@@ -399,12 +399,38 @@ function checkAccess(){
       </div>
     </div>
   `);
-  document.getElementById("gateBtn").onclick = ()=>{
+  const gateBtn = document.getElementById("gateBtn");
+  const doVerify = async ()=>{
     const val = document.getElementById("gateInput").value.trim();
-    sessionStorage.setItem("accessCode", val);
-    document.getElementById("gate").remove();
-    boot();
+    const errEl = document.getElementById("gateErr");
+    gateBtn.disabled = true; gateBtn.textContent = "校验中…";
+    errEl.style.display = "none";
+    try{
+      const resp = await fetch("/api/verify", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({code: val})
+      });
+      const data = await resp.json();
+      if(data.ok){
+        sessionStorage.setItem("accessCode", val);
+        document.getElementById("gate").remove();
+        boot();
+      }else{
+        errEl.textContent = data.error || "口令错误，请联系管理员获取。";
+        errEl.style.display = "block";
+        gateBtn.disabled = false; gateBtn.textContent = "进入";
+      }
+    }catch(e){
+      errEl.textContent = "校验失败，请检查网络后重试。";
+      errEl.style.display = "block";
+      gateBtn.disabled = false; gateBtn.textContent = "进入";
+    }
   };
+  gateBtn.onclick = doVerify;
+  document.getElementById("gateInput").addEventListener("keydown", e=>{
+    if(e.key === "Enter") doVerify();
+  });
 }
 function boot(){
   renderTOC();
