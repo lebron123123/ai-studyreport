@@ -362,17 +362,33 @@ function stepReview(){
   `;
 }
 
+function escapeHtml(str){
+  return str
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
+}
+
+function textToParagraphsHtml(text){
+  // 按空行切分为独立段落，段内的单个换行转成 <br>
+  return text
+    .split(/\n{2,}/)
+    .filter(p=>p.trim().length>0)
+    .map(p=>`<p style="font-family:'仿宋','FangSong',serif; font-size:12pt; line-height:1.9; text-indent:2em; margin:0 0 10pt;">${escapeHtml(p).replace(/\n/g,"<br>")}</p>`)
+    .join("");
+}
+
 function exportWord(){
   const active = CHAPTERS.filter(c=>c.checked);
   const chapterEls = document.querySelectorAll("#sheet .chapter-block .body");
 
   let bodyHtml = "";
   active.forEach((c,i)=>{
-    // 优先取用户在页面上编辑过的最新内容，而不是刚生成时的旧内容
-    const liveHtml = chapterEls[i] ? chapterEls[i].innerHTML : (c.content||"").replace(/\n/g,"<br>");
+    // 用 innerText 拿到网页上实际显示的换行效果（用户手动编辑过也能保留），而不是原始innerHTML
+    const liveText = chapterEls[i] ? chapterEls[i].innerText : (c.content||"");
     bodyHtml += `
       <h2 style="font-family:'黑体','SimHei',sans-serif; font-size:16pt; margin-top:28pt;">${c.cn}、${c.name}</h2>
-      <p style="font-family:'仿宋','FangSong',serif; font-size:12pt; line-height:1.9; text-indent:2em;">${liveHtml}</p>
+      ${textToParagraphsHtml(liveText)}
     `;
   });
 
