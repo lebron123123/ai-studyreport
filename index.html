@@ -355,10 +355,62 @@ function stepReview(){
 
     <div class="actions">
       <button class="btn ghost" id="backStep2">← 返回生成</button>
+      <button class="btn ghost" id="exportWordBtn">导出 Word</button>
       ${!signed ? `<button class="btn" id="signBtn">人工复核 · 确认签发</button>` :
         `<button class="btn" id="printBtn">导出 / 打印</button>`}
     </div>
   `;
+}
+
+function exportWord(){
+  const active = CHAPTERS.filter(c=>c.checked);
+  const chapterEls = document.querySelectorAll("#sheet .chapter-block .body");
+
+  let bodyHtml = "";
+  active.forEach((c,i)=>{
+    // 优先取用户在页面上编辑过的最新内容，而不是刚生成时的旧内容
+    const liveHtml = chapterEls[i] ? chapterEls[i].innerHTML : (c.content||"").replace(/\n/g,"<br>");
+    bodyHtml += `
+      <h2 style="font-family:'黑体','SimHei',sans-serif; font-size:16pt; margin-top:28pt;">${c.cn}、${c.name}</h2>
+      <p style="font-family:'仿宋','FangSong',serif; font-size:12pt; line-height:1.9; text-indent:2em;">${liveHtml}</p>
+    `;
+  });
+
+  const metaLine = [
+    project.owner ? `建设单位：${project.owner}` : "",
+    project.industry ? `所属行业：${project.industry}` : "",
+    project.location ? `建设地点：${project.location}` : "",
+    project.scale ? `投资规模：${project.scale}万元` : "",
+  ].filter(Boolean).join("　　");
+
+  const docHtml = `
+  <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+  <head>
+    <meta charset="utf-8">
+    <title>${project.name || "可行性研究报告"}</title>
+    <!--[if gte mso 9]>
+    <xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml>
+    <![endif]-->
+  </head>
+  <body>
+    <h1 style="text-align:center; font-family:'黑体','SimHei',sans-serif; font-size:22pt;">${project.name || "可行性研究报告"}</h1>
+    <p style="text-align:center; font-size:12pt; color:#555;">${project.name ? "可行性研究报告" : ""}</p>
+    <p style="text-align:center; font-size:11pt; color:#555;">${metaLine}</p>
+    <hr/>
+    ${bodyHtml}
+    <p style="margin-top:40pt; font-size:10.5pt; color:#888;">${signed ? "本报告已经人工复核确认签发，签发日期：" + new Date().toLocaleDateString('zh-CN') : "本报告为AI生成初稿，尚未经过人工复核签发，正式使用前须完成审核。"}</p>
+  </body>
+  </html>`;
+
+  const blob = new Blob(["\ufeff", docHtml], { type: "application/msword" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${project.name || "可行性研究报告"}.doc`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 /* ---------------- 事件绑定 ---------------- */
@@ -379,6 +431,7 @@ function bindEvents(){
   if(s("toStep3")) s("toStep3").onclick = ()=>{ currentStep=3; renderTOC(); renderSheet(); };
   if(s("signBtn")) s("signBtn").onclick = ()=>{ signed=true; renderSheet(); };
   if(s("printBtn")) s("printBtn").onclick = ()=> window.print();
+  if(s("exportWordBtn")) s("exportWordBtn").onclick = exportWord;
   document.querySelectorAll(".chk").forEach(chk=>{
     chk.onchange = e=>{ CHAPTERS[+e.target.dataset.idx].checked = e.target.checked; };
   });
