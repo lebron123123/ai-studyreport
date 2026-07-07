@@ -1,17 +1,31 @@
 // Cloudflare Pages Function
-// 访问路径：POST /api/generate
-// 本版本对接 DeepSeek 的 API（OpenAI兼容格式）  1
+// 访问路径：POST /api/generate （正常生成）
+//          GET  /api/generate?debug=1 （诊断：检查环境变量/KV是否配置到位，不会显示具体密钥内容）
+
+export async function onRequestGet(context) {
+  const { request, env } = context;
+  const url = new URL(request.url);
+  if (url.searchParams.get("debug") !== "1") {
+    return json({ error: "此接口仅支持 POST，如需诊断请访问 ?debug=1" }, 405);
+  }
+  return json({
+    诊断结果: {
+      是否读到_ACCESS_CODE: !!env.ACCESS_CODE,
+      是否读到_DEEPSEEK_API_KEY: !!env.DEEPSEEK_API_KEY,
+      是否绑定_USAGE_KV: !!env.USAGE_KV,
+    },
+    说明: "上面三项应该都显示 true。如果某一项是 false，说明对应的变量/绑定没有真正传到这次部署里。",
+  });
+}
 
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  // ---- 第一层防护：访问口令 ----
   const code = request.headers.get("x-access-code") || "";
   if (!env.ACCESS_CODE || code !== env.ACCESS_CODE) {
     return json({ error: "访问口令错误或未填写，请联系管理员获取口令。" }, 401);
   }
 
-  // ---- 第二层防护：每日总调用次数上限 ----
   const DAILY_LIMIT = 200;
   const today = new Date().toISOString().slice(0, 10);
   const kvKey = `usage:${today}`;
@@ -24,7 +38,6 @@ export async function onRequestPost(context) {
     }
   }
 
-  // ---- 解析前端请求 ----
   let body;
   try {
     body = await request.json();
@@ -32,7 +45,6 @@ export async function onRequestPost(context) {
     return json({ error: "请求格式有误" }, 400);
   }
 
-  // ---- 转发给 DeepSeek（OpenAI兼容格式：system作为第一条消息） ----
   const dsMessages = [
     { role: "system", content: body.system || "" },
     ...(body.messages || []),
@@ -59,7 +71,6 @@ export async function onRequestPost(context) {
     return json({ error: msg }, upstream.status);
   }
 
-  // ---- 把DeepSeek的返回格式转换成前端期望的格式（content数组） ----
   const text =
     (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
 
