@@ -1,19 +1,17 @@
 // Cloudflare Pages Function
 // 访问路径：POST /api/generate
-// 作用：前端不再直接持有API Key，所有请求都先经过这里校验，再由这里代为调用Anthropic
+// 本版本对接 Kimi（Moonshot）的 API（OpenAI兼容格式）
 
 export async function onRequestPost(context) {
   const { request, env } = context;
 
   // ---- 第一层防护：访问口令 ----
-  // 在 Cloudflare 后台把 ACCESS_CODE 设置成你自己定的口令，只把口令发给要用的人
   const code = request.headers.get("x-access-code") || "";
   if (!env.ACCESS_CODE || code !== env.ACCESS_CODE) {
     return json({ error: "访问口令错误或未填写，请联系管理员获取口令。" }, 401);
   }
 
   // ---- 第二层防护：每日总调用次数上限 ----
-  // 防止口令泄露或使用过于频繁导致API账单失控，可自行调整 DAILY_LIMIT
   const DAILY_LIMIT = 200;
   const today = new Date().toISOString().slice(0, 10);
   const kvKey = `usage:${today}`;
@@ -22,11 +20,11 @@ export async function onRequestPost(context) {
   if (env.USAGE_KV) {
     used = parseInt((await env.USAGE_KV.get(kvKey)) || "0", 10);
     if (used >= DAILY_LIMIT) {
-      return json({ error: "今日生成次数已达上限，请明天再试，或联系管理员调整限额。" }, 429);
+      return json({ error: "今日生成次数已达上限，请明天再试。" }, 429);
     }
   }
 
-  // ---- 转发给 Anthropic ----
+  // ---- 解析前端请求 ----
   let body;
   try {
     body = await request.json();
@@ -34,29 +32,42 @@ export async function onRequestPost(context) {
     return json({ error: "请求格式有误" }, 400);
   }
 
-  const upstream = await fetch("https://api.anthropic.com/v1/messages", {
+  // ---- 转发给 Kimi（OpenAI兼容格式：system作为第一条消息） ----
+  const kimiMessages = [
+    { role: "system", content: body.system || "" },
+    ...(body.messages || []),
+  ];
+
+  const upstream = await fetch("https://api.moonshot.cn/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
+      "Authorization": `Bearer ${env.KIMI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
+      model: "moonshot-v1-8k",
+      messages: kimiMessages,
       max_tokens: 1000,
-      system: body.system,
-      messages: body.messages,
+      temperature: 0.3,
     }),
   });
 
   const data = await upstream.json();
 
+  if (!upstream.ok) {
+    const msg = (data && data.error && data.error.message) || "上游AI接口调用失败";
+    return json({ error: msg }, upstream.status);
+  }
+
+  // ---- 把Kimi的返回格式转换成前端期望的格式（content数组） ----
+  const text =
+    (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+
   if (env.USAGE_KV) {
-    // 计数+1，两天后自动过期，不需要手动清理
     await env.USAGE_KV.put(kvKey, String(used + 1), { expirationTtl: 60 * 60 * 24 * 2 });
   }
 
-  return json(data, upstream.status);
+  return json({ content: [{ type: "text", text }] });
 }
 
 function json(obj, status = 200) {
