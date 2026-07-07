@@ -1,44 +1,15 @@
 // Cloudflare Pages Function
-// POST /api/generate         正常生成
-// GET  /api/generate?debug=1 诊断环境变量/KV是否配置到位
-
-export async function onRequestGet(context) {
-  const { request, env } = context;
-  const url = new URL(request.url);
-  if (url.searchParams.get("debug") !== "1") {
-    return json({ error: "此接口仅支持 POST，如需诊断请访问 ?debug=1" }, 405);
-  }
-  const ac = env.ACCESS_CODE || "";
-  return json({
-    是否读到_ACCESS_CODE: !!env.ACCESS_CODE,
-    ACCESS_CODE长度: ac.length,
-    ACCESS_CODE首尾字符: ac.length ? `${ac[0]}...${ac[ac.length - 1]}` : "",
-    是否读到_DEEPSEEK_API_KEY: !!env.DEEPSEEK_API_KEY,
-    是否绑定_USAGE_KV: !!env.USAGE_KV,
-  });
-}
+// 访问路径：POST /api/generate
+// 对接 DeepSeek API（OpenAI兼容格式）
+// 注意：口令校验这里依然保留一份，作为"防止有人绕过前端直接调这个接口"的第二道防线，
+// 但网站的"登录门槛"由 /api/verify 负责，两者各司其职。
 
 export async function onRequestPost(context) {
   const { request, env } = context;
 
   const code = request.headers.get("x-access-code") || "";
-  const expected = env.ACCESS_CODE || "";
-
-  if (!expected || code !== expected) {
-    // 临时诊断信息：不显示真实内容，只显示长度和首尾字符，方便你对比是否有不可见字符
-    return json(
-      {
-        error: "访问口令错误或未填写，请联系管理员获取口令。",
-        诊断: {
-          收到的口令长度: code.length,
-          收到的口令首尾字符: code.length ? `${code[0]}...${code[code.length - 1]}` : "(空)",
-          期望的口令长度: expected.length,
-          期望的口令首尾字符: expected.length ? `${expected[0]}...${expected[expected.length - 1]}` : "(空)",
-          两者是否相等: code === expected,
-        },
-      },
-      401
-    );
+  if (!env.ACCESS_CODE || code !== env.ACCESS_CODE) {
+    return json({ error: "访问口令错误或未填写，请联系管理员获取口令。" }, 401);
   }
 
   const DAILY_LIMIT = 200;
