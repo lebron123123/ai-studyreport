@@ -1,6 +1,6 @@
 // Cloudflare Pages Function
 // 访问路径：POST /api/generate
-// 本版本对接 Kimi（Moonshot）的 API（OpenAI兼容格式）
+// 本版本对接 DeepSeek 的 API（OpenAI兼容格式）
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -32,22 +32,22 @@ export async function onRequestPost(context) {
     return json({ error: "请求格式有误" }, 400);
   }
 
-  // ---- 转发给 Kimi（OpenAI兼容格式：system作为第一条消息） ----
-  const kimiMessages = [
+  // ---- 转发给 DeepSeek（OpenAI兼容格式：system作为第一条消息） ----
+  const dsMessages = [
     { role: "system", content: body.system || "" },
     ...(body.messages || []),
   ];
 
-  const upstream = await fetch("https://api.moonshot.cn/v1/chat/completions", {
+  const upstream = await fetch("https://api.deepseek.com/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${env.KIMI_API_KEY}`,
+      "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "moonshot-v1-8k",
-      messages: kimiMessages,
-      max_tokens: 1000,
+      model: "deepseek-chat",
+      messages: dsMessages,
+      max_tokens: 1200,
       temperature: 0.3,
     }),
   });
@@ -59,7 +59,7 @@ export async function onRequestPost(context) {
     return json({ error: msg }, upstream.status);
   }
 
-  // ---- 把Kimi的返回格式转换成前端期望的格式（content数组） ----
+  // ---- 把DeepSeek的返回格式转换成前端期望的格式（content数组） ----
   const text =
     (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
 
