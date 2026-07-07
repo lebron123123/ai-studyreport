@@ -1,6 +1,6 @@
 // Cloudflare Pages Function
 // 访问路径：POST /api/generate
-// 本版本对接 DeepSeek 的 API（OpenAI兼容格式）
+// 本版本对接 DeepSeek 的 API（OpenAI兼容格式）  1
 
 export async function onRequestPost(context) {
   const { request, env } = context;
