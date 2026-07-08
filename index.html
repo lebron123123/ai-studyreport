@@ -268,10 +268,102 @@
     .sheet{padding:28px 22px 40px;}
     .grid2,.domain-grid{grid-template-columns:1fr;}
   }
+
+  /* ===== 蓝图插画（首页） ===== */
+  .hero-draft{
+    position:relative; margin:2px 0 22px; border:1px solid var(--line-strong); border-radius:2px;
+    background:
+      linear-gradient(rgba(30,58,92,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(30,58,92,.05) 1px, transparent 1px),
+      #FDFCF8;
+    background-size:18px 18px;
+    padding:14px 16px 8px; overflow:hidden;
+  }
+  .hero-draft::after{ /* 扫描光带 */
+    content:""; position:absolute; top:0; bottom:0; width:90px;
+    background:linear-gradient(90deg, transparent, rgba(127,179,200,.14), transparent);
+    animation:heroScan 7s linear infinite;
+  }
+  @keyframes heroScan{from{left:-120px;} to{left:110%;}}
+  .hero-draft svg{display:block; width:100%; height:auto;}
+  .hero-draft path{stroke:var(--bp-navy); stroke-width:1.6; stroke-linecap:round;}
+  .hero-draft .draw{stroke-dasharray:900; stroke-dashoffset:900; animation:drawLine 1.6s ease forwards;}
+  .hero-draft .d1{animation-delay:.05s;} .hero-draft .d2{animation-delay:.25s;}
+  .hero-draft .d3{animation-delay:.5s;}  .hero-draft .d4{animation-delay:.75s;}
+  .hero-draft .d5{animation-delay:1s;}   .hero-draft .d6{animation-delay:1.25s;}
+  @keyframes drawLine{to{stroke-dashoffset:0;}}
+  .hero-draft .crane-flag{fill:var(--seal-red); stroke:none; opacity:0; animation:fadeIn .5s ease 1.7s forwards;}
+  @keyframes fadeIn{to{opacity:1;}}
+  .hero-draft .lamp{fill:var(--seal-red); stroke:none; opacity:.15;}
+  .hero-draft .l1{animation:lampGlow 3.4s ease-in-out 2s infinite;}
+  .hero-draft .l2{animation:lampGlow 4.2s ease-in-out 2.6s infinite;}
+  .hero-draft .l3{animation:lampGlow 3.8s ease-in-out 3.1s infinite;}
+  @keyframes lampGlow{0%,100%{opacity:.15;} 50%{opacity:.9;}}
+  .hero-draft .dim{stroke:var(--seal-red); stroke-width:.8; opacity:.7;}
+  .hero-draft .dim-t{font-family:var(--mono); font-size:8px; letter-spacing:1.5px; fill:var(--seal-red); opacity:.8;}
+  .hero-draft .anno{font-family:var(--serif); font-size:10px; fill:var(--bp-navy); opacity:.75;}
+  .hero-cap{
+    display:block; margin-top:8px; padding-top:7px; border-top:1px solid var(--line);
+    font-family:var(--mono); font-size:9px; letter-spacing:1.5px; color:var(--ink-soft);
+  }
+
+  /* ===== 领域卡片图标 ===== */
+  .dm-ico{width:38px; height:38px; margin-bottom:10px; display:block;}
+  .dm-ico path{stroke:var(--bp-navy); stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; transition:stroke .18s ease;}
+  .dm-ico .dm-arrow{stroke:var(--seal-red);}
+  .dm-ico .dm-arrow-h{fill:var(--seal-red); stroke:none;}
+  .domain-card:hover .dm-ico path{stroke:var(--bp-deep);}
+  .domain-card:hover{
+    background-image:
+      linear-gradient(rgba(30,58,92,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(30,58,92,.05) 1px, transparent 1px);
+    background-size:16px 16px;
+  }
+
+  /* ===== 测算指标仪表盘 ===== */
+  .metric-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:24px;}
+  .metric{
+    background:#FFF; border:1px solid var(--line-strong); border-radius:2px;
+    padding:16px 18px 13px; position:relative; overflow:hidden;
+  }
+  .metric::before{content:""; position:absolute; top:0; left:0; right:0; height:3px; background:var(--bp-navy); opacity:.25;}
+  .metric .mv{font-family:var(--mono); font-size:22px; font-weight:700; color:var(--bp-navy); letter-spacing:.5px; min-height:28px;}
+  .metric .ml{font-size:11px; color:var(--ink-soft); margin-top:5px; letter-spacing:.3px;}
+  .metric.hl{background:linear-gradient(165deg, #24466E, var(--bp-deep)); border-color:var(--bp-deep);}
+  .metric.hl::before{background:var(--seal-red); opacity:1;}
+  .metric.hl .mv{color:#FFFFFF; font-size:26px;}
+  .metric.hl .ml{color:var(--bp-cyan);}
+
+  /* ===== 侧栏城市剪影 ===== */
+  .toc-sky{position:absolute; left:14px; right:20px; bottom:0; opacity:.85; pointer-events:none;}
+
+  /* ===== 生成进度扫描 ===== */
+  .progress-line{position:relative; overflow:hidden;}
+  .progress-line::after{
+    content:""; position:absolute; top:0; bottom:0; width:70px;
+    background:linear-gradient(90deg, transparent, rgba(127,179,200,.3), transparent);
+    animation:heroScan 2s linear infinite;
+  }
+
+  @media (max-width:820px){
+    .metric-grid{grid-template-columns:1fr 1fr;}
+    .toc-sky{display:none;}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .hero-draft .draw{animation:none; stroke-dashoffset:0;}
+    .hero-draft .crane-flag{animation:none; opacity:1;}
+    .hero-draft .lamp,.hero-draft::after,.progress-line::after{animation:none;}
+  }
+
 </style>
 
 <div class="app">
-  <div class="toc"><div class="toc-title">可研报告工坊</div><div id="tocList"></div></div>
+  <div class="toc"><div class="toc-title">可研报告工坊</div><div id="tocList"></div>
+    <div class="toc-sky" aria-hidden="true"><svg viewBox="0 0 236 90" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMax meet">
+      <path d="M0 88 H236 M14 88 V46 H44 V88 M22 54 h14 M22 64 h14 M22 74 h14 M58 88 V28 H86 V88 M66 38 h12 M66 50 h12 M66 62 h12 M66 74 h12 M100 88 V56 H150 V88 M110 66 h30 M110 76 h30 M164 88 V40 H188 V88 M170 50 h12 M170 62 h12 M170 74 h12 M202 88 V60 H226 V88 M208 70 h12" fill="none" stroke="rgba(127,179,200,.5)" stroke-width="1.2"/>
+      <rect x="70" y="32" width="5" height="4" fill="#B7302B" opacity=".8"><animate attributeName="opacity" values=".2;.9;.2" dur="3.2s" repeatCount="indefinite"/></rect>
+      <rect x="174" y="44" width="5" height="4" fill="#7FB3C8" opacity=".6"><animate attributeName="opacity" values=".8;.15;.8" dur="4.5s" repeatCount="indefinite"/></rect>
+    </svg></div></div>
   <div class="sheet-wrap"><div class="sheet" id="sheet"></div></div>
 </div>
 
@@ -315,16 +407,60 @@ function renderSheet(){
   bindEvents();
 }
 
+
+function heroDraftHtml(){
+  return `<div class="hero-draft" aria-hidden="true"><svg viewBox="0 0 700 150" xmlns="http://www.w3.org/2000/svg">
+    <!-- 地平线 -->
+    <path class="draw d1" d="M20 130 H680" fill="none"/>
+    <!-- 住宅楼A -->
+    <path class="draw d2" d="M60 130 V52 H150 V130" fill="none"/>
+    <path class="draw d3" d="M72 66 H138 M72 82 H138 M72 98 H138 M72 114 H138 M94 52 V130 M116 52 V130" fill="none" stroke-width="1"/>
+    <!-- 住宅楼B（高层） -->
+    <path class="draw d3" d="M180 130 V28 H248 V130" fill="none"/>
+    <path class="draw d4" d="M192 42 H236 M192 58 H236 M192 74 H236 M192 90 H236 M192 106 H236 M214 28 V130" fill="none" stroke-width="1"/>
+    <!-- 住宅楼C（板楼） -->
+    <path class="draw d4" d="M278 130 V68 H388 V130" fill="none"/>
+    <path class="draw d5" d="M292 82 H374 M292 98 H374 M292 114 H374 M314 68 V130 M336 68 V130 M358 68 V130" fill="none" stroke-width="1"/>
+    <!-- 树 -->
+    <path class="draw d5" d="M420 130 V116 M420 116 a9 9 0 1 1 .1 0" fill="none"/>
+    <path class="draw d5" d="M448 130 V118 M448 118 a7 7 0 1 1 .1 0" fill="none"/>
+    <!-- 塔吊 -->
+    <path class="draw d2" d="M540 130 V22 M528 130 H552 M540 22 H472 M540 22 H660 M540 22 L505 40 M540 22 L575 40" fill="none"/>
+    <path class="draw d4" d="M628 22 V64 M620 64 H636 M628 64 V72" fill="none" stroke-width="1"/>
+    <path class="crane-flag" d="M540 22 L540 10 L556 15 Z"/>
+    <!-- 施工中的楼（框架） -->
+    <path class="draw d6" d="M596 130 V86 H668 V130 M596 108 H668 M620 86 V130 M644 86 V130" fill="none" stroke-width="1"/>
+    <!-- 航标灯（呼吸的窗灯） -->
+    <rect class="lamp l1" x="97" y="70" width="8" height="6"/>
+    <rect class="lamp l2" x="218" y="46" width="8" height="6"/>
+    <rect class="lamp l3" x="340" y="86" width="8" height="6"/>
+    <!-- 制图尺寸标注 -->
+    <path class="dim" d="M60 142 H388 M60 138 V146 M388 138 V146" fill="none"/>
+    <text class="dim-t" x="205" y="139" text-anchor="middle">RESIDENTIAL BLOCK A · B · C</text>
+    <text class="anno" x="612" y="146" text-anchor="middle">在建 · 安居</text>
+  </svg><span class="hero-cap">图别：总体鸟瞰示意（自动绘制）　比例：示意　单位：mm</span></div>`;
+}
+
+
+function domainIcon(k){
+  if(k==="baozhang_xinjian"){
+    return `<svg class="dm-ico" viewBox="0 0 40 40" aria-hidden="true"><path d="M6 34 H34 M10 34 V12 H22 V34 M26 34 V18 H34 V34 M13 16 h6 M13 21 h6 M13 26 h6 M29 22 h2 M29 27 h2" fill="none"/></svg>`;
+  }
+  return `<svg class="dm-ico" viewBox="0 0 40 40" aria-hidden="true"><path d="M6 34 H34 M9 34 V14 H27 V34 M13 19 h10 M13 24 h10 M13 29 h10" fill="none"/><path class="dm-arrow" d="M30 8 a8 8 0 1 1 -8 8" fill="none"/><path class="dm-arrow-h" d="M30 4 L30 12 L23 8 Z"/></svg>`;
+}
+
 function stepDomain(){
   const keys = Object.keys(window.OUTLINES);
   return '<div class="doc-eyebrow">STEP 01 · 选择报告领域</div>'
     +'<h1 class="doc-title">选择要生成的可研报告类型</h1>'
     +'<div class="step-desc">不同领域使用不同的专属章节大纲。以下大纲结构参照真实可研报告提炼，每章包含多个子标题，逐层生成，篇幅与深度贴近正式报告。</div>'
+    + heroDraftHtml()
     +'<div class="domain-grid">'
     + keys.map(k=>{
         const d = window.OUTLINES[k];
         const subCount = d.chapters.reduce((n,c)=>n+c.sections.length,0);
         return '<div class="domain-card '+(domainKey===k?'sel':'')+'" data-key="'+k+'">'
+          + domainIcon(k)
           +'<div class="dn">'+d.label+'</div>'
           +'<div class="dd">共 '+d.chapters.length+' 个一级章节</div>'
           +'<div class="dc">'+subCount+' 个子标题 · 逐层生成</div></div>';
@@ -447,6 +583,7 @@ function runCalc(){
     loanPlan:loanPlan, repayPlan:repayPlan, discountRatePct:p.discount,
   });
   document.getElementById("calcResultBox").innerHTML = calcResultHtml();
+  animateCountUps();
   const nextBtn = document.getElementById("toStep3c");
   if(nextBtn) nextBtn.textContent = "下一步：选择章节 →";
 }
@@ -454,12 +591,38 @@ function runCalc(){
 function calcResultHtml(){
   if(!calcResult) return "";
   const s = calcResult.summary;
-  const fmt = x=> x===null? "无法计算" : Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
-  const payback = s.paybackInfo? (s.paybackInfo.year+"年（第"+s.paybackInfo.index+"年）") : "全周期内未回正";
-  return '<div class="note-box" style="border-left-color:#5C8A5C; background:#EAF1EA; color:#2F5C2F;">'
-    +'<b>测算完成</b>　全周期总收入 '+fmt(s.totalIncome)+' 万元 ｜ 总成本 '+fmt(s.totalCost)+' 万元 ｜ 税金合计 '+fmt(s.totalTax)+' 万元 ｜ 净利润合计 '+fmt(s.totalNetProfit)+' 万元<br>'
-    +'累计净现值 '+fmt(s.totalNpv)+' 万元 ｜ 全投资IRR '+(s.irr===null?"无法计算":s.irr+"%")+' ｜ 累计现金流回正 '+payback
-    +'<br><span style="font-size:11px;">以上结果由内置公式实时计算（与内部Streamlit测算器口径一致），将自动写入报告财务章节。</span></div>';
+  const payback = s.paybackInfo? (s.paybackInfo.year+"年") : "未回正";
+  const tile = (label,val,dec,suffix,hl)=>'<div class="metric'+(hl?' hl':'')+'">'
+    +'<div class="mv"><span class="cnum" data-val="'+val+'" data-dec="'+dec+'" data-suffix="'+(suffix||"")+'">0</span></div>'
+    +'<div class="ml">'+label+'</div></div>';
+  return '<div class="metric-grid">'
+    + tile("全投资内部收益率 IRR", s.irr===null?0:s.irr, 2, " %", true)
+    + tile("累计净现值（万元）", s.totalNpv, 2, "")
+    + tile("净利润合计（万元）", s.totalNetProfit, 2, "")
+    + tile("全周期总收入（万元）", s.totalIncome, 0, "")
+    + tile("总成本费用（万元）", s.totalCost, 0, "")
+    +'<div class="metric"><div class="mv" style="font-size:17px; padding-top:3px;">'+payback+'</div><div class="ml">累计现金流回正</div></div>'
+    +'</div>'
+    +'<div class="note-box" style="margin-top:14px;">以上结果由内置公式实时计算（与内部测算器口径一致），将自动写入报告财务章节；数值可复算、可追溯。</div>';
+}
+
+function animateCountUps(){
+  document.querySelectorAll(".cnum").forEach(el=>{
+    if(el.dataset.done) return;
+    el.dataset.done = "1";
+    const target = parseFloat(el.dataset.val)||0;
+    const dec = parseInt(el.dataset.dec||"2");
+    const suffix = el.dataset.suffix||"";
+    const dur = 950, t0 = performance.now();
+    const fmt = v=> v.toLocaleString("zh-CN",{minimumFractionDigits:0, maximumFractionDigits:dec});
+    function tick(t){
+      const p = Math.min(1,(t-t0)/dur);
+      const e = 1-Math.pow(1-p,3);
+      el.textContent = fmt(target*e)+suffix;
+      if(p<1) requestAnimationFrame(tick); else el.textContent = fmt(target)+suffix;
+    }
+    requestAnimationFrame(tick);
+  });
 }
 
 function stepChapters(){
@@ -693,6 +856,7 @@ function bindEvents(){
   if(s("printBtn")) s("printBtn").onclick = ()=> window.print();
   if(s("exportWordBtn")) s("exportWordBtn").onclick = exportWord;
   document.querySelectorAll(".chk").forEach(chk=>{ chk.onchange = e=>{ chapters[+e.target.dataset.idx].checked = e.target.checked; }; });
+  if(document.querySelector(".cnum")) animateCountUps();
 }
 function saveProject(){
   const g=id=>{const e=document.getElementById(id);return e?e.value:"";};
