@@ -70,12 +70,15 @@
 </div>
 
 <script src="outlines.js"></script>
+<script src="nrcalc.js"></script>
 <script>
-const STEPS = ["选择领域","项目信息","章节范围","逐章生成","复核与签发"];
+const STEPS = ["选择领域","项目信息","财务测算","章节范围","逐章生成","复核与签发"];
 let currentStep = 0;
 let domainKey = null;
 let chapters = [];
 let signed = false;
+let calcResult = null;   // 财务测算结果（null表示跳过测算，走"待填"模式）
+let calcParams = null;
 const project = { name:"", owner:"", industry:"", location:"", type:"", scale:"", desc:"" };
 
 function loadDomain(key){
@@ -99,9 +102,10 @@ function renderSheet(){
   const sheet = document.getElementById("sheet");
   if(currentStep===0) sheet.innerHTML = stepDomain();
   if(currentStep===1) sheet.innerHTML = stepProjectInfo();
-  if(currentStep===2) sheet.innerHTML = stepChapters();
-  if(currentStep===3) sheet.innerHTML = stepGenerate();
-  if(currentStep===4) sheet.innerHTML = stepReview();
+  if(currentStep===2) sheet.innerHTML = stepCalc();
+  if(currentStep===3) sheet.innerHTML = stepChapters();
+  if(currentStep===4) sheet.innerHTML = stepGenerate();
+  if(currentStep===5) sheet.innerHTML = stepReview();
   bindEvents();
 }
 
@@ -141,6 +145,117 @@ function stepProjectInfo(){
     +'<div class="actions"><button class="btn ghost" id="backStep0">← 上一步</button><button class="btn" id="toStep2">下一步：选择章节 →</button></div>';
 }
 
+
+function stepCalc(){
+  const isGaibao = domainKey==="baozhang_gaibao";
+  return '<div class="doc-eyebrow">STEP 03 · 财务测算 · '+project.industry+'</div>'
+    +'<h1 class="doc-title">财务测算（可选）</h1>'
+    +'<div class="step-desc">'
+    +(isGaibao
+      ? '填入真实测算参数后点击"执行测算"，系统将用与内部测算器完全一致的公式，当场算出收入、成本、税金、损益、现金流、IRR与净现值，并把<b>真实测算结果自动写入报告的财务章节</b>。也可以点"跳过测算"，财务章节将以"待填"框架生成。'
+      : '当前"保障房·新建"领域的测算模块正在建设中，本步骤可直接跳过；财务章节将以"待填"框架生成。')
+    +'</div>'
+    + (isGaibao ? calcFormHtml() : '')
+    +'<div id="calcResultBox">'+(calcResult? calcResultHtml():'')+'</div>'
+    +'<div class="actions">'
+    +'<button class="btn ghost" id="backStep1c">← 上一步</button>'
+    +(isGaibao?'<button class="btn ghost" id="runCalcBtn">执行测算</button>':'')
+    +'<button class="btn" id="toStep3c">'+(calcResult?'下一步：选择章节 →':'跳过测算，下一步 →')+'</button>'
+    +'</div>';
+}
+
+function calcFormHtml(){
+  const v = calcParams || {};
+  const g = (k,d)=> v[k]!==undefined? v[k]: d;
+  return ''
+  +'<div class="grid2">'
+  +'<div><label>建设期起始年</label><input id="c_buildStart" type="number" value="'+g("buildStart",2026)+'"></div>'
+  +'<div><label>建设期年数</label><input id="c_buildYears" type="number" value="'+g("buildYears",1)+'"></div>'
+  +'</div><div class="grid2">'
+  +'<div><label>运营期年数</label><input id="c_operateYears" type="number" value="'+g("operateYears",12)+'"></div>'
+  +'<div><label>运营首年实际月数</label><input id="c_firstMonths" type="number" value="'+g("firstMonths",12)+'"></div>'
+  +'</div><div class="grid2">'
+  +'<div><label>住宅面积（㎡）</label><input id="c_area" type="number" value="'+g("area",20000)+'"></div>'
+  +'<div><label>起始租金（元/㎡/月）</label><input id="c_rent" type="number" step="0.1" value="'+g("rent",75)+'"></div>'
+  +'</div><div class="grid2">'
+  +'<div><label>租金递增跨度（年）</label><input id="c_rentSpan" type="number" value="'+g("rentSpan",3)+'"></div>'
+  +'<div><label>租金递增率（%）</label><input id="c_rentRate" type="number" step="0.1" value="'+g("rentRate",5)+'"></div>'
+  +'</div><div class="grid2">'
+  +'<div><label>首年出租率（爬坡）</label><input id="c_rampOcc" type="number" step="0.01" value="'+g("rampOcc",0.85)+'"></div>'
+  +'<div><label>稳定期出租率</label><input id="c_stableOcc" type="number" step="0.01" value="'+g("stableOcc",0.95)+'"></div>'
+  +'</div><div class="grid2">'
+  +'<div><label>收楼单价（元/㎡/月）</label><input id="c_collect" type="number" step="0.1" value="'+g("collect",25)+'"></div>'
+  +'<div><label>首次装修单方造价（元/㎡）</label><input id="c_deco" type="number" value="'+g("deco",1500)+'"></div>'
+  +'</div><div class="grid2">'
+  +'<div><label>装修间隔（年）</label><input id="c_decoInt" type="number" value="'+g("decoInt",10)+'"></div>'
+  +'<div><label>二次装修成本系数</label><input id="c_decoRatio" type="number" step="0.05" value="'+g("decoRatio",0.30)+'"></div>'
+  +'</div><div class="grid2">'
+  +'<div><label>总套数</label><input id="c_units" type="number" value="'+g("units",500)+'"></div>'
+  +'<div><label>单套月运营成本（元/套/月）</label><input id="c_unitCost" type="number" value="'+g("unitCost",800)+'"></div>'
+  +'</div><div class="grid2">'
+  +'<div><label>开办费（万元，首年计入）</label><input id="c_startup" type="number" value="'+g("startup",50)+'"></div>'
+  +'<div><label>总借款额（万元）</label><input id="c_loan" type="number" value="'+g("loan",13892)+'"></div>'
+  +'</div><div class="grid2">'
+  +'<div><label>计息本金（万元）</label><input id="c_interestBase" type="number" value="'+g("interestBase",10600)+'"></div>'
+  +'<div><label>利率折扣系数</label><input id="c_rateDiscount" type="number" step="0.05" value="'+g("rateDiscount",0.80)+'"></div>'
+  +'</div><div class="grid2">'
+  +'<div><label>贷款年利率（%）</label><input id="c_loanRate" type="number" step="0.05" value="'+g("loanRate",3.5)+'"></div>'
+  +'<div><label>折现率（%）</label><input id="c_discount" type="number" step="0.5" value="'+g("discount",6)+'"></div>'
+  +'</div><div class="grid2">'
+  +'<div><label>年均还款额（万元/年，运营第2年起）</label><input id="c_repay" type="number" value="'+g("repay",1157.67)+'"></div>'
+  +'<div></div>'
+  +'</div>';
+}
+
+function readCalcForm(){
+  const n = id=>parseFloat(document.getElementById(id).value)||0;
+  return {
+    buildStart:n("c_buildStart"), buildYears:n("c_buildYears"), operateYears:n("c_operateYears"),
+    firstMonths:n("c_firstMonths"), area:n("c_area"), rent:n("c_rent"),
+    rentSpan:n("c_rentSpan"), rentRate:n("c_rentRate"), rampOcc:n("c_rampOcc"), stableOcc:n("c_stableOcc"),
+    collect:n("c_collect"), deco:n("c_deco"), decoInt:n("c_decoInt"), decoRatio:n("c_decoRatio"),
+    units:n("c_units"), unitCost:n("c_unitCost"), startup:n("c_startup"),
+    loan:n("c_loan"), interestBase:n("c_interestBase"), rateDiscount:n("c_rateDiscount"),
+    loanRate:n("c_loanRate"), discount:n("c_discount"), repay:n("c_repay"),
+  };
+}
+
+function runCalc(){
+  calcParams = readCalcForm();
+  const p = calcParams;
+  const buildYearsArr = Array.from({length:p.buildYears},(_,i)=>p.buildStart+i);
+  const opStart = p.buildStart + p.buildYears;
+  const operateYearsArr = Array.from({length:p.operateYears},(_,i)=>opStart+i);
+  const loanPlan = {}; loanPlan[p.buildStart] = p.loan;
+  const repayPlan = {};
+  for(let i=1;i<p.operateYears;i++){ repayPlan[opStart+i] = p.repay; }
+  const ramp = {}; ramp[opStart] = p.rampOcc;
+  calcResult = window.NRCalc.calc({
+    buildYears:buildYearsArr, operateYears:operateYearsArr, firstOperateMonths:p.firstMonths,
+    residentialArea:p.area, rentStartPrice:p.rent, rentIncreaseSpan:p.rentSpan, rentIncreaseRate:p.rentRate,
+    costIncreaseSpan:1, costIncreaseRate:0,
+    occupancyRamp:ramp, stableStart:opStart+1, stableEnd:operateYearsArr[operateYearsArr.length-1], occupancyStable:p.stableOcc,
+    collectPrice:p.collect, decorationUnitCost:p.deco, decorationInterval:p.decoInt, redecorationRatio:p.decoRatio,
+    totalUnits:p.units, unitOperateCost:p.unitCost, startupFee:p.startup,
+    loanAmount:p.loan, interestBase:p.interestBase, rateDiscount:p.rateDiscount, loanAnnualRate:p.loanRate,
+    loanPlan:loanPlan, repayPlan:repayPlan, discountRatePct:p.discount,
+  });
+  document.getElementById("calcResultBox").innerHTML = calcResultHtml();
+  const nextBtn = document.getElementById("toStep3c");
+  if(nextBtn) nextBtn.textContent = "下一步：选择章节 →";
+}
+
+function calcResultHtml(){
+  if(!calcResult) return "";
+  const s = calcResult.summary;
+  const fmt = x=> x===null? "无法计算" : Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
+  const payback = s.paybackInfo? (s.paybackInfo.year+"年（第"+s.paybackInfo.index+"年）") : "全周期内未回正";
+  return '<div class="note-box" style="border-left-color:#5C8A5C; background:#EAF1EA; color:#2F5C2F;">'
+    +'<b>测算完成</b>　全周期总收入 '+fmt(s.totalIncome)+' 万元 ｜ 总成本 '+fmt(s.totalCost)+' 万元 ｜ 税金合计 '+fmt(s.totalTax)+' 万元 ｜ 净利润合计 '+fmt(s.totalNetProfit)+' 万元<br>'
+    +'累计净现值 '+fmt(s.totalNpv)+' 万元 ｜ 全投资IRR '+(s.irr===null?"无法计算":s.irr+"%")+' ｜ 累计现金流回正 '+payback
+    +'<br><span style="font-size:11px;">以上结果由内置公式实时计算（与内部Streamlit测算器口径一致），将自动写入报告财务章节。</span></div>';
+}
+
 function stepChapters(){
   return '<div class="doc-eyebrow">STEP 03 · 章节范围 · '+project.industry+'</div>'
     +'<h1 class="doc-title">选择本次生成的章节</h1>'
@@ -150,7 +265,7 @@ function stepChapters(){
         +'<input type="checkbox" data-idx="'+i+'" class="chk" '+(c.checked?'checked':'')+'>'
         +'<span>'+c.name+'</span><span class="subcount">'+c.sections.length+' 子节</span></div>').join("")
     +'</div>'
-    +'<div class="actions"><button class="btn ghost" id="backStep1">← 上一步</button><button class="btn" id="toStep3">下一步：开始生成 →</button></div>';
+    +'<div class="actions"><button class="btn ghost" id="backStep2ch">← 上一步</button><button class="btn" id="toStep4g">下一步：开始生成 →</button></div>';
 }
 
 function stepGenerate(){
@@ -163,9 +278,9 @@ function stepGenerate(){
     +'<h1 class="doc-title">起草中：'+(project.name||"（未命名项目）")+'</h1>'
     +'<div class="progress-line" id="progressLine">准备开始，共 '+active.length+' 章 / '+totalSec+' 个子标题待生成…</div>'
     +'<div id="chapterContainer">'+inner+'</div>'
-    +'<div class="actions"><button class="btn ghost" id="backStep2">← 上一步</button>'
+    +'<div class="actions"><button class="btn ghost" id="backStep3g">← 上一步</button>'
     +'<button class="btn" id="startGen">开始逐章生成</button>'
-    +'<button class="btn" id="toStep4" style="display:none;">下一步：人工复核 →</button></div>';
+    +'<button class="btn" id="toStep5r" style="display:none;">下一步：人工复核 →</button></div>';
 }
 
 async function runGeneration(){
@@ -197,7 +312,7 @@ async function runGeneration(){
   }
   progressEl.textContent = '已完成 '+total+' 个子标题的初稿起草。';
   genBtn.style.display = "none";
-  document.getElementById("toStep4").style.display = "inline-block";
+  document.getElementById("toStep5r").style.display = "inline-block";
 }
 
 function renderContent(text){
@@ -220,11 +335,49 @@ function renderContent(text){
 }
 function escapeHtml(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 
+
+// 把测算结果整理成给AI的数据摘要 + 现成表格
+function buildCalcDigest(){
+  if(!calcResult) return null;
+  const r = calcResult, s = r.summary, p = calcParams;
+  const y0 = r.allYears[0], yN = r.allYears[r.allYears.length-1];
+  const fmt = x=> Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
+  // 分年现金流表（节选前若干年+汇总）
+  let cfRows = "年份|现金流入(万元)|现金流出(万元)|净现金流量(万元)|累计净现金流量(万元)\n";
+  r.allYears.forEach(y=>{
+    const c=r.cf[y];
+    cfRows += y+"|"+fmt(c.inflow)+"|"+fmt(c.outflow)+"|"+fmt(c.net)+"|"+fmt(c.cumNet)+"\n";
+  });
+  let incomeRows = "年份|住宅租金收入(万元)|出租率|租金单价(元/㎡/月)\n";
+  r.allYears.forEach(y=>{
+    if(r.income[y].rent>0){
+      incomeRows += y+"|"+fmt(r.income[y].rent)+"|"+((r.resiOccupancy[y]||0)*100).toFixed(0)+"%|"+fmt(r.resiRentPrice[y]||0)+"\n";
+    }
+  });
+  let costRows = "年份|收楼成本(万元)|工程费用(万元)|运营费用(万元)|财务费用(万元)|总成本(万元)\n";
+  r.allYears.forEach(y=>{
+    const c=r.cost[y];
+    if(c.total>0) costRows += y+"|"+fmt(c.collect)+"|"+fmt(c.eng)+"|"+fmt(c.op)+"|"+fmt(c.fin)+"|"+fmt(c.total)+"\n";
+  });
+  const digest = "【真实财务测算结果（由内置公式计算，可直接引用）】\n"
+    +"测算周期："+y0+"—"+yN+"年（建设期"+p.buildYears+"年，运营期"+p.operateYears+"年）\n"
+    +"核心参数：住宅面积"+fmt(p.area)+"㎡，起始租金"+p.rent+"元/㎡/月（每"+p.rentSpan+"年递增"+p.rentRate+"%），首年出租率"+(p.rampOcc*100)+"%，稳定期"+(p.stableOcc*100)+"%；收楼单价"+p.collect+"元/㎡/月；首次装修"+p.deco+"元/㎡（共装修"+s.decoTimes+"次，工程费合计"+fmt(s.totalEngCost)+"万元）；总套数"+p.units+"套，单套运营成本"+p.unitCost+"元/套/月；总借款"+fmt(p.loan)+"万元（计息本金"+fmt(p.interestBase)+"万元，利率"+p.loanRate+"%×折扣"+p.rateDiscount+"），折现率"+p.discount+"%。\n"
+    +"汇总结果：全周期总收入"+fmt(s.totalIncome)+"万元；总成本费用"+fmt(s.totalCost)+"万元；税金及附加合计"+fmt(s.totalTax)+"万元；净利润合计"+fmt(s.totalNetProfit)+"万元；累计净现值"+fmt(s.totalNpv)+"万元；全投资内部收益率IRR为"+(s.irr===null?"无法计算":s.irr+"%")+"；累计净现金流"+(s.paybackInfo?("于"+s.paybackInfo.year+"年（第"+s.paybackInfo.index+"年）回正"):"全周期内未回正")+"。\n"
+    +"\n分年收入明细：\n"+incomeRows
+    +"\n分年成本明细：\n"+costRows
+    +"\n分年现金流量：\n"+cfRows;
+  return digest;
+}
+
 async function generateSection(c, s){
-  const tableHint = s.numeric
-    ? '\n本子标题涉及具体数字或测算，请：①用文字说明测算口径、方法与逻辑；②生成一个结构完整的数据表格，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔，每行一个换行）：\n[[TABLE]]\n列1|列2|列3\n项目A|待填|待填\n项目B|待填|待填\n[[/TABLE]]\n表格中的具体数值一律填"待填"，绝不编造精确数字；但表格的行项目、列结构要专业完整、贴合真实可研报告。'
-    : "";
-  const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时，绝不给出看似权威的精确数字，一律以"待填"或"（此处为示例测算框架，正式数字须以专业机构实测为准）"标注。\n3. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n4. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+tableHint;
+  const digest = s.numeric ? buildCalcDigest() : null;
+  let tableHint = "";
+  if(s.numeric && digest){
+    tableHint = '\n本子标题涉及财务数字。下面提供了本项目由内置公式实际计算出的真实测算结果，请：①严格依据这些真实数字撰写分析（数字直接引用，不得改动、不得另行编造）；②在正文中生成1-2个数据表格支撑论述，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔）：\n[[TABLE]]\n列1|列2|列3\n行1|数值|数值\n[[/TABLE]]\n表格数据从测算结果中选取，允许按年份归并或取关键年份，但数值必须与测算结果一致。\n\n'+digest;
+  } else if(s.numeric){
+    tableHint = '\n本子标题涉及具体数字或测算，请：①用文字说明测算口径、方法与逻辑；②生成一个结构完整的数据表格，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔，每行一个换行）：\n[[TABLE]]\n列1|列2|列3\n项目A|待填|待填\n[[/TABLE]]\n表格中的具体数值一律填"待填"，绝不编造精确数字；但表格的行项目、列结构要专业完整、贴合真实可研报告。';
+  }
+  const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n3. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n4. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+tableHint;
   const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。';
   const resp = await fetch("/api/generate", {
     method:"POST",
@@ -250,9 +403,26 @@ function stepReview(){
     +'<div class="step-desc">每一段正文可直接点击编辑。数据类子章节的表格须由人工替换为真实测算结果后，方可确认签发。</div>'
     + inner
     +(signed?'<div class="seal"><span>单位复核确认<br>'+new Date().toLocaleDateString('zh-CN')+'<br>责任人签发</span></div><div class="final-banner">✓ 已完成人工复核签发，可导出正式文本</div>':'')
-    +'<div class="actions"><button class="btn ghost" id="backStep3">← 返回生成</button>'
+    +'<div class="actions"><button class="btn ghost" id="backStep4r">← 返回生成</button>'
     +'<button class="btn ghost" id="exportWordBtn">导出 Word</button>'
     +(!signed?'<button class="btn" id="signBtn">人工复核 · 确认签发</button>':'<button class="btn" id="printBtn">打印</button>')+'</div>';
+}
+
+
+function calcAppendixHtml(){
+  if(!calcResult) return "";
+  const r=calcResult, s=r.summary;
+  const fmt=x=>Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
+  const th='style="border:1px solid #000; padding:3px 6px; background:#eee; font-size:9.5pt;"';
+  const td='style="border:1px solid #000; padding:3px 6px; font-size:9.5pt;"';
+  let t1='<table style="border-collapse:collapse; width:100%;"><tr><th '+th+'>年份</th><th '+th+'>租金收入</th><th '+th+'>总成本</th><th '+th+'>税金</th><th '+th+'>净利润</th><th '+th+'>净现金流</th><th '+th+'>累计净现金流</th></tr>';
+  r.allYears.forEach(y=>{
+    t1+='<tr><td '+td+'>'+y+'</td><td '+td+'>'+fmt(r.income[y].rent)+'</td><td '+td+'>'+fmt(r.cost[y].total)+'</td><td '+td+'>'+fmt(r.tax[y].total)+'</td><td '+td+'>'+fmt(r.profit[y].netProfit)+'</td><td '+td+'>'+fmt(r.cf[y].net)+'</td><td '+td+'>'+fmt(r.cf[y].cumNet)+'</td></tr>';
+  });
+  t1+='</table>';
+  return '<h1 style="font-family:\'黑体\',\'SimHei\',sans-serif; font-size:18pt; margin-top:26pt;">附表：财务测算明细（单位：万元）</h1>'
+    +'<p style="font-size:10.5pt;">全周期总收入 '+fmt(s.totalIncome)+'｜总成本 '+fmt(s.totalCost)+'｜净利润合计 '+fmt(s.totalNetProfit)+'｜累计净现值 '+fmt(s.totalNpv)+'｜IRR '+(s.irr===null?"无法计算":s.irr+"%")+'</p>'
+    + t1;
 }
 
 function exportWord(){
@@ -285,6 +455,7 @@ function exportWord(){
     +'<p style="text-align:center; font-size:14pt;">可 行 性 研 究 报 告</p>'
     +'<p style="text-align:center; font-size:11pt; color:#555;">'+metaLine+'</p><hr/>'
     + bodyHtml
+    + calcAppendixHtml()
     +'<p style="margin-top:40pt; font-size:10.5pt; color:#888;">'+signNote+'</p></body></html>';
   const blob = new Blob(["\ufeff", docHtml], {type:"application/msword"});
   const url = URL.createObjectURL(blob);
@@ -303,12 +474,15 @@ function bindEvents(){
   if(s("toStep1")) s("toStep1").onclick = ()=>{ if(!domainKey) return; currentStep=1; renderTOC(); renderSheet(); };
   if(s("backStep0")) s("backStep0").onclick = ()=>{ currentStep=0; renderTOC(); renderSheet(); };
   if(s("toStep2")) s("toStep2").onclick = ()=>{ saveProject(); currentStep=2; renderTOC(); renderSheet(); };
-  if(s("backStep1")) s("backStep1").onclick = ()=>{ currentStep=1; renderTOC(); renderSheet(); };
-  if(s("toStep3")) s("toStep3").onclick = ()=>{ currentStep=3; renderTOC(); renderSheet(); };
-  if(s("backStep2")) s("backStep2").onclick = ()=>{ currentStep=2; renderTOC(); renderSheet(); };
+  if(s("backStep1c")) s("backStep1c").onclick = ()=>{ currentStep=1; renderTOC(); renderSheet(); };
+  if(s("runCalcBtn")) s("runCalcBtn").onclick = runCalc;
+  if(s("toStep3c")) s("toStep3c").onclick = ()=>{ currentStep=3; renderTOC(); renderSheet(); };
+  if(s("backStep2ch")) s("backStep2ch").onclick = ()=>{ currentStep=2; renderTOC(); renderSheet(); };
+  if(s("toStep4g")) s("toStep4g").onclick = ()=>{ currentStep=4; renderTOC(); renderSheet(); };
+  if(s("backStep3g")) s("backStep3g").onclick = ()=>{ currentStep=3; renderTOC(); renderSheet(); };
   if(s("startGen")) s("startGen").onclick = runGeneration;
-  if(s("toStep4")) s("toStep4").onclick = ()=>{ currentStep=4; renderTOC(); renderSheet(); };
-  if(s("backStep3")) s("backStep3").onclick = ()=>{ currentStep=3; renderTOC(); renderSheet(); };
+  if(s("toStep5r")) s("toStep5r").onclick = ()=>{ currentStep=5; renderTOC(); renderSheet(); };
+  if(s("backStep4r")) s("backStep4r").onclick = ()=>{ currentStep=4; renderTOC(); renderSheet(); };
   if(s("signBtn")) s("signBtn").onclick = ()=>{ signed=true; renderSheet(); };
   if(s("printBtn")) s("printBtn").onclick = ()=> window.print();
   if(s("exportWordBtn")) s("exportWordBtn").onclick = exportWord;
