@@ -1,509 +1,350 @@
 <style>
   :root{
-    --paper:#EEECE4;
-    --paper-card:#FBFAF6;
-    --ink:#22282B;
-    --ink-soft:#5B6265;
-    --blueprint:#1F3A5F;
-    --blueprint-dim:#3E5A7A;
-    --line:#C9C5B8;
-    --seal-red:#B7302B;
-    --seal-red-dim:#B7302B55;
-    --mono: "SF Mono", "Consolas", "Courier New", monospace;
-    --serif: "Songti SC","STSong","SimSun","Noto Serif SC",serif;
-    --sans: "PingFang SC","Microsoft YaHei","Hiragino Sans GB",sans-serif;
+    --paper:#EEECE4; --paper-card:#FBFAF6; --ink:#22282B; --ink-soft:#5B6265;
+    --blueprint:#1F3A5F; --blueprint-dim:#3E5A7A; --line:#C9C5B8;
+    --seal-red:#B7302B; --seal-red-dim:#B7302B55;
+    --mono:"SF Mono","Consolas","Courier New",monospace;
+    --serif:"Songti SC","STSong","SimSun","Noto Serif SC",serif;
+    --sans:"PingFang SC","Microsoft YaHei","Hiragino Sans GB",sans-serif;
   }
   *{box-sizing:border-box;}
-  body{
-    margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans);
-    -webkit-font-smoothing:antialiased;
-  }
-  .app{ display:flex; min-height:640px; }
-
-  /* ---------- 左侧目录 ---------- */
-  .toc{
-    width:220px; flex-shrink:0; background:var(--paper);
-    border-right:1px solid var(--line); padding:28px 0 28px 28px;
-  }
-  .toc-title{
-    font-family:var(--serif); font-size:15px; letter-spacing:2px; color:var(--blueprint);
-    margin-bottom:22px; padding-right:20px; border-bottom:1px solid var(--line); padding-bottom:14px;
-  }
-  .toc-item{
-    display:flex; gap:10px; align-items:flex-start; padding:9px 20px 9px 0;
-    font-size:13px; color:var(--ink-soft); cursor:default; position:relative;
-  }
-  .toc-item .num{ font-family:var(--mono); font-size:11px; color:var(--line); flex-shrink:0; padding-top:1px;}
-  .toc-item.active{ color:var(--blueprint); font-weight:600; }
-  .toc-item.active .num{ color:var(--blueprint); }
-  .toc-item.done .num{ color:var(--blueprint-dim); }
-  .toc-item.done::after{content:"·"; position:absolute; right:6px; color:var(--blueprint-dim);}
-
-  /* ---------- 右侧“纸面” ---------- */
-  .sheet-wrap{ flex:1; padding:36px 40px; }
-  .sheet{
-    background:var(--paper-card); max-width:760px; margin:0 auto;
-    border:1px solid var(--line); box-shadow:0 1px 0 var(--line);
-    padding:40px 48px; position:relative; min-height:560px;
-  }
-  .doc-eyebrow{
-    font-family:var(--mono); font-size:11px; letter-spacing:1.5px; color:var(--blueprint-dim);
-    text-transform:uppercase; margin-bottom:6px;
-  }
-  h1.doc-title{
-    font-family:var(--serif); font-size:26px; margin:0 0 26px; color:var(--ink); font-weight:700;
-    border-bottom:2px solid var(--blueprint); padding-bottom:16px;
-  }
-
-  label{ display:block; font-size:12.5px; color:var(--ink-soft); margin:16px 0 6px; }
-  input[type=text], input[type=number], select, textarea{
-    width:100%; font-family:var(--sans); font-size:14px; color:var(--ink);
-    background:#fff; border:1px solid var(--line); padding:9px 11px; outline:none;
-  }
-  input:focus, select:focus, textarea:focus{ border-color:var(--blueprint); }
-  textarea{ min-height:76px; resize:vertical; }
-  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:0 20px; }
-
-  .btn{
-    font-family:var(--sans); font-size:13.5px; font-weight:600; padding:11px 22px; border:none;
-    background:var(--blueprint); color:#fff; cursor:pointer; letter-spacing:.5px;
-  }
-  .btn:hover{ background:var(--blueprint-dim); }
-  .btn.ghost{ background:transparent; color:var(--blueprint); border:1px solid var(--blueprint); }
-  .btn.ghost:hover{ background:var(--blueprint); color:#fff; }
-  .btn:disabled{ background:var(--line); color:#888; cursor:not-allowed; }
-  .actions{ margin-top:30px; display:flex; gap:12px; justify-content:flex-end; }
-
-  .chapter-list{ margin-top:8px; }
-  .chapter-row{
-    display:flex; align-items:center; gap:12px; padding:11px 4px;
-    border-bottom:1px solid var(--line); font-size:14px;
-  }
-  .chapter-row .num{ font-family:var(--mono); color:var(--blueprint-dim); font-size:12px; width:20px;}
-  .chapter-row input[type=checkbox]{ width:16px; height:16px; accent-color:var(--blueprint); }
-  .chapter-row .tag{
-    margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--ink-soft);
-    border:1px solid var(--line); padding:2px 6px;
-  }
-
-  .note-box{
-    margin-top:22px; background:#F1EEE4; border-left:3px solid var(--blueprint);
-    padding:12px 16px; font-size:12.5px; color:var(--ink-soft); line-height:1.6;
-  }
-
-  /* 生成中 */
-  .progress-line{ font-family:var(--mono); font-size:12px; color:var(--blueprint-dim); margin-bottom:18px; }
-  .chapter-block{ margin-bottom:26px; }
-  .chapter-block h3{
-    font-family:var(--serif); font-size:16.5px; color:var(--ink); margin:0 0 8px;
-    display:flex; align-items:center; gap:8px;
-  }
-  .chapter-block h3 .cn{ font-family:var(--mono); font-size:12px; color:var(--blueprint); }
-  .chapter-block .body{
-    font-size:14px; line-height:1.85; color:var(--ink); white-space:pre-wrap;
-    outline:none; border-left:2px solid transparent; padding-left:10px;
-  }
-  .chapter-block .body:focus{ border-left-color:var(--blueprint); background:#F7F5EE; }
-  .chapter-block.pending .body{ color:var(--ink-soft); font-style:italic; }
-  .data-flag{
-    display:inline-block; font-family:var(--mono); font-size:10px; color:var(--seal-red);
-    border:1px dashed var(--seal-red-dim); padding:1px 6px; margin-top:6px;
-  }
-
-  /* 水印 + 印章 */
-  .watermark{
-    position:absolute; top:18px; right:-8px; transform:rotate(8deg);
-    font-family:var(--mono); font-size:11px; letter-spacing:2px; color:var(--seal-red);
-    border:1.5px solid var(--seal-red); padding:4px 10px; opacity:.75;
-  }
-  .seal{
-    position:absolute; bottom:38px; right:52px; width:104px; height:104px; border-radius:50%;
-    border:2.5px solid var(--seal-red); color:var(--seal-red); display:flex; align-items:center; justify-content:center;
-    text-align:center; font-family:var(--serif); font-size:12px; line-height:1.4; transform:rotate(-8deg);
-    opacity:.9; background: radial-gradient(circle, transparent 60%, transparent 60%);
-  }
-  .seal .star{ position:absolute; font-size:18px; }
-
-  .step-desc{ font-size:13px; color:var(--ink-soft); margin-bottom:20px; line-height:1.6; }
-  .final-banner{
-    display:flex; justify-content:space-between; align-items:center;
-    background:#EAF1EA; border:1px solid #5C8A5C; padding:12px 16px; margin-top:18px; font-size:13px; color:#2F5C2F;
-  }
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); -webkit-font-smoothing:antialiased;}
+  .app{display:flex; min-height:640px;}
+  .toc{width:220px; flex-shrink:0; background:var(--paper); border-right:1px solid var(--line); padding:28px 0 28px 28px;}
+  .toc-title{font-family:var(--serif); font-size:15px; letter-spacing:2px; color:var(--blueprint); margin-bottom:22px; padding-right:20px; border-bottom:1px solid var(--line); padding-bottom:14px;}
+  .toc-item{display:flex; gap:10px; align-items:flex-start; padding:9px 20px 9px 0; font-size:13px; color:var(--ink-soft); position:relative;}
+  .toc-item .num{font-family:var(--mono); font-size:11px; color:var(--line); flex-shrink:0; padding-top:1px;}
+  .toc-item.active{color:var(--blueprint); font-weight:600;}
+  .toc-item.active .num{color:var(--blueprint);}
+  .toc-item.done .num{color:var(--blueprint-dim);}
+  .sheet-wrap{flex:1; padding:36px 40px;}
+  .sheet{background:var(--paper-card); max-width:820px; margin:0 auto; border:1px solid var(--line); box-shadow:0 1px 0 var(--line); padding:40px 48px; position:relative; min-height:560px;}
+  .doc-eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:1.5px; color:var(--blueprint-dim); text-transform:uppercase; margin-bottom:6px;}
+  h1.doc-title{font-family:var(--serif); font-size:26px; margin:0 0 26px; color:var(--ink); font-weight:700; border-bottom:2px solid var(--blueprint); padding-bottom:16px;}
+  label{display:block; font-size:12.5px; color:var(--ink-soft); margin:16px 0 6px;}
+  input[type=text],input[type=number],select,textarea{width:100%; font-family:var(--sans); font-size:14px; color:var(--ink); background:#fff; border:1px solid var(--line); padding:9px 11px; outline:none;}
+  input:focus,select:focus,textarea:focus{border-color:var(--blueprint);}
+  textarea{min-height:76px; resize:vertical;}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:0 20px;}
+  .btn{font-family:var(--sans); font-size:13.5px; font-weight:600; padding:11px 22px; border:none; background:var(--blueprint); color:#fff; cursor:pointer; letter-spacing:.5px;}
+  .btn:hover{background:var(--blueprint-dim);}
+  .btn.ghost{background:transparent; color:var(--blueprint); border:1px solid var(--blueprint);}
+  .btn.ghost:hover{background:var(--blueprint); color:#fff;}
+  .btn:disabled{background:var(--line); color:#888; cursor:not-allowed;}
+  .actions{margin-top:30px; display:flex; gap:12px; justify-content:flex-end; flex-wrap:wrap;}
+  .note-box{margin-top:22px; background:#F1EEE4; border-left:3px solid var(--blueprint); padding:12px 16px; font-size:12.5px; color:var(--ink-soft); line-height:1.6;}
+  .domain-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:10px;}
+  .domain-card{border:1.5px solid var(--line); padding:18px 20px; cursor:pointer; background:#fff; transition:.15s;}
+  .domain-card:hover{border-color:var(--blueprint-dim);}
+  .domain-card.sel{border-color:var(--blueprint); background:#F4F1E8;}
+  .domain-card .dn{font-family:var(--serif); font-size:16px; color:var(--ink); margin-bottom:6px;}
+  .domain-card .dd{font-size:12px; color:var(--ink-soft); line-height:1.55;}
+  .domain-card .dc{font-family:var(--mono); font-size:10.5px; color:var(--blueprint-dim); margin-top:8px;}
+  .chapter-list{margin-top:8px;}
+  .chapter-row{display:flex; align-items:center; gap:12px; padding:11px 4px; border-bottom:1px solid var(--line); font-size:14px;}
+  .chapter-row .num{font-family:var(--mono); color:var(--blueprint-dim); font-size:12px; width:26px;}
+  .chapter-row input[type=checkbox]{width:16px; height:16px; accent-color:var(--blueprint);}
+  .chapter-row .subcount{margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--ink-soft); border:1px solid var(--line); padding:2px 6px;}
+  .progress-line{font-family:var(--mono); font-size:12px; color:var(--blueprint-dim); margin-bottom:18px;}
+  .chapter-block{margin-bottom:30px;}
+  .chapter-block h3{font-family:var(--serif); font-size:17px; color:var(--ink); margin:0 0 4px; display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--line); padding-bottom:6px;}
+  .chapter-block h3 .cn{font-family:var(--mono); font-size:12px; color:var(--blueprint);}
+  .section-block{margin:14px 0 0;}
+  .section-block h4{font-family:var(--sans); font-weight:600; font-size:14px; color:var(--blueprint-dim); margin:0 0 6px;}
+  .section-block .body{font-size:13.5px; line-height:1.85; color:var(--ink); outline:none; border-left:2px solid transparent; padding-left:10px;}
+  .section-block .body:focus{border-left-color:var(--blueprint); background:#F7F5EE;}
+  .section-block.pending .body{color:var(--ink-soft); font-style:italic;}
+  .data-flag{display:inline-block; font-family:var(--mono); font-size:10px; color:var(--seal-red); border:1px dashed var(--seal-red-dim); padding:1px 6px; margin-top:6px;}
+  table.rpt{border-collapse:collapse; width:100%; margin:10px 0; font-size:12.5px;}
+  table.rpt th,table.rpt td{border:1px solid var(--line); padding:5px 8px; text-align:left;}
+  table.rpt th{background:#EDEAE0; font-weight:600;}
+  .watermark{position:absolute; top:18px; right:-8px; transform:rotate(8deg); font-family:var(--mono); font-size:11px; letter-spacing:2px; color:var(--seal-red); border:1.5px solid var(--seal-red); padding:4px 10px; opacity:.75;}
+  .seal{position:absolute; bottom:38px; right:52px; width:104px; height:104px; border-radius:50%; border:2.5px solid var(--seal-red); color:var(--seal-red); display:flex; align-items:center; justify-content:center; text-align:center; font-family:var(--serif); font-size:12px; line-height:1.4; transform:rotate(-8deg); opacity:.9;}
+  .step-desc{font-size:13px; color:var(--ink-soft); margin-bottom:20px; line-height:1.6;}
+  .final-banner{display:flex; justify-content:space-between; align-items:center; background:#EAF1EA; border:1px solid #5C8A5C; padding:12px 16px; margin-top:18px; font-size:13px; color:#2F5C2F;}
 </style>
 
 <div class="app">
-  <div class="toc">
-    <div class="toc-title">生成流程</div>
-    <div id="tocList"></div>
-  </div>
-
-  <div class="sheet-wrap">
-    <div class="sheet" id="sheet"></div>
-  </div>
+  <div class="toc"><div class="toc-title">生成流程</div><div id="tocList"></div></div>
+  <div class="sheet-wrap"><div class="sheet" id="sheet"></div></div>
 </div>
 
+<script src="outlines.js"></script>
 <script>
-const STEPS = ["项目信息","章节范围","逐章生成","复核与签发"];
+const STEPS = ["选择领域","项目信息","章节范围","逐章生成","复核与签发"];
 let currentStep = 0;
-
-const project = {
-  name:"", owner:"", industry:"制造业", location:"", type:"新建",
-  scale:"", desc:""
-};
-
-const CHAPTERS = [
-  {id:"bg", cn:"一", name:"项目背景与建设必要性"},
-  {id:"market", cn:"二", name:"市场分析与需求预测"},
-  {id:"site", cn:"三", name:"建设条件与选址方案"},
-  {id:"tech", cn:"四", name:"技术方案与建设内容"},
-  {id:"env", cn:"五", name:"环境影响与安全生产", numeric:true},
-  {id:"invest", cn:"六", name:"投资估算与资金筹措", numeric:true},
-  {id:"finance", cn:"七", name:"财务效益分析", numeric:true},
-  {id:"risk", cn:"八", name:"风险分析与对策"},
-  {id:"conclusion", cn:"九", name:"结论与建议"},
-];
-CHAPTERS.forEach(c => c.checked = true);
-CHAPTERS.forEach(c => c.content = "");
+let domainKey = null;
+let chapters = [];
 let signed = false;
+const project = { name:"", owner:"", industry:"", location:"", type:"", scale:"", desc:"" };
+
+function loadDomain(key){
+  domainKey = key;
+  const src = window.OUTLINES[key];
+  project.industry = src.label;
+  chapters = src.chapters.map(ch=>({
+    cn: ch.cn, name: ch.name, checked: true,
+    sections: ch.sections.map(s=>({ t: s.t, numeric: !!s.numeric, content: "" }))
+  }));
+}
 
 function renderTOC(){
-  const el = document.getElementById("tocList");
-  el.innerHTML = STEPS.map((s,i)=>{
-    let cls = i===currentStep? "active" : (i<currentStep? "done":"");
-    return `<div class="toc-item ${cls}"><span class="num">${String(i+1).padStart(2,'0')}</span><span>${s}</span></div>`;
+  document.getElementById("tocList").innerHTML = STEPS.map((s,i)=>{
+    const cls = i===currentStep?"active":(i<currentStep?"done":"");
+    return '<div class="toc-item '+cls+'"><span class="num">'+String(i+1).padStart(2,'0')+'</span><span>'+s+'</span></div>';
   }).join("");
 }
 
 function renderSheet(){
   const sheet = document.getElementById("sheet");
-  if(currentStep===0) sheet.innerHTML = stepProjectInfo();
-  if(currentStep===1) sheet.innerHTML = stepChapters();
-  if(currentStep===2) sheet.innerHTML = stepGenerate();
-  if(currentStep===3) sheet.innerHTML = stepReview();
+  if(currentStep===0) sheet.innerHTML = stepDomain();
+  if(currentStep===1) sheet.innerHTML = stepProjectInfo();
+  if(currentStep===2) sheet.innerHTML = stepChapters();
+  if(currentStep===3) sheet.innerHTML = stepGenerate();
+  if(currentStep===4) sheet.innerHTML = stepReview();
   bindEvents();
 }
 
-/* ---------------- Step 0 ---------------- */
+function stepDomain(){
+  const keys = Object.keys(window.OUTLINES);
+  return '<div class="doc-eyebrow">STEP 01 · 选择报告领域</div>'
+    +'<h1 class="doc-title">选择要生成的可研报告类型</h1>'
+    +'<div class="step-desc">不同领域使用不同的专属章节大纲。以下大纲结构参照真实可研报告提炼，每章包含多个子标题，逐层生成，篇幅与深度贴近正式报告。</div>'
+    +'<div class="domain-grid">'
+    + keys.map(k=>{
+        const d = window.OUTLINES[k];
+        const subCount = d.chapters.reduce((n,c)=>n+c.sections.length,0);
+        return '<div class="domain-card '+(domainKey===k?'sel':'')+'" data-key="'+k+'">'
+          +'<div class="dn">'+d.label+'</div>'
+          +'<div class="dd">共 '+d.chapters.length+' 个一级章节</div>'
+          +'<div class="dc">'+subCount+' 个子标题 · 逐层生成</div></div>';
+      }).join("")
+    +'</div>'
+    +'<div class="note-box">升级说明：本版本相比旧版，把"一章一段"改为"一章按多个子标题逐层撰写"，单份报告的结构颗粒度和篇幅大幅提升；数据类子标题会自动生成表格框架并标注"待填真实数据"。</div>'
+    +'<div class="actions"><button class="btn" id="toStep1" '+(domainKey?'':'disabled')+'>下一步：录入项目信息 →</button></div>';
+}
+
 function stepProjectInfo(){
-  return `
-    <div class="doc-eyebrow">STEP 01 · 项目基础信息</div>
-    <h1 class="doc-title">可行性研究报告 · 生成任务单</h1>
-    <div class="step-desc">先录入项目的基础事实信息 —— AI只按你给定的信息组织语言，不会替你编造项目本身没有的事实。</div>
-    <div class="grid2">
-      <div><label>项目名称</label><input id="f_name" type="text" placeholder="例：XX年产10万吨XX建设项目" value="${project.name}"></div>
-      <div><label>建设单位</label><input id="f_owner" type="text" placeholder="例：XX有限公司" value="${project.owner}"></div>
-    </div>
-    <div class="grid2">
-      <div><label>所属行业</label>
-        <select id="f_industry">
-          ${["制造业","农业","基础设施/市政","能源","信息技术","文旅/商业地产","医疗/教育"].map(o=>`<option ${o===project.industry?'selected':''}>${o}</option>`).join("")}
-        </select>
-      </div>
-      <div><label>项目类型</label>
-        <select id="f_type">
-          ${["新建","改扩建","技术改造"].map(o=>`<option ${o===project.type?'selected':''}>${o}</option>`).join("")}
-        </select>
-      </div>
-    </div>
-    <div class="grid2">
-      <div><label>建设地点</label><input id="f_location" type="text" placeholder="例：XX省XX市XX园区" value="${project.location}"></div>
-      <div><label>投资规模（万元，估算）</label><input id="f_scale" type="text" placeholder="例：8000" value="${project.scale}"></div>
-    </div>
-    <label>建设内容与项目概况（越具体，生成质量越高）</label>
-    <textarea id="f_desc" placeholder="例：拟建设厂房及配套设施，主要生产XX产品，年设计产能XX，主要客户为XX...">${project.desc}</textarea>
-
-    <div class="note-box">
-      边界提示：以上信息由你确认真实性；生成环节涉及市场规模、财务指标等具体数字时，系统会自动标注为"示例测算，需以实际调研数据为准"，不会把AI推测的数字当真实统计数据呈现。
-    </div>
-    <div class="actions">
-      <button class="btn" id="toStep1">下一步：选择章节 →</button>
-    </div>
-  `;
+  return '<div class="doc-eyebrow">STEP 02 · 项目基础信息 · '+project.industry+'</div>'
+    +'<h1 class="doc-title">可行性研究报告 · 生成任务单</h1>'
+    +'<div class="step-desc">录入项目基础事实。信息越具体，逐章生成的贴合度越高。</div>'
+    +'<div class="grid2">'
+    +'<div><label>项目名称</label><input id="f_name" type="text" placeholder="例：XX保障性住房改造升级项目" value="'+project.name+'"></div>'
+    +'<div><label>建设/委托单位</label><input id="f_owner" type="text" placeholder="例：XX安居集团有限公司" value="'+project.owner+'"></div></div>'
+    +'<div class="grid2">'
+    +'<div><label>项目类型</label><input id="f_type" type="text" placeholder="例：改造升级 / 新建" value="'+project.type+'"></div>'
+    +'<div><label>建设地点</label><input id="f_location" type="text" placeholder="例：深圳市龙华区XX片区" value="'+project.location+'"></div></div>'
+    +'<div><label>投资规模（万元，估算）</label><input id="f_scale" type="text" placeholder="例：5240" value="'+project.scale+'"></div>'
+    +'<label>项目概况（建筑面积、现状、改造/建设内容、周边情况等，越详细越好）</label>'
+    +'<textarea id="f_desc" placeholder="例：项目总建筑面积21300㎡，含集中商业与街区商业，已运营11年，现出租率下滑至70%，拟通过系统性改造升级重构业态与动线...">'+project.desc+'</textarea>'
+    +'<div class="note-box">边界提示：涉及投资估算、经营收入、财务指标等具体数字的子章节，系统只生成结构与表格框架，并标注"待填真实数据"，不会编造看似权威的精确数字。这些必须由专业测算填入后方可正式使用。</div>'
+    +'<div class="actions"><button class="btn ghost" id="backStep0">← 上一步</button><button class="btn" id="toStep2">下一步：选择章节 →</button></div>';
 }
 
-/* ---------------- Step 1 ---------------- */
 function stepChapters(){
-  return `
-    <div class="doc-eyebrow">STEP 02 · 报告章节范围</div>
-    <h1 class="doc-title">选择本次生成的章节</h1>
-    <div class="step-desc">标注"⚠数据类"的章节，AI只会给出结构与示例框架，实际数字需接入真实测算模块或人工填入 —— 这是批量生成里最容易出问题、也是必须卡住的边界。</div>
-    <div class="chapter-list">
-      ${CHAPTERS.map((c,i)=>`
-        <div class="chapter-row">
-          <span class="num">${c.cn}</span>
-          <input type="checkbox" data-idx="${i}" class="chk" ${c.checked?'checked':''}>
-          <span>${c.name}</span>
-          ${c.numeric? '<span class="tag">⚠ 数据类</span>' : ''}
-        </div>`).join("")}
-    </div>
-    <div class="actions">
-      <button class="btn ghost" id="backStep0">← 上一步</button>
-      <button class="btn" id="toStep2">下一步：开始生成 →</button>
-    </div>
-  `;
+  return '<div class="doc-eyebrow">STEP 03 · 章节范围 · '+project.industry+'</div>'
+    +'<h1 class="doc-title">选择本次生成的章节</h1>'
+    +'<div class="step-desc">每个章节含多个子标题，生成时逐个撰写。取消勾选可跳过整章。</div>'
+    +'<div class="chapter-list">'
+    + chapters.map((c,i)=>'<div class="chapter-row"><span class="num">'+c.cn+'</span>'
+        +'<input type="checkbox" data-idx="'+i+'" class="chk" '+(c.checked?'checked':'')+'>'
+        +'<span>'+c.name+'</span><span class="subcount">'+c.sections.length+' 子节</span></div>').join("")
+    +'</div>'
+    +'<div class="actions"><button class="btn ghost" id="backStep1">← 上一步</button><button class="btn" id="toStep3">下一步：开始生成 →</button></div>';
 }
 
-/* ---------------- Step 2 ---------------- */
 function stepGenerate(){
-  const active = CHAPTERS.filter(c=>c.checked);
-  return `
-    <div class="doc-eyebrow">STEP 03 · 逐章生成</div>
-    <h1 class="doc-title">起草中：${project.name || "（未命名项目）"}</h1>
-    <div class="progress-line" id="progressLine">准备开始，逐章调用生成…</div>
-    <div id="chapterContainer">
-      ${active.map(c=>`
-        <div class="chapter-block pending" id="block_${c.id}">
-          <h3><span class="cn">${c.cn}</span>${c.name}</h3>
-          <div class="body">等待生成…</div>
-        </div>`).join("")}
-    </div>
-    <div class="actions">
-      <button class="btn ghost" id="backStep1">← 上一步</button>
-      <button class="btn" id="startGen">开始逐章生成</button>
-      <button class="btn" id="toStep3" style="display:none;">下一步：人工复核 →</button>
-    </div>
-  `;
+  const active = chapters.filter(c=>c.checked);
+  const totalSec = active.reduce((n,c)=>n+c.sections.length,0);
+  let inner = active.map(c=>'<div class="chapter-block" id="block_'+c.cn+'"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
+    + c.sections.map((s,si)=>'<div class="section-block pending" id="sec_'+c.cn+'_'+si+'"><h4>'+s.t+(s.numeric?' ⚠数据':'')+'</h4><div class="body">等待生成…</div></div>').join("")
+    +'</div>').join("");
+  return '<div class="doc-eyebrow">STEP 04 · 逐章生成</div>'
+    +'<h1 class="doc-title">起草中：'+(project.name||"（未命名项目）")+'</h1>'
+    +'<div class="progress-line" id="progressLine">准备开始，共 '+active.length+' 章 / '+totalSec+' 个子标题待生成…</div>'
+    +'<div id="chapterContainer">'+inner+'</div>'
+    +'<div class="actions"><button class="btn ghost" id="backStep2">← 上一步</button>'
+    +'<button class="btn" id="startGen">开始逐章生成</button>'
+    +'<button class="btn" id="toStep4" style="display:none;">下一步：人工复核 →</button></div>';
 }
 
 async function runGeneration(){
-  const active = CHAPTERS.filter(c=>c.checked);
+  const active = chapters.filter(c=>c.checked);
   const genBtn = document.getElementById("startGen");
   genBtn.disabled = true; genBtn.textContent = "生成中…";
   const progressEl = document.getElementById("progressLine");
-
-  for(let i=0;i<active.length;i++){
-    const c = active[i];
-    progressEl.textContent = `正在起草 第${i+1}/${active.length}章：${c.name} …`;
-    const block = document.getElementById("block_"+c.id);
-    try{
-      const text = await generateChapter(c);
-      c.content = text;
-      block.classList.remove("pending");
-      block.querySelector(".body").textContent = text;
-      if(c.numeric){
-        const flag = document.createElement("div");
-        flag.className = "data-flag";
-        flag.textContent = "⚠ 本章数字为示例测算框架，正式版须替换为真实数据/计算结果";
-        block.appendChild(flag);
-      }
-    }catch(e){
-      block.querySelector(".body").textContent = "生成失败："+e.message;
+  const total = active.reduce((n,c)=>n+c.sections.length,0);
+  let done = 0;
+  for(const c of active){
+    for(let si=0; si<c.sections.length; si++){
+      const s = c.sections[si];
+      done++;
+      progressEl.textContent = '正在撰写 '+done+'/'+total+'：'+c.name+' — '+s.t+' …';
+      const secEl = document.getElementById('sec_'+c.cn+'_'+si);
+      try{
+        const text = await generateSection(c, s);
+        s.content = text;
+        secEl.classList.remove("pending");
+        secEl.querySelector(".body").innerHTML = renderContent(text);
+        if(s.numeric){
+          const flag = document.createElement("div");
+          flag.className = "data-flag";
+          flag.textContent = "⚠ 表内数字为占位框架，正式版须替换为真实测算结果";
+          secEl.appendChild(flag);
+        }
+      }catch(e){ secEl.querySelector(".body").textContent = "生成失败："+e.message; }
     }
   }
-  progressEl.textContent = `已完成 ${active.length} 个章节的初稿起草。`;
+  progressEl.textContent = '已完成 '+total+' 个子标题的初稿起草。';
   genBtn.style.display = "none";
-  document.getElementById("toStep3").style.display = "inline-block";
+  document.getElementById("toStep4").style.display = "inline-block";
 }
 
-async function generateChapter(c){
-  const sys = `你是一名资深工程咨询工程师，专门撰写可行性研究报告。请使用正式、严谨的官方文书语言撰写指定章节内容，逻辑清晰、结构完整，避免夸张和口语化表达。
-要求：
-1. 只依据用户提供的项目信息撰写，不得编造项目未提及的具体事实。
-2. 如涉及市场规模、投资额、财务指标（IRR/NPV/回收期等）具体数字，必须明确说明"此处为示例测算框架，正式数字需以专业机构实际调研与测算为准"，不得给出看似权威的精确统计数字。
-3. 篇幅约400-600字，直接输出正文，不要标题，不要客套语。`;
+function renderContent(text){
+  const tableRe = /\[\[TABLE\]\]([\s\S]*?)\[\[\/TABLE\]\]/g;
+  let html = text.replace(tableRe, function(m, inner){
+    const rows = inner.trim().split("\n").filter(r=>r.trim());
+    let t = '<table class="rpt">';
+    rows.forEach((r,ri)=>{
+      const cells = r.split("|").map(x=>x.trim());
+      const tag = ri===0 ? "th" : "td";
+      t += "<tr>" + cells.map(c=>'<'+tag+'>'+escapeHtml(c)+'</'+tag+'>').join("") + "</tr>";
+    });
+    return t + "</table>";
+  });
+  html = html.split(/\n{2,}/).map(p=>{
+    if(p.includes("<table")) return p;
+    return p.trim()? '<p style="margin:0 0 10px;">'+escapeHtml(p).replace(/\n/g,"<br>")+'</p>' : "";
+  }).join("");
+  return html;
+}
+function escapeHtml(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 
-  const user = `项目名称：${project.name || "（未填写）"}
-建设单位：${project.owner || "（未填写）"}
-所属行业：${project.industry}
-项目类型：${project.type}
-建设地点：${project.location || "（未填写）"}
-投资规模：${project.scale ? project.scale+"万元" : "（未填写）"}
-项目概况：${project.desc || "（未填写）"}
-
-请撰写本报告的《${c.name}》一章正文。`;
-
+async function generateSection(c, s){
+  const tableHint = s.numeric
+    ? '\n本子标题涉及具体数字或测算，请：①用文字说明测算口径、方法与逻辑；②生成一个结构完整的数据表格，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔，每行一个换行）：\n[[TABLE]]\n列1|列2|列3\n项目A|待填|待填\n项目B|待填|待填\n[[/TABLE]]\n表格中的具体数值一律填"待填"，绝不编造精确数字；但表格的行项目、列结构要专业完整、贴合真实可研报告。'
+    : "";
+  const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时，绝不给出看似权威的精确数字，一律以"待填"或"（此处为示例测算框架，正式数字须以专业机构实测为准）"标注。\n3. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n4. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+tableHint;
+  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。';
   const resp = await fetch("/api/generate", {
     method:"POST",
-    headers:{
-      "Content-Type":"application/json",
-      "X-Access-Code": sessionStorage.getItem("accessCode") || ""
-    },
-    body: JSON.stringify({
-      system: sys,
-      messages:[{role:"user", content:user}]
-    })
+    headers:{"Content-Type":"application/json","X-Access-Code":sessionStorage.getItem("accessCode")||""},
+    body: JSON.stringify({ system: sys, messages:[{role:"user", content:user}] })
   });
   const data = await resp.json();
-  if(data.error){ throw new Error(data.error); }
+  if(data.error) throw new Error(data.error);
   const text = (data.content||[]).map(b=>b.text||"").join("").trim();
   return text || "（未返回内容）";
 }
 
-/* ---------------- Step 3 ---------------- */
 function stepReview(){
-  const active = CHAPTERS.filter(c=>c.checked);
-  return `
-    <div class="doc-eyebrow">STEP 04 · 人工复核与签发</div>
-    <h1 class="doc-title">${project.name || "（未命名项目）"}可行性研究报告</h1>
-    ${!signed ? `<div class="watermark">AI初稿 · 未经复核</div>` : ""}
-    <div class="step-desc">这是流程里最不能省略的一步：每一章正文均可直接点击编辑修改；数字类章节须由人工替换为真实测算结果后，方可点击"确认签发"。</div>
-
-    ${active.map(c=>`
-      <div class="chapter-block">
-        <h3><span class="cn">${c.cn}</span>${c.name}</h3>
-        <div class="body" contenteditable="true">${c.content || "（该章节未生成）"}</div>
-        ${c.numeric? '<div class="data-flag">⚠ 请核对/替换为真实数据后再签发</div>' : ""}
-      </div>
-    `).join("")}
-
-    ${signed ? `
-      <div class="seal">
-        <span>单位复核确认<br>${new Date().toLocaleDateString('zh-CN')}<br>责任人签发</span>
-      </div>
-      <div class="final-banner">✓ 已完成人工复核签发，可导出正式文本</div>
-    ` : ""}
-
-    <div class="actions">
-      <button class="btn ghost" id="backStep2">← 返回生成</button>
-      <button class="btn ghost" id="exportWordBtn">导出 Word</button>
-      ${!signed ? `<button class="btn" id="signBtn">人工复核 · 确认签发</button>` :
-        `<button class="btn" id="printBtn">导出 / 打印</button>`}
-    </div>
-  `;
-}
-
-function escapeHtml(str){
-  return str
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;");
-}
-
-function textToParagraphsHtml(text){
-  // 按空行切分为独立段落，段内的单个换行转成 <br>
-  return text
-    .split(/\n{2,}/)
-    .filter(p=>p.trim().length>0)
-    .map(p=>`<p style="font-family:'仿宋','FangSong',serif; font-size:12pt; line-height:1.9; text-indent:2em; margin:0 0 10pt;">${escapeHtml(p).replace(/\n/g,"<br>")}</p>`)
-    .join("");
+  const active = chapters.filter(c=>c.checked);
+  let inner = active.map(c=>'<div class="chapter-block"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
+    + c.sections.map((s,si)=>'<div class="section-block" data-cn="'+c.cn+'" data-si="'+si+'"><h4>'+s.t+'</h4>'
+        +'<div class="body" contenteditable="true">'+(s.content? renderContent(s.content) : "（该子章节未生成）")+'</div>'
+        +(s.numeric?'<div class="data-flag">⚠ 请核对/替换为真实数据后再签发</div>':'')+'</div>').join("")
+    +'</div>').join("");
+  return '<div class="doc-eyebrow">STEP 05 · 人工复核与签发</div>'
+    +'<h1 class="doc-title">'+(project.name||"（未命名项目）")+'可行性研究报告</h1>'
+    +(!signed?'<div class="watermark">AI初稿 · 未经复核</div>':'')
+    +'<div class="step-desc">每一段正文可直接点击编辑。数据类子章节的表格须由人工替换为真实测算结果后，方可确认签发。</div>'
+    + inner
+    +(signed?'<div class="seal"><span>单位复核确认<br>'+new Date().toLocaleDateString('zh-CN')+'<br>责任人签发</span></div><div class="final-banner">✓ 已完成人工复核签发，可导出正式文本</div>':'')
+    +'<div class="actions"><button class="btn ghost" id="backStep3">← 返回生成</button>'
+    +'<button class="btn ghost" id="exportWordBtn">导出 Word</button>'
+    +(!signed?'<button class="btn" id="signBtn">人工复核 · 确认签发</button>':'<button class="btn" id="printBtn">打印</button>')+'</div>';
 }
 
 function exportWord(){
-  const active = CHAPTERS.filter(c=>c.checked);
-  const chapterEls = document.querySelectorAll("#sheet .chapter-block .body");
-
+  const active = chapters.filter(c=>c.checked);
+  const secEls = document.querySelectorAll("#sheet .section-block");
+  const elMap = {};
+  secEls.forEach(el=>{ const b = el.querySelector(".body"); if(el.dataset.cn!==undefined) elMap[el.dataset.cn+'_'+el.dataset.si] = b; });
   let bodyHtml = "";
-  active.forEach((c,i)=>{
-    // 用 innerText 拿到网页上实际显示的换行效果（用户手动编辑过也能保留），而不是原始innerHTML
-    const liveText = chapterEls[i] ? chapterEls[i].innerText : (c.content||"");
-    bodyHtml += `
-      <h2 style="font-family:'黑体','SimHei',sans-serif; font-size:16pt; margin-top:28pt;">${c.cn}、${c.name}</h2>
-      ${textToParagraphsHtml(liveText)}
-    `;
+  active.forEach(c=>{
+    bodyHtml += '<h1 style="font-family:\'黑体\',\'SimHei\',sans-serif; font-size:18pt; margin-top:26pt;">'+c.cn+'、'+c.name+'</h1>';
+    c.sections.forEach((s,si)=>{
+      const el = elMap[c.cn+'_'+si];
+      const innerH = el ? el.innerHTML : renderContent(s.content||"");
+      bodyHtml += '<h2 style="font-family:\'黑体\',\'SimHei\',sans-serif; font-size:14pt; margin-top:16pt;">'+s.t+'</h2>';
+      bodyHtml += '<div style="font-family:\'仿宋\',\'FangSong\',serif; font-size:12pt; line-height:1.9;">'+wordifyBody(innerH)+'</div>';
+    });
   });
-
   const metaLine = [
-    project.owner ? `建设单位：${project.owner}` : "",
-    project.industry ? `所属行业：${project.industry}` : "",
-    project.location ? `建设地点：${project.location}` : "",
-    project.scale ? `投资规模：${project.scale}万元` : "",
+    project.owner?'建设/委托单位：'+project.owner:"",
+    project.industry?'报告领域：'+project.industry:"",
+    project.location?'建设地点：'+project.location:"",
+    project.scale?'投资规模：'+project.scale+'万元':"",
   ].filter(Boolean).join("　　");
-
-  const docHtml = `
-  <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-  <head>
-    <meta charset="utf-8">
-    <title>${project.name || "可行性研究报告"}</title>
-    <!--[if gte mso 9]>
-    <xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml>
-    <![endif]-->
-  </head>
-  <body>
-    <h1 style="text-align:center; font-family:'黑体','SimHei',sans-serif; font-size:22pt;">${project.name || "可行性研究报告"}</h1>
-    <p style="text-align:center; font-size:12pt; color:#555;">${project.name ? "可行性研究报告" : ""}</p>
-    <p style="text-align:center; font-size:11pt; color:#555;">${metaLine}</p>
-    <hr/>
-    ${bodyHtml}
-    <p style="margin-top:40pt; font-size:10.5pt; color:#888;">${signed ? "本报告已经人工复核确认签发，签发日期：" + new Date().toLocaleDateString('zh-CN') : "本报告为AI生成初稿，尚未经过人工复核签发，正式使用前须完成审核。"}</p>
-  </body>
-  </html>`;
-
-  const blob = new Blob(["\ufeff", docHtml], { type: "application/msword" });
+  const signNote = signed ? '本报告已经人工复核确认签发，签发日期：'+new Date().toLocaleDateString('zh-CN') : '本报告为AI生成初稿，尚未经过人工复核签发，其中标注"待填"的数据须补充真实测算结果，正式使用前须完成审核。';
+  const docHtml = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>'+(project.name||"可行性研究报告")+'</title>'
+    +'<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->'
+    +'<style>table{border-collapse:collapse;} td,th{border:1px solid #000; padding:4px 8px; font-size:10.5pt; font-family:"仿宋","FangSong",serif;} th{background:#eee;}</style>'
+    +'</head><body>'
+    +'<h1 style="text-align:center; font-family:\'黑体\',\'SimHei\',sans-serif; font-size:24pt;">'+(project.name||"可行性研究报告")+'</h1>'
+    +'<p style="text-align:center; font-size:14pt;">可 行 性 研 究 报 告</p>'
+    +'<p style="text-align:center; font-size:11pt; color:#555;">'+metaLine+'</p><hr/>'
+    + bodyHtml
+    +'<p style="margin-top:40pt; font-size:10.5pt; color:#888;">'+signNote+'</p></body></html>';
+  const blob = new Blob(["\ufeff", docHtml], {type:"application/msword"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
-  a.download = `${project.name || "可行性研究报告"}.doc`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  a.href = url; a.download = (project.name||"可行性研究报告")+".doc";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+function wordifyBody(html){ return html.replace(/<p style="margin:0 0 10px;">/g,'<p style="text-indent:2em; margin:0 0 10pt;">'); }
 
-/* ---------------- 事件绑定 ---------------- */
 function bindEvents(){
-  const s = id => document.getElementById(id);
-  if(s("toStep1")) s("toStep1").onclick = ()=>{
-    project.name=s_val("f_name"); project.owner=s_val("f_owner");
-    project.industry=s_val("f_industry"); project.type=s_val("f_type");
-    project.location=s_val("f_location"); project.scale=s_val("f_scale");
-    project.desc=s_val("f_desc");
-    currentStep=1; renderTOC(); renderSheet();
-  };
+  const s = id=>document.getElementById(id);
+  document.querySelectorAll(".domain-card").forEach(card=>{
+    card.onclick = ()=>{ loadDomain(card.dataset.key); renderSheet(); };
+  });
+  if(s("toStep1")) s("toStep1").onclick = ()=>{ if(!domainKey) return; currentStep=1; renderTOC(); renderSheet(); };
   if(s("backStep0")) s("backStep0").onclick = ()=>{ currentStep=0; renderTOC(); renderSheet(); };
-  if(s("toStep2")) s("toStep2").onclick = ()=>{ currentStep=2; renderTOC(); renderSheet(); };
+  if(s("toStep2")) s("toStep2").onclick = ()=>{ saveProject(); currentStep=2; renderTOC(); renderSheet(); };
   if(s("backStep1")) s("backStep1").onclick = ()=>{ currentStep=1; renderTOC(); renderSheet(); };
+  if(s("toStep3")) s("toStep3").onclick = ()=>{ currentStep=3; renderTOC(); renderSheet(); };
   if(s("backStep2")) s("backStep2").onclick = ()=>{ currentStep=2; renderTOC(); renderSheet(); };
   if(s("startGen")) s("startGen").onclick = runGeneration;
-  if(s("toStep3")) s("toStep3").onclick = ()=>{ currentStep=3; renderTOC(); renderSheet(); };
+  if(s("toStep4")) s("toStep4").onclick = ()=>{ currentStep=4; renderTOC(); renderSheet(); };
+  if(s("backStep3")) s("backStep3").onclick = ()=>{ currentStep=3; renderTOC(); renderSheet(); };
   if(s("signBtn")) s("signBtn").onclick = ()=>{ signed=true; renderSheet(); };
   if(s("printBtn")) s("printBtn").onclick = ()=> window.print();
   if(s("exportWordBtn")) s("exportWordBtn").onclick = exportWord;
-  document.querySelectorAll(".chk").forEach(chk=>{
-    chk.onchange = e=>{ CHAPTERS[+e.target.dataset.idx].checked = e.target.checked; };
-  });
+  document.querySelectorAll(".chk").forEach(chk=>{ chk.onchange = e=>{ chapters[+e.target.dataset.idx].checked = e.target.checked; }; });
 }
-function s_val(id){ const e=document.getElementById(id); return e? e.value : ""; }
+function saveProject(){
+  const g=id=>{const e=document.getElementById(id);return e?e.value:"";};
+  project.name=g("f_name"); project.owner=g("f_owner"); project.type=g("f_type");
+  project.location=g("f_location"); project.scale=g("f_scale"); project.desc=g("f_desc");
+}
 
 function checkAccess(){
-  const saved = sessionStorage.getItem("accessCode");
-  if(saved){ boot(); return; }
-  document.body.insertAdjacentHTML("beforeend", `
-    <div id="gate" style="position:fixed; inset:0; background:rgba(20,20,18,.55); display:flex; align-items:center; justify-content:center; z-index:999;">
-      <div style="background:var(--paper-card); border:1px solid var(--line); padding:32px 36px; width:320px;">
-        <div style="font-family:var(--serif); font-size:16px; margin-bottom:10px; color:var(--ink);">请输入访问口令</div>
-        <div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:16px; line-height:1.6;">本工具消耗内部AI额度，仅限获得口令的同事使用。</div>
-        <input id="gateInput" type="text" style="width:100%; padding:9px 11px; border:1px solid var(--line); margin-bottom:14px;" placeholder="访问口令">
-        <button class="btn" style="width:100%;" id="gateBtn">进入</button>
-        <div id="gateErr" style="color:var(--seal-red); font-size:12px; margin-top:10px; display:none;">口令错误，请联系管理员获取。</div>
-      </div>
-    </div>
-  `);
+  if(sessionStorage.getItem("accessCode")){ boot(); return; }
+  document.body.insertAdjacentHTML("beforeend",
+    '<div id="gate" style="position:fixed; inset:0; background:rgba(20,20,18,.55); display:flex; align-items:center; justify-content:center; z-index:999;">'
+    +'<div style="background:var(--paper-card); border:1px solid var(--line); padding:32px 36px; width:320px;">'
+    +'<div style="font-family:var(--serif); font-size:16px; margin-bottom:10px; color:var(--ink);">请输入访问口令</div>'
+    +'<div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:16px; line-height:1.6;">本工具消耗内部AI额度，仅限获得口令的同事使用。</div>'
+    +'<input id="gateInput" type="text" style="width:100%; padding:9px 11px; border:1px solid var(--line); margin-bottom:14px;" placeholder="访问口令">'
+    +'<button class="btn" style="width:100%;" id="gateBtn">进入</button>'
+    +'<div id="gateErr" style="color:var(--seal-red); font-size:12px; margin-top:10px; display:none;"></div></div></div>');
   const gateBtn = document.getElementById("gateBtn");
   const doVerify = async ()=>{
     const val = document.getElementById("gateInput").value.trim();
     const errEl = document.getElementById("gateErr");
-    gateBtn.disabled = true; gateBtn.textContent = "校验中…";
-    errEl.style.display = "none";
+    gateBtn.disabled=true; gateBtn.textContent="校验中…"; errEl.style.display="none";
     try{
-      const resp = await fetch("/api/verify", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({code: val})
-      });
+      const resp = await fetch("/api/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:val})});
       const data = await resp.json();
-      if(data.ok){
-        sessionStorage.setItem("accessCode", val);
-        document.getElementById("gate").remove();
-        boot();
-      }else{
-        errEl.textContent = data.error || "口令错误，请联系管理员获取。";
-        errEl.style.display = "block";
-        gateBtn.disabled = false; gateBtn.textContent = "进入";
-      }
-    }catch(e){
-      errEl.textContent = "校验失败，请检查网络后重试。";
-      errEl.style.display = "block";
-      gateBtn.disabled = false; gateBtn.textContent = "进入";
-    }
+      if(data.ok){ sessionStorage.setItem("accessCode",val); document.getElementById("gate").remove(); boot(); }
+      else{ errEl.textContent=data.error||"口令错误"; errEl.style.display="block"; gateBtn.disabled=false; gateBtn.textContent="进入"; }
+    }catch(e){ errEl.textContent="校验失败，请检查网络后重试。"; errEl.style.display="block"; gateBtn.disabled=false; gateBtn.textContent="进入"; }
   };
   gateBtn.onclick = doVerify;
-  document.getElementById("gateInput").addEventListener("keydown", e=>{
-    if(e.key === "Enter") doVerify();
-  });
+  document.getElementById("gateInput").addEventListener("keydown",e=>{ if(e.key==="Enter") doVerify(); });
 }
-function boot(){
-  renderTOC();
-  renderSheet();
-}
+function boot(){ renderTOC(); renderSheet(); }
 checkAccess();
 </script>
