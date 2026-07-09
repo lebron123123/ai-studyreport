@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <style>
   :root{
     /* 蓝图·公文 配色体系 */
@@ -920,13 +921,13 @@ function calcAppendixHtml(){
   const fmt=x=>Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
   const th='style="border:1px solid #000; padding:3px 6px; background:#eee; font-size:9.5pt;"';
   const td='style="border:1px solid #000; padding:3px 6px; font-size:9.5pt;"';
-  let t1='<table style="border-collapse:collapse; width:100%;"><tr><th '+th+'>年份</th><th '+th+'>租金收入</th><th '+th+'>总成本</th><th '+th+'>税金</th><th '+th+'>净利润</th><th '+th+'>净现金流</th><th '+th+'>累计净现金流</th></tr>';
+  let t1='<table align="center" style="border-collapse:collapse; width:100%; margin:10pt auto;"><tr><th '+th+'>年份</th><th '+th+'>租金收入</th><th '+th+'>总成本</th><th '+th+'>税金</th><th '+th+'>净利润</th><th '+th+'>净现金流</th><th '+th+'>累计净现金流</th></tr>';
   r.allYears.forEach(y=>{
     t1+='<tr><td '+td+'>'+y+'</td><td '+td+'>'+fmt(r.income[y].rent)+'</td><td '+td+'>'+fmt(r.cost[y].total)+'</td><td '+td+'>'+fmt(r.tax[y].total)+'</td><td '+td+'>'+fmt(r.profit[y].netProfit)+'</td><td '+td+'>'+fmt(r.cf[y].net)+'</td><td '+td+'>'+fmt(r.cf[y].cumNet)+'</td></tr>';
   });
   t1+='</table>';
-  return '<h1 style="font-family:\'黑体\',\'SimHei\',sans-serif; font-size:18pt; margin-top:26pt;">附表：财务测算明细（单位：万元）</h1>'
-    +'<p style="font-size:10.5pt;">全周期总收入 '+fmt(s.totalIncome)+'｜总成本 '+fmt(s.totalCost)+'｜净利润合计 '+fmt(s.totalNetProfit)+'｜累计净现值 '+fmt(s.totalNpv)+'｜IRR '+(s.irr===null?"无法计算":s.irr+"%")+'</p>'
+  return '<h1 style="font-family:宋体,SimSun,serif; font-size:22pt; font-weight:bold; text-align:center; line-height:130%; margin:0 0 18pt; page-break-before:always;">附表　财务测算明细（单位：万元）</h1>'
+    +'<p style="font-family:宋体,SimSun,serif; font-size:12pt; line-height:130%; text-align:center;">全周期总收入 '+fmt(s.totalIncome)+'｜总成本 '+fmt(s.totalCost)+'｜净利润合计 '+fmt(s.totalNetProfit)+'｜累计净现值 '+fmt(s.totalNpv)+'｜IRR '+(s.irr===null?"无法计算":s.irr+"%")+'</p>'
     + t1;
 }
 
@@ -935,16 +936,28 @@ function exportWord(){
   const secEls = document.querySelectorAll("#sheet .section-block");
   const elMap = {};
   secEls.forEach(el=>{ const b = el.querySelector(".body"); if(el.dataset.cn!==undefined) elMap[el.dataset.cn+'_'+el.dataset.si] = b; });
+
+  // ---------- 目录条目（静态展示；配合Word域可更新出页码） ----------
+  let tocRows = "";
+  active.forEach((c,ci)=>{
+    tocRows += '<p style="font-family:宋体,SimSun,serif; font-size:12pt; font-weight:bold; line-height:150%; margin:4pt 0 0;">第'+c.cn+'章　'+c.name+'</p>';
+    c.sections.forEach((s,si)=>{
+      tocRows += '<p style="font-family:宋体,SimSun,serif; font-size:12pt; line-height:150%; margin:0 0 0 21pt;">'+(ci+1)+'.'+(si+1)+'　'+s.t+'</p>';
+    });
+  });
+
+  // ---------- 正文：大章标题居中(宋体二号)、小节标题靠左、正文宋体小四1.3倍 ----------
   let bodyHtml = "";
-  active.forEach(c=>{
-    bodyHtml += '<h1 style="font-family:\'黑体\',\'SimHei\',sans-serif; font-size:18pt; margin-top:26pt;">'+c.cn+'、'+c.name+'</h1>';
+  active.forEach((c,ci)=>{
+    bodyHtml += '<h1 style="font-family:宋体,SimSun,serif; font-size:22pt; font-weight:bold; text-align:center; line-height:130%; margin:0 0 18pt; page-break-before:always;">第'+c.cn+'章　'+c.name+'</h1>';
     c.sections.forEach((s,si)=>{
       const el = elMap[c.cn+'_'+si];
       const innerH = el ? el.innerHTML : renderContent(s.content||"");
-      bodyHtml += '<h2 style="font-family:\'黑体\',\'SimHei\',sans-serif; font-size:14pt; margin-top:16pt;">'+s.t+'</h2>';
-      bodyHtml += '<div style="font-family:\'仿宋\',\'FangSong\',serif; font-size:12pt; line-height:1.9;">'+wordifyBody(innerH)+'</div>';
+      bodyHtml += '<h2 style="font-family:宋体,SimSun,serif; font-size:14pt; font-weight:bold; text-align:left; line-height:130%; margin:14pt 0 8pt;">'+(ci+1)+'.'+(si+1)+'　'+s.t+'</h2>';
+      bodyHtml += '<div>'+wordifyBody(innerH)+'</div>';
     });
   });
+
   const metaLine = [
     project.owner?'建设/委托单位：'+project.owner:"",
     project.industry?'报告领域：'+project.industry:"",
@@ -952,16 +965,35 @@ function exportWord(){
     project.scale?'投资规模：'+project.scale+'万元':"",
   ].filter(Boolean).join("　　");
   const signNote = signed ? '本报告已经人工复核确认签发，签发日期：'+new Date().toLocaleDateString('zh-CN') : '本报告为AI生成初稿，尚未经过人工复核签发，其中标注"待填"的数据须补充真实测算结果，正式使用前须完成审核。';
+
   const docHtml = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>'+(project.name||"可行性研究报告")+'</title>'
-    +'<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->'
-    +'<style>table{border-collapse:collapse;} td,th{border:1px solid #000; padding:4px 8px; font-size:10.5pt; font-family:"仿宋","FangSong",serif;} th{background:#eee;}</style>'
+    +'<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:UpdateFields>true</w:UpdateFields></w:WordDocument></xml><![endif]-->'
+    +'<style>'
+    +'body{font-family:宋体,SimSun,serif;}'
+    +'p{font-family:宋体,SimSun,serif; font-size:12pt; line-height:130%;}'
+    +'table{border-collapse:collapse; margin:10pt auto;}'
+    +'td,th{border:1px solid #000; padding:4px 9px; font-size:10.5pt; font-family:宋体,SimSun,serif; line-height:130%;}'
+    +'th{background:#EEE; font-weight:bold;}'
+    +'</style>'
     +'</head><body>'
-    +'<h1 style="text-align:center; font-family:\'黑体\',\'SimHei\',sans-serif; font-size:24pt;">'+(project.name||"可行性研究报告")+'</h1>'
-    +'<p style="text-align:center; font-size:14pt;">可 行 性 研 究 报 告</p>'
-    +'<p style="text-align:center; font-size:11pt; color:#555;">'+metaLine+'</p><hr/>'
+    /* ---------- 封面 ---------- */
+    +'<div style="text-align:center;">'
+    +'<p style="font-size:22pt; font-weight:bold; letter-spacing:2pt; margin:160pt 0 28pt; line-height:150%;">'+(project.name||"（未命名项目）")+'</p>'
+    +'<p style="font-size:22pt; font-weight:bold; letter-spacing:10pt; margin:0 0 90pt;">可行性研究报告</p>'
+    +'<p style="font-size:12pt; color:#333; margin:0 0 8pt;">'+metaLine+'</p>'
+    +'<p style="font-size:12pt; color:#333;">'+new Date().toLocaleDateString('zh-CN')+'</p>'
+    +'</div>'
+    /* ---------- 目录页 ---------- */
+    +'<h1 style="font-family:宋体,SimSun,serif; font-size:22pt; font-weight:bold; text-align:center; margin:0 0 18pt; page-break-before:always; mso-outline-level:9;">目　录</h1>'
+    +'<!--[if supportFields]><p style="margin:0;"><span style="mso-element:field-begin"></span> TOC \\o "1-2" \\h \\z \\u <span style="mso-element:field-separator"></span></p><![endif]-->'
+    + tocRows
+    +'<!--[if supportFields]><p style="margin:0;"><span style="mso-element:field-end"></span></p><![endif]-->'
+    +'<p style="font-size:9pt; color:#999; margin-top:10pt;">提示：在Word中打开时若提示"更新域"请选择"是"，或全选后按F9，目录将自动生成带页码版本。</p>'
+    /* ---------- 正文 ---------- */
     + bodyHtml
     + calcAppendixHtml()
     +'<p style="margin-top:40pt; font-size:10.5pt; color:#888;">'+signNote+'</p></body></html>';
+
   const blob = new Blob(["\ufeff", docHtml], {type:"application/msword"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -969,7 +1001,11 @@ function exportWord(){
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
-function wordifyBody(html){ return html.replace(/<p style="margin:0 0 10px;">/g,'<p style="text-indent:2em; margin:0 0 10pt;">'); }
+function wordifyBody(html){
+  return html
+    .replace(/<p style="margin:0 0 10px;">/g,'<p style="font-family:宋体,SimSun,serif; font-size:12pt; line-height:130%; text-indent:2em; margin:0 0 6pt;">')
+    .replace(/<table class="rpt">/g,'<table class="rpt" align="center" style="margin:10pt auto;">');
+}
 
 function bindEvents(){
   const s = id=>document.getElementById(id);
