@@ -473,6 +473,46 @@
     font-size:11px; color:var(--ink-soft); letter-spacing:.3px; line-height:1.8;
   }
 
+
+  /* ===== 用户栏 ===== */
+  .user-bar{
+    max-width:860px; margin:0 auto 14px; padding:8px 14px;
+    display:flex; align-items:center; gap:14px;
+    background:var(--paper-card); border:1px solid var(--line-strong); border-radius:2px;
+    font-size:12.5px;
+  }
+  .ub-user{font-weight:700; color:var(--bp-navy);}
+  .ub-user::before{content:"● "; color:var(--ok-green); font-size:9px;}
+  .ub-save{color:var(--ink-soft); font-size:11px;}
+  .ub-acts{margin-left:auto; display:flex; gap:8px;}
+  .ub-btn{
+    font-family:var(--sans); font-size:12px; padding:5px 13px;
+    border:1px solid var(--line-strong); border-radius:2px; background:#FFF;
+    color:var(--bp-navy); cursor:pointer; transition:all .15s ease;
+  }
+  .ub-btn:hover{background:var(--bp-navy); color:#fff; border-color:var(--bp-navy);}
+
+  /* ===== 登录/注册 ===== */
+  .auth-tabs{display:flex; margin-bottom:16px; border:1px solid var(--line-strong); border-radius:2px; overflow:hidden;}
+  .at-btn{flex:1; padding:9px 0; border:none; background:#F1EEE3; color:var(--ink-soft); font-size:13px; letter-spacing:4px; cursor:pointer;}
+  .at-btn.active{background:var(--bp-navy); color:#fff; font-weight:600;}
+
+  /* ===== 项目库面板 ===== */
+  .proj-overlay{position:fixed; inset:0; background:rgba(14,28,44,.55); backdrop-filter:blur(3px); z-index:990; display:flex; align-items:center; justify-content:center;}
+  .proj-panel{width:520px; max-width:92vw; max-height:76vh; display:flex; flex-direction:column;
+    background:var(--paper-card); border:1px solid var(--line-strong); border-top:5px solid var(--bp-navy);
+    border-radius:2px; box-shadow:0 24px 60px -18px rgba(0,0,0,.5);}
+  .pp-head{font-family:var(--serif); font-size:16px; padding:16px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center;}
+  .pp-close{border:none; background:none; font-size:20px; cursor:pointer; color:var(--ink-soft); line-height:1;}
+  .pp-list{overflow-y:auto; padding:8px 0;}
+  .pp-row{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 20px; border-bottom:1px solid var(--line);}
+  .pp-row:hover{background:#F5F2E9;}
+  .pp-name{font-size:14px; font-weight:600; color:var(--ink);}
+  .pp-time{font-family:var(--mono); font-size:10.5px; color:var(--ink-soft); margin-top:3px;}
+  .pp-ops{display:flex; gap:8px; flex-shrink:0;}
+  .pp-del:hover{background:var(--seal-red); border-color:var(--seal-red);}
+  .pp-empty{padding:36px 20px; text-align:center; color:var(--ink-soft); font-size:13px;}
+
 </style>
 
 <div class="app">
@@ -502,16 +542,17 @@ const project = { name:"", owner:"", industry:"", location:"", type:"", scale:""
 
 /* ---------- 草稿自动存档（浏览器本地，防刷新丢失） ---------- */
 const DRAFT_KEY = "fs_draft_v1";
+function buildDraftData(){
+  return {
+    ts: Date.now(), domainKey, currentStep, signed, docNo,
+    project: project, calcParams: calcParams,
+    chapters: chapters.map(c=>({cn:c.cn, name:c.name, checked:c.checked,
+      sections:c.sections.map(s=>({t:s.t, numeric:s.numeric, content:s.content, editedHtml:s.editedHtml||null}))}))
+  };
+}
 function saveDraft(){
-  try{
-    const data = {
-      ts: Date.now(), domainKey, currentStep, signed, docNo,
-      project: project, calcParams: calcParams,
-      chapters: chapters.map(c=>({cn:c.cn, name:c.name, checked:c.checked,
-        sections:c.sections.map(s=>({t:s.t, numeric:s.numeric, content:s.content, editedHtml:s.editedHtml||null}))}))
-    };
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
-  }catch(e){}
+  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(buildDraftData())); }catch(e){}
+  scheduleCloudSave();
 }
 function loadDraft(){
   try{ const raw = localStorage.getItem(DRAFT_KEY); return raw? JSON.parse(raw): null; }catch(e){ return null; }
@@ -1032,9 +1073,10 @@ async function generateSection(c, s){
   const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。';
   const resp = await fetch("/api/generate", {
     method:"POST",
-    headers:{"Content-Type":"application/json","X-Access-Code":sessionStorage.getItem("accessCode")||""},
+    headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
     body: JSON.stringify({ system: sys, messages:[{role:"user", content:user}] })
   });
+  if(resp.status===401){ clearAuth(); showLoginModal("登录已过期，请重新登录后继续生成"); throw new Error("登录已过期"); }
   const data = await resp.json();
   if(data.error) throw new Error(data.error);
   const text = (data.content||[]).map(b=>b.text||"").join("").trim();
@@ -1269,39 +1311,172 @@ function saveProject(){
   project.location=g("f_location"); project.scale=g("f_scale"); project.desc=g("f_desc");
 }
 
-function checkAccess(){
-  if(sessionStorage.getItem("accessCode")){ boot(); return; }
+/* ================= 账号体系 ================= */
+function getToken(){ try{ return localStorage.getItem("fs_token"); }catch(e){ return null; } }
+function getUser(){ try{ return localStorage.getItem("fs_user"); }catch(e){ return null; } }
+function setAuth(t,u){ try{ localStorage.setItem("fs_token",t); localStorage.setItem("fs_user",u); }catch(e){} }
+function clearAuth(){ try{ localStorage.removeItem("fs_token"); localStorage.removeItem("fs_user"); }catch(e){} }
+function authHeaders(){ const t=getToken(); return t? {"Authorization":"Bearer "+t} : {}; }
+
+function showLoginModal(msg){
+  if(document.getElementById("gate")) return;
   document.body.insertAdjacentHTML("beforeend",
     '<div id="gate" style="position:fixed; inset:0; background:rgba(14,28,44,.62); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; z-index:999;">'
-    +'<div style="background:var(--paper-card); border:1px solid var(--line-strong); border-top:5px solid var(--bp-navy); border-radius:2px; box-shadow:0 24px 60px -18px rgba(0,0,0,.5); padding:34px 38px; width:330px;">'
-    +'<div style="font-family:var(--serif); font-size:16px; margin-bottom:10px; color:var(--ink);">请输入访问口令</div>'
-    +'<div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:16px; line-height:1.6;">本工具消耗内部AI额度，仅限获得口令的同事使用。</div>'
-    +'<input id="gateInput" type="text" style="width:100%; padding:9px 11px; border:1px solid var(--line); margin-bottom:14px;" placeholder="访问口令">'
-    +'<button class="btn" style="width:100%;" id="gateBtn">进入</button>'
-    +'<div id="gateErr" style="color:var(--seal-red); font-size:12px; margin-top:10px; display:none;"></div></div></div>');
-  const gateBtn = document.getElementById("gateBtn");
-  const doVerify = async ()=>{
-    const val = document.getElementById("gateInput").value.trim();
-    const errEl = document.getElementById("gateErr");
-    gateBtn.disabled=true; gateBtn.textContent="校验中…"; errEl.style.display="none";
+    +'<div style="background:var(--paper-card); border:1px solid var(--line-strong); border-top:5px solid var(--bp-navy); border-radius:2px; box-shadow:0 24px 60px -18px rgba(0,0,0,.5); padding:30px 34px; width:340px;">'
+    +'<div class="auth-tabs"><button class="at-btn active" data-m="login">登 录</button><button class="at-btn" data-m="register">注 册</button></div>'
+    +(msg?'<div style="font-size:12px; color:var(--seal-red); margin-bottom:10px;">'+msg+'</div>':'')
+    +'<label style="margin-top:4px;">用户名</label><input id="auName" type="text" placeholder="2-20位中英文/数字">'
+    +'<label>密码</label><input id="auPass" type="password" placeholder="至少6位">'
+    +'<div id="auInviteWrap" style="display:none;"><label>注册邀请码</label><input id="auInvite" type="text" placeholder="向管理员索取"></div>'
+    +'<button class="btn" style="width:100%; margin-top:18px;" id="auSubmit">登 录</button>'
+    +'<div id="auErr" style="color:var(--seal-red); font-size:12px; margin-top:10px; display:none;"></div>'
+    +'</div></div>');
+  let mode = "login";
+  document.querySelectorAll(".at-btn").forEach(b=>{
+    b.onclick = ()=>{
+      mode = b.dataset.m;
+      document.querySelectorAll(".at-btn").forEach(x=>x.classList.toggle("active", x===b));
+      document.getElementById("auInviteWrap").style.display = mode==="register"? "block":"none";
+      document.getElementById("auSubmit").textContent = mode==="register"? "注 册":"登 录";
+    };
+  });
+  const submit = async ()=>{
+    const btn = document.getElementById("auSubmit");
+    const errEl = document.getElementById("auErr");
+    btn.disabled = true; btn.textContent = "请稍候…"; errEl.style.display="none";
     try{
-      const resp = await fetch("/api/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:val})});
+      const resp = await fetch("/api/auth", {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({action:mode,
+          username: document.getElementById("auName").value.trim(),
+          password: document.getElementById("auPass").value,
+          invite: mode==="register"? document.getElementById("auInvite").value.trim() : undefined })});
       const data = await resp.json();
-      if(data.ok){ sessionStorage.setItem("accessCode",val); document.getElementById("gate").remove(); boot(); }
-      else{ errEl.textContent=data.error||"口令错误"; errEl.style.display="block"; gateBtn.disabled=false; gateBtn.textContent="进入"; }
-    }catch(e){ errEl.textContent="校验失败，请检查网络后重试。"; errEl.style.display="block"; gateBtn.disabled=false; gateBtn.textContent="进入"; }
+      if(data.ok){ setAuth(data.token, data.username); document.getElementById("gate").remove(); startApp(); }
+      else{ errEl.textContent = data.error||"操作失败"; errEl.style.display="block"; btn.disabled=false; btn.textContent = mode==="register"?"注 册":"登 录"; }
+    }catch(e){ errEl.textContent="网络错误，请重试"; errEl.style.display="block"; btn.disabled=false; btn.textContent = mode==="register"?"注 册":"登 录"; }
   };
-  gateBtn.onclick = doVerify;
-  document.getElementById("gateInput").addEventListener("keydown",e=>{ if(e.key==="Enter") doVerify(); });
+  document.getElementById("auSubmit").onclick = submit;
+  document.getElementById("auPass").addEventListener("keydown", e=>{ if(e.key==="Enter") submit(); });
 }
-function boot(){
-  renderTOC(); renderSheet();
-  const d = loadDraft();
-  if(d && d.ts && (d.project&&d.project.name || (d.chapters||[]).some(c=>c.sections.some(s=>s.content)))){
-    document.querySelector(".sheet-wrap").insertAdjacentHTML("afterbegin", draftBarHtml(d));
-    document.getElementById("draftRestore").onclick = ()=>{ document.getElementById("draftBar").remove(); restoreDraft(d); };
-    document.getElementById("draftDiscard").onclick = ()=>{ clearDraft(); document.getElementById("draftBar").remove(); };
+
+/* ================= 云端项目库 ================= */
+let currentProjectId = null;
+let cloudTimer = null;
+function genProjectId(){
+  try{ return crypto.randomUUID(); }catch(e){
+    return "p-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10);
   }
 }
-checkAccess();
+function scheduleCloudSave(){
+  if(!getToken()) return;
+  clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(cloudSaveNow, 1200);
+}
+async function cloudSaveNow(){
+  if(!getToken()) return;
+  if(!currentProjectId) currentProjectId = genProjectId();
+  setSaveState("saving");
+  try{
+    const resp = await fetch("/api/projects", {method:"POST",
+      headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
+      body: JSON.stringify({id:currentProjectId, name:project.name||"未命名项目", data:buildDraftData()})});
+    if(resp.status===401){ setSaveState("err"); clearAuth(); showLoginModal("登录已过期，请重新登录（本地草稿仍在）"); return; }
+    const d = await resp.json();
+    setSaveState(d.ok? "ok":"err");
+  }catch(e){ setSaveState("err"); }
+}
+function setSaveState(st){
+  const el = document.getElementById("saveState");
+  if(!el) return;
+  el.textContent = st==="saving"? "云端保存中…" : st==="ok"? "已保存到云端" : "云端保存失败（本地已存）";
+  el.style.color = st==="err"? "var(--seal-red)" : "";
+}
+
+function mountUserBar(){
+  if(document.getElementById("userBar")) return;
+  document.querySelector(".sheet-wrap").insertAdjacentHTML("afterbegin",
+    '<div id="userBar" class="user-bar">'
+    +'<span class="ub-user">'+ (getUser()||"") +'</span>'
+    +'<span id="saveState" class="ub-save"></span>'
+    +'<span class="ub-acts">'
+    +'<button class="ub-btn" id="ubProjects">我的项目</button>'
+    +'<button class="ub-btn" id="ubNew">新建项目</button>'
+    +'<button class="ub-btn" id="ubLogout">退出</button>'
+    +'</span></div>');
+  document.getElementById("ubLogout").onclick = ()=>{ clearAuth(); location.reload(); };
+  document.getElementById("ubNew").onclick = ()=>{
+    if(!confirm("开始一个全新项目？当前项目已自动保存到云端。")) return;
+    newProject();
+  };
+  document.getElementById("ubProjects").onclick = openProjectsPanel;
+}
+function newProject(){
+  currentProjectId = null; domainKey = null; chapters = []; signed = false;
+  calcParams = null; calcResult = null; docNo = null;
+  Object.keys(project).forEach(k=>project[k]="");
+  currentStep = 0; clearDraft();
+  renderTOC(); renderSheet();
+}
+async function openProjectsPanel(){
+  const old = document.getElementById("projPanel"); if(old) old.remove();
+  document.body.insertAdjacentHTML("beforeend",
+    '<div id="projPanel" class="proj-overlay"><div class="proj-panel">'
+    +'<div class="pp-head">我的项目<button class="pp-close" id="ppClose">×</button></div>'
+    +'<div class="pp-list" id="ppList">加载中…</div></div></div>');
+  document.getElementById("ppClose").onclick = ()=>document.getElementById("projPanel").remove();
+  document.getElementById("projPanel").onclick = e=>{ if(e.target.id==="projPanel") e.target.remove(); };
+  try{
+    const resp = await fetch("/api/projects", {headers: authHeaders()});
+    if(resp.status===401){ document.getElementById("projPanel").remove(); clearAuth(); showLoginModal("登录已过期，请重新登录"); return; }
+    const d = await resp.json();
+    const list = d.list||[];
+    const el = document.getElementById("ppList");
+    if(!list.length){ el.innerHTML = '<div class="pp-empty">还没有云端项目。开始编辑后会自动保存到这里。</div>'; return; }
+    el.innerHTML = list.map(p=>{
+      const t = new Date(p.updated_at);
+      const when = t.toLocaleDateString("zh-CN")+" "+String(t.getHours()).padStart(2,"0")+":"+String(t.getMinutes()).padStart(2,"0");
+      return '<div class="pp-row"><div class="pp-info"><div class="pp-name">'+escapeHtml(p.name||"未命名项目")+'</div><div class="pp-time">'+when+'</div></div>'
+        +'<div class="pp-ops"><button class="ub-btn" data-open="'+p.id+'">打开</button><button class="ub-btn pp-del" data-del="'+p.id+'">删除</button></div></div>';
+    }).join("");
+    el.querySelectorAll("[data-open]").forEach(b=>{ b.onclick = ()=>openProject(b.dataset.open); });
+    el.querySelectorAll("[data-del]").forEach(b=>{
+      b.onclick = async ()=>{
+        if(!confirm("确定删除该项目？此操作不可恢复。")) return;
+        await fetch("/api/projects?id="+encodeURIComponent(b.dataset.del), {method:"DELETE", headers:authHeaders()});
+        openProjectsPanel();
+      };
+    });
+  }catch(e){ document.getElementById("ppList").textContent = "加载失败，请重试"; }
+}
+async function openProject(id){
+  try{
+    const resp = await fetch("/api/projects?id="+encodeURIComponent(id), {headers:authHeaders()});
+    const d = await resp.json();
+    if(!d.ok){ alert(d.error||"打开失败"); return; }
+    currentProjectId = id;
+    const panel = document.getElementById("projPanel"); if(panel) panel.remove();
+    const bar = document.getElementById("draftBar"); if(bar) bar.remove();
+    restoreDraft(d.project.data);
+  }catch(e){ alert("打开失败，请重试"); }
+}
+
+function startApp(){
+  mountUserBar();
+  renderTOC(); renderSheet();
+  const d = loadDraft();
+  if(d && d.ts && !currentProjectId && (d.project&&d.project.name || (d.chapters||[]).some(c=>c.sections.some(s=>s.content)))){
+    document.querySelector(".sheet-wrap").insertAdjacentHTML("beforeend", "");
+    const bar = document.getElementById("draftBar");
+    if(!bar){
+      document.getElementById("userBar").insertAdjacentHTML("afterend", draftBarHtml(d));
+      document.getElementById("draftRestore").onclick = ()=>{ document.getElementById("draftBar").remove(); restoreDraft(d); };
+      document.getElementById("draftDiscard").onclick = ()=>{ clearDraft(); document.getElementById("draftBar").remove(); };
+    }
+  }
+}
+function checkLogin(){
+  if(getToken()){ startApp(); }
+  else{ renderTOC(); renderSheet(); showLoginModal(); }
+}
+checkLogin();
 </script>
