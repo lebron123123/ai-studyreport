@@ -1168,7 +1168,7 @@ function buildExportPayload(){
   const elMap = {};
   secEls.forEach(el=>{ const b = el.querySelector(".body"); if(el.dataset.cn!==undefined) elMap[el.dataset.cn+'_'+el.dataset.si] = b; });
 
-  const chs = active.map(c=>({ cn:c.cn, name:c.name,
+  const chs = active.map(c=>({ cn:c.cn, name:c.name, num: chapters.indexOf(c)+1,
     sections: c.sections.map((s,si)=>{
       const el = elMap[c.cn+'_'+si];
       const htmlStr = el? el.innerHTML : (s.editedHtml || renderContent(s.content||""));
