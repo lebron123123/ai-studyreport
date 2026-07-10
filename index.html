@@ -535,6 +535,9 @@ let currentStep = 0;
 let domainKey = null;
 let chapters = [];
 let signed = false;
+let genUsage = {inTok:0, outTok:0};
+const PRICE_IN_PER_M = 2, PRICE_OUT_PER_M = 8;   // 元/百万tokens，按DeepSeek价目表估算，可调整
+const EST_IN_PER_SEC = 1200, EST_OUT_PER_SEC = 700; // 每子节预估token
 let calcResult = null;   // 财务测算结果（null表示跳过测算，走"待填"模式）
 let calcParams = null;
 const project = { name:"", owner:"", industry:"", location:"", type:"", scale:"", desc:"" };
@@ -957,7 +960,7 @@ function stepGenerate(){
     +'</div>').join("");
   return '<div class="doc-eyebrow">STEP 04 · 逐章生成</div>'
     +'<h1 class="doc-title">起草中：'+(project.name||"（未命名项目）")+'</h1>'
-    +'<div class="progress-line" id="progressLine">准备开始，共 '+active.length+' 章 / '+totalSec+' 个子标题待生成…</div>'
+    +'<div class="progress-line" id="progressLine">共 '+active.length+' 章 / '+totalSec+' 个子标题待生成 ｜ 预计消耗约 '+((totalSec*(EST_IN_PER_SEC+EST_OUT_PER_SEC))/10000).toFixed(1)+' 万 tokens（约 ¥'+((totalSec*EST_IN_PER_SEC*PRICE_IN_PER_M + totalSec*EST_OUT_PER_SEC*PRICE_OUT_PER_M)/1000000).toFixed(2)+'，按标准价估算）</div>'
     +'<div id="chapterContainer">'+inner+'</div>'
     +'<div class="actions"><button class="btn ghost" id="backStep3g">← 上一步</button>'
     +'<button class="btn" id="startGen">开始逐章生成</button>'
@@ -969,36 +972,43 @@ async function runGeneration(){
   const genBtn = document.getElementById("startGen");
   genBtn.disabled = true; genBtn.textContent = "生成中…";
   const progressEl = document.getElementById("progressLine");
-  const total = active.reduce((n,c)=>n+c.sections.length,0);
-  let done = 0;
-  for(const c of active){
-    for(let si=0; si<c.sections.length; si++){
-      const s = c.sections[si];
-      done++;
-      progressEl.textContent = '正在撰写 '+done+'/'+total+'：'+c.name+' — '+s.t+' …';
-      const secEl = document.getElementById('sec_'+c.cn+'_'+si);
-      secEl.classList.add("gen");
-      try{
-        const text = await generateSection(c, s);
-        s.content = text;
-        secEl.classList.remove("pending");
-        secEl.classList.remove("gen");
-        secEl.querySelector(".body").innerHTML = renderContent(text);
-        secEl.querySelector("h4").insertAdjacentHTML("beforeend", '<span class="done-stamp">已拟</span>');
-        saveDraft();
-        if(s.numeric){
-          const flag = document.createElement("div");
-          flag.className = "data-flag";
-          flag.textContent = "⚠ 表内数字为占位框架，正式版须替换为真实测算结果";
-          secEl.appendChild(flag);
-        }
-      }catch(e){
-        secEl.classList.remove("gen");
-        secEl.querySelector(".body").innerHTML = '<span style="color:var(--seal-red);">生成失败：'+escapeHtml(e.message)+'</span> <button class="retry-btn btn ghost" data-cn="'+c.cn+'" data-si="'+si+'" style="padding:3px 12px; font-size:11px; margin-left:8px;">重试</button>';
-      }
+  genUsage = {inTok:0, outTok:0};
+  const tasks = [];
+  active.forEach(c=>c.sections.forEach((s,si)=>tasks.push({c,s,si})));
+  const total = tasks.length;
+  let done = 0, failed = 0;
+
+  async function handleOne(t){
+    const {c,s,si} = t;
+    const secEl = document.getElementById('sec_'+c.cn+'_'+si);
+    secEl.classList.add("gen");
+    try{
+      const text = await generateSection(c, s);
+      s.content = text;
+      secEl.classList.remove("pending"); secEl.classList.remove("gen");
+      secEl.querySelector(".body").innerHTML = renderContent(text);
+      secEl.querySelector("h4").insertAdjacentHTML("beforeend", '<span class="done-stamp">已拟</span>');
+      saveDraft();
+    }catch(e){
+      failed++;
+      secEl.classList.remove("gen");
+      secEl.querySelector(".body").innerHTML = '<span style="color:var(--seal-red);">生成失败：'+escapeHtml(e.message)+'</span> <button class="retry-btn btn ghost" data-cn="'+c.cn+'" data-si="'+si+'" style="padding:3px 12px; font-size:11px; margin-left:8px;">重试</button>';
     }
+    done++;
+    progressEl.textContent = '3路并行撰写中… 已完成 '+done+'/'+total + (failed? '（失败 '+failed+'）':'');
   }
-  progressEl.textContent = '已完成 '+total+' 个子标题的初稿起草。';
+  const CONCURRENCY = 3;
+  const workers = Array.from({length:Math.min(CONCURRENCY,total)}, ()=>(async ()=>{
+    while(tasks.length){ const t = tasks.shift(); await handleOne(t); }
+  })());
+  await Promise.all(workers);
+
+  const cost = (genUsage.inTok*PRICE_IN_PER_M + genUsage.outTok*PRICE_OUT_PER_M)/1000000;
+  let tail = '已完成 '+(total-failed)+'/'+total+' 个子标题的初稿起草' + (failed? '（'+failed+' 个失败，可在下方点击重试）':'。');
+  if(genUsage.inTok||genUsage.outTok){
+    tail += ' ｜ 实际消耗：输入 '+genUsage.inTok.toLocaleString()+' + 输出 '+genUsage.outTok.toLocaleString()+' tokens ≈ ¥'+cost.toFixed(2);
+  }
+  progressEl.textContent = tail;
   genBtn.style.display = "none";
   document.getElementById("toStep5r").style.display = "inline-block";
   saveDraft();
@@ -1079,6 +1089,7 @@ async function generateSection(c, s){
   if(resp.status===401){ clearAuth(); showLoginModal("登录已过期，请重新登录后继续生成"); throw new Error("登录已过期"); }
   const data = await resp.json();
   if(data.error) throw new Error(data.error);
+  if(data.usage){ genUsage.inTok += data.usage.prompt_tokens||0; genUsage.outTok += data.usage.completion_tokens||0; }
   const text = (data.content||[]).map(b=>b.text||"").join("").trim();
   return text || "（未返回内容）";
 }
