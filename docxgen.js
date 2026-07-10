@@ -85,7 +85,7 @@
     c.sections.forEach((s,si)=>{
       children.push(new D.Paragraph({
         tabStops:tocTab, indent:{left:420}, spacing:{after:40, line:300, lineRule:D.LineRuleType.AUTO},
-        children:[ run((ci+1)+"."+(si+1)+"　"+(s.title||""),{size:24}), run("\t"),
+        children:[ run((c.num||ci+1)+"."+(si+1)+"　"+(s.title||""),{size:24}), run("\t"),
           new D.SimpleField("PAGEREF _tc"+ci+"_"+si+" \\h") ],
       }));
     });
@@ -105,7 +105,7 @@
     c.sections.forEach((s,si)=>{
       children.push(new D.Paragraph({
         heading: D.HeadingLevel.HEADING_2,
-        children:[ new D.Bookmark({id:"_tc"+ci+"_"+si, children:[run((ci+1)+"."+(si+1)+"　"+s.title,{size:28,bold:true})]}) ],
+        children:[ new D.Bookmark({id:"_tc"+ci+"_"+si, children:[run((c.num||ci+1)+"."+(si+1)+"　"+s.title,{size:28,bold:true})]}) ],
         spacing: Object.assign({before:280, after:160}, LINE13),
       }));
       (s.blocks||[]).forEach(b=> blockToElems(b).forEach(e=>children.push(e)));
