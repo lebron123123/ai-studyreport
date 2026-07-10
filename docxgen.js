@@ -69,20 +69,34 @@
     children:[run("目　　录",{size:44,bold:true})],
     alignment:D.AlignmentType.CENTER, pageBreakBefore:true, spacing:{after:400},
   }));
-  children.push(new D.TableOfContents("目录", { hyperlink:true, headingStyleRange:"1-2" }));
+  const tocTab = [{type:D.TabStopType.RIGHT, position:D.TabStopPosition.MAX, leader:D.LeaderType.DOT}];
+  payload.chapters.forEach((c,ci)=>{
+    children.push(new D.Paragraph({
+      tabStops:tocTab, spacing:{before:100, after:40, line:300, lineRule:D.LineRuleType.AUTO},
+      children:[ run("第"+c.cn+"章　"+c.name,{size:24,bold:true}), run("\t"),
+        new D.SimpleField("PAGEREF _tc"+ci+" \\h") ],
+    }));
+    c.sections.forEach((s,si)=>{
+      children.push(new D.Paragraph({
+        tabStops:tocTab, indent:{left:420}, spacing:{after:40, line:300, lineRule:D.LineRuleType.AUTO},
+        children:[ run((ci+1)+"."+(si+1)+"　"+(s.title||""),{size:24}), run("\t"),
+          new D.SimpleField("PAGEREF _tc"+ci+"_"+si+" \\h") ],
+      }));
+    });
+  });
 
   /* ---------- 正文 ---------- */
   payload.chapters.forEach((c,ci)=>{
     children.push(new D.Paragraph({
       heading: D.HeadingLevel.HEADING_1,
-      children:[run("第"+c.cn+"章　"+c.name,{size:44,bold:true})],
+      children:[ new D.Bookmark({id:"_tc"+ci, children:[run("第"+c.cn+"章　"+c.name,{size:44,bold:true})]}) ],
       alignment:D.AlignmentType.CENTER, pageBreakBefore:true,
       spacing: Object.assign({after:360}, LINE13),
     }));
     c.sections.forEach((s,si)=>{
       children.push(new D.Paragraph({
         heading: D.HeadingLevel.HEADING_2,
-        children:[run((ci+1)+"."+(si+1)+"　"+s.title,{size:28,bold:true})],
+        children:[ new D.Bookmark({id:"_tc"+ci+"_"+si, children:[run((ci+1)+"."+(si+1)+"　"+s.title,{size:28,bold:true})]}) ],
         spacing: Object.assign({before:280, after:160}, LINE13),
       }));
       (s.blocks||[]).forEach(b=> blockToElems(b).forEach(e=>children.push(e)));
