@@ -70,6 +70,12 @@
     alignment:D.AlignmentType.CENTER, pageBreakBefore:true, spacing:{after:400},
   }));
   const tocTab = [{type:D.TabStopType.RIGHT, position:D.TabStopPosition.MAX, leader:D.LeaderType.DOT}];
+  const WNS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  children.push(D.ImportedXmlComponent.fromXmlString(
+    '<w:p '+WNS+'><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>'
+    +'<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+    +'<w:r><w:instrText xml:space="preserve"> TOC \\o "1-2" \\h \\z \\u </w:instrText></w:r>'
+    +'<w:r><w:fldChar w:fldCharType="separate"/></w:r></w:p>'));
   payload.chapters.forEach((c,ci)=>{
     children.push(new D.Paragraph({
       tabStops:tocTab, spacing:{before:100, after:40, line:300, lineRule:D.LineRuleType.AUTO},
@@ -84,6 +90,9 @@
       }));
     });
   });
+  children.push(D.ImportedXmlComponent.fromXmlString(
+    '<w:p '+WNS+'><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>'
+    +'<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'));
 
   /* ---------- 正文 ---------- */
   payload.chapters.forEach((c,ci)=>{
