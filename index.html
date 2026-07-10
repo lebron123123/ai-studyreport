@@ -1123,103 +1123,94 @@ function stepReview(){
 }
 
 
-function calcAppendixHtml(){
-  if(!calcResult) return "";
-  const r=calcResult, s=r.summary;
-  const fmt=x=>Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
-  const th='style="border:1px solid #000; padding:3px 6px; background:#eee; font-size:9.5pt;"';
-  const td='style="border:1px solid #000; padding:3px 6px; font-size:9.5pt;"';
-  let t1='<table align="center" style="border-collapse:collapse; width:100%; margin:10pt auto;"><tr><th '+th+'>年份</th><th '+th+'>租金收入</th><th '+th+'>总成本</th><th '+th+'>税金</th><th '+th+'>净利润</th><th '+th+'>净现金流</th><th '+th+'>累计净现金流</th></tr>';
-  r.allYears.forEach(y=>{
-    t1+='<tr><td '+td+'>'+y+'</td><td '+td+'>'+fmt(r.income[y].rent)+'</td><td '+td+'>'+fmt(r.cost[y].total)+'</td><td '+td+'>'+fmt(r.tax[y].total)+'</td><td '+td+'>'+fmt(r.profit[y].netProfit)+'</td><td '+td+'>'+fmt(r.cf[y].net)+'</td><td '+td+'>'+fmt(r.cf[y].cumNet)+'</td></tr>';
+
+let docxLibLoading = null;
+function loadScript(src){
+  return new Promise((ok,err)=>{
+    const s = document.createElement("script");
+    s.src = src; s.onload = ok; s.onerror = ()=>err(new Error("加载失败:"+src));
+    document.head.appendChild(s);
   });
-  t1+='</table>';
-  let sensT = "";
-  if(r.sens){
-    sensT = '<p style="font-family:宋体,SimSun,serif; font-size:12pt; font-weight:bold; margin:16pt 0 6pt;">附表二　单因素敏感性分析</p>'
-      +'<table align="center" style="border-collapse:collapse; margin:6pt auto;"><tr><th '+th+'>变动因素</th><th '+th+'>IRR</th><th '+th+'>累计净现值（万元）</th></tr>'
-      + r.sens.map(x=>'<tr><td '+td+'>'+x.label+'</td><td '+td+'>'+(x.irr===null?"—":x.irr+" %")+'</td><td '+td+'>'+fmt(x.npv)+'</td></tr>').join("")
-      +'</table>';
+}
+async function ensureDocxLib(){
+  if(window.docx && window.buildDocxDocument) return;
+  if(!docxLibLoading){
+    docxLibLoading = Promise.all([loadScript("docx.umd.js"), loadScript("docxgen.js")]);
   }
-  return '<h1 style="font-family:宋体,SimSun,serif; font-size:22pt; font-weight:bold; text-align:center; line-height:130%; margin:0 0 18pt; page-break-before:always;">附表　财务测算明细（单位：万元）</h1>'
-    +'<p style="font-family:宋体,SimSun,serif; font-size:12pt; line-height:130%; text-align:center;">全周期总收入 '+fmt(s.totalIncome)+'｜总成本 '+fmt(s.totalCost)+'｜净利润合计 '+fmt(s.totalNetProfit)+'｜累计净现值 '+fmt(s.totalNpv)+'｜IRR '+(s.irr===null?"无法计算":s.irr+"%")+'</p>'
-    + t1 + sensT;
+  await docxLibLoading;
 }
 
-function exportWord(){
+// HTML → 结构块（段落/表格），供docx构建
+function htmlToBlocks(htmlStr){
+  const blocks = [];
+  const dom = new DOMParser().parseFromString("<div>"+htmlStr+"</div>", "text/html");
+  const rootEl = dom.body.firstChild;
+  rootEl.childNodes.forEach(node=>{
+    if(node.nodeType===3){ const t=node.textContent.trim(); if(t) blocks.push({type:"p", text:t}); return; }
+    if(node.nodeType!==1) return;
+    if(node.tagName==="TABLE"){
+      const rows = [...node.querySelectorAll("tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
+      if(rows.length) blocks.push({type:"table", rows});
+    }else{
+      // 段内<br>视为换行拆段
+      node.innerHTML.split(/<br\s*\/?>/i).forEach(seg=>{
+        const t = seg.replace(/<[^>]+>/g,"").trim();
+        if(t) blocks.push({type:"p", text:t});
+      });
+    }
+  });
+  return blocks;
+}
+
+function buildExportPayload(){
   const active = chapters.filter(c=>c.checked);
   const secEls = document.querySelectorAll("#sheet .section-block");
   const elMap = {};
   secEls.forEach(el=>{ const b = el.querySelector(".body"); if(el.dataset.cn!==undefined) elMap[el.dataset.cn+'_'+el.dataset.si] = b; });
 
-  // ---------- 目录条目（静态展示；配合Word域可更新出页码） ----------
-  let tocRows = "";
-  active.forEach((c,ci)=>{
-    tocRows += '<p style="font-family:宋体,SimSun,serif; font-size:12pt; font-weight:bold; line-height:150%; margin:4pt 0 0;">第'+c.cn+'章　'+c.name+'</p>';
-    c.sections.forEach((s,si)=>{
-      tocRows += '<p style="font-family:宋体,SimSun,serif; font-size:12pt; line-height:150%; margin:0 0 0 21pt;">'+(ci+1)+'.'+(si+1)+'　'+s.t+'</p>';
-    });
-  });
-
-  // ---------- 正文：大章标题居中(宋体二号)、小节标题靠左、正文宋体小四1.3倍 ----------
-  let bodyHtml = "";
-  active.forEach((c,ci)=>{
-    bodyHtml += '<h1 style="font-family:宋体,SimSun,serif; font-size:22pt; font-weight:bold; text-align:center; line-height:130%; margin:0 0 18pt; page-break-before:always;">第'+c.cn+'章　'+c.name+'</h1>';
-    c.sections.forEach((s,si)=>{
+  const chs = active.map(c=>({ cn:c.cn, name:c.name,
+    sections: c.sections.map((s,si)=>{
       const el = elMap[c.cn+'_'+si];
-      const innerH = el ? el.innerHTML : renderContent(s.content||"");
-      bodyHtml += '<h2 style="font-family:宋体,SimSun,serif; font-size:14pt; font-weight:bold; text-align:left; line-height:130%; margin:14pt 0 8pt;">'+(ci+1)+'.'+(si+1)+'　'+s.t+'</h2>';
-      bodyHtml += '<div>'+wordifyBody(innerH)+'</div>';
-    });
-  });
+      const htmlStr = el? el.innerHTML : (s.editedHtml || renderContent(s.content||""));
+      return { title:s.title||s.t, blocks: htmlToBlocks(htmlStr) };
+    })
+  }));
 
-  const metaLine = [
-    project.owner?'建设/委托单位：'+project.owner:"",
-    project.industry?'报告领域：'+project.industry:"",
-    project.location?'建设地点：'+project.location:"",
-    project.scale?'投资规模：'+project.scale+'万元':"",
-  ].filter(Boolean).join("　　");
-  const signNote = signed ? '本报告已经人工复核确认签发，签发日期：'+new Date().toLocaleDateString('zh-CN') : '本报告为AI生成初稿，尚未经过人工复核签发，其中标注"待填"的数据须补充真实测算结果，正式使用前须完成审核。';
-
-  const docHtml = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>'+(project.name||"可行性研究报告")+'</title>'
-    +'<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:UpdateFields>true</w:UpdateFields></w:WordDocument></xml><![endif]-->'
-    +'<style>'
-    +'body{font-family:宋体,SimSun,serif;}'
-    +'p{font-family:宋体,SimSun,serif; font-size:12pt; line-height:130%;}'
-    +'table{border-collapse:collapse; margin:10pt auto;}'
-    +'td,th{border:1px solid #000; padding:4px 9px; font-size:10.5pt; font-family:宋体,SimSun,serif; line-height:130%;}'
-    +'th{background:#EEE; font-weight:bold;}'
-    +'</style>'
-    +'</head><body>'
-    /* ---------- 封面 ---------- */
-    +'<div style="text-align:center;">'
-    +'<p style="font-size:22pt; font-weight:bold; letter-spacing:2pt; margin:160pt 0 28pt; line-height:150%;">'+(project.name||"（未命名项目）")+'</p>'
-    +'<p style="font-size:22pt; font-weight:bold; letter-spacing:10pt; margin:0 0 90pt;">可行性研究报告</p>'
-    +'<p style="font-size:12pt; color:#333; margin:0 0 8pt;">'+metaLine+'</p>'
-    +'<p style="font-size:12pt; color:#333;">'+new Date().toLocaleDateString('zh-CN')+'</p>'
-    +'</div>'
-    /* ---------- 目录页 ---------- */
-    +'<h1 style="font-family:宋体,SimSun,serif; font-size:22pt; font-weight:bold; text-align:center; margin:0 0 18pt; page-break-before:always; mso-outline-level:9;">目　录</h1>'
-    +'<!--[if supportFields]><p style="margin:0;"><span style="mso-element:field-begin"></span> TOC \\o "1-2" \\h \\z \\u <span style="mso-element:field-separator"></span></p><![endif]-->'
-    + tocRows
-    +'<!--[if supportFields]><p style="margin:0;"><span style="mso-element:field-end"></span></p><![endif]-->'
-    +'<p style="font-size:9pt; color:#999; margin-top:10pt;">提示：在Word中打开时若提示"更新域"请选择"是"，或全选后按F9，目录将自动生成带页码版本。</p>'
-    /* ---------- 正文 ---------- */
-    + bodyHtml
-    + calcAppendixHtml()
-    +'<p style="margin-top:40pt; font-size:10.5pt; color:#888;">'+signNote+'</p></body></html>';
-
-  const blob = new Blob(["\ufeff", docHtml], {type:"application/msword"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = (project.name||"可行性研究报告")+".doc";
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  let appendix = null;
+  if(calcResult){
+    const r = calcResult, s = r.summary;
+    const fmt = x=> x===null? "—" : Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
+    const mainRows = [["年份","租金收入","总成本","税金","净利润","净现金流","累计净现金流"]];
+    r.allYears.forEach(y=> mainRows.push([y, fmt(r.income[y].rent), fmt(r.cost[y].total), fmt(r.tax[y].total), fmt(r.profit[y].netProfit), fmt(r.cf[y].net), fmt(r.cf[y].cumNet)]));
+    let sensRows = null;
+    if(r.sens){
+      sensRows = [["变动因素","IRR","累计净现值（万元）"]];
+      r.sens.forEach(x=> sensRows.push([x.label, x.irr===null?"—":x.irr+" %", fmt(x.npv)]));
+    }
+    appendix = {
+      summaryLine: "全周期总收入 "+fmt(s.totalIncome)+"｜总成本 "+fmt(s.totalCost)+"｜净利润合计 "+fmt(s.totalNetProfit)+"｜累计净现值 "+fmt(s.totalNpv)+"｜IRR "+(s.irr===null?"—":s.irr+"%"),
+      mainRows, sensRows,
+    };
+  }
+  return { project: project, signed: signed, docNo: getDocNo(), chapters: chs, appendix };
 }
-function wordifyBody(html){
-  return html
-    .replace(/<p style="margin:0 0 10px;">/g,'<p style="font-family:宋体,SimSun,serif; font-size:12pt; line-height:130%; text-indent:2em; margin:0 0 6pt;">')
-    .replace(/<table class="rpt">/g,'<table class="rpt" align="center" style="margin:10pt auto;">');
+
+async function exportWord(){
+  const btn = document.getElementById("exportWordBtn");
+  if(btn){ btn.disabled = true; btn.textContent = "正在生成 .docx…"; }
+  try{
+    await ensureDocxLib();
+    const doc = window.buildDocxDocument(window.docx, buildExportPayload());
+    const blob = await window.docx.Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = (project.name||"可行性研究报告")+".docx";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }catch(e){
+    alert("导出失败："+e.message);
+  }
+  if(btn){ btn.disabled = false; btn.textContent = "导出 Word"; }
 }
 
 
