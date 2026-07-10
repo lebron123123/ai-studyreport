@@ -53,5 +53,5 @@ export async function onRequestPost(context) {
     await env.USAGE_KV.put(kvKey, String(used + 1), { expirationTtl: 60 * 60 * 24 * 2 });
   }
 
-  return json({ content: [{ type: "text", text }] });
+  return json({ content: [{ type: "text", text }], usage: data.usage || null });
 }
