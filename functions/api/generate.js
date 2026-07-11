@@ -1,4 +1,4 @@
-// POST /api/generate  AI生成接口（需登录，按用户每日限额）
+// POST /api/generate  AI生成接口（登录鉴权 + 按用户限额 + 流式/非流式双模式）
 import { verifyAuth, json } from "./_auth.js";
 
 export async function onRequestPost(context) {
@@ -7,7 +7,6 @@ export async function onRequestPost(context) {
   const user = await verifyAuth(request, env);
   if(!user) return json({ error: "未登录或登录已过期，请重新登录后再生成。" }, 401);
 
-  // 每用户每日限额
   const USER_DAILY_LIMIT = 120;
   const today = new Date().toISOString().slice(0, 10);
   const kvKey = "usage:" + today + ":" + user.userId;
@@ -27,6 +26,8 @@ export async function onRequestPost(context) {
     ...(body.messages || []),
   ];
 
+  const wantStream = !!body.stream;
+
   const upstream = await fetch("https://api.deepseek.com/chat/completions", {
     method: "POST",
     headers: {
@@ -38,20 +39,35 @@ export async function onRequestPost(context) {
       messages: dsMessages,
       max_tokens: 1200,
       temperature: 0.3,
+      stream: wantStream,
     }),
   });
 
-  const data = await upstream.json();
   if (!upstream.ok) {
+    const data = await upstream.json().catch(()=>({}));
     const msg = (data && data.error && data.error.message) || "上游AI接口调用失败";
     return json({ error: msg }, upstream.status);
   }
 
-  const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-
+  // 计数+1
   if (env.USAGE_KV) {
     await env.USAGE_KV.put(kvKey, String(used + 1), { expirationTtl: 60 * 60 * 24 * 2 });
   }
 
-  return json({ content: [{ type: "text", text }], usage: data.usage || null });
+  if (wantStream) {
+    // 流式：直接透传 SSE 流
+    return new Response(upstream.body, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
+  } else {
+    // 非流式：原逻辑
+    const data = await upstream.json();
+    const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+    return json({ content: [{ type: "text", text }], usage: data.usage || null });
+  }
 }
