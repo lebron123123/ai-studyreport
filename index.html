@@ -536,6 +536,7 @@ let domainKey = null;
 let chapters = [];
 let signed = false;
 let genUsage = {inTok:0, outTok:0};
+let kbEntries = [];   // 参考资料库 [{title, content}]
 const PRICE_IN_PER_M = 2, PRICE_OUT_PER_M = 8;   // 元/百万tokens，按DeepSeek价目表估算，可调整
 const EST_IN_PER_SEC = 1200, EST_OUT_PER_SEC = 700; // 每子节预估token
 let calcResult = null;   // 财务测算结果（null表示跳过测算，走"待填"模式）
@@ -548,7 +549,7 @@ const DRAFT_KEY = "fs_draft_v1";
 function buildDraftData(){
   return {
     ts: Date.now(), domainKey, currentStep, signed, docNo,
-    project: project, calcParams: calcParams,
+    project: project, calcParams: calcParams, kb: kbEntries,
     chapters: chapters.map(c=>({cn:c.cn, name:c.name, checked:c.checked,
       sections:c.sections.map(s=>({t:s.t, numeric:s.numeric, content:s.content, editedHtml:s.editedHtml||null}))}))
   };
@@ -565,6 +566,7 @@ function restoreDraft(d){
   domainKey = d.domainKey; signed = !!d.signed; docNo = d.docNo||null;
   Object.assign(project, d.project||{});
   calcParams = d.calcParams||null;
+  kbEntries = d.kb||[];
   if(domainKey){ loadDomain(domainKey); Object.assign(project, d.project||{}); }
   if(d.chapters && chapters.length){
     d.chapters.forEach((dc,i)=>{
@@ -747,6 +749,13 @@ function stepProjectInfo(){
     +'<div><label>投资规模（万元，估算）</label><input id="f_scale" type="text" placeholder="例：5240" value="'+project.scale+'"></div>'
     +'<label>项目概况（建筑面积、现状、改造/建设内容、周边情况等，越详细越好）</label>'
     +'<textarea id="f_desc" placeholder="例：项目总建筑面积21300㎡，含集中商业与街区商业，已运营11年，现出租率下滑至70%，拟通过系统性改造升级重构业态与动线...">'+project.desc+'</textarea>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px;"><b style="font-size:14px;">参考资料库（可选）</b><button type="button" class="btn ghost" id="kbAdd" style="padding:5px 14px;font-size:12px;">＋ 添加资料</button></div>'
+    +'<div class="step-desc" style="margin:6px 0 0;">粘贴政策文件、区域市场数据、项目批复等真实资料。生成时系统按章节自动匹配相关资料注入AI，并要求引用处标注来源——让市场分析、必要性论证有真实依据。</div>'
+    +'<div id="kbList">'
+    + kbEntries.map((e,i)=>'<div class="kb-entry" style="border:1px solid var(--line); padding:10px 12px; margin-top:10px; background:#fff;">'
+        +'<div style="display:flex; gap:8px; align-items:center;"><input class="kb-title" placeholder="资料标题（如：深圳市住房发展十四五规划要点）" value="'+escapeHtml(e.title||"")+'" style="flex:1;"><button type="button" class="btn ghost kb-del" data-ki="'+i+'" style="padding:4px 10px;font-size:11px;">删除</button></div>'
+        +'<textarea class="kb-content" placeholder="粘贴资料正文…" style="margin-top:8px; min-height:70px;">'+escapeHtml(e.content||"")+'</textarea></div>').join("")
+    +'</div>'
     +'<div class="note-box">边界提示：涉及投资估算、经营收入、财务指标等具体数字的子章节，系统只生成结构与表格框架，并标注"待填真实数据"，不会编造看似权威的精确数字。这些必须由专业测算填入后方可正式使用。</div>'
     +'<div class="actions"><button class="btn ghost" id="backStep0">← 上一步</button><button class="btn" id="toStep2">下一步：选择章节 →</button></div>';
 }
@@ -989,7 +998,7 @@ function stepGenerate(){
     +'</div>').join("");
   return '<div class="doc-eyebrow">STEP 04 · 逐章生成</div>'
     +'<h1 class="doc-title">起草中：'+(project.name||"（未命名项目）")+'</h1>'
-    +'<div class="progress-line" id="progressLine">共 '+active.length+' 章 / '+totalSec+' 个子标题待生成 ｜ 预计消耗约 '+((totalSec*(EST_IN_PER_SEC+EST_OUT_PER_SEC))/10000).toFixed(1)+' 万 tokens（约 ¥'+((totalSec*EST_IN_PER_SEC*PRICE_IN_PER_M + totalSec*EST_OUT_PER_SEC*PRICE_OUT_PER_M)/1000000).toFixed(2)+'，按标准价估算）</div>'
+    +'<div class="progress-line" id="progressLine">共 '+active.length+' 章 / '+totalSec+' 个子标题待生成'+(kbEntries.length?'｜已挂载参考资料 '+kbEntries.length+' 篇（自动匹配注入）':'')+' ｜ 预计消耗约 '+((totalSec*(EST_IN_PER_SEC+EST_OUT_PER_SEC))/10000).toFixed(1)+' 万 tokens（约 ¥'+((totalSec*EST_IN_PER_SEC*PRICE_IN_PER_M + totalSec*EST_OUT_PER_SEC*PRICE_OUT_PER_M)/1000000).toFixed(2)+'，按标准价估算）</div>'
     +'<div id="chapterContainer">'+inner+'</div>'
     +'<div class="actions"><button class="btn ghost" id="backStep3g">← 上一步</button>'
     +'<button class="btn" id="startGen">开始逐章生成</button>'
@@ -1100,6 +1109,36 @@ function buildCalcDigest(){
   return digest;
 }
 
+
+// 按章节标题匹配最相关的参考资料（关键词2元组打分，无需向量库）
+function kbRetrieve(chapterName, secTitle){
+  if(!kbEntries.length) return "";
+  const q = String(chapterName||"") + String(secTitle||"");
+  const grams = new Set();
+  for(let i=0;i<q.length-1;i++){
+    const g = q.slice(i,i+2);
+    if(/^[\u4e00-\u9fa5]{2}$/.test(g)) grams.add(g);
+  }
+  const scored = kbEntries.map(e=>{
+    let s = 0;
+    grams.forEach(g=>{
+      if(e.title && e.title.includes(g)) s += 3;
+      if(e.content && e.content.includes(g)) s += 1;
+    });
+    return {e, s};
+  }).filter(x=>x.s>=2).sort((a,b)=>b.s-a.s).slice(0,2);
+  if(!scored.length) return "";
+  let out = "\n\n【参考资料】（以下为真实资料，请优先引用其中的事实、数据与政策表述，引用处以（来源：资料标题）标注；资料未覆盖的内容按原要求撰写，不得虚构资料里没有的内容）\n";
+  let budget = 2600;
+  scored.forEach(({e})=>{
+    if(budget<=100) return;
+    const c = String(e.content||"").slice(0, Math.min(1500, budget));
+    budget -= c.length;
+    out += "《"+(e.title||"未命名资料")+"》：\n"+c+"\n\n";
+  });
+  return out;
+}
+
 async function generateSection(c, s, onChunk){
   const digest = s.numeric ? buildCalcDigest() : null;
   let tableHint = "";
@@ -1109,7 +1148,7 @@ async function generateSection(c, s, onChunk){
     tableHint = '\n本子标题涉及具体数字或测算，请：①用文字说明测算口径、方法与逻辑；②生成一个结构完整的数据表格，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔，每行一个换行）：\n[[TABLE]]\n列1|列2|列3\n项目A|待填|待填\n[[/TABLE]]\n表格中的具体数值一律填"待填"，绝不编造精确数字；但表格的行项目、列结构要专业完整、贴合真实可研报告。';
   }
   const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n3. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n4. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+tableHint;
-  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。';
+  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + kbRetrieve(c.name, s.t);
 
   const resp = await fetch("/api/generate", {
     method:"POST",
@@ -1296,6 +1335,8 @@ function bindEvents(){
   document.querySelectorAll(".domain-card").forEach(card=>{
     card.onclick = ()=>{ loadDomain(card.dataset.key); renderSheet(); };
   });
+  if(s("kbAdd")) s("kbAdd").onclick = ()=>{ readKbFromDom(); kbEntries.push({title:"",content:""}); renderSheet(); };
+  document.querySelectorAll(".kb-del").forEach(b=>{ b.onclick = ()=>{ readKbFromDom(); kbEntries.splice(+b.dataset.ki,1); renderSheet(); }; });
   if(s("toStep1")) s("toStep1").onclick = ()=>{ if(!domainKey) return; currentStep=1; renderTOC(); renderSheet(); };
   if(s("backStep0")) s("backStep0").onclick = ()=>{ currentStep=0; renderTOC(); renderSheet(); };
   if(s("toStep2")) s("toStep2").onclick = ()=>{ saveProject(); saveDraft(); currentStep=2; renderTOC(); renderSheet(); };
@@ -1369,7 +1410,16 @@ function bindEvents(){
     };
   });
 }
+function readKbFromDom(){
+  if(currentStep!==1) return;
+  const rows = document.querySelectorAll(".kb-entry");
+  kbEntries = [...rows].map(r=>({
+    title: r.querySelector(".kb-title").value.trim(),
+    content: r.querySelector(".kb-content").value
+  })).filter(e=>e.title||e.content.trim());
+}
 function saveProject(){
+  readKbFromDom();
   const g=id=>{const e=document.getElementById(id);return e?e.value:"";};
   project.name=g("f_name"); project.owner=g("f_owner"); project.type=g("f_type");
   project.location=g("f_location"); project.scale=g("f_scale"); project.desc=g("f_desc");
@@ -1478,6 +1528,7 @@ function newProject(){
   currentProjectId = null; domainKey = null; chapters = []; signed = false;
   calcParams = null; calcResult = null; docNo = null;
   Object.keys(project).forEach(k=>project[k]="");
+  kbEntries = [];
   currentStep = 0; clearDraft();
   renderTOC(); renderSheet();
 }
