@@ -1,0 +1,211 @@
+<meta charset="utf-8">
+<title>可研报告工坊 · 大纲管理</title>
+<style>
+  :root{--bp:#1E3A5C;--bg:#F2EFE7;--card:#FBFAF5;--ink:#1F262B;--soft:#66707A;--line:#D8D3C4;--red:#B7302B;--ok:#3E6B45;
+    --mono:"SF Mono","Consolas",monospace;--sans:"PingFang SC","Microsoft YaHei",sans-serif;--serif:"Songti SC","SimSun",serif;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);font-family:var(--sans);color:var(--ink);}
+  .wrap{max-width:900px;margin:0 auto;padding:30px 24px;}
+  h1{font-family:var(--serif);font-size:22px;color:var(--bp);margin:0 0 6px;}
+  .sub{font-size:12px;color:var(--soft);margin-bottom:24px;}
+  .bar{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;}
+  .btn{font-size:13px;font-weight:600;padding:9px 20px;border:1px solid var(--bp);border-radius:2px;background:var(--bp);color:#fff;cursor:pointer;}
+  .btn:hover{filter:brightness(1.1);} .btn.ghost{background:transparent;color:var(--bp);} .btn.ghost:hover{background:var(--bp);color:#fff;}
+  .btn:disabled{opacity:.4;cursor:not-allowed;}
+  .btn.sm{padding:5px 12px;font-size:12px;}
+  .btn.red{background:var(--red);border-color:var(--red);} .btn.red:hover{filter:brightness(1.1);}
+  input,textarea,select{font-family:var(--sans);font-size:14px;padding:8px 10px;border:1px solid var(--line);background:#fff;width:100%;outline:none;}
+  input:focus,textarea:focus{border-color:var(--bp);}
+  label{display:block;font-size:12px;color:var(--soft);margin:12px 0 4px;}
+  .card{background:var(--card);border:1px solid var(--line);padding:18px 22px;margin-bottom:12px;border-radius:2px;display:flex;justify-content:space-between;align-items:center;}
+  .card .name{font-weight:600;font-size:15px;} .card .meta{font-size:11px;color:var(--soft);font-family:var(--mono);}
+  .card .ops{display:flex;gap:8px;}
+  .empty{text-align:center;color:var(--soft);padding:40px 0;}
+  .ch-list{margin-top:10px;} .ch-row{border:1px solid var(--line);margin-bottom:8px;background:#fff;padding:12px 14px;border-radius:2px;}
+  .ch-head{display:flex;gap:10px;align-items:center;margin-bottom:8px;}
+  .ch-head input{flex:1;font-weight:600;}
+  .sec-row{display:flex;gap:8px;align-items:center;margin:4px 0 4px 24px;}
+  .sec-row input{flex:1;} .sec-row select{width:70px;flex-shrink:0;}
+  .add-link{font-size:12px;color:var(--bp);cursor:pointer;margin-left:24px;margin-top:4px;display:inline-block;}
+  .add-link:hover{text-decoration:underline;}
+  .msg{padding:10px 14px;margin-bottom:14px;font-size:13px;border-radius:2px;}
+  .msg.ok{background:#EAF1EA;color:var(--ok);border:1px solid var(--ok);}
+  .msg.err{background:#FDF6F5;color:var(--red);border:1px solid var(--red);}
+  .preview{background:#F5F3EA;border:1px solid var(--line);padding:14px 18px;margin-top:14px;font-size:13px;max-height:300px;overflow-y:auto;white-space:pre-wrap;font-family:var(--mono);color:var(--soft);}
+</style>
+<div class="wrap">
+  <h1>可研报告工坊 · 大纲管理后台</h1>
+  <div class="sub">管理员可在此新建/编辑/删除报告领域大纲。修改后立即生效，所有用户下次选领域时将看到最新版本。</div>
+  <div id="msgBox"></div>
+  <div id="app">
+    <div class="bar">
+      <button class="btn" id="btnNew">+ 新建领域大纲</button>
+      <button class="btn ghost" id="btnRefresh">刷新列表</button>
+      <button class="btn ghost" id="btnSeed">导入内置默认大纲</button>
+      <span style="margin-left:auto;font-size:12px;color:var(--soft);" id="loginInfo"></span>
+    </div>
+    <div id="listBox"></div>
+    <div id="editBox" style="display:none;"></div>
+  </div>
+</div>
+<script>
+function getToken(){ return localStorage.getItem("fs_token"); }
+function getUser(){ return localStorage.getItem("fs_user"); }
+function authHeaders(){ const t=getToken(); return t? {"Authorization":"Bearer "+t,"Content-Type":"application/json"}:{"Content-Type":"application/json"}; }
+function msg(text,type){ document.getElementById("msgBox").innerHTML='<div class="msg '+type+'">'+text+'</div>'; setTimeout(()=>{document.getElementById("msgBox").innerHTML="";},4000); }
+
+let allOutlines = [];
+let editing = null; // {key, label, chapters}
+
+async function loadList(){
+  document.getElementById("editBox").style.display="none";
+  document.getElementById("listBox").style.display="block";
+  try{
+    const r = await fetch("/api/outlines",{headers:authHeaders()}); const d = await r.json();
+    if(!d.ok){ msg(d.error||"加载失败","err"); return; }
+    allOutlines = d.list||[];
+    renderList();
+  }catch(e){ msg("网络错误","err"); }
+}
+
+function renderList(){
+  const box = document.getElementById("listBox");
+  if(!allOutlines.length){ box.innerHTML='<div class="empty">暂无大纲。点击"新建领域大纲"或"导入内置默认大纲"开始。</div>'; return; }
+  box.innerHTML = allOutlines.map(o=>{
+    const t = new Date(o.updated_at);
+    const when = t.toLocaleDateString("zh-CN")+" "+String(t.getHours()).padStart(2,"0")+":"+String(t.getMinutes()).padStart(2,"0");
+    return '<div class="card"><div><div class="name">'+esc(o.label)+'</div><div class="meta">key: '+esc(o.key)+' ｜ '+when+'</div></div>'
+      +'<div class="ops"><button class="btn sm" data-edit="'+esc(o.key)+'">编辑</button><button class="btn sm red" data-del="'+esc(o.key)+'">删除</button></div></div>';
+  }).join("");
+  box.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>openEdit(b.dataset.edit));
+  box.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("确定删除大纲「"+b.dataset.del+"」？")) return;
+    const r = await fetch("/api/outlines?key="+encodeURIComponent(b.dataset.del),{method:"DELETE",headers:authHeaders()});
+    const d = await r.json();
+    if(d.ok){ msg("已删除","ok"); loadList(); } else msg(d.error,"err");
+  });
+}
+
+async function openEdit(key){
+  if(key){
+    const r = await fetch("/api/outlines?key="+encodeURIComponent(key),{headers:authHeaders()});
+    const d = await r.json();
+    if(!d.ok){ msg(d.error,"err"); return; }
+    editing = {key:d.outline.key, label:d.outline.label, chapters:d.outline.chapters};
+  }else{
+    editing = {key:"", label:"", chapters:[{cn:"一", name:"项目总论", sections:[{t:"项目背景", numeric:false}]}]};
+  }
+  document.getElementById("listBox").style.display="none";
+  document.getElementById("editBox").style.display="block";
+  renderEdit();
+}
+
+function renderEdit(){
+  const e = editing;
+  let html = '<label>大纲Key（英文小写+数字，保存后不可改）</label><input id="eKey" value="'+esc(e.key)+'" '+(e.key?'disabled':'')+'>'
+    +'<label>显示标签（如"保障房·非居改保"）</label><input id="eLabel" value="'+esc(e.label)+'">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;"><b>章节结构</b><button class="btn sm" id="addCh">+ 添加章节</button></div>'
+    +'<div class="ch-list" id="chList"></div>'
+    +'<div class="bar" style="margin-top:18px;">'
+    +'<button class="btn" id="saveBtn">保存大纲</button>'
+    +'<button class="btn ghost" id="previewBtn">预览JSON</button>'
+    +'<button class="btn ghost" id="cancelBtn">返回列表</button></div>'
+    +'<div id="previewBox"></div>';
+  document.getElementById("editBox").innerHTML = html;
+  renderChapters();
+  document.getElementById("addCh").onclick = ()=>{ e.chapters.push({cn:cnNum(e.chapters.length+1), name:"", sections:[{t:"",numeric:false}]}); renderChapters(); };
+  document.getElementById("saveBtn").onclick = saveOutline;
+  document.getElementById("previewBtn").onclick = ()=>{ readForm(); document.getElementById("previewBox").innerHTML='<div class="preview">'+esc(JSON.stringify(editing,null,2))+'</div>'; };
+  document.getElementById("cancelBtn").onclick = ()=>loadList();
+}
+
+const CN = ["一","二","三","四","五","六","七","八","九","十","十一","十二","十三","十四","十五","十六","十七","十八","十九","二十"];
+function cnNum(n){ return CN[n-1]||String(n); }
+
+function renderChapters(){
+  const box = document.getElementById("chList");
+  box.innerHTML = editing.chapters.map((c,ci)=>{
+    let secHtml = c.sections.map((s,si)=>
+      '<div class="sec-row"><input value="'+esc(s.t)+'" data-ci="'+ci+'" data-si="'+si+'" class="sec-t" placeholder="子标题名称">'
+      +'<select data-ci="'+ci+'" data-si="'+si+'" class="sec-num"><option value="0" '+(s.numeric?'':'selected')+'>文字</option><option value="1" '+(s.numeric?'selected':'')+'>数据</option></select>'
+      +'<button class="btn sm red" data-ci="'+ci+'" data-si="'+si+'" title="删除子标题">×</button></div>'
+    ).join("");
+    return '<div class="ch-row"><div class="ch-head">'
+      +'<span style="font-family:var(--serif);color:var(--bp);min-width:30px;">'+esc(c.cn)+'</span>'
+      +'<input value="'+esc(c.name)+'" data-ci="'+ci+'" class="ch-name" placeholder="章节名称">'
+      +'<button class="btn sm red" data-chd="'+ci+'" title="删除整章">删除章</button></div>'
+      + secHtml
+      +'<span class="add-link" data-addsec="'+ci+'">+ 添加子标题</span></div>';
+  }).join("");
+  // 绑事件
+  box.querySelectorAll("[data-addsec]").forEach(b=>b.onclick=()=>{
+    const ci=+b.dataset.addsec;
+    editing.chapters[ci].sections.push({t:"",numeric:false});
+    renderChapters();
+  });
+  box.querySelectorAll("[data-chd]").forEach(b=>b.onclick=()=>{
+    editing.chapters.splice(+b.dataset.chd,1);
+    editing.chapters.forEach((c,i)=>c.cn=cnNum(i+1));
+    renderChapters();
+  });
+  box.querySelectorAll(".sec-row .btn").forEach(b=>b.onclick=()=>{
+    editing.chapters[+b.dataset.ci].sections.splice(+b.dataset.si,1);
+    renderChapters();
+  });
+}
+
+function readForm(){
+  editing.key = document.getElementById("eKey").value.trim();
+  editing.label = document.getElementById("eLabel").value.trim();
+  document.querySelectorAll(".ch-name").forEach(el=>{
+    editing.chapters[+el.dataset.ci].name = el.value.trim();
+  });
+  document.querySelectorAll(".sec-t").forEach(el=>{
+    editing.chapters[+el.dataset.ci].sections[+el.dataset.si].t = el.value.trim();
+  });
+  document.querySelectorAll(".sec-num").forEach(el=>{
+    editing.chapters[+el.dataset.ci].sections[+el.dataset.si].numeric = el.value==="1";
+  });
+}
+
+async function saveOutline(){
+  readForm();
+  if(!editing.key || !editing.label){ msg("Key和标签不能为空","err"); return; }
+  const btn = document.getElementById("saveBtn");
+  btn.disabled=true; btn.textContent="保存中…";
+  try{
+    const r = await fetch("/api/outlines",{method:"POST",headers:authHeaders(),
+      body:JSON.stringify({key:editing.key, label:editing.label, chapters:editing.chapters})});
+    const d = await r.json();
+    if(d.ok){ msg("保存成功","ok"); loadList(); } else msg(d.error,"err");
+  }catch(e){ msg("网络错误","err"); }
+  btn.disabled=false; btn.textContent="保存大纲";
+}
+
+async function seedDefaults(){
+  if(!confirm("将内置的2个默认大纲（非居改保、新建）导入数据库，已存在的同key大纲将被覆盖。继续？")) return;
+  try{
+    const resp = await fetch("outlines.js"); const text = await resp.text();
+    const m = {}; new Function("window", text)({OUTLINES:null, set OUTLINES(v){Object.assign(m,v);}});
+    // 实际上outlines.js用 window.OUTLINES = {...}，我们eval它
+    const fn = new Function("var window={};"+text+";return window.OUTLINES;");
+    const data = fn();
+    for(const [k,v] of Object.entries(data)){
+      await fetch("/api/outlines",{method:"POST",headers:authHeaders(),
+        body:JSON.stringify({key:k, label:v.label, chapters:v.chapters})});
+    }
+    msg("导入完成","ok"); loadList();
+  }catch(e){ msg("导入失败："+e.message,"err"); }
+}
+
+function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+// 初始化
+if(!getToken()){ document.getElementById("app").innerHTML='<div class="empty">请先在主站登录后再访问此页面（登录态通过浏览器共享）。</div>'; }
+else{
+  document.getElementById("loginInfo").textContent = "当前用户："+getUser();
+  document.getElementById("btnNew").onclick = ()=>openEdit(null);
+  document.getElementById("btnRefresh").onclick = loadList;
+  document.getElementById("btnSeed").onclick = seedDefaults;
+  loadList();
+}
+</script>
