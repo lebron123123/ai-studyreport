@@ -749,7 +749,9 @@ function stepProjectInfo(){
     +'<div><label>投资规模（万元，估算）</label><input id="f_scale" type="text" placeholder="例：5240" value="'+project.scale+'"></div>'
     +'<label>项目概况（建筑面积、现状、改造/建设内容、周边情况等，越详细越好）</label>'
     +'<textarea id="f_desc" placeholder="例：项目总建筑面积21300㎡，含集中商业与街区商业，已运营11年，现出租率下滑至70%，拟通过系统性改造升级重构业态与动线...">'+project.desc+'</textarea>'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px;"><b style="font-size:14px;">参考资料库（可选）</b><button type="button" class="btn ghost" id="kbAdd" style="padding:5px 14px;font-size:12px;">＋ 添加资料</button></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px;"><b style="font-size:14px;">参考资料库（可选）</b><span style="display:flex;gap:8px;"><button type="button" class="btn ghost" id="kbUpload" style="padding:5px 14px;font-size:12px;">上传文件</button><button type="button" class="btn ghost" id="kbAdd" style="padding:5px 14px;font-size:12px;">＋ 粘贴文本</button></span></div>'
+    +'<input type="file" id="kbFile" accept=".pdf,.docx,.txt,.md" multiple style="display:none;">'
+    +'<div id="kbParsing" style="display:none; font-size:12px; color:var(--bp-navy); margin-top:8px;">正在解析文件…</div>'
     +'<div class="step-desc" style="margin:6px 0 0;">粘贴政策文件、区域市场数据、项目批复等真实资料。生成时系统按章节自动匹配相关资料注入AI，并要求引用处标注来源——让市场分析、必要性论证有真实依据。</div>'
     +'<div id="kbList">'
     + kbEntries.map((e,i)=>'<div class="kb-entry" style="border:1px solid var(--line); padding:10px 12px; margin-top:10px; background:#fff;">'
@@ -1110,6 +1112,52 @@ function buildCalcDigest(){
 }
 
 
+
+async function kbHandleFiles(files){
+  const parsing = document.getElementById("kbParsing");
+  if(parsing) parsing.style.display = "block";
+  readKbFromDom();
+  for(const f of files){
+    try{
+      const name = f.name.replace(/\.[^.]+$/, "");
+      const ext = (f.name.split(".").pop()||"").toLowerCase();
+      let text = "";
+      if(ext==="txt" || ext==="md"){
+        text = await f.text();
+      }else if(ext==="docx"){
+        if(!window.mammoth) await loadScript("mammoth.min.js");
+        const buf = await f.arrayBuffer();
+        const r = await window.mammoth.extractRawText({arrayBuffer: buf});
+        text = r.value || "";
+      }else if(ext==="pdf"){
+        if(!window.pdfjsLib) await loadScript("pdf.min.js");
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "pdf.worker.min.js";
+        const buf = await f.arrayBuffer();
+        const pdf = await window.pdfjsLib.getDocument({data: buf}).promise;
+        const parts = [];
+        for(let p=1; p<=pdf.numPages; p++){
+          const page = await pdf.getPage(p);
+          const tc = await page.getTextContent();
+          parts.push(tc.items.map(it=>it.str).join(""));
+        }
+        text = parts.join("\n");
+      }else{
+        alert("暂不支持 ."+ext+" 格式，请使用 PDF / docx / txt");
+        continue;
+      }
+      text = text.replace(/\n{3,}/g, "\n\n").trim();
+      if(!text){ alert("《"+f.name+"》未能提取到文字（可能是扫描件PDF，无文字层）"); continue; }
+      const MAX = 20000;
+      if(text.length > MAX) text = text.slice(0, MAX) + "\n…（超长已截断，保留前2万字）";
+      kbEntries.push({title: name, content: text});
+    }catch(e){
+      alert("解析《"+f.name+"》失败："+e.message);
+    }
+  }
+  if(parsing) parsing.style.display = "none";
+  renderSheet();
+}
+
 // 按章节标题匹配最相关的参考资料（关键词2元组打分，无需向量库）
 function kbRetrieve(chapterName, secTitle){
   if(!kbEntries.length) return "";
@@ -1336,6 +1384,8 @@ function bindEvents(){
     card.onclick = ()=>{ loadDomain(card.dataset.key); renderSheet(); };
   });
   if(s("kbAdd")) s("kbAdd").onclick = ()=>{ readKbFromDom(); kbEntries.push({title:"",content:""}); renderSheet(); };
+  if(s("kbUpload")) s("kbUpload").onclick = ()=>{ s("kbFile").click(); };
+  if(s("kbFile")) s("kbFile").onchange = e=>{ if(e.target.files.length) kbHandleFiles([...e.target.files]); };
   document.querySelectorAll(".kb-del").forEach(b=>{ b.onclick = ()=>{ readKbFromDom(); kbEntries.splice(+b.dataset.ki,1); renderSheet(); }; });
   if(s("toStep1")) s("toStep1").onclick = ()=>{ if(!domainKey) return; currentStep=1; renderTOC(); renderSheet(); };
   if(s("backStep0")) s("backStep0").onclick = ()=>{ currentStep=0; renderTOC(); renderSheet(); };
