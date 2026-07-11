@@ -1071,7 +1071,7 @@ function buildCalcDigest(){
   return digest;
 }
 
-async function generateSection(c, s){
+async function generateSection(c, s, onChunk){
   const digest = s.numeric ? buildCalcDigest() : null;
   let tableHint = "";
   if(s.numeric && digest){
@@ -1081,12 +1081,42 @@ async function generateSection(c, s){
   }
   const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n3. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n4. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+tableHint;
   const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。';
+
   const resp = await fetch("/api/generate", {
     method:"POST",
     headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
-    body: JSON.stringify({ system: sys, messages:[{role:"user", content:user}] })
+    body: JSON.stringify({ system: sys, messages:[{role:"user", content:user}], stream: !!onChunk })
   });
   if(resp.status===401){ clearAuth(); showLoginModal("登录已过期，请重新登录后继续生成"); throw new Error("登录已过期"); }
+
+  // 流式模式
+  if(onChunk && resp.headers.get("content-type")?.includes("text/event-stream")){
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let full = "", buf = "", usage = null;
+    while(true){
+      const {done, value} = await reader.read();
+      if(done) break;
+      buf += decoder.decode(value, {stream:true});
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for(const line of lines){
+        if(!line.startsWith("data: ")) continue;
+        const payload = line.slice(6).trim();
+        if(payload === "[DONE]") continue;
+        try{
+          const j = JSON.parse(payload);
+          const delta = j.choices && j.choices[0] && j.choices[0].delta;
+          if(delta && delta.content){ full += delta.content; onChunk(full); }
+          if(j.usage) usage = j.usage;
+        }catch(e){}
+      }
+    }
+    if(usage){ genUsage.inTok += usage.prompt_tokens||0; genUsage.outTok += usage.completion_tokens||0; }
+    return full || "（未返回内容）";
+  }
+
+  // 非流式回退
   const data = await resp.json();
   if(data.error) throw new Error(data.error);
   if(data.usage){ genUsage.inTok += data.usage.prompt_tokens||0; genUsage.outTok += data.usage.completion_tokens||0; }
@@ -1293,7 +1323,10 @@ function bindEvents(){
       secEl.classList.add("gen");
       btn.disabled = true; btn.textContent = "重试中…";
       try{
-        const text = await generateSection(info.chapter, info.section);
+        secEl.querySelector(".body").innerHTML = "";
+        const text = await generateSection(info.chapter, info.section, (partial)=>{
+          secEl.querySelector(".body").textContent = partial;
+        });
         info.section.content = text;
         secEl.classList.remove("pending"); secEl.classList.remove("gen");
         secEl.querySelector(".body").innerHTML = renderContent(text);
