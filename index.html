@@ -591,9 +591,31 @@ function draftBarHtml(d){
     +'<button class="btn ghost" id="draftDiscard" style="padding:6px 16px; font-size:12px;">丢弃</button></span></div>';
 }
 
+
+let dynamicOutlines = null; // 从数据库加载的大纲（优先）或内置的
+async function fetchOutlines(){
+  if(dynamicOutlines) return dynamicOutlines;
+  try{
+    const r = await fetch("/api/outlines", {headers: authHeaders()});
+    const d = await r.json();
+    if(d.ok && d.list && d.list.length){
+      const map = {};
+      for(const item of d.list){
+        const det = await fetch("/api/outlines?key="+encodeURIComponent(item.key), {headers: authHeaders()});
+        const dd = await det.json();
+        if(dd.ok) map[item.key] = {label:dd.outline.label, chapters:dd.outline.chapters};
+      }
+      if(Object.keys(map).length){ dynamicOutlines = map; return map; }
+    }
+  }catch(e){}
+  dynamicOutlines = window.OUTLINES || {};
+  return dynamicOutlines;
+}
+function getOutlines(){ return dynamicOutlines || window.OUTLINES || {}; }
+
 function loadDomain(key){
   domainKey = key;
-  const src = window.OUTLINES[key];
+  const src = getOutlines()[key];
   project.industry = src.label;
   chapters = src.chapters.map(ch=>({
     cn: ch.cn, name: ch.name, checked: true,
@@ -685,14 +707,21 @@ function domainIcon(k){
 }
 
 function stepDomain(){
-  const keys = Object.keys(window.OUTLINES);
+  const outlines = getOutlines();
+  if(!outlines || !Object.keys(outlines).length){
+    return '<div class="doc-eyebrow">STEP 01</div><h1 class="doc-title">加载领域大纲中…</h1><div class="step-desc">正在从云端读取大纲数据…</div>';
+  }
+  return stepDomainInner(outlines);
+}
+function stepDomainInner(outlines){
+  const keys = Object.keys(outlines);
   return '<div class="doc-eyebrow">STEP 01 · 选择报告领域</div>'
     +'<h1 class="doc-title">选择要生成的可研报告类型</h1>'
     +'<div class="step-desc">不同领域使用不同的专属章节大纲。以下大纲结构参照真实可研报告提炼，每章包含多个子标题，逐层生成，篇幅与深度贴近正式报告。</div>'
     + heroDraftHtml()
     +'<div class="domain-grid">'
     + keys.map(k=>{
-        const d = window.OUTLINES[k];
+        const d = outlines[k];
         const subCount = d.chapters.reduce((n,c)=>n+c.sections.length,0);
         return '<div class="domain-card '+(domainKey===k?'sel':'')+'" data-key="'+k+'">'
           + domainIcon(k)
@@ -1495,8 +1524,10 @@ async function openProject(id){
   }catch(e){ alert("打开失败，请重试"); }
 }
 
-function startApp(){
+async function startApp(){
   mountUserBar();
+  renderTOC(); renderSheet();
+  await fetchOutlines();
   renderTOC(); renderSheet();
   const d = loadDraft();
   if(d && d.ts && !currentProjectId && (d.project&&d.project.name || (d.chapters||[]).some(c=>c.sections.some(s=>s.content)))){
