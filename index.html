@@ -529,6 +529,7 @@
 
 <script src="outlines.js"></script>
 <script src="nrcalc.js"></script>
+<script src="rentcalc.js"></script>
 <script>
 const STEPS = ["选择领域","项目信息","财务测算","章节范围","逐章生成","复核与签发"];
 let currentStep = 0;
@@ -537,6 +538,12 @@ let chapters = [];
 let signed = false;
 let genUsage = {inTok:0, outTok:0};
 let kbEntries = [];   // 参考资料库 [{title, content}]
+let appMode = null;          // null=首页 | 'report'=可研生成 | 'calc'=独立测算
+let calcType = null;         // 'gaibao' | 'rent' | 'sale'
+let scStep = 0;              // 测算模块步骤 0选类型 1参数 2结果
+let scResult = null;         // 测算结果
+let scParams = null;
+let aiChat = [];             // AI问答历史 [{role, content}]
 const PRICE_IN_PER_M = 2, PRICE_OUT_PER_M = 8;   // 元/百万tokens，按DeepSeek价目表估算，可调整
 const EST_IN_PER_SEC = 1200, EST_OUT_PER_SEC = 700; // 每子节预估token
 let calcResult = null;   // 财务测算结果（null表示跳过测算，走"待填"模式）
@@ -563,6 +570,7 @@ function loadDraft(){
 }
 function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
 function restoreDraft(d){
+  appMode = "report";
   domainKey = d.domainKey; signed = !!d.signed; docNo = d.docNo||null;
   Object.assign(project, d.project||{});
   calcParams = d.calcParams||null;
@@ -629,6 +637,7 @@ function loadDomain(key){
 function mountAnchorNav(){
   const old = document.getElementById("anchorNav");
   if(old) old.remove();
+  if(appMode!=="report") return;
   if(currentStep!==4 && currentStep!==5) return;
   const active = chapters.filter(c=>c.checked);
   if(!active.length) return;
@@ -648,14 +657,31 @@ function mountAnchorNav(){
 }
 
 function renderTOC(){
-  document.getElementById("tocList").innerHTML = STEPS.map((s,i)=>{
-    const cls = i===currentStep?"active":(i<currentStep?"done":"");
-    return '<div class="toc-item '+cls+'"><span class="num">'+String(i+1).padStart(2,'0')+'</span><span>'+s+'</span></div>';
-  }).join("");
+  const el = document.getElementById("tocList");
+  let items = "";
+  if(appMode!==null){
+    items += '<div class="toc-item" style="cursor:pointer;" onclick="goHome()"><span class="num">⌂</span><span>返回首页</span></div>';
+  }
+  if(appMode==="calc"){
+    const CS = ["选择类型","参数录入","测算结果"];
+    items += CS.map((s,i)=>{
+      const cls = i===scStep?"active":(i<scStep?"done":"");
+      return '<div class="toc-item '+cls+'"><span class="num">'+String(i+1).padStart(2,'0')+'</span><span>'+s+'</span></div>';
+    }).join("");
+  }else if(appMode==="report"){
+    items += STEPS.map((s,i)=>{
+      const cls = i===currentStep?"active":(i<currentStep?"done":"");
+      return '<div class="toc-item '+cls+'"><span class="num">'+String(i+1).padStart(2,'0')+'</span><span>'+s+'</span></div>';
+    }).join("");
+  }
+  el.innerHTML = items;
 }
+function goHome(){ appMode=null; renderTOC(); renderSheet(); }
 
 function renderSheet(){
   const sheet = document.getElementById("sheet");
+  if(appMode===null){ sheet.innerHTML = stepHome(); bindEvents(); bindCalcEvents(); mountAnchorNav(); return; }
+  if(appMode==="calc"){ sheet.innerHTML = renderCalcModule(); bindEvents(); bindCalcEvents(); mountAnchorNav(); return; }
   if(currentStep===0) sheet.innerHTML = stepDomain();
   if(currentStep===1) sheet.innerHTML = stepProjectInfo();
   if(currentStep===2) sheet.innerHTML = stepCalc();
@@ -706,6 +732,171 @@ function domainIcon(k){
     return `<svg class="dm-ico" viewBox="0 0 40 40" aria-hidden="true"><path d="M6 34 H34 M10 34 V12 H22 V34 M26 34 V18 H34 V34 M13 16 h6 M13 21 h6 M13 26 h6 M29 22 h2 M29 27 h2" fill="none"/></svg>`;
   }
   return `<svg class="dm-ico" viewBox="0 0 40 40" aria-hidden="true"><path d="M6 34 H34 M9 34 V14 H27 V34 M13 19 h10 M13 24 h10 M13 29 h10" fill="none"/><path class="dm-arrow" d="M30 8 a8 8 0 1 1 -8 8" fill="none"/><path class="dm-arrow-h" d="M30 4 L30 12 L23 8 Z"/></svg>`;
+}
+
+
+/* ================= 首页：两大功能分类 ================= */
+function stepHome(){
+  return '<div class="doc-eyebrow">HOME · 功能选择</div>'
+    +'<h1 class="doc-title">可研报告工坊</h1>'
+    +'<div class="step-desc">选择要使用的功能模块。</div>'
+    +'<div class="domain-grid">'
+    +'<div class="domain-card" id="homeCalc"><div class="dn">财务测算</div><div class="dd">独立财务测算工具：非居改保 / 出租类 / 出售类三种模型，逐年明细、IRR/NPV，并可与AI就测算结果智能问答。</div><div class="dc">CALCULATOR · AI Q&A</div></div>'
+    +'<div class="domain-card" id="homeReport"><div class="dn">可研生成</div><div class="dd">完整可行性研究报告生成：选择领域→录入信息→财务测算→逐章AI撰写→人工复核签发→导出标准Word。</div><div class="dc">FEASIBILITY REPORT</div></div>'
+    +'</div>';
+}
+
+/* ================= 独立测算模块 ================= */
+function renderCalcModule(){
+  if(scStep===0) return scStepType();
+  if(scStep===1) return scStepForm();
+  return scStepResult();
+}
+function scStepType(){
+  const card=(k,n,d,dis)=>'<div class="domain-card '+(calcType===k?'sel':'')+(dis?'" style="opacity:.55;':'"')+' data-sct="'+k+'"><div class="dn">'+n+'</div><div class="dd">'+d+'</div>'+(dis?'<div class="dc" style="color:var(--seal-red);">建设中 · 下一轮上线</div>':'')+'</div>';
+  return '<div class="doc-eyebrow">财务测算 · STEP 01</div><h1 class="doc-title">选择测算类型</h1>'
+    +'<div class="step-desc">三种模型与内部Streamlit测算器口径完全一致（已逐位交叉验证）。</div>'
+    +'<div class="domain-grid">'
+    + card("gaibao","非居改保类","收楼成本+装修摊销+运营+贷款财务费用，增值税价税分离、五年弥补亏损、年中折现IRR/NPV。")
+    + card("rent","出租类（公租房/保租房）","住宅+车位+其他收入，八项经营成本（含装修重置20/10年规则）、六税种、还本付息迭代、利息保障倍数。")
+    + card("sale","出售类（配保房等）","配保房销售+商业出租净收益现值+地价抵减增值税模型。",true)
+    +'</div>'
+    +'<div class="actions"><button class="btn" id="scNext1" '+(calcType&&calcType!=="sale"?'':'disabled')+'>下一步：录入参数 →</button></div>';
+}
+function scStepForm(){
+  const inner = calcType==="gaibao"? calcFormHtml() : rentFormHtml();
+  return '<div class="doc-eyebrow">财务测算 · STEP 02 · '+(calcType==="gaibao"?"非居改保":"出租类")+'</div>'
+    +'<h1 class="doc-title">录入测算参数</h1>'+inner
+    +'<div class="actions"><button class="btn ghost" id="scBack0">← 上一步</button><button class="btn" id="scRun">执行测算 →</button></div>';
+}
+function rentFormHtml(){
+  const v = scParams||{}; const g=(k,d)=>v[k]!==undefined?v[k]:d;
+  const F=(label,id,val,step)=>'<div><label>'+label+'</label><input id="'+id+'" type="number" step="'+(step||"any")+'" value="'+val+'"></div>';
+  return '<div class="grid2">'
+    +F("建设期起始年","r_buildStart",g("buildStart",2026))+F("建设期年数","r_buildYears",g("buildYears",1))
+    +F("运营期年数","r_operateYears",g("operateYears",20))+F("运营首年月数","r_firstMonths",g("firstMonths",12))
+    +F("住宅面积（㎡）","r_area",g("area",20000))+F("起始租金（元/㎡/月）","r_rent",g("rent",45))
+    +F("租金递增跨度（年）","r_rentSpan",g("rentSpan",3))+F("租金递增率（%）","r_rentRate",g("rentRate",5))
+    +F("首年出租率","r_rampOcc",g("rampOcc",0.85))+F("稳定期出租率","r_stableOcc",g("stableOcc",0.95))
+    +F("车位个数","r_parkCount",g("parkCount",200))+F("车位月租金（元/个）","r_parkPrice",g("parkPrice",300))
+    +F("车位收入系数","r_parkRatio",g("parkRatio",0.5))+F("其他收入（万元，首年一次性）","r_otherTotal",g("otherTotal",100))
+    +F("总建筑面积（㎡）","r_totalBuildArea",g("totalBuildArea",25000))+F("管理系数","r_manageCoeff",g("manageCoeff",3))
+    +F("住宅装修造价（万元）","r_decorationCost",g("decorationCost",800))
+    +'<div><label>房源类型</label><select id="r_houseType"><option '+(g("houseType","公租房")==="公租房"?"selected":"")+'>公租房</option><option '+(g("houseType","公租房")==="保租房"?"selected":"")+'>保租房</option></select></div>'
+    +F("总投资（万元，折旧基数）","r_totalInvestment",g("totalInvestment",15000))+F("用地面积（㎡）","r_landArea",g("landArea",8000))
+    +F("建安工程费（万元）","r_constructionCost",g("constructionCost",6000))+F("总借款额（万元）","r_loanAmount",g("loanAmount",9000))
+    +F("贷款年利率（%）","r_loanRate",g("loanRate",3))+F("首次还本比例（%）","r_firstRepayRatio",g("firstRepayRatio",3))
+    +F("还本递增率（%）","r_repayIncreaseRate",g("repayIncreaseRate",4.5))+F("借款总年数","r_loanTotalYears",g("loanTotalYears",20))
+    +F("建设投资（万元，首年计入现金流出）","r_invest",g("invest",15000))+F("折现率（%）","r_discountPct",g("discountPct",3.5))
+    +'</div>';
+}
+function readRentForm(){
+  const n=id=>parseFloat(document.getElementById(id).value)||0;
+  return { buildStart:n("r_buildStart"), buildYears:n("r_buildYears"), operateYears:n("r_operateYears"), firstMonths:n("r_firstMonths"),
+    area:n("r_area"), rent:n("r_rent"), rentSpan:n("r_rentSpan"), rentRate:n("r_rentRate"), rampOcc:n("r_rampOcc"), stableOcc:n("r_stableOcc"),
+    parkCount:n("r_parkCount"), parkPrice:n("r_parkPrice"), parkRatio:n("r_parkRatio"), parkRampOcc:n("r_rampOcc"), parkStableOcc:n("r_stableOcc"),
+    otherTotal:n("r_otherTotal"), totalBuildArea:n("r_totalBuildArea"), manageCoeff:n("r_manageCoeff"),
+    decorationCost:n("r_decorationCost"), houseType:document.getElementById("r_houseType").value,
+    totalInvestment:n("r_totalInvestment"), landArea:n("r_landArea"), constructionCost:n("r_constructionCost"),
+    loanAmount:n("r_loanAmount"), loanRate:n("r_loanRate"), firstRepayRatio:n("r_firstRepayRatio"),
+    repayIncreaseRate:n("r_repayIncreaseRate"), loanTotalYears:n("r_loanTotalYears"),
+    invest:n("r_invest"), discountPct:n("r_discountPct") };
+}
+function scStepResult(){
+  if(!scResult) return '<div class="step-desc">尚未测算</div>';
+  const s=scResult.summary;
+  const fmt=x=>x===null?"—":Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
+  const tile=(l,v,hl)=>'<div class="metric'+(hl?' hl':'')+'"><div class="mv">'+v+'</div><div class="ml">'+l+'</div></div>';
+  let extra = calcType==="rent"? tile("利息保障倍数", s.icr) : "";
+  // 分年简表
+  let rows='<table class="rpt"><tr><th>年份</th><th>总收入</th><th>总成本</th><th>税金</th><th>净利润</th><th>净现金流</th><th>累计净现金流</th></tr>';
+  const R=scResult;
+  const inc = y=> calcType==="rent"? R.income[y].total : R.income[y].rent;
+  R.allYears.forEach(y=>{ rows+='<tr><td>'+y+'</td><td>'+fmt(inc(y))+'</td><td>'+fmt(calcType==="rent"?R.totalCost[y].total:R.cost[y].total)+'</td><td>'+fmt(R.tax[y].total)+'</td><td>'+fmt(calcType==="rent"?R.profit[y].net:R.profit[y].netProfit)+'</td><td>'+fmt(R.cf[y].net)+'</td><td>'+fmt(R.cf[y].cumNet)+'</td></tr>'; });
+  rows+='</table>';
+  return '<div class="doc-eyebrow">财务测算 · STEP 03 · 结果</div>'
+    +'<h1 class="doc-title">测算结果</h1>'
+    +'<div class="metric-grid">'
+    + tile("全投资IRR", s.irr===null?"—":s.irr+" %", true)
+    + tile("累计净现值（万元）", fmt(s.totalNpv))
+    + tile("净利润合计（万元）", fmt(s.totalNetProfit))
+    + tile("全周期总收入（万元）", fmt(s.totalIncome))
+    + tile("总成本费用（万元）", fmt(s.totalCost))
+    + tile("现金流回正", s.payback? s.payback.year+"年" : "未回正")
+    + extra
+    +'</div>'
+    +'<div class="cf-chart" style="margin-top:16px;"><div class="cf-head"><span>分年明细（万元）</span></div><div style="max-height:320px;overflow:auto;">'+rows+'</div></div>'
+    + aiChatHtml()
+    +'<div class="actions"><button class="btn ghost" id="scBack1">← 修改参数</button></div>';
+}
+
+/* ================= AI 智能问答 ================= */
+function aiChatHtml(){
+  let msgs = aiChat.map(m=>'<div style="margin:8px 0; padding:10px 14px; border-radius:2px; font-size:13px; line-height:1.75; '+(m.role==="user"?'background:#EDF1F5; border-left:3px solid var(--bp-navy);':'background:#FFF; border:1px solid var(--line);')+'">'+(m.role==="user"?"<b>你：</b>":"<b>AI：</b>")+escapeHtml(m.content).replace(/\n/g,"<br>")+'</div>').join("");
+  return '<div class="cf-chart" style="margin-top:16px;">'
+    +'<div class="cf-head"><span>AI 智能问答（基于本次测算结果）</span></div>'
+    +'<div id="aiMsgs">'+msgs+'</div>'
+    +'<div style="display:flex; gap:8px; margin-top:10px;">'
+    +'<input id="aiQ" type="text" placeholder="例如：为什么IRR这么低？装修重置费是怎么摊的？" style="flex:1;">'
+    +'<button class="btn" id="aiAsk" style="flex-shrink:0;">提问</button></div></div>';
+}
+function buildScDigest(){
+  if(!scResult) return "";
+  const s=scResult.summary, R=scResult;
+  const fmt=x=>x===null?"—":Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
+  let lines = "【测算类型】"+(calcType==="rent"?"出租类(公租房/保租房)":"非居改保类")+"\n";
+  lines += "【输入参数】"+JSON.stringify(scParams)+"\n";
+  lines += "【汇总】总收入"+fmt(s.totalIncome)+"万｜总成本"+fmt(s.totalCost)+"万｜税金"+fmt(s.totalTax)+"万｜净利润"+fmt(s.totalNetProfit)+"万｜NPV "+fmt(s.totalNpv)+"万｜IRR "+(s.irr===null?"—":s.irr+"%")+(s.icr!==undefined?"｜利息保障倍数"+s.icr:"")+"\n";
+  lines += "【分年净现金流】"+R.allYears.map(y=>y+":"+fmt(R.cf[y].net)).join("，")+"\n";
+  if(calcType==="rent"){
+    lines += "【核心公式】管理费(住房)=面积×出租率×12×1.92×管理系数/1e4；管理费(车位)=车位收入×0.4；保险=总建面×0.3/1e4；维修=住宅租金收入×2%；维修基金=面积×出租率×月×0.25/1e4；空置物业费=面积×(1-出租率)×月×3.9/1e4；装修重置=装修造价×70%按公租房20年/保租房10年到期后10年分摊；折旧=总投资×80%/50年；增值税=住宅租金×1.5%/1.05+车位×9%/1.09；房产税前3年免征；现金流出不含折旧与财务费用；NPV年中折现。";
+  }
+  return lines;
+}
+async function askAI(){
+  const inp = document.getElementById("aiQ");
+  const q = inp.value.trim();
+  if(!q) return;
+  const btn = document.getElementById("aiAsk");
+  btn.disabled = true; btn.textContent = "思考中…";
+  aiChat.push({role:"user", content:q});
+  document.getElementById("aiMsgs").innerHTML = aiChat.map(m=>'<div style="margin:8px 0; padding:10px 14px; font-size:13px; line-height:1.75; '+(m.role==="user"?'background:#EDF1F5; border-left:3px solid var(--bp-navy);':'background:#FFF; border:1px solid var(--line);')+'">'+(m.role==="user"?"<b>你：</b>":"<b>AI：</b>")+escapeHtml(m.content).replace(/\n/g,"<br>")+'</div>').join("");
+  inp.value = "";
+  try{
+    const sys = "你是保障性住房项目财务测算专家。用户完成了一次财务测算，以下是完整结果与口径。请基于这些真实数据回答用户问题：数字直接引用不得改动；涉及公式时解释计算逻辑；回答简明、专业、分点，200-400字。\n\n"+buildScDigest();
+    const msgs = aiChat.slice(-6).map(m=>({role:m.role==="user"?"user":"assistant", content:m.content}));
+    const resp = await fetch("/api/generate",{method:"POST",
+      headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
+      body:JSON.stringify({system:sys, messages:msgs})});
+    const data = await resp.json();
+    if(data.error) throw new Error(data.error);
+    const text = (data.content||[]).map(b=>b.text||"").join("").trim();
+    aiChat.push({role:"assistant", content:text||"（未返回内容）"});
+  }catch(e){ aiChat.push({role:"assistant", content:"回答失败："+e.message}); }
+  renderSheet();
+}
+function bindCalcEvents(){
+  const s=id=>document.getElementById(id);
+  document.querySelectorAll("[data-sct]").forEach(c=>{ c.onclick=()=>{ if(c.dataset.sct==="sale") return; calcType=c.dataset.sct; renderSheet(); }; });
+  if(s("scNext1")) s("scNext1").onclick=()=>{ scStep=1; renderTOC(); renderSheet(); };
+  if(s("scBack0")) s("scBack0").onclick=()=>{ scStep=0; renderTOC(); renderSheet(); };
+  if(s("scBack1")) s("scBack1").onclick=()=>{ scStep=1; renderTOC(); renderSheet(); };
+  if(s("scRun")) s("scRun").onclick=()=>{
+    if(calcType==="gaibao"){
+      scParams = readCalcForm();
+      scResult = window.NRCalc.calc(assembleCalcInput(scParams));
+    }else{
+      scParams = readRentForm();
+      const p = scParams;
+      scResult = window.RentCalc.calc(Object.assign({}, p, {investPlan:(function(){const o={};o[p.buildStart]=p.invest;return o;})()}));
+    }
+    aiChat = [];
+    scStep=2; renderTOC(); renderSheet();
+  };
+  if(s("aiAsk")) s("aiAsk").onclick = askAI;
+  if(s("aiQ")) s("aiQ").addEventListener("keydown", e=>{ if(e.key==="Enter") askAI(); });
+  if(s("homeCalc")) s("homeCalc").onclick=()=>{ appMode="calc"; scStep=0; renderTOC(); renderSheet(); };
+  if(s("homeReport")) s("homeReport").onclick=()=>{ appMode="report"; renderTOC(); renderSheet(); };
 }
 
 function stepDomain(){
