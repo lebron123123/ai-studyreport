@@ -1,5 +1,5 @@
 <meta charset="utf-8">
-<style> 
+<style>
   :root{
     /* 蓝图·公文 配色体系 */
     --bp-deep:#132A43;        /* 图纸深蓝（侧栏底） */
@@ -530,6 +530,7 @@
 <script src="outlines.js"></script>
 <script src="nrcalc.js"></script>
 <script src="rentcalc.js"></script>
+<script src="salecalc.js"></script>
 <script>
 const STEPS = ["选择领域","项目信息","财务测算","章节范围","逐章生成","复核与签发"];
 let currentStep = 0;
@@ -759,16 +760,64 @@ function scStepType(){
     +'<div class="domain-grid">'
     + card("gaibao","非居改保类","收楼成本+装修摊销+运营+贷款财务费用，增值税价税分离、五年弥补亏损、年中折现IRR/NPV。")
     + card("rent","出租类（公租房/保租房）","住宅+车位+其他收入，八项经营成本（含装修重置20/10年规则）、六税种、还本付息迭代、利息保障倍数。")
-    + card("sale","出售类（配保房等）","配保房销售+商业出租净收益现值+地价抵减增值税模型。",true)
+    + card("sale","出售类（配保房等）","配保房销售爬坡+商业出租净收益现值+地价抵减增值税+调整所得税，出售类专用现金流与利息保障倍数。")
     +'</div>'
-    +'<div class="actions"><button class="btn" id="scNext1" '+(calcType&&calcType!=="sale"?'':'disabled')+'>下一步：录入参数 →</button></div>';
+    +'<div class="actions"><button class="btn" id="scNext1" '+(calcType?'':'disabled')+'>下一步：录入参数 →</button></div>';
 }
 function scStepForm(){
-  const inner = calcType==="gaibao"? calcFormHtml() : rentFormHtml();
-  return '<div class="doc-eyebrow">财务测算 · STEP 02 · '+(calcType==="gaibao"?"非居改保":"出租类")+'</div>'
+  const inner = calcType==="gaibao"? calcFormHtml() : (calcType==="sale"? saleFormHtml() : rentFormHtml());
+  return '<div class="doc-eyebrow">财务测算 · STEP 02 · '+(calcType==="gaibao"?"非居改保":(calcType==="sale"?"出售类":"出租类"))+'</div>'
     +'<h1 class="doc-title">录入测算参数</h1>'+inner
     +'<div class="actions"><button class="btn ghost" id="scBack0">← 上一步</button><button class="btn" id="scRun">执行测算 →</button></div>';
 }
+
+function saleFormHtml(){
+  const v = scParams||{}; const g=(k,d)=>v[k]!==undefined?v[k]:d;
+  const F=(label,id,val,step)=>'<div><label>'+label+'</label><input id="'+id+'" type="number" step="'+(step||"any")+'" value="'+val+'"></div>';
+  return '<div class="step-desc" style="margin-top:14px;"><b>期限与销售</b></div><div class="grid2">'
+    +F("建设期起始年","s_buildStart",g("buildStart",2026))+F("建设期年数","s_buildYears",g("buildYears",2))
+    +F("运营期年数","s_operateYears",g("operateYears",10))+F("其他收入（万元，运营首年一次性）","s_otherTotal",g("otherTotal",500))
+    +F("配保房销售面积（㎡）","s_saleArea",g("saleArea",56105))+F("可售售价（元/㎡）","s_saleAvgPrice",g("saleAvgPrice",12880))
+    +F("运营第1年销售率","s_rate1",g("rate1",0.5))+F("运营第2年销售率","s_rate2",g("rate2",0.3))
+    +F("运营第3年销售率","s_rate3",g("rate3",0.2))+'<div></div>'
+    +'</div><div class="step-desc" style="margin-top:14px;"><b>商业出租（净收益现值口径）</b></div><div class="grid2">'
+    +F("商业出租面积（㎡）","s_commArea",g("commArea",20000))+F("商业起始租金（元/㎡/月）","s_commRent",g("commRent",120))
+    +F("商业租金递增跨度（年）","s_commRentSpan",g("commRentSpan",3))+F("商业租金递增率（%）","s_commRentRate",g("commRentRate",5))
+    +F("商业首年出租率","s_commRampOcc",g("commRampOcc",0.7))+F("商业稳定期出租率","s_commStableOcc",g("commStableOcc",0.9))
+    +F("商业租金冻结起始年（该年起不再递增）","s_commRentStableStart",g("commRentStableStart",2033))+F("商业租赁月数（每年）","s_leaseMonths",g("leaseMonths",12))
+    +F("商业停车位个数","s_parkCount",g("parkCount",300))+'<div></div>'
+    +'</div><div class="step-desc" style="margin-top:14px;"><b>成本与税费参数</b></div><div class="grid2">'
+    +F("(非配售)土地成本费（万元）","s_landCost",g("landCost",30000))+F("(非配售)建安工程费（万元）","s_constructionCost",g("constructionCost",40000))
+    +F("(非配售)基础设施建设费（万元）","s_infraCost",g("infraCost",5000))+F("(非配售)工程建设其他费用（万元）","s_otherEngCost",g("otherEngCost",3000))
+    +F("(非配售)开发成本费（万元）","s_devCost",g("devCost",8000))+F("(配售)建安工程费（万元）","s_saleConstructionCost",g("saleConstructionCost",28000))
+    +F("(配售)基础设施费（万元）","s_saleInfraCost",g("saleInfraCost",3500))+F("工程进项税（万元）","s_projectInputTax",g("projectInputTax",200))
+    +F("用地面积（㎡）","s_landUseArea",g("landUseArea",25000))+F("划拨土地楼面价（元/㎡，地价抵减用）","s_landFloorPrice",g("landFloorPrice",1000))
+    +F("项目总投资（万元）","s_totalInvestment",g("totalInvestment",90000))+'<div></div>'
+    +'</div><div class="step-desc" style="margin-top:14px;"><b>融资与折现</b></div><div class="grid2">'
+    +F("总借款额（万元，建设期首年借入）","s_loanAmount",g("loanAmount",50000))+F("贷款年利率（%）","s_loanRate",g("loanRate",3))
+    +F("借款总年数","s_loanTotalYears",g("loanTotalYears",12))+F("还款开始年","s_repayStart",g("repayStart",2030))
+    +F("每年还款额（万元）","s_repayAmount",g("repayAmount",10000))+F("还款年数","s_repayYears",g("repayYears",4))
+    +F("折现率（%）","s_discountPct",g("discountPct",3.5))+'<div></div>'
+    +'</div>';
+}
+function readSaleForm(){
+  const n=id=>parseFloat(document.getElementById(id).value)||0;
+  return { buildStart:n("s_buildStart"), buildYears:n("s_buildYears"), operateYears:n("s_operateYears"),
+    otherTotal:n("s_otherTotal"), saleArea:n("s_saleArea"), saleAvgPrice:n("s_saleAvgPrice"),
+    rate1:n("s_rate1"), rate2:n("s_rate2"), rate3:n("s_rate3"),
+    commArea:n("s_commArea"), commRent:n("s_commRent"), commRentSpan:n("s_commRentSpan"), commRentRate:n("s_commRentRate"),
+    commRampOcc:n("s_commRampOcc"), commStableOcc:n("s_commStableOcc"),
+    commRentStableStart:n("s_commRentStableStart"), leaseMonths:n("s_leaseMonths"), parkCount:n("s_parkCount"),
+    landCost:n("s_landCost"), constructionCost:n("s_constructionCost"), infraCost:n("s_infraCost"),
+    otherEngCost:n("s_otherEngCost"), devCost:n("s_devCost"),
+    saleConstructionCost:n("s_saleConstructionCost"), saleInfraCost:n("s_saleInfraCost"),
+    projectInputTax:n("s_projectInputTax"), landUseArea:n("s_landUseArea"), landFloorPrice:n("s_landFloorPrice"),
+    totalInvestment:n("s_totalInvestment"),
+    loanAmount:n("s_loanAmount"), loanRate:n("s_loanRate"), loanTotalYears:n("s_loanTotalYears"),
+    repayStart:n("s_repayStart"), repayAmount:n("s_repayAmount"), repayYears:n("s_repayYears"),
+    discountPct:n("s_discountPct") };
+}
+
 function rentFormHtml(){
   const v = scParams||{}; const g=(k,d)=>v[k]!==undefined?v[k]:d;
   const F=(label,id,val,step)=>'<div><label>'+label+'</label><input id="'+id+'" type="number" step="'+(step||"any")+'" value="'+val+'"></div>';
@@ -807,13 +856,21 @@ function scStepResult(){
   const s=scResult.summary;
   const fmt=x=>x===null?"—":Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
   const tile=(l,v,hl)=>'<div class="metric'+(hl?' hl':'')+'"><div class="mv">'+v+'</div><div class="ml">'+l+'</div></div>';
-  let extra = calcType==="rent"? tile("利息保障倍数", s.icr) : "";
+  let extra = (calcType==="rent"||calcType==="sale")? tile("利息保障倍数", s.icr) : "";
+  if(calcType==="sale") extra += tile("配保房销售收入合计（万元）", fmt(s.totalSaleIncome)) + tile("出租净收益现值合计（万元）", fmt(s.rentalPvTotal));
   // 分年简表
-  let rows='<table class="rpt"><tr><th>年份</th><th>总收入</th><th>总成本</th><th>税金</th><th>净利润</th><th>净现金流</th><th>累计净现金流</th></tr>';
   const R=scResult;
-  const inc = y=> calcType==="rent"? R.income[y].total : R.income[y].rent;
-  R.allYears.forEach(y=>{ rows+='<tr><td>'+y+'</td><td>'+fmt(inc(y))+'</td><td>'+fmt(calcType==="rent"?R.totalCost[y].total:R.cost[y].total)+'</td><td>'+fmt(R.tax[y].total)+'</td><td>'+fmt(calcType==="rent"?R.profit[y].net:R.profit[y].netProfit)+'</td><td>'+fmt(R.cf[y].net)+'</td><td>'+fmt(R.cf[y].cumNet)+'</td></tr>'; });
-  rows+='</table>';
+  let rows;
+  if(calcType==="sale"){
+    rows='<table class="rpt"><tr><th>年份</th><th>现金流入</th><th>其中:销售收入</th><th>商业租金</th><th>现金流出</th><th>其中:调整所得税</th><th>净现金流</th><th>累计净现金流</th></tr>';
+    R.allYears.forEach(y=>{ rows+='<tr><td>'+y+'</td><td>'+fmt(R.cf[y].inflow)+'</td><td>'+fmt(R.income[y].sale)+'</td><td>'+fmt(R.rental[y]?R.rental[y].income:0)+'</td><td>'+fmt(R.cf[y].outflow)+'</td><td>'+fmt(R.cf[y].adjTax)+'</td><td>'+fmt(R.cf[y].net)+'</td><td>'+fmt(R.cf[y].cumNet)+'</td></tr>'; });
+    rows+='</table>';
+  }else{
+    rows='<table class="rpt"><tr><th>年份</th><th>总收入</th><th>总成本</th><th>税金</th><th>净利润</th><th>净现金流</th><th>累计净现金流</th></tr>';
+    const inc = y=> calcType==="rent"? R.income[y].total : R.income[y].rent;
+    R.allYears.forEach(y=>{ rows+='<tr><td>'+y+'</td><td>'+fmt(inc(y))+'</td><td>'+fmt(calcType==="rent"?R.totalCost[y].total:R.cost[y].total)+'</td><td>'+fmt(R.tax[y].total)+'</td><td>'+fmt(calcType==="rent"?R.profit[y].net:R.profit[y].netProfit)+'</td><td>'+fmt(R.cf[y].net)+'</td><td>'+fmt(R.cf[y].cumNet)+'</td></tr>'; });
+    rows+='</table>';
+  }
   return '<div class="doc-eyebrow">财务测算 · STEP 03 · 结果</div>'
     +'<h1 class="doc-title">测算结果</h1>'
     +'<div class="metric-grid">'
@@ -844,11 +901,13 @@ function buildScDigest(){
   if(!scResult) return "";
   const s=scResult.summary, R=scResult;
   const fmt=x=>x===null?"—":Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
-  let lines = "【测算类型】"+(calcType==="rent"?"出租类(公租房/保租房)":"非居改保类")+"\n";
+  let lines = "【测算类型】"+(calcType==="rent"?"出租类(公租房/保租房)":(calcType==="sale"?"出售类(配保房/可售型人才房)":"非居改保类"))+"\n";
   lines += "【输入参数】"+JSON.stringify(scParams)+"\n";
-  lines += "【汇总】总收入"+fmt(s.totalIncome)+"万｜总成本"+fmt(s.totalCost)+"万｜税金"+fmt(s.totalTax)+"万｜净利润"+fmt(s.totalNetProfit)+"万｜NPV "+fmt(s.totalNpv)+"万｜IRR "+(s.irr===null?"—":s.irr+"%")+(s.icr!==undefined?"｜利息保障倍数"+s.icr:"")+"\n";
+  lines += "【汇总】总收入"+fmt(s.totalIncome)+"万｜总成本"+fmt(s.totalCost)+"万"+(s.totalTax!==undefined?"｜税金"+fmt(s.totalTax)+"万":"")+"｜净利润"+fmt(s.totalNetProfit)+"万｜NPV "+fmt(s.totalNpv)+"万｜IRR "+(s.irr===null?"—":s.irr+"%")+(s.icr!==undefined?"｜利息保障倍数"+s.icr:"")+(s.totalSaleIncome!==undefined?"｜配保房销售收入合计"+fmt(s.totalSaleIncome)+"万｜出租净收益现值合计"+fmt(s.rentalPvTotal)+"万":"")+"\n";
   lines += "【分年净现金流】"+R.allYears.map(y=>y+":"+fmt(R.cf[y].net)).join("，")+"\n";
-  if(calcType==="rent"){
+  if(calcType==="sale"){
+    lines += "【核心公式】配保房销售收入=销售面积×售价×当年销售率/1e4；总收入=配保房销售+出租净收益现值(全周期折现合计,计入运营首年)+其他收入；出租净收入=商业租金收入-出租营运成本(房产税1=租金×12%/1.09、房产税2=(土地+建安+基础设施+工程其他+建安×2%×商业面积占比)×70%×1.2%×(1-出租率)、管理费=租金×8%、停车管理=车位×80×12、维修金=面积×月×0.25、维修=租金×2%、空置服务=面积×(1-出租率)×8×12、保险=面积×1.86、土地使用税按商业面积占比)-出租经营税金(销项=租金×9%/1.09,进项按全周期合计逐年抵扣,增值税附加12%,印花税0.05%)，按3.5%逐年折现；累计开发成本(销售部分)=总投资-建设期财务费用×销售面积占比-销售收入×1.5%,按销售率分摊；折旧摊销部分=(土地+非配售开发成本-建设期财务费用×商业占比)×0.8,一次性计入首年(现金流用/50摊销版)；销售增值税=max(累计销项-累计进项-已缴,0),销项含地价抵减(销售面积×楼面价×销售率)；调整所得税=max((现金流入-回收余值-开发成本销售-摊销/50-销售费税-出租成本税)×25%,0)；现金流出=开发成本投资+销售费用+销售税金+出租税金+出租成本+调整所得税；回收固定资产余值=(土地+开发成本-建设期财务费用×商业占比)×20%计入运营首年流入；NPV从首个非零现金流年按0期折现；利息保障倍数=(净利润+经营期财务费用+所得税+折旧摊销部分-0.8×其他收入)/(建设期+经营期财务费用)。";
+  }else if(calcType==="rent"){
     lines += "【核心公式】管理费(住房)=面积×出租率×12×1.92×管理系数/1e4；管理费(车位)=车位收入×0.4；保险=总建面×0.3/1e4；维修=住宅租金收入×2%；维修基金=面积×出租率×月×0.25/1e4；空置物业费=面积×(1-出租率)×月×3.9/1e4；装修重置=装修造价×70%按公租房20年/保租房10年到期后10年分摊；折旧=总投资×80%/50年；增值税=住宅租金×1.5%/1.05+车位×9%/1.09；房产税前3年免征；现金流出不含折旧与财务费用；NPV年中折现。";
   }
   return lines;
@@ -877,7 +936,7 @@ async function askAI(){
 }
 function bindCalcEvents(){
   const s=id=>document.getElementById(id);
-  document.querySelectorAll("[data-sct]").forEach(c=>{ c.onclick=()=>{ if(c.dataset.sct==="sale") return; calcType=c.dataset.sct; renderSheet(); }; });
+  document.querySelectorAll("[data-sct]").forEach(c=>{ c.onclick=()=>{ calcType=c.dataset.sct; renderSheet(); }; });
   if(s("scNext1")) s("scNext1").onclick=()=>{ scStep=1; renderTOC(); renderSheet(); };
   if(s("scBack0")) s("scBack0").onclick=()=>{ scStep=0; renderTOC(); renderSheet(); };
   if(s("scBack1")) s("scBack1").onclick=()=>{ scStep=1; renderTOC(); renderSheet(); };
@@ -885,6 +944,13 @@ function bindCalcEvents(){
     if(calcType==="gaibao"){
       scParams = readCalcForm();
       scResult = window.NRCalc.calc(assembleCalcInput(scParams));
+    }else if(calcType==="sale"){
+      scParams = readSaleForm();
+      const p = scParams;
+      const opStart = p.buildStart + p.buildYears;
+      const ramp = {}; if(p.rate1) ramp[opStart]=p.rate1; if(p.rate2) ramp[opStart+1]=p.rate2; if(p.rate3) ramp[opStart+2]=p.rate3;
+      const repay = {}; for(let i=0;i<p.repayYears;i++) repay[p.repayStart+i]=p.repayAmount;
+      scResult = window.SaleCalc.calc(Object.assign({}, p, {saleRamp:ramp, customRepay:repay}));
     }else{
       scParams = readRentForm();
       const p = scParams;
