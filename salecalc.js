@@ -1,5 +1,31 @@
 // 出售类(配保房/可售型人才房等)财务测算引擎 —— 1:1 翻译自 calculator3.py
 window.SaleCalc = (function(){
+const SALE_DEFAULTS = {
+  saleFeeRate: 0.015,     // 销售费用率
+  vatSale: 0.09,          // 销售/商业租金增值税率
+  vatIn6: 0.06,           // 进项税6%档
+  surcharge: 0.12,        // 增值税附加率
+  mgCommRate: 0.08,       // 商业管理费率
+  parkMgUnit: 80,         // 停车管理费 元/位/月
+  fundPerSqm: 0.25,       // 维修金 元/㎡/月
+  repairRate: 0.02,       // 维修费率
+  vacPerSqm: 8,           // 空置服务费 元/㎡/月
+  insPerSqm: 1.86,        // 保险 元/㎡(年)
+  landTaxPerSqm: 3,       // 土地使用税 元/㎡
+  prop1Rate: 0.12,        // 房产税1(从租)
+  prop2Base: 0.7,         // 房产税2从价基数
+  prop2Rate: 0.012,       // 房产税2税率
+  extraEngRate: 0.02,     // 房产税2中建安附加率
+  rentalPvRate: 0.035,    // 出租净收益折现率
+  devDepRatio: 0.8,       // 折旧摊销基数比率
+  depYears: 50,           // 摊销年限
+  recoverRatio: 0.2,      // 回收固定资产余值比率
+  adjTaxRate: 0.25,       // 调整所得税率
+  incomeTax: 0.25,        // 所得税率
+  lossCarry: 5,           // 亏损弥补年限
+  stampSaleRate: 0,       // 销售印花税率(默认0)
+};
+
 function r4(x){ return Math.round(x*10000)/10000; }
 function r2(x){ return Math.round(x*100)/100; }
 
@@ -21,7 +47,8 @@ function r2(x){ return Math.round(x*100)/100; }
  *  loanAmount(万), loanRate(%), loanTotalYears, customRepay {年:万元} 自定义还款计划,
  *  discountPct(%)
  */
-function calc(p){
+function calc(p, cfgIn){
+  const K = Object.assign({}, SALE_DEFAULTS, cfgIn||{});
   const buildArr = Array.from({length:p.buildYears},(_,i)=>p.buildStart+i);
   const opStart = p.buildStart + p.buildYears;
   const opArr = Array.from({length:p.operateYears},(_,i)=>opStart+i);
@@ -51,36 +78,36 @@ function calc(p){
   let totManageIns=0, totVacancy=0;
   opArr.forEach(y=>{
     const inc = p.commArea*commRentP[y]*commOcc[y]*leaseMonths/10000;
-    totManageIns += inc*0.08 + p.commArea*1.86/10000;
-    totVacancy += p.commArea*(1-commOcc[y])*8*12/10000;
+    totManageIns += inc*K.mgCommRate + p.commArea*K.insPerSqm/10000;
+    totVacancy += p.commArea*(1-commOcc[y])*K.vacPerSqm*12/10000;
   });
-  const totalInputTax = totManageIns*(0.06/1.06) + totVacancy*(0.09/1.09) + (p.projectInputTax||0);
+  const totalInputTax = totManageIns*(K.vatIn6/(1+K.vatIn6)) + totVacancy*(K.vatSale/(1+K.vatSale)) + (p.projectInputTax||0);
   let remainInput = totalInputTax;
   const rental = {};
   opArr.forEach((y,idx)=>{
     const occ=commOcc[y], cr=commRentP[y];
     const inc = p.commArea*cr*occ*leaseMonths/10000;
-    const tax1 = inc*(0.12/1.09);
+    const tax1 = inc*(K.prop1Rate/(1+K.vatSale));
     const tax2base = areaTotal!==0?
-      (p.landCost + p.constructionCost + p.infraCost + p.otherEngCost + p.constructionCost*0.02*p.commArea/areaTotal) : 0;
-    const tax2 = tax2base*0.7*0.012*(1-occ);
-    const mgC = inc*0.08;
-    const mgP = p.parkCount*80*12/10000;
-    const fund = p.commArea*leaseMonths*0.25/10000;
-    const rep = inc*0.02;
-    const vac = p.commArea*(1-occ)*8*12/10000;
-    const ins = p.commArea*1.86/10000;
-    const landT = areaTotal!==0? p.landUseArea*(p.commArea/areaTotal)*3/10000 : 0;
+      (p.landCost + p.constructionCost + p.infraCost + p.otherEngCost + p.constructionCost*K.extraEngRate*p.commArea/areaTotal) : 0;
+    const tax2 = tax2base*K.prop2Base*K.prop2Rate*(1-occ);
+    const mgC = inc*K.mgCommRate;
+    const mgP = p.parkCount*K.parkMgUnit*12/10000;
+    const fund = p.commArea*leaseMonths*K.fundPerSqm/10000;
+    const rep = inc*K.repairRate;
+    const vac = p.commArea*(1-occ)*K.vacPerSqm*12/10000;
+    const ins = p.commArea*K.insPerSqm/10000;
+    const landT = areaTotal!==0? p.landUseArea*(p.commArea/areaTotal)*K.landTaxPerSqm/10000 : 0;
     const costTot = tax1+tax2+mgC+mgP+fund+rep+vac+ins+landT;
-    const outputT = inc>0? inc*(0.09/1.09) : 0;
+    const outputT = inc>0? inc*(K.vatSale/(1+K.vatSale)) : 0;
     const inputBefore = remainInput;
     const vat = Math.max(outputT-inputBefore, 0);
     remainInput = Math.max(inputBefore-outputT, 0);
-    const vatSur = vat*0.12;
+    const vatSur = vat*K.surcharge;
     const stamp = inc*0.0005;
     const taxTot = vat+vatSur+stamp;
     const netInc = inc - costTot - taxTot;
-    const pv = netInc/Math.pow(1.035, idx+1);
+    const pv = netInc/Math.pow(1+K.rentalPvRate, idx+1);
     rental[y] = {occ:r4(occ), rent:r4(cr), income:r4(inc), tax1:r4(tax1), tax2:r4(tax2),
       mgC:r4(mgC), mgP:r4(mgP), fund:r4(fund), rep:r4(rep), vac:r4(vac), ins:r4(ins), landT:r4(landT),
       costTotal:r4(costTot), outputT:r4(outputT), inputT:r4(inputBefore), vat:r4(vat), vatSur:r4(vatSur),
@@ -122,32 +149,32 @@ function calc(p){
   // ===== 4. 出售类总成本表（累计增值税+地价抵减） =====
   const landDeductTotal = p.saleArea*p.landFloorPrice/10000;
   const totalSaleIncomeAll = allYears.reduce((s,y)=>s+income[y].sale,0);
-  const totalSaleFeeAll = totalSaleIncomeAll*0.015;
+  const totalSaleFeeAll = totalSaleIncomeAll*K.saleFeeRate;
   const devCostSaleBase = p.totalInvestment - buildFinTotal*ratioSale - totalSaleFeeAll;
-  const devCostDepBase = (p.landCost + p.devCost - buildFinTotal*ratioComm)*0.8;
+  const devCostDepBase = (p.landCost + p.devCost - buildFinTotal*ratioComm)*K.devDepRatio;
   const cost = {};
   let cumOut=0, cumIn=0, cumVat=0;
   allYears.forEach(y=>{
     const saleInc = income[y].sale;
     const saleRate = (p.saleRamp&&p.saleRamp[y])||0;
     const otherInc = income[y].other;
-    const saleFee = saleInc*0.015;
-    const outVat = saleInc>0? (saleInc + otherInc - landDeductTotal*saleRate)*(0.09/1.09) : 0;
-    const inVat6 = ratioComm!==0? (p.otherEngCost/ratioComm + totalSaleFeeAll)*saleRate*(0.06/1.06) : 0;
-    const inVat9 = (p.saleConstructionCost + p.saleInfraCost + p.constructionCost + p.infraCost)*saleRate*(0.09/1.09);
+    const saleFee = saleInc*K.saleFeeRate;
+    const outVat = saleInc>0? (saleInc + otherInc - landDeductTotal*saleRate)*(K.vatSale/(1+K.vatSale)) : 0;
+    const inVat6 = ratioComm!==0? (p.otherEngCost/ratioComm + totalSaleFeeAll)*saleRate*(K.vatIn6/(1+K.vatIn6)) : 0;
+    const inVat9 = (p.saleConstructionCost + p.saleInfraCost + p.constructionCost + p.infraCost)*saleRate*(K.vatSale/(1+K.vatSale));
     const inVat = inVat6+inVat9;
     cumOut += outVat; cumIn += inVat;
     const vat = Math.max(cumOut - cumIn - cumVat, 0);
     cumVat += vat;
-    const vatSur = vat*0.12;
-    const stamp = 0; // 印花税率默认0‰(与Streamlit一致)
+    const vatSur = vat*K.surcharge;
+    const stamp = saleInc*K.stampSaleRate/(1+K.vatSale);
     const saleTax = vat + vatSur + stamp;
     const devSale = devCostSaleBase*saleRate;
     const devDep = (y===opStart)? devCostDepBase : 0;
     let devDep2 = 0;
     if(isOp[y]){
       const no = opArr.indexOf(y)+1;
-      if(no<=50) devDep2 = devCostDepBase/50;
+      if(no<=K.depYears) devDep2 = devCostDepBase/K.depYears;
     }
     const finB = isOp[y]?0:finCost[y];
     const finO = isOp[y]?finCost[y]:0;
@@ -167,20 +194,20 @@ function calc(p){
     if(firstProfitYear===null && pt>0) firstProfitYear=y;
     let makeup=0;
     if(firstProfitYear!==null){
-      if(lossUsed>=5) makeup=0;
-      else if(y===firstProfitYear) makeup=lossHist.slice(Math.max(0,idx-5),idx).reduce((s,v)=>s+v,0);
+      if(lossUsed>=K.lossCarry) makeup=0;
+      else if(y===firstProfitYear) makeup=lossHist.slice(Math.max(0,idx-K.lossCarry),idx).reduce((s,v)=>s+v,0);
       else makeup = lastNeg<0? lastNeg:0;
     }
     const taxable=pt+makeup;
     if(firstProfitYear!==null && makeup!==0) lossUsed++;
     lastNeg = taxable<0? taxable:0;
-    const incomeTax = taxable>0? r4(taxable*0.25):0;
+    const incomeTax = taxable>0? r4(taxable*K.incomeTax):0;
     profit[y]={total:pt, makeup:r4(makeup), taxable:r4(taxable), incomeTax, net:r4(pt-incomeTax)};
   });
 
   // ===== 6. 现金流（出售类专属口径） =====
   // 流入=配保房销售+其他收入+商业出租收入+回收固定资产余值(运营首年)
-  const recoverFixed = r4((p.landCost + p.devCost - buildFinTotal*ratioComm)*0.2);
+  const recoverFixed = r4((p.landCost + p.devCost - buildFinTotal*ratioComm)*K.recoverRatio);
   // 开发成本投资计划(默认建设期平摊总投资)
   const devPlan = p.devCostPlan || (function(){ const o={}; buildArr.forEach(y=>o[y]=p.totalInvestment/buildArr.length); return o; })();
   const discount=p.discountPct/100;
@@ -191,7 +218,7 @@ function calc(p){
     const rentTax = rental[y]? rental[y].taxTotal:0;
     const rentCost = rental[y]? rental[y].costTotal:0;
     const adjTax = Math.max((inflow - (y===opStart?recoverFixed:0)
-      - (cost[y].devSale + cost[y].devDep2 + cost[y].saleFee + cost[y].saleTax + rentCost + rentTax))*0.25, 0);
+      - (cost[y].devSale + cost[y].devDep2 + cost[y].saleFee + cost[y].saleTax + rentCost + rentTax))*K.adjTaxRate, 0);
     const invest = devPlan[y]||0;
     const outflow = r4(invest + cost[y].saleFee + cost[y].saleTax + rentTax + rentCost + adjTax);
     const net = r4(inflow-outflow);
@@ -216,7 +243,7 @@ function calc(p){
   const irr = excelIrr(allYears.map(y=>cf[y].net));
   const sum=f=>allYears.reduce((s,y)=>s+f(y),0);
   const oF = sum(y=>cost[y].finOp), bF = sum(y=>cost[y].finBuild);
-  const icrNum = sum(y=>profit[y].net) + oF + sum(y=>profit[y].incomeTax) + sum(y=>cost[y].devDep) - 0.8*sum(y=>income[y].other);
+  const icrNum = sum(y=>profit[y].net) + oF + sum(y=>profit[y].incomeTax) + sum(y=>cost[y].devDep) - K.devDepRatio*sum(y=>income[y].other);
   const icr = (bF+oF)!==0? r2(icrNum/(bF+oF)) : 0;
   let payback=null;
   for(let i=0;i<allYears.length;i++){ if(cf[allYears[i]].cumNet>=0){ payback={year:allYears[i], index:i+1}; break; } }
