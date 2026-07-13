@@ -41,6 +41,7 @@
       <button class="btn" id="btnNew">+ 新建领域大纲</button>
       <button class="btn ghost" id="btnRefresh">刷新列表</button>
       <button class="btn ghost" id="btnSeed">导入内置默认大纲</button>
+      <button class="btn ghost" id="btnCalcCfg">测算参数管理</button>
       <span style="margin-left:auto;font-size:12px;color:var(--soft);" id="loginInfo"></span>
     </div>
     <div id="listBox"></div>
@@ -55,6 +56,129 @@ function msg(text,type){ document.getElementById("msgBox").innerHTML='<div class
 
 let allOutlines = [];
 let editing = null; // {key, label, chapters}
+
+
+/* ================= 测算参数管理 ================= */
+const PARAM_DEFS = {
+  gaibao: {label:"非居改保类", params:[
+    ["vatOut","租金/收楼/工程增值税率",0.09],["vatOps","运营/财务进项税率",0.06],
+    ["surcharge","增值税附加率",0.12],["incomeTax","企业所得税率",0.25],
+    ["stampDeco","装修合同印花税率",0.0003],["lossCarry","亏损弥补年限(年)",5],
+  ]},
+  rent: {label:"出租类", params:[
+    ["mgHouseUnit","管理费(住房)元/㎡/月系数",1.92],["mgParkRatio","管理费(车位)占车位收入比",0.4],
+    ["insPerSqm","保险费 元/㎡(总建面/年)",0.3],["repairRate","维修费率(占住宅租金)",0.02],
+    ["fundPerSqm","维修基金 元/㎡/月",0.25],["vacPerSqm","空置物业费 元/㎡/月",3.9],
+    ["resetRatio","装修重置比率",0.7],["resetPublic","公租房重置周期(年)",20],
+    ["resetAffordable","保租房重置周期(年)",10],["resetSpread","重置费分摊年数",10],
+    ["depResidual","折旧残值率",0.2],["depYears","折旧年限(年)",50],
+    ["vatResi","住宅租金增值税率",0.015],["vatResiBase","住宅价税分离基数",0.05],
+    ["vatPark","车位增值税率",0.09],["stampRate","印花税率",0.0005],
+    ["citySur","城建附加率",0.07],["eduSur","教育附加率",0.05],
+    ["propResi","房产税-住宅从租",0.04],["propPark","房产税-车位从租",0.12],
+    ["propBase","房产税从价基数比",0.7],["propRate","房产税从价税率",0.012],
+    ["propFreeYears","房产税免征年数",3],["landTaxPerSqm","土地使用税 元/㎡",3],
+    ["incomeTax","所得税率",0.25],["lossCarry","亏损弥补年限(年)",5],
+  ]},
+  sale: {label:"出售类", params:[
+    ["saleFeeRate","销售费用率",0.015],["vatSale","销售/商业增值税率",0.09],
+    ["vatIn6","进项税6%档",0.06],["surcharge","增值税附加率",0.12],
+    ["mgCommRate","商业管理费率",0.08],["parkMgUnit","停车管理费 元/位/月",80],
+    ["fundPerSqm","维修金 元/㎡/月",0.25],["repairRate","维修费率",0.02],
+    ["vacPerSqm","空置服务费 元/㎡/月",8],["insPerSqm","保险 元/㎡(年)",1.86],
+    ["landTaxPerSqm","土地使用税 元/㎡",3],["prop1Rate","房产税1(从租)",0.12],
+    ["prop2Base","房产税2从价基数",0.7],["prop2Rate","房产税2税率",0.012],
+    ["extraEngRate","房产税2建安附加率",0.02],["rentalPvRate","出租净收益折现率",0.035],
+    ["devDepRatio","折旧摊销基数比率",0.8],["depYears","摊销年限(年)",50],
+    ["recoverRatio","回收固定资产余值比率",0.2],["adjTaxRate","调整所得税率",0.25],
+    ["incomeTax","所得税率",0.25],["lossCarry","亏损弥补年限(年)",5],
+    ["stampSaleRate","销售印花税率",0],
+  ]},
+};
+const METRIC_VARS = "totalIncome(总收入) totalCost(总成本) totalTax(税金) totalNetProfit(净利润) totalNpv(净现值) irr(IRR) icr(利息保障倍数) totalSaleIncome(销售收入合计) rentalPvTotal(出租净收益现值) totalInterest(利息合计)";
+let calcCfg = {gaibao:{}, rent:{}, sale:{}, metrics:[]};
+
+async function openCalcCfg(){
+  document.getElementById("listBox").style.display="none";
+  const box = document.getElementById("editBox");
+  box.style.display="block";
+  box.innerHTML = '<div style="padding:30px 0; color:var(--soft);">加载配置中…</div>';
+  try{
+    const r = await fetch("/api/calcconfig",{headers:authHeaders()});
+    const d = await r.json();
+    if(d.ok) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},metrics:[]}, d.config);
+  }catch(e){}
+  renderCalcCfg();
+}
+function renderCalcCfg(){
+  const box = document.getElementById("editBox");
+  let html = '<h1 style="font-size:18px;">测算参数管理</h1>'
+    +'<div class="sub">修改后所有用户下次执行测算时生效。留空或恢复默认值即使用引擎内置口径。<b>改动会直接影响测算结果与"逐位一致"承诺，请确保有政策/口径依据后再改。</b></div>';
+  for(const [type,def] of Object.entries(PARAM_DEFS)){
+    html += '<div style="margin-top:18px; font-weight:600;">'+def.label+'</div>'
+      +'<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:8px 14px; margin-top:8px;">'
+      + def.params.map(([k,label,dv])=>{
+          const cur = (calcCfg[type]&&calcCfg[type][k]!==undefined)? calcCfg[type][k] : "";
+          const changed = cur!=="" && parseFloat(cur)!==dv;
+          return '<div><label style="margin:4px 0 2px;'+(changed?'color:var(--red);font-weight:600;':'')+'">'+label+'<span style="color:#999;">（默认'+dv+'）</span></label>'
+            +'<input type="number" step="any" data-type="'+type+'" data-k="'+k+'" placeholder="'+dv+'" value="'+cur+'"></div>';
+        }).join("")
+      +'</div>';
+  }
+  // 自定义指标
+  html += '<div style="margin-top:22px; font-weight:600;">自定义结果指标</div>'
+    +'<div class="sub">公式可用变量：'+METRIC_VARS+'，支持 + - * / ( ) 与数字。示例：净利率(%) = totalNetProfit / totalIncome * 100</div>'
+    +'<div id="metricList">'
+    + (calcCfg.metrics||[]).map((m,i)=>metricRowHtml(m,i)).join("")
+    +'</div>'
+    +'<span class="add-link" id="addMetric" style="margin-left:0;">+ 添加自定义指标</span>'
+    +'<div class="bar" style="margin-top:18px;">'
+    +'<button class="btn" id="saveCalcCfg">保存全部配置</button>'
+    +'<button class="btn ghost" id="cfgBack">返回列表</button></div>';
+  box.innerHTML = html;
+  document.getElementById("saveCalcCfg").onclick = saveCalcCfg;
+  document.getElementById("cfgBack").onclick = ()=>loadList();
+  document.getElementById("addMetric").onclick = ()=>{
+    readCfgForm(); calcCfg.metrics.push({name:"",expr:"",scope:"all"}); renderCalcCfg();
+  };
+  document.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=()=>{
+    readCfgForm(); calcCfg.metrics.splice(+b.dataset.mdel,1); renderCalcCfg();
+  });
+}
+function metricRowHtml(m,i){
+  const sel = s=> m.scope===s?'selected':'';
+  return '<div style="display:flex; gap:8px; margin:6px 0; align-items:center;">'
+    +'<input class="m-name" data-i="'+i+'" placeholder="指标名称" value="'+esc(m.name||"")+'" style="width:160px;">'
+    +'<input class="m-expr" data-i="'+i+'" placeholder="公式，如 totalNetProfit/totalIncome*100" value="'+esc(m.expr||"")+'" style="flex:1;">'
+    +'<select class="m-scope" data-i="'+i+'" style="width:110px;"><option value="all" '+sel("all")+'>全部类型</option><option value="gaibao" '+sel("gaibao")+'>非居改保</option><option value="rent" '+sel("rent")+'>出租类</option><option value="sale" '+sel("sale")+'>出售类</option></select>'
+    +'<button class="btn sm red" data-mdel="'+i+'">×</button></div>';
+}
+function readCfgForm(){
+  document.querySelectorAll("[data-type][data-k]").forEach(el=>{
+    const t=el.dataset.type, k=el.dataset.k, v=el.value.trim();
+    if(!calcCfg[t]) calcCfg[t]={};
+    if(v==="") delete calcCfg[t][k];
+    else calcCfg[t][k] = parseFloat(v);
+  });
+  const names=[...document.querySelectorAll(".m-name")], exprs=[...document.querySelectorAll(".m-expr")], scopes=[...document.querySelectorAll(".m-scope")];
+  calcCfg.metrics = names.map((n,i)=>({name:n.value.trim(), expr:exprs[i].value.trim(), scope:scopes[i].value}))
+    .filter(m=>m.name&&m.expr);
+}
+async function saveCalcCfg(){
+  readCfgForm();
+  const btn = document.getElementById("saveCalcCfg");
+  btn.disabled=true; btn.textContent="保存中…";
+  try{
+    for(const key of ["gaibao","rent","sale","metrics"]){
+      const r = await fetch("/api/calcconfig",{method:"POST",headers:authHeaders(),
+        body:JSON.stringify({key, data:calcCfg[key]})});
+      const d = await r.json();
+      if(!d.ok){ msg(d.error||"保存失败","err"); btn.disabled=false; btn.textContent="保存全部配置"; return; }
+    }
+    msg("配置已保存，所有用户下次测算生效","ok");
+  }catch(e){ msg("网络错误","err"); }
+  btn.disabled=false; btn.textContent="保存全部配置";
+}
 
 async function loadList(){
   document.getElementById("editBox").style.display="none";
@@ -206,6 +330,7 @@ else{
   document.getElementById("btnNew").onclick = ()=>openEdit(null);
   document.getElementById("btnRefresh").onclick = loadList;
   document.getElementById("btnSeed").onclick = seedDefaults;
+  document.getElementById("btnCalcCfg").onclick = openCalcCfg;
   loadList();
 }
 </script>
