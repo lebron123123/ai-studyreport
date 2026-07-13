@@ -2,6 +2,15 @@
 // 保持与 Streamlit 版完全一致的计算口径
 
 window.NRCalc = (function(){
+const NR_DEFAULTS = {
+  vatOut: 0.09,        // 租金/收楼/工程增值税率
+  vatOps: 0.06,        // 运营/财务费用进项税率
+  surcharge: 0.12,     // 增值税附加率
+  incomeTax: 0.25,     // 企业所得税率
+  stampDeco: 0.0003,   // 装修合同印花税率
+  lossCarry: 5,        // 亏损弥补年限
+};
+
 
 function round4(x){ return Math.round(x * 10000) / 10000; }
 function round2(x){ return Math.round(x * 100) / 100; }
@@ -36,7 +45,8 @@ function round2(x){ return Math.round(x * 100) / 100; }
  *  repayPlan: {2030:2000,...}    还款计划（年->万元）
  *  discountRatePct: 6            折现率 %
  */
-function calcNonResiReform(p){
+function calcNonResiReform(p, cfgIn){
+  const K = Object.assign({}, NR_DEFAULTS, cfgIn||{});
   const allYears = [...p.buildYears, ...p.operateYears].sort((a,b)=>a-b).filter((v,i,a)=>a.indexOf(v)===i);
   const operateSet = new Set(p.operateYears);
   const buildSet = new Set(p.buildYears);
@@ -68,7 +78,7 @@ function calcNonResiReform(p){
     else{
       const occ=resiOccupancy[y]||0, rp=resiRentPrice[y]||0, m=monthDict[y];
       const ri = p.residentialArea*rp*occ*m/10000;
-      income[y]={rent:round4(ri), rentAfterTax:round4(ri/1.09)};
+      income[y]={rent:round4(ri), rentAfterTax:round4(ri/(1+K.vatOut))};
     }
   });
 
@@ -81,7 +91,7 @@ function calcNonResiReform(p){
     else{
       const occ=resiOccupancy[y]||0, m=monthDict[y];
       const c = p.residentialArea*p.collectPrice*occ*m/10000;
-      cost[y].collect=round4(c); cost[y].collectAT=round4(c/1.09);
+      cost[y].collect=round4(c); cost[y].collectAT=round4(c/(1+K.vatOut));
     }
   });
   // 2b 工程费用（首装+重装摊销）
@@ -92,7 +102,7 @@ function calcNonResiReform(p){
   const monthlyAmort = totalOperateMonths>0? totalEng/totalOperateMonths : 0;
   allYears.forEach(y=>{
     if(!isOperate[y]){ cost[y].eng=0; cost[y].engAT=0; }
-    else{ const e=monthlyAmort*monthDict[y]; cost[y].eng=round4(e); cost[y].engAT=round4(e/1.09); }
+    else{ const e=monthlyAmort*monthDict[y]; cost[y].eng=round4(e); cost[y].engAT=round4(e/(1+K.vatOut)); }
   });
   // 2c 运营费用
   const firstOpYear = p.operateYears[0];
@@ -107,7 +117,7 @@ function calcNonResiReform(p){
       const mult = Math.pow(1+p.costIncreaseRate/100, incTimes);
       let base = p.unitOperateCost*mult*p.totalUnits*m/10000;
       if(y===firstOpYear) base += p.startupFee;
-      cost[y].op=round4(base); cost[y].opAT=round4(base/1.06);
+      cost[y].op=round4(base); cost[y].opAT=round4(base/(1+K.vatOps));
     }
   });
   // 2d 财务费用（还本付息表）
@@ -131,7 +141,7 @@ function calcNonResiReform(p){
   allYears.forEach(y=>{
     const f=loan[y].interest;
     cost[y].fin=round4(f);
-    cost[y].finAT = f>0? round4(f/1.06):0;
+    cost[y].finAT = f>0? round4(f/(1+K.vatOps)):0;
   });
   // 2e 总成本
   allYears.forEach(y=>{
@@ -145,11 +155,11 @@ function calcNonResiReform(p){
     if(!isOperate[y]){ tax[y]={output:0,input:0,vat:0,surcharge:0,stamp:0,total:0}; }
     else{
       const ri=income[y].rent;
-      const output = ri/1.09*0.09;
-      const inputT = cost[y].eng*0.09/1.09 + (cost[y].op+cost[y].fin)*0.06/1.06;
+      const output = ri/(1+K.vatOut)*K.vatOut;
+      const inputT = cost[y].eng*K.vatOut/(1+K.vatOut) + (cost[y].op+cost[y].fin)*K.vatOps/(1+K.vatOps);
       const vat = Math.max(output-inputT,0);
-      const surcharge = vat*0.12;
-      const stamp = (y===firstOpYear)? p.decorationUnitCost*p.residentialArea/10000*0.0003 : 0;
+      const surcharge = vat*K.surcharge;
+      const stamp = (y===firstOpYear)? p.decorationUnitCost*p.residentialArea/10000*K.stampDeco : 0;
       tax[y]={output:round4(output),input:round4(inputT),vat:round4(vat),
               surcharge:round4(surcharge),stamp:round4(stamp),total:round4(vat+surcharge+stamp)};
     }
@@ -170,9 +180,9 @@ function calcNonResiReform(p){
     if(firstProfitYear===null && cur>0) firstProfitYear=y;
     let makeup=0;
     if(firstProfitYear!==null){
-      if(lossYearsUsed>=5) makeup=0;
+      if(lossYearsUsed>=K.lossCarry) makeup=0;
       else if(y===firstProfitYear){
-        const prev5 = lossHistory.slice(Math.max(0,idx-5), idx);
+        const prev5 = lossHistory.slice(Math.max(0,idx-K.lossCarry), idx);
         makeup = prev5.reduce((s,v)=>s+v,0);
       }else{
         makeup = lastNegTaxable<0? lastNegTaxable:0;
@@ -183,7 +193,7 @@ function calcNonResiReform(p){
     lastNegTaxable = taxable<0? taxable:0;
     profit[y].makeup=round4(makeup);
     profit[y].taxable=round4(taxable);
-    profit[y].incomeTax = taxable>0? round4(taxable*0.25):0;
+    profit[y].incomeTax = taxable>0? round4(taxable*K.incomeTax):0;
     profit[y].netProfit = round4(profit[y].totalProfit - profit[y].incomeTax);
   });
 
