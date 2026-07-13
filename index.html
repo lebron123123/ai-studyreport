@@ -1,5 +1,5 @@
 <meta charset="utf-8">
-<style>  
+<style>
   :root{
     /* 蓝图·公文 配色体系 */
     --bp-deep:#132A43;        /* 图纸深蓝（侧栏底） */
@@ -516,14 +516,14 @@
 </style>
 
 <div class="app">
-  <div class="toc"><div class="toc-title">可研报告与测算生成</div><div id="tocList"></div>
+  <div class="toc"><div class="toc-title">可研报告工坊</div><div id="tocList"></div>
     <div class="toc-sky" aria-hidden="true"><svg viewBox="0 0 236 90" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMax meet">
       <path d="M0 88 H236 M14 88 V46 H44 V88 M22 54 h14 M22 64 h14 M22 74 h14 M58 88 V28 H86 V88 M66 38 h12 M66 50 h12 M66 62 h12 M66 74 h12 M100 88 V56 H150 V88 M110 66 h30 M110 76 h30 M164 88 V40 H188 V88 M170 50 h12 M170 62 h12 M170 74 h12 M202 88 V60 H226 V88 M208 70 h12" fill="none" stroke="rgba(127,179,200,.5)" stroke-width="1.2"/>
       <rect x="70" y="32" width="5" height="4" fill="#B7302B" opacity=".8"><animate attributeName="opacity" values=".2;.9;.2" dur="3.2s" repeatCount="indefinite"/></rect>
       <rect x="174" y="44" width="5" height="4" fill="#7FB3C8" opacity=".6"><animate attributeName="opacity" values=".8;.15;.8" dur="4.5s" repeatCount="indefinite"/></rect>
     </svg></div></div>
   <div class="sheet-wrap"><div class="sheet" id="sheet"></div>
-    <footer class="site-foot">可研报告与测算生成 · v2.0 ｜ 本工具生成内容为AI辅助初稿，须经人工复核签发后方可使用 ｜ 数据仅存于浏览器本地与内部接口，请勿输入涉密信息</footer>
+    <footer class="site-foot">可研报告工坊 · v2.0 ｜ 本工具生成内容为AI辅助初稿，须经人工复核签发后方可使用 ｜ 数据仅存于浏览器本地与内部接口，请勿输入涉密信息</footer>
   </div>
 </div>
 
@@ -545,6 +545,43 @@ let scStep = 0;              // 测算模块步骤 0选类型 1参数 2结果
 let scResult = null;         // 测算结果
 let scParams = null;
 let aiChat = [];             // AI问答历史 [{role, content}]
+let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, metrics:[]};   // 后台测算参数配置
+async function fetchCalcConfig(){
+  try{
+    const r = await fetch("/api/calcconfig", {headers:authHeaders()});
+    const d = await r.json();
+    if(d.ok && d.config) CALC_CFG = Object.assign({gaibao:{},rent:{},sale:{},metrics:[]}, d.config);
+  }catch(e){}
+}
+function safeEval(expr, scope){
+  if(!/^[\w\s+\-*/().]+$/.test(expr)) return null;
+  const ids = expr.match(/[A-Za-z_]\w*/g) || [];
+  for(const id of ids){ if(!(id in scope)) return null; }
+  try{
+    const keys = Object.keys(scope);
+    const fn = new Function(...keys, "return ("+expr+");");
+    const v = fn(...keys.map(k=>scope[k]));
+    return (typeof v==="number" && isFinite(v))? v : null;
+  }catch(e){ return null; }
+}
+function metricScope(){
+  const s = scResult.summary;
+  return { totalIncome:s.totalIncome||0, totalCost:s.totalCost||0, totalTax:s.totalTax||0,
+    totalNetProfit:s.totalNetProfit||0, totalNpv:s.totalNpv||0, irr:s.irr||0, icr:s.icr||0,
+    totalSaleIncome:s.totalSaleIncome||0, rentalPvTotal:s.rentalPvTotal||0, totalInterest:s.totalInterest||0 };
+}
+function customMetricTiles(){
+  if(!scResult || !CALC_CFG.metrics || !CALC_CFG.metrics.length) return "";
+  const scope = metricScope();
+  let out = "";
+  CALC_CFG.metrics.forEach(m=>{
+    if(m.scope && m.scope!=="all" && m.scope!==calcType) return;
+    const v = safeEval(String(m.expr||""), scope);
+    if(v===null) return;
+    out += '<div class="metric"><div class="mv">'+v.toLocaleString("zh-CN",{maximumFractionDigits:2})+'</div><div class="ml">'+escapeHtml(m.name||"自定义指标")+'（自定义）</div></div>';
+  });
+  return out;
+}
 const PRICE_IN_PER_M = 2, PRICE_OUT_PER_M = 8;   // 元/百万tokens，按DeepSeek价目表估算，可调整
 const EST_IN_PER_SEC = 1200, EST_OUT_PER_SEC = 700; // 每子节预估token
 let calcResult = null;   // 财务测算结果（null表示跳过测算，走"待填"模式）
@@ -587,7 +624,7 @@ function restoreDraft(d){
     });
   }
   if(calcParams && window.NRCalc && domainKey==="baozhang_gaibao"){
-    calcResult = window.NRCalc.calc(assembleCalcInput(calcParams));
+    calcResult = window.NRCalc.calc(assembleCalcInput(calcParams), CALC_CFG.gaibao);
     calcResult.sens = computeSensitivity(calcParams);
   }
   currentStep = Math.min(d.currentStep||0, STEPS.length-1);
@@ -739,7 +776,7 @@ function domainIcon(k){
 /* ================= 首页：两大功能分类 ================= */
 function stepHome(){
   return '<div class="doc-eyebrow">HOME · 功能选择</div>'
-    +'<h1 class="doc-title">可研报告与测算生成</h1>'
+    +'<h1 class="doc-title">可研报告工坊</h1>'
     +'<div class="step-desc">选择要使用的功能模块。</div>'
     +'<div class="domain-grid">'
     +'<div class="domain-card" id="homeCalc"><div class="dn">财务测算</div><div class="dd">独立财务测算工具：非居改保 / 出租类 / 出售类三种模型，逐年明细、IRR/NPV，并可与AI就测算结果智能问答。</div><div class="dc">CALCULATOR · AI Q&A</div></div>'
@@ -858,6 +895,7 @@ function scStepResult(){
   const tile=(l,v,hl)=>'<div class="metric'+(hl?' hl':'')+'"><div class="mv">'+v+'</div><div class="ml">'+l+'</div></div>';
   let extra = (calcType==="rent"||calcType==="sale")? tile("利息保障倍数", s.icr) : "";
   if(calcType==="sale") extra += tile("配保房销售收入合计（万元）", fmt(s.totalSaleIncome)) + tile("出租净收益现值合计（万元）", fmt(s.rentalPvTotal));
+  extra += customMetricTiles();
   // 分年简表
   const R=scResult;
   let rows;
@@ -904,6 +942,12 @@ function buildScDigest(){
   let lines = "【测算类型】"+(calcType==="rent"?"出租类(公租房/保租房)":(calcType==="sale"?"出售类(配保房/可售型人才房)":"非居改保类"))+"\n";
   lines += "【输入参数】"+JSON.stringify(scParams)+"\n";
   lines += "【汇总】总收入"+fmt(s.totalIncome)+"万｜总成本"+fmt(s.totalCost)+"万"+(s.totalTax!==undefined?"｜税金"+fmt(s.totalTax)+"万":"")+"｜净利润"+fmt(s.totalNetProfit)+"万｜NPV "+fmt(s.totalNpv)+"万｜IRR "+(s.irr===null?"—":s.irr+"%")+(s.icr!==undefined?"｜利息保障倍数"+s.icr:"")+(s.totalSaleIncome!==undefined?"｜配保房销售收入合计"+fmt(s.totalSaleIncome)+"万｜出租净收益现值合计"+fmt(s.rentalPvTotal)+"万":"")+"\n";
+  if(CALC_CFG.metrics && CALC_CFG.metrics.length){
+    const scope2 = metricScope();
+    const ms = CALC_CFG.metrics.filter(m=>!m.scope||m.scope==="all"||m.scope===calcType)
+      .map(m=>{ const v=safeEval(String(m.expr||""),scope2); return v===null?null:(m.name+"="+v.toFixed(2)+"（公式:"+m.expr+"）"); }).filter(Boolean);
+    if(ms.length) lines += "【自定义指标】"+ms.join("；")+"\n";
+  }
   lines += "【分年净现金流】"+R.allYears.map(y=>y+":"+fmt(R.cf[y].net)).join("，")+"\n";
   if(calcType==="sale"){
     lines += "【核心公式】配保房销售收入=销售面积×售价×当年销售率/1e4；总收入=配保房销售+出租净收益现值(全周期折现合计,计入运营首年)+其他收入；出租净收入=商业租金收入-出租营运成本(房产税1=租金×12%/1.09、房产税2=(土地+建安+基础设施+工程其他+建安×2%×商业面积占比)×70%×1.2%×(1-出租率)、管理费=租金×8%、停车管理=车位×80×12、维修金=面积×月×0.25、维修=租金×2%、空置服务=面积×(1-出租率)×8×12、保险=面积×1.86、土地使用税按商业面积占比)-出租经营税金(销项=租金×9%/1.09,进项按全周期合计逐年抵扣,增值税附加12%,印花税0.05%)，按3.5%逐年折现；累计开发成本(销售部分)=总投资-建设期财务费用×销售面积占比-销售收入×1.5%,按销售率分摊；折旧摊销部分=(土地+非配售开发成本-建设期财务费用×商业占比)×0.8,一次性计入首年(现金流用/50摊销版)；销售增值税=max(累计销项-累计进项-已缴,0),销项含地价抵减(销售面积×楼面价×销售率)；调整所得税=max((现金流入-回收余值-开发成本销售-摊销/50-销售费税-出租成本税)×25%,0)；现金流出=开发成本投资+销售费用+销售税金+出租税金+出租成本+调整所得税；回收固定资产余值=(土地+开发成本-建设期财务费用×商业占比)×20%计入运营首年流入；NPV从首个非零现金流年按0期折现；利息保障倍数=(净利润+经营期财务费用+所得税+折旧摊销部分-0.8×其他收入)/(建设期+经营期财务费用)。";
@@ -943,18 +987,18 @@ function bindCalcEvents(){
   if(s("scRun")) s("scRun").onclick=()=>{
     if(calcType==="gaibao"){
       scParams = readCalcForm();
-      scResult = window.NRCalc.calc(assembleCalcInput(scParams));
+      scResult = window.NRCalc.calc(assembleCalcInput(scParams), CALC_CFG.gaibao);
     }else if(calcType==="sale"){
       scParams = readSaleForm();
       const p = scParams;
       const opStart = p.buildStart + p.buildYears;
       const ramp = {}; if(p.rate1) ramp[opStart]=p.rate1; if(p.rate2) ramp[opStart+1]=p.rate2; if(p.rate3) ramp[opStart+2]=p.rate3;
       const repay = {}; for(let i=0;i<p.repayYears;i++) repay[p.repayStart+i]=p.repayAmount;
-      scResult = window.SaleCalc.calc(Object.assign({}, p, {saleRamp:ramp, customRepay:repay}));
+      scResult = window.SaleCalc.calc(Object.assign({}, p, {saleRamp:ramp, customRepay:repay}), CALC_CFG.sale);
     }else{
       scParams = readRentForm();
       const p = scParams;
-      scResult = window.RentCalc.calc(Object.assign({}, p, {investPlan:(function(){const o={};o[p.buildStart]=p.invest;return o;})()}));
+      scResult = window.RentCalc.calc(Object.assign({}, p, {investPlan:(function(){const o={};o[p.buildStart]=p.invest;return o;})()}), CALC_CFG.rent);
     }
     aiChat = [];
     scStep=2; renderTOC(); renderSheet();
@@ -1124,14 +1168,14 @@ function computeSensitivity(p){
     {label:"装修造价 +10%",    mod:{deco:p.deco*1.1}},
   ];
   return cases.map(cs=>{
-    const r = window.NRCalc.calc(assembleCalcInput(Object.assign({}, p, cs.mod)));
+    const r = window.NRCalc.calc(assembleCalcInput(Object.assign({}, p, cs.mod)), CALC_CFG.gaibao);
     return {label:cs.label, irr:r.summary.irr, npv:r.summary.totalNpv};
   });
 }
 
 function runCalc(){
   calcParams = readCalcForm();
-  calcResult = window.NRCalc.calc(assembleCalcInput(calcParams));
+  calcResult = window.NRCalc.calc(assembleCalcInput(calcParams), CALC_CFG.gaibao);
   calcResult.sens = computeSensitivity(calcParams);
   document.getElementById("calcResultBox").innerHTML = calcResultHtml();
   animateCountUps();
@@ -1885,7 +1929,7 @@ async function openProject(id){
 async function startApp(){
   mountUserBar();
   renderTOC(); renderSheet();
-  await fetchOutlines();
+  await Promise.all([fetchOutlines(), fetchCalcConfig()]);
   renderTOC(); renderSheet();
   const d = loadDraft();
   if(d && d.ts && !currentProjectId && (d.project&&d.project.name || (d.chapters||[]).some(c=>c.sections.some(s=>s.content)))){
