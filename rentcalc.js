@@ -226,5 +226,5 @@ function excelIrr(fl,maxIter=1000,tol=1e-7){
   }
   return null;
 }
-return { calc };
+return { calc, defaults: RENT_DEFAULTS };
 })();
