@@ -267,5 +267,5 @@ function calcPayback(years, cf){
   return null;
 }
 
-return { calc: calcNonResiReform };
+return { calc: calcNonResiReform, defaults: NR_DEFAULTS };
 })();
