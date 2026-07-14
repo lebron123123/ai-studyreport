@@ -513,6 +513,31 @@
   .pp-del:hover{background:var(--seal-red); border-color:var(--seal-red);}
   .pp-empty{padding:36px 20px; text-align:center; color:var(--ink-soft); font-size:13px;}
 
+
+  /* ===== 测算明细表 ===== */
+  .dt-block{margin-top:12px; border:1px solid var(--line-strong); background:#FFF; border-radius:2px;}
+  .dt-block summary{
+    cursor:pointer; padding:11px 16px; font-size:13px; font-weight:600; color:var(--ink);
+    user-select:none; list-style:none; display:flex; align-items:center; gap:8px;
+  }
+  .dt-block summary::before{content:"▸"; color:var(--bp-navy); transition:transform .15s ease;}
+  .dt-block[open] summary::before{transform:rotate(90deg);}
+  .dt-block summary::-webkit-details-marker{display:none;}
+  .dt-scroll{overflow:auto; max-height:360px; padding:0 12px 12px;}
+  table.dt{margin:0; min-width:100%;}
+  table.dt th, table.dt td{white-space:nowrap; text-align:right; font-family:var(--mono); font-size:11.5px;}
+  table.dt th.dt-l, table.dt td.dt-l{
+    text-align:left; font-family:var(--sans); font-size:12px;
+    position:sticky; left:0; background:#FFF; z-index:2;
+    border-right:2px solid var(--line-strong); min-width:150px;
+  }
+  table.dt th.dt-l{background:var(--bp-navy); z-index:3;}
+  table.dt tr:nth-child(even) td.dt-l{background:#F7F5EE;}
+  table.dt th{position:sticky; top:0; z-index:1;}
+  table.dt .dt-sum{background:#EFF2F6 !important; font-weight:700;}
+  table.dt th.dt-sum{background:var(--bp-deep) !important; color:#fff;}
+  table.dt td.dt-hl, table.dt .dt-hl{color:var(--bp-navy); font-weight:700;}
+
 </style>
 
 <div class="app">
@@ -888,6 +913,233 @@ function readRentForm(){
     repayIncreaseRate:n("r_repayIncreaseRate"), loanTotalYears:n("r_loanTotalYears"),
     invest:n("r_invest"), discountPct:n("r_discountPct") };
 }
+
+/* ================= 测算明细表（复刻Streamlit表格体系：指标行×年份列+全周期合计） ================= */
+function dtFmt(x, kind){
+  if(x===null || x===undefined || (typeof x==="number" && !isFinite(x))) return "—";
+  if(kind==="pct") return (x*100).toLocaleString("zh-CN",{maximumFractionDigits:2})+"%";
+  return Number(x).toLocaleString("zh-CN",{maximumFractionDigits:4});
+}
+function dtable(title, R, rows, open){
+  const ys = R.allYears;
+  let head = '<tr><th class="dt-l">指标</th><th class="dt-sum">全周期合计</th>'
+    + ys.map(y=>'<th>'+y+'</th>').join("") + '</tr>';
+  let body = rows.map(r=>{
+    const vals = ys.map(y=>{ try{ return r.g(R,y); }catch(e){ return null; } });
+    let total;
+    if(r.t==="none") total = null;
+    else if(r.t==="last"){ const nn = vals.filter(v=>v!==null&&v!==undefined); total = nn.length? nn[nn.length-1] : null; }
+    else total = vals.reduce((s,v)=> s + (typeof v==="number"&&isFinite(v)? v:0), 0);
+    return '<tr><td class="dt-l'+(r.hl?' dt-hl':'')+'">'+r.l+'</td>'
+      +'<td class="dt-sum'+(r.hl?' dt-hl':'')+'">'+(total===null?"—":dtFmt(total, r.f))+'</td>'
+      + vals.map(v=>'<td'+(r.hl?' class="dt-hl"':'')+'>'+dtFmt(v, r.f)+'</td>').join("") + '</tr>';
+  }).join("");
+  return '<details class="dt-block"'+(open?' open':'')+'><summary>'+title+'</summary>'
+    +'<div class="dt-scroll"><table class="rpt dt">'+head+body+'</table></div></details>';
+}
+
+function detailTablesHtml(){
+  const R = scResult;
+  if(calcType==="gaibao") return dtGaibao(R);
+  if(calcType==="rent") return dtRent(R);
+  return dtSale(R);
+}
+
+function dtGaibao(R){
+  return '<div class="doc-eyebrow" style="margin-top:22px;">DETAIL · 测算明细表</div>'
+  + dtable("收入明细表（万元）", R, [
+    {l:"住宅租金收入", g:(R,y)=>R.income[y].rent, hl:1},
+    {l:"租金收入（不含税）", g:(R,y)=>R.income[y].rentAfterTax},
+    {l:"出租率", g:(R,y)=>R.resiOccupancy[y], f:"pct", t:"none"},
+    {l:"租金单价（元/㎡/月）", g:(R,y)=>R.resiRentPrice[y], t:"none"},
+  ], true)
+  + dtable("总成本费用明细（万元）", R, [
+    {l:"收楼成本", g:(R,y)=>R.cost[y].collect},
+    {l:"工程费用（装修摊销）", g:(R,y)=>R.cost[y].eng},
+    {l:"运营费用", g:(R,y)=>R.cost[y].op},
+    {l:"财务费用", g:(R,y)=>R.cost[y].fin},
+    {l:"总成本费用", g:(R,y)=>R.cost[y].total, hl:1},
+    {l:"总成本费用（不含税）", g:(R,y)=>R.cost[y].totalAT},
+  ])
+  + dtable("还本付息计划表（万元）", R, [
+    {l:"期初借款余额", g:(R,y)=>R.loan[y].begin, t:"none"},
+    {l:"本期借款", g:(R,y)=>R.loan[y].borrow},
+    {l:"本期利息", g:(R,y)=>R.loan[y].interest},
+    {l:"本期还本", g:(R,y)=>R.loan[y].repay},
+    {l:"还本付息合计", g:(R,y)=>R.loan[y].payTotal},
+    {l:"期末借款余额", g:(R,y)=>R.loan[y].end, t:"last"},
+  ])
+  + dtable("税金及附加明细（万元）", R, [
+    {l:"销项税额", g:(R,y)=>R.tax[y].output},
+    {l:"进项税额", g:(R,y)=>R.tax[y].input},
+    {l:"增值税", g:(R,y)=>R.tax[y].vat},
+    {l:"增值税附加", g:(R,y)=>R.tax[y].surcharge},
+    {l:"印花税", g:(R,y)=>R.tax[y].stamp},
+    {l:"税金及附加总和", g:(R,y)=>R.tax[y].total, hl:1},
+  ])
+  + dtable("利润表（万元）", R, [
+    {l:"营业收入（不含税）", g:(R,y)=>R.profit[y].incomeAT},
+    {l:"营业成本（不含税）", g:(R,y)=>R.profit[y].costAT},
+    {l:"利润总额", g:(R,y)=>R.profit[y].totalProfit},
+    {l:"弥补以前年度亏损", g:(R,y)=>R.profit[y].makeup},
+    {l:"应纳税所得额", g:(R,y)=>R.profit[y].taxable},
+    {l:"所得税", g:(R,y)=>R.profit[y].incomeTax},
+    {l:"净利润", g:(R,y)=>R.profit[y].netProfit, hl:1},
+  ])
+  + dtable("现金流量表（万元）", R, [
+    {l:"现金流入", g:(R,y)=>R.cf[y].inflow},
+    {l:"现金流出", g:(R,y)=>R.cf[y].outflow},
+    {l:"净现金流量", g:(R,y)=>R.cf[y].net, hl:1},
+    {l:"累计净现金流量", g:(R,y)=>R.cf[y].cumNet, t:"last"},
+    {l:"净现值", g:(R,y)=>R.cf[y].npv},
+    {l:"累计净现值", g:(R,y)=>R.cf[y].cumNpv, t:"last", hl:1},
+  ]);
+}
+
+function dtRent(R){
+  return '<div class="doc-eyebrow" style="margin-top:22px;">DETAIL · 测算明细表</div>'
+  + dtable("收入明细表（万元）", R, [
+    {l:"住宅租金收入", g:(R,y)=>R.income[y].resi},
+    {l:"车位收入", g:(R,y)=>R.income[y].park},
+    {l:"其他收入", g:(R,y)=>R.income[y].other},
+    {l:"总收入", g:(R,y)=>R.income[y].total, hl:1},
+    {l:"出租率", g:(R,y)=>R.resiOcc[y], f:"pct", t:"none"},
+    {l:"租金单价（元/㎡/月）", g:(R,y)=>R.resiRent[y], t:"none"},
+  ], true)
+  + dtable("经营成本明细（万元）", R, [
+    {l:"管理费用（住房）", g:(R,y)=>R.cost[y].mgH},
+    {l:"管理费用（停车位）", g:(R,y)=>R.cost[y].mgP},
+    {l:"保险费", g:(R,y)=>R.cost[y].ins},
+    {l:"维修费用", g:(R,y)=>R.cost[y].rep},
+    {l:"日常物业维修基金", g:(R,y)=>R.cost[y].fund},
+    {l:"空置期物业管理费", g:(R,y)=>R.cost[y].vac},
+    {l:"装修重置费", g:(R,y)=>R.cost[y].reset},
+    {l:"折旧摊销", g:(R,y)=>R.cost[y].dep},
+    {l:"经营成本合计", g:(R,y)=>R.cost[y].operating, hl:1},
+  ])
+  + dtable("还本付息计划表（万元）", R, [
+    {l:"期初借款余额", g:(R,y)=>R.loan[y].begin, t:"none"},
+    {l:"本期借款", g:(R,y)=>R.loan[y].borrow},
+    {l:"本期利息", g:(R,y)=>R.loan[y].interest},
+    {l:"本期还本", g:(R,y)=>R.loan[y].repay},
+    {l:"本期付息", g:(R,y)=>R.loan[y].payInt},
+    {l:"还本付息合计", g:(R,y)=>R.loan[y].total},
+    {l:"期末借款余额", g:(R,y)=>R.loan[y].end, t:"last"},
+  ])
+  + dtable("税金及附加明细（万元）", R, [
+    {l:"增值税", g:(R,y)=>R.tax[y].vat},
+    {l:"印花税", g:(R,y)=>R.tax[y].stamp},
+    {l:"城建税", g:(R,y)=>R.tax[y].city},
+    {l:"教育费附加", g:(R,y)=>R.tax[y].edu},
+    {l:"房产税", g:(R,y)=>R.tax[y].prop},
+    {l:"土地使用税", g:(R,y)=>R.tax[y].land},
+    {l:"税金及附加总和", g:(R,y)=>R.tax[y].total, hl:1},
+  ])
+  + dtable("总成本费用表（万元）", R, [
+    {l:"经营成本", g:(R,y)=>R.cost[y].operating},
+    {l:"财务费用（建设期）", g:(R,y)=>R.totalCost[y].finBuild},
+    {l:"财务费用（运营期）", g:(R,y)=>R.totalCost[y].finOp},
+    {l:"总成本费用（不含建设期财务费用、不含税金）", g:(R,y)=>R.totalCost[y].total, hl:1},
+  ])
+  + dtable("利润表（万元）", R, [
+    {l:"利润总额", g:(R,y)=>R.profit[y].total},
+    {l:"弥补以前年度亏损", g:(R,y)=>R.profit[y].makeup},
+    {l:"应纳税所得额", g:(R,y)=>R.profit[y].taxable},
+    {l:"所得税", g:(R,y)=>R.profit[y].incomeTax},
+    {l:"净利润", g:(R,y)=>R.profit[y].net, hl:1},
+  ])
+  + dtable("现金流量表（万元）", R, [
+    {l:"现金流入", g:(R,y)=>R.cf[y].inflow},
+    {l:"其中：建设投资", g:(R,y)=>R.cf[y].invest},
+    {l:"现金流出合计", g:(R,y)=>R.cf[y].outflow},
+    {l:"净现金流量", g:(R,y)=>R.cf[y].net, hl:1},
+    {l:"累计净现金流量", g:(R,y)=>R.cf[y].cumNet, t:"last"},
+    {l:"净现值", g:(R,y)=>R.cf[y].npv},
+    {l:"累计净现值", g:(R,y)=>R.cf[y].cumNpv, t:"last", hl:1},
+  ]);
+}
+
+function dtSale(R){
+  const rr = (R,y,k)=> R.rental[y]? R.rental[y][k] : null;
+  return '<div class="doc-eyebrow" style="margin-top:22px;">DETAIL · 测算明细表</div>'
+  + dtable("收入明细表（万元）", R, [
+    {l:"配保房销售收入", g:(R,y)=>R.income[y].sale, hl:1},
+    {l:"出租净收益现值（计入首年）", g:(R,y)=>R.income[y].rentPv},
+    {l:"其他收入", g:(R,y)=>R.income[y].other},
+    {l:"总收入", g:(R,y)=>R.income[y].total, hl:1},
+    {l:"商业出租收入（参考，不计入总收入）", g:(R,y)=>rr(R,y,"income")},
+  ], true)
+  + dtable("商业出租情况表（万元）", R, [
+    {l:"出租率", g:(R,y)=>rr(R,y,"occ"), f:"pct", t:"none"},
+    {l:"租金单价（元/㎡/月）", g:(R,y)=>rr(R,y,"rent"), t:"none"},
+    {l:"商业出租收入", g:(R,y)=>rr(R,y,"income"), hl:1},
+    {l:"房产税（从租）", g:(R,y)=>rr(R,y,"tax1")},
+    {l:"房产税（从价·空置）", g:(R,y)=>rr(R,y,"tax2")},
+    {l:"管理费用（商业）", g:(R,y)=>rr(R,y,"mgC")},
+    {l:"管理费用（停车）", g:(R,y)=>rr(R,y,"mgP")},
+    {l:"维修金", g:(R,y)=>rr(R,y,"fund")},
+    {l:"维修费", g:(R,y)=>rr(R,y,"rep")},
+    {l:"空置服务费", g:(R,y)=>rr(R,y,"vac")},
+    {l:"保险费", g:(R,y)=>rr(R,y,"ins")},
+    {l:"土地使用税", g:(R,y)=>rr(R,y,"landT")},
+    {l:"出租营运成本合计", g:(R,y)=>rr(R,y,"costTotal"), hl:1},
+    {l:"销项税额", g:(R,y)=>rr(R,y,"outputT")},
+    {l:"期初可抵进项", g:(R,y)=>rr(R,y,"inputT"), t:"none"},
+    {l:"增值税", g:(R,y)=>rr(R,y,"vat")},
+    {l:"增值税附加", g:(R,y)=>rr(R,y,"vatSur")},
+    {l:"印花税", g:(R,y)=>rr(R,y,"stamp")},
+    {l:"出租经营税金合计", g:(R,y)=>rr(R,y,"taxTotal"), hl:1},
+    {l:"出租净收入", g:(R,y)=>rr(R,y,"netIncome")},
+    {l:"出租净收益现值", g:(R,y)=>rr(R,y,"pv"), hl:1},
+  ])
+  + dtable("出售成本费用表（万元）", R, [
+    {l:"累计开发成本（销售部分）", g:(R,y)=>R.cost[y].devSale},
+    {l:"累计开发成本（折旧摊销部分）", g:(R,y)=>R.cost[y].devDep},
+    {l:"折旧摊销（/50年）", g:(R,y)=>R.cost[y].devDep2},
+    {l:"销售费用", g:(R,y)=>R.cost[y].saleFee},
+    {l:"销项税额", g:(R,y)=>R.cost[y].outVat},
+    {l:"进项税额", g:(R,y)=>R.cost[y].inVat},
+    {l:"地价抵减额", g:(R,y)=>R.cost[y].landDeduct},
+    {l:"增值税", g:(R,y)=>R.cost[y].vat},
+    {l:"增值税附加", g:(R,y)=>R.cost[y].vatSur},
+    {l:"销售税金合计", g:(R,y)=>R.cost[y].saleTax, hl:1},
+    {l:"财务费用（建设期）", g:(R,y)=>R.cost[y].finBuild},
+    {l:"财务费用（运营期）", g:(R,y)=>R.cost[y].finOp},
+    {l:"总成本费用", g:(R,y)=>R.cost[y].total, hl:1},
+  ])
+  + dtable("还本付息计划表（万元）", R, [
+    {l:"期初借款余额", g:(R,y)=>R.loan[y].begin, t:"none"},
+    {l:"本期借款", g:(R,y)=>R.loan[y].borrow},
+    {l:"本期利息", g:(R,y)=>R.loan[y].interest},
+    {l:"本期还本", g:(R,y)=>R.loan[y].repay},
+    {l:"还本付息合计", g:(R,y)=>R.loan[y].total},
+    {l:"期末借款余额", g:(R,y)=>R.loan[y].end, t:"last"},
+  ])
+  + dtable("利润表（万元）", R, [
+    {l:"利润总额", g:(R,y)=>R.profit[y].total},
+    {l:"弥补以前年度亏损", g:(R,y)=>R.profit[y].makeup},
+    {l:"应纳税所得额", g:(R,y)=>R.profit[y].taxable},
+    {l:"所得税", g:(R,y)=>R.profit[y].incomeTax},
+    {l:"净利润", g:(R,y)=>R.profit[y].net, hl:1},
+  ])
+  + dtable("现金流量表（万元）", R, [
+    {l:"现金流入", g:(R,y)=>R.cf[y].inflow},
+    {l:"其中：配保房销售", g:(R,y)=>R.income[y].sale},
+    {l:"其中：回收固定资产余值", g:(R,y)=>R.cf[y].recover},
+    {l:"开发成本投资", g:(R,y)=>R.cf[y].invest},
+    {l:"销售费用", g:(R,y)=>R.cf[y].saleFee},
+    {l:"销售税金", g:(R,y)=>R.cf[y].saleTax},
+    {l:"出租经营税金", g:(R,y)=>R.cf[y].rentTax},
+    {l:"出租营运成本", g:(R,y)=>R.cf[y].rentCost},
+    {l:"调整所得税", g:(R,y)=>R.cf[y].adjTax},
+    {l:"现金流出合计", g:(R,y)=>R.cf[y].outflow},
+    {l:"净现金流量", g:(R,y)=>R.cf[y].net, hl:1},
+    {l:"累计净现金流量", g:(R,y)=>R.cf[y].cumNet, t:"last"},
+    {l:"净现值", g:(R,y)=>R.cf[y].npv},
+    {l:"累计净现值", g:(R,y)=>R.cf[y].cumNpv, t:"last", hl:1},
+  ]);
+}
+
 function scStepResult(){
   if(!scResult) return '<div class="step-desc">尚未测算</div>';
   const s=scResult.summary;
@@ -896,19 +1148,6 @@ function scStepResult(){
   let extra = (calcType==="rent"||calcType==="sale")? tile("利息保障倍数", s.icr) : "";
   if(calcType==="sale") extra += tile("配保房销售收入合计（万元）", fmt(s.totalSaleIncome)) + tile("出租净收益现值合计（万元）", fmt(s.rentalPvTotal));
   extra += customMetricTiles();
-  // 分年简表
-  const R=scResult;
-  let rows;
-  if(calcType==="sale"){
-    rows='<table class="rpt"><tr><th>年份</th><th>现金流入</th><th>其中:销售收入</th><th>商业租金</th><th>现金流出</th><th>其中:调整所得税</th><th>净现金流</th><th>累计净现金流</th></tr>';
-    R.allYears.forEach(y=>{ rows+='<tr><td>'+y+'</td><td>'+fmt(R.cf[y].inflow)+'</td><td>'+fmt(R.income[y].sale)+'</td><td>'+fmt(R.rental[y]?R.rental[y].income:0)+'</td><td>'+fmt(R.cf[y].outflow)+'</td><td>'+fmt(R.cf[y].adjTax)+'</td><td>'+fmt(R.cf[y].net)+'</td><td>'+fmt(R.cf[y].cumNet)+'</td></tr>'; });
-    rows+='</table>';
-  }else{
-    rows='<table class="rpt"><tr><th>年份</th><th>总收入</th><th>总成本</th><th>税金</th><th>净利润</th><th>净现金流</th><th>累计净现金流</th></tr>';
-    const inc = y=> calcType==="rent"? R.income[y].total : R.income[y].rent;
-    R.allYears.forEach(y=>{ rows+='<tr><td>'+y+'</td><td>'+fmt(inc(y))+'</td><td>'+fmt(calcType==="rent"?R.totalCost[y].total:R.cost[y].total)+'</td><td>'+fmt(R.tax[y].total)+'</td><td>'+fmt(calcType==="rent"?R.profit[y].net:R.profit[y].netProfit)+'</td><td>'+fmt(R.cf[y].net)+'</td><td>'+fmt(R.cf[y].cumNet)+'</td></tr>'; });
-    rows+='</table>';
-  }
   return '<div class="doc-eyebrow">财务测算 · STEP 03 · 结果</div>'
     +'<h1 class="doc-title">测算结果</h1>'
     +'<div class="metric-grid">'
@@ -920,7 +1159,7 @@ function scStepResult(){
     + tile("现金流回正", s.payback? s.payback.year+"年" : "未回正")
     + extra
     +'</div>'
-    +'<div class="cf-chart" style="margin-top:16px;"><div class="cf-head"><span>分年明细（万元）</span></div><div style="max-height:320px;overflow:auto;">'+rows+'</div></div>'
+    + detailTablesHtml()
     + aiChatHtml()
     +'<div class="actions"><button class="btn ghost" id="scBack1">← 修改参数</button></div>';
 }
@@ -980,7 +1219,7 @@ async function askAI(){
 }
 function bindCalcEvents(){
   const s=id=>document.getElementById(id);
-  document.querySelectorAll("[data-sct]").forEach(c=>{ c.onclick=()=>{ calcType=c.dataset.sct; renderSheet(); }; });
+  document.querySelectorAll("[data-sct]").forEach(c=>{ c.onclick=()=>{ if(calcType!==c.dataset.sct){ scParams=null; scResult=null; aiChat=[]; } calcType=c.dataset.sct; renderSheet(); }; });
   if(s("scNext1")) s("scNext1").onclick=()=>{ scStep=1; renderTOC(); renderSheet(); };
   if(s("scBack0")) s("scBack0").onclick=()=>{ scStep=0; renderTOC(); renderSheet(); };
   if(s("scBack1")) s("scBack1").onclick=()=>{ scStep=1; renderTOC(); renderSheet(); };
