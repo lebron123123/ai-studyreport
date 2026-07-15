@@ -554,6 +554,10 @@
   .ch-range{display:flex; align-items:center; gap:6px; color:var(--ink-soft);}
   .ch-range input{width:56px; padding:5px 6px; font-size:12.5px; text-align:center;}
 
+
+  .audit-row{display:flex; align-items:baseline; padding:6px 4px; border-bottom:1px solid var(--line); line-height:1.6;}
+  .audit-row:hover{background:#F5F2E9;}
+
 </style>
 
 <div class="app">
@@ -2075,6 +2079,79 @@ function archiveCardHtml(){
     +'</div>';
 }
 
+
+/* ================= 可研审核 · 硬规则检查（零AI成本，确定性） ================= */
+function runAudit(){
+  const issues = [];  // {sev:"err"|"warn"|"info", cn, si, secTitle, msg}
+  const add = (sev,c,si,s,msg)=>issues.push({sev, cn:c.cn, si, secTitle:s? s.t:"", chName:c.name, msg});
+  const active = chapters.filter(c=>c.checked);
+  const plain = s => {
+    const src = s.editedHtml? s.editedHtml.replace(/<[^>]+>/g," ") : (s.content||"");
+    return src;
+  };
+  const fullText = active.map(c=>c.sections.map(plain).join("\n")).join("\n");
+
+  active.forEach(c=>c.sections.forEach((s,si)=>{
+    const t = plain(s);
+    // 完整性
+    if(!s.content && !s.editedHtml){ add("err",c,si,s,"未生成内容"); return; }
+    const tf = (t.match(/待填/g)||[]).length;
+    if(tf) add("warn",c,si,s,"存在 "+tf+" 处「待填」，须补充真实数据");
+    // 规范性
+    const len = t.replace(/\s/g,"").length;
+    if(len < 150) add("info",c,si,s,"篇幅偏短（"+len+"字），建议充实");
+    if(s.numeric){
+      const hasTable = s.editedHtml? /<table/i.test(s.editedHtml) : /\[\[TABLE\]\]/.test(s.content||"");
+      if(!hasTable) add("warn",c,si,s,"数据类子节缺少数据表格");
+    }
+    // 穿帮语
+    const m = t.match(/作为(一个)?(AI|人工智能|语言模型)|以下是|希望对您有帮助|抱歉，|无法提供/);
+    if(m) add("err",c,si,s,"疑似AI穿帮语：「"+m[0]+"」");
+  }));
+
+  // 一致性：全文数字 vs 测算结果（同一问题去重）
+  const seen = new Set();
+  const addOnce = (msg)=>{ if(seen.has(msg)) return; seen.add(msg); issues.push({sev:"err", cn:"—", si:null, secTitle:"", chName:"全文一致性", msg}); };
+  if(calcResult && calcResult.summary){
+    const S = calcResult.summary;
+    const near = (a,b,tol)=>Math.abs(a-b)<=tol;
+    // IRR：找“内部收益率/IRR”附近的百分数
+    if(S.irr!==null && S.irr!==undefined){
+      const re = /(内部收益率|IRR)[^。\n]{0,30}?(-?\d+(?:\.\d+)?)\s*%/g;
+      let mm;
+      while((mm = re.exec(fullText))){
+        const v = parseFloat(mm[2]);
+        if(!near(v, S.irr, 0.05)) addOnce("IRR 表述「"+mm[2]+"%」与测算结果 "+S.irr+"% 不一致");
+      }
+    }
+    // 净现值/净利润/总收入：找指标名附近的金额
+    [["净现值", S.totalNpv], ["净利润", S.totalNetProfit], ["总收入", S.totalIncome]].forEach(([label, val])=>{
+      if(val===null||val===undefined) return;
+      const re = new RegExp(label+"[^。\\n]{0,25}?(-?[\\d,]+(?:\\.\\d+)?)\\s*万", "g");
+      let mm;
+      while((mm = re.exec(fullText))){
+        const v = parseFloat(mm[1].replace(/,/g,""));
+        if(!near(v, val, Math.max(Math.abs(val)*0.005, 0.5))) addOnce(label+" 表述「"+mm[1]+"万」与测算结果 "+(Math.round(val*100)/100).toLocaleString("zh-CN")+"万 不一致");
+      }
+    });
+  }
+  return issues;
+}
+function auditPanelHtml(issues){
+  const err = issues.filter(x=>x.sev==="err"), warn = issues.filter(x=>x.sev==="warn"), info = issues.filter(x=>x.sev==="info");
+  const dot = s=> s==="err"? "var(--seal-red)" : s==="warn"? "#C99A2E" : "var(--ink-soft)";
+  let head;
+  if(!issues.length) head = '<div style="color:var(--ok-green); font-weight:700;">✓ 全部检查通过（完整性 / 规范性 / 数据一致性），可进入签发。</div>';
+  else head = '<div style="font-weight:700;">检查完成：<span style="color:var(--seal-red);">'+err.length+' 项错误</span> ｜ <span style="color:#C99A2E;">'+warn.length+' 项警告</span> ｜ '+info.length+' 项提示</div>';
+  const rows = issues.map(x=>
+    '<div class="audit-row" '+(x.si!==null&&x.si!==undefined?'data-goto="'+x.cn+'_'+x.si+'" style="cursor:pointer;"':'')+'>'
+    +'<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+dot(x.sev)+';margin-right:8px;flex-shrink:0;"></span>'
+    +'<span style="color:var(--ink-soft); flex-shrink:0;">'+(x.si!==null&&x.si!==undefined? '第'+x.cn+'章 · '+escapeHtml(x.secTitle) : escapeHtml(x.chName))+'</span>'
+    +'<span style="margin-left:10px;">'+escapeHtml(x.msg)+'</span></div>').join("");
+  return head + '<div style="margin-top:8px; max-height:260px; overflow-y:auto;">'+rows+'</div>'
+    +'<div style="font-size:11px; color:var(--ink-soft); margin-top:8px;">点击条目可定位到对应小节。硬规则检查不消耗AI额度。</div>';
+}
+
 function stepReview(){
   const active = chapters.filter(c=>c.checked);
   let inner = active.map(c=>'<div class="chapter-block"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
@@ -2088,6 +2165,7 @@ function stepReview(){
     +(!signed?'<div class="watermark">AI初稿 · 未经复核</div>':'')
     + archiveCardHtml()
     +'<div class="step-desc">每一段正文可直接点击编辑。数据类子章节的表格须由人工替换为真实测算结果后，方可确认签发。</div>'
+    +'<div class="cf-chart" style="margin:0 0 16px;"><div class="cf-head"><span>签发前审核检查</span><button class="ub-btn" id="auditBtn">运行审核检查</button></div><div id="auditBox" style="font-size:12.5px;"><span style="color:var(--ink-soft);">检查项：内容完整性（未生成/待填）、规范性（篇幅/数据表格/AI穿帮语）、全文与测算结果的数据一致性。</span></div></div>'
     + inner
     +(signed?'<div class="seal"><span>单位复核确认<br>'+new Date().toLocaleDateString('zh-CN')+'<br>责任人签发</span></div><div class="final-banner">✓ 已完成人工复核签发，可导出正式文本</div>':'')
     +'<div class="actions"><button class="btn ghost" id="backStep4r">← 返回生成</button>'
@@ -2223,6 +2301,17 @@ function bindEvents(){
   if(s("startGen")) s("startGen").onclick = runGeneration;
   if(s("toStep5r")) s("toStep5r").onclick = ()=>{ currentStep=5; renderTOC(); renderSheet(); };
   if(s("backStep4r")) s("backStep4r").onclick = ()=>{ currentStep=4; renderTOC(); renderSheet(); };
+  if(s("auditBtn")) s("auditBtn").onclick = ()=>{
+    const issues = runAudit();
+    document.getElementById("auditBox").innerHTML = auditPanelHtml(issues);
+    document.querySelectorAll(".audit-row[data-goto]").forEach(r=>{
+      r.onclick = ()=>{
+        const [cn,si] = r.dataset.goto.split("_");
+        const el = document.getElementById("sec_"+cn+"_"+si) || document.querySelector('.section-block[data-cn="'+cn+'"][data-si="'+si+'"]');
+        if(el){ el.scrollIntoView({behavior:"smooth", block:"center"}); el.style.outline="2px solid var(--seal-red)"; setTimeout(()=>el.style.outline="",1800); }
+      };
+    });
+  };
   if(s("signBtn")) s("signBtn").onclick = ()=>{ signed=true; saveDraft(); renderSheet(); };
   if(s("printBtn")) s("printBtn").onclick = ()=> window.print();
   if(s("exportWordBtn")) s("exportWordBtn").onclick = exportWord;
