@@ -3,7 +3,7 @@
 // POST             {key:"gaibao"|"rent"|"sale"|"metrics", data:{...}|[...]}
 import { verifyAuth, json } from "./_auth.js";
 
-const KEYS = ["gaibao","rent","sale","metrics"];
+const KEYS = ["gaibao","rent","sale","metrics","score"];
 function isAdmin(env, user){
   const admins = (env.ADMIN_USERS || "").split(",").map(s=>s.trim()).filter(Boolean);
   return admins.includes(user.username) || admins.includes(String(user.userId));
@@ -16,7 +16,7 @@ export async function onRequestGet(context){
   const out = {};
   for(const k of KEYS){
     const row = await env.DB.prepare("SELECT data FROM configs WHERE key=?").bind("calc_"+k).first();
-    out[k] = row? JSON.parse(row.data) : (k==="metrics"? [] : {});
+    out[k] = row? JSON.parse(row.data) : ((k==="metrics"||k==="score")? [] : {});
   }
   return json({ok:true, config: out});
 }
