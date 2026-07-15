@@ -135,13 +135,52 @@ function renderAiRules(){
     +'<div class="sub">复核页"AI深度审核"按这些要点逐节评审。<b>匹配关键词</b>命中章节标题即适用（多个用逗号分隔；填 <b>*</b> 表示适用所有小节）。要点写给AI看，例如："必须引用具体政策文件名；须包含供需两侧数据；每项风险须有对应对策"。未配置任何规则时使用内置通用规则。</div>'
     +'<div id="arList">'+arList.map((e,i)=>arRowHtml(e,i)).join("")+'</div>'
     +'<span class="add-link" id="addAr" style="margin-left:0;">+ 添加规则</span>'
+    +'<span class="add-link" id="evolveAr" style="margin-left:18px; color:var(--red);">⟳ 从修改意见生成规则建议</span>'
+    +'<div id="evolveBox"></div>'
     +'<div class="bar" style="margin-top:18px;"><button class="btn" id="saveAr">保存规则</button>'
     +'<button class="btn ghost" id="arBack">返回列表</button></div>';
   document.getElementById("addAr").onclick = ()=>{ readArForm(); arList.push({match:"",rule:""}); renderAiRules(); };
   document.getElementById("saveAr").onclick = saveAiRules;
   document.getElementById("arBack").onclick = ()=>loadList();
   document.querySelectorAll("[data-ardel]").forEach(b=>b.onclick=()=>{ readArForm(); arList.splice(+b.dataset.ardel,1); renderAiRules(); });
+  document.getElementById("evolveAr").onclick = evolveRules;
 }
+
+async function evolveRules(){
+  const box = document.getElementById("evolveBox");
+  box.innerHTML = '<div style="padding:14px 0; color:var(--soft); font-size:13px;">读取修改意见记录…</div>';
+  try{
+    const r = await fetch("/api/revlog",{headers:authHeaders()});
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error||"读取失败");
+    const list = d.list||[];
+    if(!list.length){ box.innerHTML = '<div style="padding:14px 0; color:var(--soft); font-size:13px;">暂无修改意见记录。用户在复核页使用"✎ AI修改"后会自动积累。</div>'; return; }
+    box.innerHTML = '<div style="padding:14px 0; color:var(--soft); font-size:13px;">已读取 '+list.length+' 条意见，AI归纳中…</div>';
+    const digest = list.slice(0,200).map(x=>'['+(x.chapter||"?")+'/'+(x.section||"?")+'] '+x.instruction).join("\n");
+    const sys = '你是可研报告质量管理专家。以下是用户对AI生成章节提出的修改意见记录。请归纳出其中反复出现的共性问题，转化为可配置的审核规则建议。只输出JSON数组（不要代码块、不要其他文字），每项格式：{"match":"匹配章节关键词(如:市场分析,多个逗号分隔,通用则填*)","rule":"审核要点(50字内,写给AI评审用)","reason":"依据(出现了哪类意见约几次,30字内)"}。最多5条，按重要性排序。';
+    const resp = await fetch("/api/generate",{method:"POST", headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
+      body:JSON.stringify({system:sys, messages:[{role:"user", content:digest}]})});
+    const gd = await resp.json();
+    if(gd.error) throw new Error(gd.error);
+    const text = (gd.content||[]).map(b=>b.text||"").join("").replace(/```json|```/g,"").trim();
+    const arr = JSON.parse(text.slice(text.indexOf("["), text.lastIndexOf("]")+1));
+    if(!arr.length){ box.innerHTML = '<div style="padding:14px 0; color:var(--soft);">AI未归纳出共性规则。</div>'; return; }
+    box.innerHTML = '<div style="margin:14px 0 6px; font-weight:600; font-size:13px;">AI建议新增以下规则（逐条审阅，点采纳加入上方列表，最后记得保存）：</div>'
+      + arr.map((a,i)=>'<div style="border:1px solid var(--line); background:#FFFDF5; padding:10px 12px; margin-top:8px; font-size:13px;">'
+        +'<div><b>匹配：</b>'+esc(a.match||"*")+' ｜ <b>依据：</b><span style="color:var(--soft);">'+esc(a.reason||"")+'</span></div>'
+        +'<div style="margin-top:4px;"><b>要点：</b>'+esc(a.rule||"")+'</div>'
+        +'<button class="btn sm" data-adoptr="'+i+'" style="margin-top:8px;">采纳此规则</button></div>').join("");
+    box.querySelectorAll("[data-adoptr]").forEach(b=>{
+      b.onclick = ()=>{
+        const a = arr[+b.dataset.adoptr];
+        readArForm(); arList.push({match:a.match||"*", rule:a.rule||""});
+        renderAiRules();
+        msg("已加入列表，请点「保存规则」持久化","ok");
+      };
+    });
+  }catch(e){ box.innerHTML = '<div style="padding:14px 0; color:var(--red); font-size:13px;">失败：'+esc(e.message)+'</div>'; }
+}
+
 function arRowHtml(e,i){
   return '<div style="border:1px solid var(--line); background:#fff; padding:10px 12px; margin-top:10px;">'
     +'<div style="display:flex; gap:8px; align-items:center;">'
