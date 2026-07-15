@@ -96,7 +96,7 @@ const PARAM_DEFS = {
   ]},
 };
 const METRIC_VARS = "totalIncome(总收入) totalCost(总成本) totalTax(税金) totalNetProfit(净利润) totalNpv(净现值) irr(IRR) icr(利息保障倍数) totalSaleIncome(销售收入合计) rentalPvTotal(出租净收益现值) totalInterest(利息合计)";
-let calcCfg = {gaibao:{}, rent:{}, sale:{}, metrics:[]};
+let calcCfg = {gaibao:{}, rent:{}, sale:{}, metrics:[], score:[]};
 
 async function openCalcCfg(){
   document.getElementById("listBox").style.display="none";
@@ -106,7 +106,7 @@ async function openCalcCfg(){
   try{
     const r = await fetch("/api/calcconfig",{headers:authHeaders()});
     const d = await r.json();
-    if(d.ok) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},metrics:[]}, d.config);
+    if(d.ok) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},metrics:[],score:[]}, d.config);
   }catch(e){}
   renderCalcCfg();
 }
@@ -132,6 +132,12 @@ function renderCalcCfg(){
     + (calcCfg.metrics||[]).map((m,i)=>metricRowHtml(m,i)).join("")
     +'</div>'
     +'<span class="add-link" id="addMetric" style="margin-left:0;">+ 添加自定义指标</span>'
+    +'<div style="margin-top:22px; font-weight:600;">测算评分规则</div>'
+    +'<div class="sub">留空则使用内置默认规则（IRR/NPV/利息保障/回正年限/净利率）。表达式变量同上（另有 paybackYears=回正年限）；方向"≥"越大越好、"≤"越小越好；良阈值可留空（不达优即差）。档位得分固定：优100/良60/差20，总分按权重加权。</div>'
+    +'<div id="scoreList">'
+    + (calcCfg.score||[]).map((m,i)=>scoreRowHtml(m,i)).join("")
+    +'</div>'
+    +'<span class="add-link" id="addScore" style="margin-left:0;">+ 添加评分规则</span>'
     +'<div class="bar" style="margin-top:18px;">'
     +'<button class="btn" id="saveCalcCfg">保存全部配置</button>'
     +'<button class="btn ghost" id="cfgBack">返回列表</button></div>';
@@ -144,7 +150,27 @@ function renderCalcCfg(){
   document.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=()=>{
     readCfgForm(); calcCfg.metrics.splice(+b.dataset.mdel,1); renderCalcCfg();
   });
+  document.getElementById("addScore").onclick = ()=>{
+    readCfgForm(); calcCfg.score.push({name:"",expr:"",dir:">=",goodV:"",midV:"",weight:10,scope:"all"}); renderCalcCfg();
+  };
+  document.querySelectorAll("[data-sdel]").forEach(b=>b.onclick=()=>{
+    readCfgForm(); calcCfg.score.splice(+b.dataset.sdel,1); renderCalcCfg();
+  });
 }
+
+function scoreRowHtml(m,i){
+  const sel = (k,s)=> m[k]===s?'selected':'';
+  return '<div style="display:flex; gap:6px; margin:6px 0; align-items:center; flex-wrap:wrap;">'
+    +'<input class="sc-name" data-i="'+i+'" placeholder="指标名称" value="'+esc(m.name||"")+'" style="width:150px;">'
+    +'<input class="sc-expr" data-i="'+i+'" placeholder="表达式，如 irr" value="'+esc(m.expr||"")+'" style="flex:1; min-width:140px;">'
+    +'<select class="sc-dir" data-i="'+i+'" style="width:64px;"><option value=">=" '+sel("dir",">=")+'>≥</option><option value="<=" '+sel("dir","<=")+'>≤</option></select>'
+    +'<input class="sc-good" data-i="'+i+'" type="number" step="any" placeholder="优阈值" value="'+(m.goodV!==undefined&&m.goodV!==null?m.goodV:"")+'" style="width:80px;">'
+    +'<input class="sc-mid" data-i="'+i+'" type="number" step="any" placeholder="良阈值" value="'+(m.midV!==undefined&&m.midV!==null?m.midV:"")+'" style="width:80px;">'
+    +'<input class="sc-w" data-i="'+i+'" type="number" step="any" placeholder="权重" value="'+(m.weight!==undefined?m.weight:"")+'" style="width:70px;">'
+    +'<select class="sc-scope" data-i="'+i+'" style="width:100px;"><option value="all" '+sel("scope","all")+'>全部类型</option><option value="gaibao" '+sel("scope","gaibao")+'>非居改保</option><option value="rent" '+sel("scope","rent")+'>出租类</option><option value="sale" '+sel("scope","sale")+'>出售类</option></select>'
+    +'<button class="btn sm red" data-sdel="'+i+'">×</button></div>';
+}
+
 function metricRowHtml(m,i){
   const sel = s=> m.scope===s?'selected':'';
   return '<div style="display:flex; gap:8px; margin:6px 0; align-items:center;">'
@@ -163,13 +189,20 @@ function readCfgForm(){
   const names=[...document.querySelectorAll(".m-name")], exprs=[...document.querySelectorAll(".m-expr")], scopes=[...document.querySelectorAll(".m-scope")];
   calcCfg.metrics = names.map((n,i)=>({name:n.value.trim(), expr:exprs[i].value.trim(), scope:scopes[i].value}))
     .filter(m=>m.name&&m.expr);
+  const sn=[...document.querySelectorAll(".sc-name")], se=[...document.querySelectorAll(".sc-expr")],
+    sd=[...document.querySelectorAll(".sc-dir")], sg=[...document.querySelectorAll(".sc-good")],
+    sm2=[...document.querySelectorAll(".sc-mid")], sw=[...document.querySelectorAll(".sc-w")],
+    ss=[...document.querySelectorAll(".sc-scope")];
+  calcCfg.score = sn.map((n,i)=>({name:n.value.trim(), expr:se[i].value.trim(), dir:sd[i].value,
+    goodV:sg[i].value.trim(), midV:sm2[i].value.trim(), weight:parseFloat(sw[i].value)||0, scope:ss[i].value}))
+    .filter(m=>m.name&&m.expr&&m.goodV!=="");
 }
 async function saveCalcCfg(){
   readCfgForm();
   const btn = document.getElementById("saveCalcCfg");
   btn.disabled=true; btn.textContent="保存中…";
   try{
-    for(const key of ["gaibao","rent","sale","metrics"]){
+    for(const key of ["gaibao","rent","sale","metrics","score"]){
       const r = await fetch("/api/calcconfig",{method:"POST",headers:authHeaders(),
         body:JSON.stringify({key, data:calcCfg[key]})});
       const d = await r.json();
