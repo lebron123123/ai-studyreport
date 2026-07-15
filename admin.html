@@ -42,6 +42,7 @@
       <button class="btn ghost" id="btnRefresh">刷新列表</button>
       <button class="btn ghost" id="btnSeed">导入内置默认大纲</button>
       <button class="btn ghost" id="btnCalcCfg">测算参数管理</button>
+      <button class="btn ghost" id="btnExamples">黄金范例库</button>
       <span style="margin-left:auto;font-size:12px;color:var(--soft);" id="loginInfo"></span>
     </div>
     <div id="listBox"></div>
@@ -57,6 +58,60 @@ function msg(text,type){ document.getElementById("msgBox").innerHTML='<div class
 let allOutlines = [];
 let editing = null; // {key, label, chapters}
 
+
+
+/* ================= 黄金范例库 ================= */
+let exList = [];
+async function openExamples(){
+  document.getElementById("listBox").style.display="none";
+  const box = document.getElementById("editBox");
+  box.style.display="block";
+  box.innerHTML = '<div style="padding:30px 0; color:var(--soft);">加载范例库…</div>';
+  try{
+    const r = await fetch("/api/calcconfig",{headers:authHeaders()});
+    const d = await r.json();
+    exList = (d.ok && d.config && d.config.examples)? d.config.examples : [];
+  }catch(e){ exList = []; }
+  renderExamples();
+}
+function renderExamples(){
+  const box = document.getElementById("editBox");
+  box.innerHTML = '<h1 style="font-size:18px;">黄金范例库</h1>'
+    +'<div class="sub">为章节配置优秀范文。生成时按<b>匹配关键词</b>命中章节标题即注入（最多2篇/节，每篇截取前1800字），并要求AI学习结构与深度、不得照抄数据。关键词可填多个（逗号分隔），如"市场分析,供需"。</div>'
+    +'<div id="exList">'+exList.map((e,i)=>exRowHtml(e,i)).join("")+'</div>'
+    +'<span class="add-link" id="addEx" style="margin-left:0;">+ 添加范例</span>'
+    +'<div class="bar" style="margin-top:18px;"><button class="btn" id="saveEx">保存范例库</button>'
+    +'<button class="btn ghost" id="exBack">返回列表</button></div>';
+  document.getElementById("addEx").onclick = ()=>{ readExForm(); exList.push({match:"",title:"",content:""}); renderExamples(); };
+  document.getElementById("saveEx").onclick = saveExamples;
+  document.getElementById("exBack").onclick = ()=>loadList();
+  document.querySelectorAll("[data-exdel]").forEach(b=>b.onclick=()=>{ readExForm(); exList.splice(+b.dataset.exdel,1); renderExamples(); });
+}
+function exRowHtml(e,i){
+  return '<div style="border:1px solid var(--line); background:#fff; padding:10px 12px; margin-top:10px;">'
+    +'<div style="display:flex; gap:8px; align-items:center;">'
+    +'<input class="ex-match" placeholder="匹配关键词（如：市场分析,供需）" value="'+esc(e.match||"")+'" style="width:220px;">'
+    +'<input class="ex-title" placeholder="范文标题（如：XX项目-市场分析章）" value="'+esc(e.title||"")+'" style="flex:1;">'
+    +'<button class="btn sm red" data-exdel="'+i+'">删除</button></div>'
+    +'<textarea class="ex-content" placeholder="粘贴范文正文…" style="margin-top:8px; min-height:90px;">'+esc(e.content||"")+'</textarea></div>';
+}
+function readExForm(){
+  const ms=[...document.querySelectorAll(".ex-match")], ts=[...document.querySelectorAll(".ex-title")], cs=[...document.querySelectorAll(".ex-content")];
+  exList = ms.map((m,i)=>({match:m.value.trim(), title:ts[i].value.trim(), content:cs[i].value}))
+    .filter(e=>e.match && e.content.trim());
+}
+async function saveExamples(){
+  readExForm();
+  const btn = document.getElementById("saveEx");
+  btn.disabled=true; btn.textContent="保存中…";
+  try{
+    const r = await fetch("/api/calcconfig",{method:"POST",headers:authHeaders(),
+      body:JSON.stringify({key:"examples", data:exList})});
+    const d = await r.json();
+    if(d.ok) msg("范例库已保存，生成时自动匹配注入","ok"); else msg(d.error||"保存失败","err");
+  }catch(e){ msg("网络错误","err"); }
+  btn.disabled=false; btn.textContent="保存范例库";
+}
 
 /* ================= 测算参数管理 ================= */
 const PARAM_DEFS = {
@@ -364,6 +419,7 @@ else{
   document.getElementById("btnRefresh").onclick = loadList;
   document.getElementById("btnSeed").onclick = seedDefaults;
   document.getElementById("btnCalcCfg").onclick = openCalcCfg;
+  document.getElementById("btnExamples").onclick = openExamples;
   loadList();
 }
 </script>
