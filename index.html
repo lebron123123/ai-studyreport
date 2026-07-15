@@ -586,12 +586,12 @@ let scStep = 0;              // 测算模块步骤 0选类型 1参数 2结果
 let scResult = null;         // 测算结果
 let scParams = null;
 let aiChat = [];             // AI问答历史 [{role, content}]
-let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, metrics:[], score:[]};   // 后台测算参数配置
+let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, metrics:[], score:[], examples:[]};   // 后台测算参数配置
 async function fetchCalcConfig(){
   try{
     const r = await fetch("/api/calcconfig", {headers:authHeaders()});
     const d = await r.json();
-    if(d.ok && d.config) CALC_CFG = Object.assign({gaibao:{},rent:{},sale:{},metrics:[],score:[]}, d.config);
+    if(d.ok && d.config) CALC_CFG = Object.assign({gaibao:{},rent:{},sale:{},metrics:[],score:[],examples:[]}, d.config);
   }catch(e){}
 }
 function safeEval(expr, scope){
@@ -1911,6 +1911,28 @@ async function kbHandleFiles(files){
   renderSheet();
 }
 
+
+// 黄金范例库：按章节标题匹配范文（管理员在后台维护）
+function exampleRetrieve(chapterName, secTitle){
+  const exs = CALC_CFG.examples||[];
+  if(!exs.length) return "";
+  const q = String(chapterName||"") + String(secTitle||"");
+  const hits = exs.filter(e=>{
+    if(e.domain && domainKey && e.domain!=="all" && e.domain!==domainKey) return false;
+    return String(e.match||"").split(/[,，、\s]+/).filter(Boolean).some(k=>q.includes(k));
+  }).slice(0,2);
+  if(!hits.length) return "";
+  let out = "\n\n【优秀范例】（以下为同类项目的优秀章节范文，请学习其结构层次、论证深度与专业表述方式来撰写本节；范文中的具体项目名称、数据一律不得照抄）\n";
+  let budget = 3000;
+  hits.forEach(e=>{
+    if(budget<=200) return;
+    const c = String(e.content||"").slice(0, Math.min(1800, budget));
+    budget -= c.length;
+    out += "《"+(e.title||"范文")+"》：\n"+c+"\n\n";
+  });
+  return out;
+}
+
 // 按章节标题匹配最相关的参考资料（关键词2元组打分，无需向量库）
 function kbRetrieve(chapterName, secTitle){
   if(!kbEntries.length) return "";
@@ -1985,7 +2007,7 @@ async function generateSection(c, s, onChunk){
     tableHint = '\n本子标题涉及具体数字或测算，请：①用文字说明测算口径、方法与逻辑；②生成一个结构完整的数据表格，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔，每行一个换行）：\n[[TABLE]]\n列1|列2|列3\n项目A|待填|待填\n[[/TABLE]]\n表格中的具体数值一律填"待填"，绝不编造精确数字；但表格的行项目、列结构要专业完整、贴合真实可研报告。';
   }
   const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n3. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n4. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+tableHint;
-  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + kbRetrieve(c.name, s.t);
+  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + exampleRetrieve(c.name, s.t) + kbRetrieve(c.name, s.t);
 
   return callGen(sys, user, onChunk);
 }
