@@ -2551,6 +2551,8 @@ function bindEvents(){
         inp.value = "";
         blk.querySelector(".revise-bar").style.display = "none";
         saveDraft();
+        try{ fetch("/api/revlog",{method:"POST", headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
+          body:JSON.stringify({chapter:info.chapter.name, section:info.section.t, instruction})}); }catch(e){}
       }catch(e){
         alert("修改失败："+e.message);
         bodyEl.innerHTML = info.section.editedHtml? info.section.editedHtml : renderContent(info.section.content||"");
