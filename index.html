@@ -548,6 +548,12 @@
   .revise-bar .rev-input{flex:1; font-size:12.5px; padding:7px 10px;}
   .rev-toggle{margin-left:6px;}
 
+
+  .ch-tools{display:flex; align-items:center; gap:10px; margin-top:16px; flex-wrap:wrap;
+    padding:10px 12px; background:#F3F1E8; border:1px dashed var(--line-strong); border-radius:2px; font-size:12.5px;}
+  .ch-range{display:flex; align-items:center; gap:6px; color:var(--ink-soft);}
+  .ch-range input{width:56px; padding:5px 6px; font-size:12.5px; text-align:center;}
+
 </style>
 
 <div class="app">
@@ -739,15 +745,19 @@ function renderTOC(){
     const CS = ["选择类型","参数录入","测算结果"];
     items += CS.map((s,i)=>{
       const cls = i===scStep?"active":(i<scStep?"done":"");
-      return '<div class="toc-item '+cls+'"><span class="num">'+String(i+1).padStart(2,'0')+'</span><span>'+s+'</span></div>';
+      const click = i<scStep? ' data-goc="'+i+'" style="cursor:pointer;"' : '';
+      return '<div class="toc-item '+cls+'"'+click+'><span class="num">'+String(i+1).padStart(2,'0')+'</span><span>'+s+'</span></div>';
     }).join("");
   }else if(appMode==="report"){
     items += STEPS.map((s,i)=>{
       const cls = i===currentStep?"active":(i<currentStep?"done":"");
-      return '<div class="toc-item '+cls+'"><span class="num">'+String(i+1).padStart(2,'0')+'</span><span>'+s+'</span></div>';
+      const click = i<currentStep? ' data-gor="'+i+'" style="cursor:pointer;"' : '';
+      return '<div class="toc-item '+cls+'"'+click+'><span class="num">'+String(i+1).padStart(2,'0')+'</span><span>'+s+'</span></div>';
     }).join("");
   }
   el.innerHTML = items;
+  el.querySelectorAll("[data-gor]").forEach(it=>{ it.onclick = ()=>{ currentStep = +it.dataset.gor; renderTOC(); renderSheet(); }; });
+  el.querySelectorAll("[data-goc]").forEach(it=>{ it.onclick = ()=>{ scStep = +it.dataset.goc; renderTOC(); renderSheet(); }; });
 }
 function goHome(){ appMode=null; renderTOC(); renderSheet(); }
 
@@ -1674,6 +1684,7 @@ function stepChapters(){
         +'<input type="checkbox" data-idx="'+i+'" class="chk" '+(c.checked?'checked':'')+'>'
         +'<span>'+c.name+'</span><span class="subcount">'+c.sections.length+' 子节</span></div>').join("")
     +'</div>'
+    +'<div class="ch-tools"><button class="ub-btn" id="chAll">全选</button><button class="ub-btn" id="chNone">全不选</button><span class="ch-range">第 <input id="chFrom" type="number" min="1" max="'+chapters.length+'" value="1"> 至 <input id="chTo" type="number" min="1" max="'+chapters.length+'" value="'+chapters.length+'"> 章 <button class="ub-btn" id="chRange">仅选此区间</button></span></div>'
     +'<div class="actions"><button class="btn ghost" id="backStep2ch">← 上一步</button><button class="btn" id="toStep4g">下一步：开始生成 →</button></div>';
 }
 
@@ -2120,6 +2131,14 @@ function bindEvents(){
   if(s("runCalcBtn")) s("runCalcBtn").onclick = runCalc;
   if(s("toStep3c")) s("toStep3c").onclick = ()=>{ currentStep=3; renderTOC(); renderSheet(); };
   if(s("backStep2ch")) s("backStep2ch").onclick = ()=>{ currentStep=2; renderTOC(); renderSheet(); };
+  if(s("chAll")) s("chAll").onclick = ()=>{ chapters.forEach(c=>c.checked=true); saveDraft(); renderSheet(); };
+  if(s("chNone")) s("chNone").onclick = ()=>{ chapters.forEach(c=>c.checked=false); saveDraft(); renderSheet(); };
+  if(s("chRange")) s("chRange").onclick = ()=>{
+    let a = parseInt(s("chFrom").value)||1, b = parseInt(s("chTo").value)||chapters.length;
+    if(a>b){ const t=a; a=b; b=t; }
+    chapters.forEach((c,i)=>c.checked = (i+1>=a && i+1<=b));
+    saveDraft(); renderSheet();
+  };
   if(s("toStep4g")) s("toStep4g").onclick = ()=>{ currentStep=4; renderTOC(); renderSheet(); };
   if(s("backStep3g")) s("backStep3g").onclick = ()=>{ currentStep=3; renderTOC(); renderSheet(); };
   if(s("startGen")) s("startGen").onclick = runGeneration;
