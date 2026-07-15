@@ -538,6 +538,16 @@
   table.dt th.dt-sum{background:var(--bp-deep) !important; color:#fff;}
   table.dt td.dt-hl, table.dt .dt-hl{color:var(--bp-navy); font-weight:700;}
 
+
+  /* ===== AI定向修改条 ===== */
+  .revise-bar{
+    display:flex; gap:8px; margin-top:8px; padding:9px 10px;
+    background:#F3F1E8; border:1px dashed var(--line-strong); border-radius:2px;
+    align-items:center;
+  }
+  .revise-bar .rev-input{flex:1; font-size:12.5px; padding:7px 10px;}
+  .rev-toggle{margin-left:6px;}
+
 </style>
 
 <div class="app">
@@ -1862,6 +1872,42 @@ function kbRetrieve(chapterName, secTitle){
   return out;
 }
 
+
+// 把HTML稿转回[[TABLE]]源格式（复用docx导出的解析器）
+function blocksToSource(htmlStr){
+  return htmlToBlocks(htmlStr).map(b=>{
+    if(b.type==="table") return "[[TABLE]]\n"+b.rows.map(r=>r.join("|")).join("\n")+"\n[[/TABLE]]";
+    return b.text;
+  }).join("\n\n");
+}
+
+// 按用户修改意见改写小节
+async function reviseSection(c, s, instruction, onChunk){
+  const digest = s.numeric ? buildCalcDigest() : null;
+  const current = s.editedHtml ? blocksToSource(s.editedHtml) : (s.content||"");
+  let numRule;
+  if(s.numeric && digest){
+    numRule = '涉及财务数字时，严格引用下方【真实财务测算结果】中的数字，不得改动或另行编造。\n\n'+digest;
+  }else if(s.numeric){
+    numRule = '涉及具体金额、比率等数字时一律以"待填"标注，绝不编造精确数字。';
+  }else{
+    numRule = '不得编造项目未提及的具体事实与数字。';
+  }
+  const sys = '你是资深工程咨询报告编辑。用户对可研报告某一小节的现稿提出了修改意见，请输出修改后的完整替换稿：\n'
+    +'1. 直接输出正文，不要任何说明、开场白或"修改后："之类字样；\n'
+    +'2. 未被修改意见涉及的部分尽量保留原稿表述，不做无谓改写；\n'
+    +'3. 严格按修改意见调整相应内容；\n'
+    +'4. 保持正式公文文风；段落间用空行分隔；表格用[[TABLE]]与[[/TABLE]]包裹、表头在首行、单元格用竖线|分隔；\n'
+    +'5. '+numRule;
+  const user = '【报告章节】第'+c.cn+'章 '+c.name+' — '+s.t
+    +'\n【项目名称】'+(project.name||"（未填写）")
+    +'\n\n【当前稿件】\n'+current
+    +'\n\n【修改意见】\n'+instruction
+    +'\n\n请输出按意见修改后的完整小节正文。'
+    + kbRetrieve(c.name, s.t);
+  return callGen(sys, user, onChunk);
+}
+
 async function generateSection(c, s, onChunk){
   const digest = s.numeric ? buildCalcDigest() : null;
   let tableHint = "";
@@ -1873,6 +1919,10 @@ async function generateSection(c, s, onChunk){
   const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n3. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n4. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+tableHint;
   const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + kbRetrieve(c.name, s.t);
 
+  return callGen(sys, user, onChunk);
+}
+
+async function callGen(sys, user, onChunk){
   const resp = await fetch("/api/generate", {
     method:"POST",
     headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
@@ -1938,8 +1988,9 @@ function archiveCardHtml(){
 function stepReview(){
   const active = chapters.filter(c=>c.checked);
   let inner = active.map(c=>'<div class="chapter-block"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
-    + c.sections.map((s,si)=>'<div class="section-block" data-cn="'+c.cn+'" data-si="'+si+'"><h4>'+s.t+'<button class="regen-btn" data-cn="'+c.cn+'" data-si="'+si+'" title="用AI重写本节">↻ 重写</button></h4>'
+    + c.sections.map((s,si)=>'<div class="section-block" data-cn="'+c.cn+'" data-si="'+si+'"><h4>'+s.t+'<button class="regen-btn" data-cn="'+c.cn+'" data-si="'+si+'" title="用AI重写本节">↻ 重写</button><button class="regen-btn rev-toggle" data-cn="'+c.cn+'" data-si="'+si+'" title="提修改意见，AI按要求改">✎ AI修改</button></h4>'
         +'<div class="body" contenteditable="true">'+(s.editedHtml? s.editedHtml : (s.content? renderContent(s.content) : "（该子章节未生成）"))+'</div>'
+        +'<div class="revise-bar" style="display:none;"><input type="text" class="rev-input" placeholder="修改意见，如：数据分析太浅，应结合敏感性分析展开；语气再正式一些…"><button class="btn rev-go" data-cn="'+c.cn+'" data-si="'+si+'" style="padding:7px 16px; font-size:12px; flex-shrink:0;">按要求修改</button></div>'
         +(s.numeric?'<div class="data-flag">⚠ 请核对/替换为真实数据后再签发</div>':'')+'</div>').join("")
     +'</div>').join("");
   return '<div class="doc-eyebrow">STEP 05 · 人工复核与签发</div>'
@@ -2088,7 +2139,48 @@ function bindEvents(){
     });
   });
   // 复核页：单节AI重写
-  document.querySelectorAll(".regen-btn").forEach(btn=>{
+  document.querySelectorAll(".rev-toggle").forEach(btn=>{
+    btn.onclick = ()=>{
+      const blk = btn.closest(".section-block");
+      const bar = blk.querySelector(".revise-bar");
+      bar.style.display = bar.style.display==="none"? "flex":"none";
+      if(bar.style.display==="flex") bar.querySelector(".rev-input").focus();
+    };
+  });
+  document.querySelectorAll(".rev-go").forEach(btn=>{
+    const doRevise = async ()=>{
+      const blk = btn.closest(".section-block");
+      const inp = blk.querySelector(".rev-input");
+      const instruction = inp.value.trim();
+      if(!instruction){ inp.focus(); return; }
+      const info = findChapterSection(btn.dataset.cn, +btn.dataset.si);
+      if(!info) return;
+      const bodyEl = blk.querySelector(".body");
+      btn.disabled = true; btn.textContent = "修改中…";
+      blk.querySelectorAll(".regen-btn").forEach(b=>b.disabled=true);
+      try{
+        const text = await reviseSection(info.chapter, info.section, instruction, (partial)=>{
+          bodyEl.textContent = partial;
+        });
+        info.section.content = text;
+        info.section.editedHtml = null;
+        bodyEl.innerHTML = renderContent(text);
+        inp.value = "";
+        blk.querySelector(".revise-bar").style.display = "none";
+        saveDraft();
+      }catch(e){
+        alert("修改失败："+e.message);
+        bodyEl.innerHTML = info.section.editedHtml? info.section.editedHtml : renderContent(info.section.content||"");
+      }
+      btn.disabled = false; btn.textContent = "按要求修改";
+      blk.querySelectorAll(".regen-btn").forEach(b=>b.disabled=false);
+    };
+    btn.onclick = doRevise;
+    const inp = btn.closest(".revise-bar").querySelector(".rev-input");
+    inp.addEventListener("keydown", e=>{ if(e.key==="Enter") doRevise(); });
+  });
+
+  document.querySelectorAll(".regen-btn:not(.rev-toggle)").forEach(btn=>{
     btn.onclick = async (e)=>{
       e.preventDefault();
       const cn = btn.dataset.cn, si = +btn.dataset.si;
