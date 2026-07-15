@@ -3,7 +3,7 @@
 // POST             {key:"gaibao"|"rent"|"sale"|"metrics", data:{...}|[...]}
 import { verifyAuth, json } from "./_auth.js";
 
-const KEYS = ["gaibao","rent","sale","metrics","score","examples"];
+const KEYS = ["gaibao","rent","sale","metrics","score","examples"]; 
 function isAdmin(env, user){
   const admins = (env.ADMIN_USERS || "").split(",").map(s=>s.trim()).filter(Boolean);
   return admins.includes(user.username) || admins.includes(String(user.userId));
