@@ -586,12 +586,12 @@ let scStep = 0;              // 测算模块步骤 0选类型 1参数 2结果
 let scResult = null;         // 测算结果
 let scParams = null;
 let aiChat = [];             // AI问答历史 [{role, content}]
-let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, metrics:[]};   // 后台测算参数配置
+let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, metrics:[], score:[]};   // 后台测算参数配置
 async function fetchCalcConfig(){
   try{
     const r = await fetch("/api/calcconfig", {headers:authHeaders()});
     const d = await r.json();
-    if(d.ok && d.config) CALC_CFG = Object.assign({gaibao:{},rent:{},sale:{},metrics:[]}, d.config);
+    if(d.ok && d.config) CALC_CFG = Object.assign({gaibao:{},rent:{},sale:{},metrics:[],score:[]}, d.config);
   }catch(e){}
 }
 function safeEval(expr, scope){
@@ -609,8 +609,63 @@ function metricScope(){
   const s = scResult.summary;
   return { totalIncome:s.totalIncome||0, totalCost:s.totalCost||0, totalTax:s.totalTax||0,
     totalNetProfit:s.totalNetProfit||0, totalNpv:s.totalNpv||0, irr:s.irr||0, icr:s.icr||0,
-    totalSaleIncome:s.totalSaleIncome||0, rentalPvTotal:s.rentalPvTotal||0, totalInterest:s.totalInterest||0 };
+    totalSaleIncome:s.totalSaleIncome||0, rentalPvTotal:s.rentalPvTotal||0, totalInterest:s.totalInterest||0,
+    paybackYears: s.payback? s.payback.index : 999 };
 }
+
+/* ================= 测算评分 ================= */
+const DEFAULT_SCORE_RULES = [
+  {name:"全投资IRR（%）", expr:"irr", dir:">=", goodV:6, midV:3, weight:30, scope:"all"},
+  {name:"累计净现值（万元）", expr:"totalNpv", dir:">=", goodV:0, midV:"", weight:25, scope:"all"},
+  {name:"利息保障倍数", expr:"icr", dir:">=", goodV:2, midV:1, weight:20, scope:"all"},
+  {name:"现金流回正（年）", expr:"paybackYears", dir:"<=", goodV:10, midV:15, weight:15, scope:"all"},
+  {name:"净利率（%）", expr:"totalNetProfit/totalIncome*100", dir:">=", goodV:10, midV:0, weight:10, scope:"all"},
+];
+function scoreRules(){
+  const rules = (CALC_CFG.score && CALC_CFG.score.length)? CALC_CFG.score : DEFAULT_SCORE_RULES;
+  return rules.filter(r=>!r.scope || r.scope==="all" || r.scope===calcType);
+}
+function evalScore(){
+  const scope = metricScope();
+  const rows = [];
+  let wSum = 0, sSum = 0;
+  scoreRules().forEach(r=>{
+    const v = safeEval(String(r.expr||""), scope);
+    if(v===null) return;
+    const cmp = (a,b)=> r.dir==="<="? a<=b : a>=b;
+    let band, score;
+    const gv = parseFloat(r.goodV), mv = parseFloat(r.midV);
+    if(isFinite(gv) && cmp(v, gv)){ band="优"; score=100; }
+    else if(isFinite(mv) && cmp(v, mv)){ band="良"; score=60; }
+    else{ band="差"; score=20; }
+    const w = parseFloat(r.weight)||0;
+    wSum += w; sSum += score*w;
+    rows.push({name:r.name, v, band, score, w, dir:r.dir, gv:r.goodV, mv:r.midV});
+  });
+  const total = wSum? Math.round(sSum/wSum) : 0;
+  const grade = total>=85? "优" : total>=60? "良" : total>=40? "中" : "差";
+  return {total, grade, rows};
+}
+function scoreCardHtml(){
+  const sc = evalScore();
+  if(!sc.rows.length) return "";
+  const dot = b=> b==="优"? "var(--ok-green)" : b==="良"? "#C99A2E" : "var(--seal-red)";
+  const fmt = x=> Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
+  let rows = sc.rows.map(r=>
+    '<tr><td style="text-align:left;">'+escapeHtml(r.name)+'</td>'
+    +'<td>'+fmt(r.v)+'</td>'
+    +'<td>'+r.dir+' '+r.gv+' 优'+(r.mv!==""&&r.mv!==undefined&&r.mv!==null?'｜'+r.dir+' '+r.mv+' 良':'')+'</td>'
+    +'<td><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+dot(r.band)+';margin-right:6px;"></span>'+r.band+'</td>'
+    +'<td>'+r.score+'</td><td>'+r.w+'%</td></tr>').join("");
+  return '<div class="cf-chart" style="margin-top:16px;">'
+    +'<div class="cf-head"><span>测算评分（规则可在管理后台配置）</span></div>'
+    +'<div style="display:flex; align-items:center; gap:18px; padding:10px 4px 14px;">'
+    +'<div style="font-family:var(--mono); font-size:42px; font-weight:700; color:'+dot(sc.grade==="中"?"良":sc.grade)+';">'+sc.total+'</div>'
+    +'<div><div style="font-size:15px; font-weight:700;">综合评级：'+sc.grade+'</div>'
+    +'<div style="font-size:11px; color:var(--ink-soft);">加权得分（优=100 / 良=60 / 差=20）</div></div></div>'
+    +'<table class="rpt"><tr><th style="text-align:left;">指标</th><th>实际值</th><th>达标线</th><th>档位</th><th>得分</th><th>权重</th></tr>'+rows+'</table></div>';
+}
+
 function customMetricTiles(){
   if(!scResult || !CALC_CFG.metrics || !CALC_CFG.metrics.length) return "";
   const scope = metricScope();
@@ -1313,6 +1368,7 @@ function scStepResult(){
     + tile("现金流回正", s.payback? s.payback.year+"年" : "未回正")
     + extra
     +'</div>'
+    + scoreCardHtml()
     + detailTablesHtml()
     + aiChatHtml()
     +'<div class="actions"><button class="btn ghost" id="scBack1">← 修改参数</button><button class="btn" id="scExcel">导出 Excel</button></div>';
@@ -1341,6 +1397,7 @@ function buildScDigest(){
       .map(m=>{ const v=safeEval(String(m.expr||""),scope2); return v===null?null:(m.name+"="+v.toFixed(2)+"（公式:"+m.expr+"）"); }).filter(Boolean);
     if(ms.length) lines += "【自定义指标】"+ms.join("；")+"\n";
   }
+  try{ const sc = evalScore(); if(sc.rows.length) lines += "【测算评分】综合"+sc.total+"分("+sc.grade+")："+sc.rows.map(r=>r.name+"="+Number(r.v).toFixed(2)+"("+r.band+")").join("；")+"\n"; }catch(e){}
   lines += "【分年净现金流】"+R.allYears.map(y=>y+":"+fmt(R.cf[y].net)).join("，")+"\n";
   if(calcType==="sale"){
     lines += "【核心公式】配保房销售收入=销售面积×售价×当年销售率/1e4；总收入=配保房销售+出租净收益现值(全周期折现合计,计入运营首年)+其他收入；出租净收入=商业租金收入-出租营运成本(房产税1=租金×12%/1.09、房产税2=(土地+建安+基础设施+工程其他+建安×2%×商业面积占比)×70%×1.2%×(1-出租率)、管理费=租金×8%、停车管理=车位×80×12、维修金=面积×月×0.25、维修=租金×2%、空置服务=面积×(1-出租率)×8×12、保险=面积×1.86、土地使用税按商业面积占比)-出租经营税金(销项=租金×9%/1.09,进项按全周期合计逐年抵扣,增值税附加12%,印花税0.05%)，按3.5%逐年折现；累计开发成本(销售部分)=总投资-建设期财务费用×销售面积占比-销售收入×1.5%,按销售率分摊；折旧摊销部分=(土地+非配售开发成本-建设期财务费用×商业占比)×0.8,一次性计入首年(现金流用/50摊销版)；销售增值税=max(累计销项-累计进项-已缴,0),销项含地价抵减(销售面积×楼面价×销售率)；调整所得税=max((现金流入-回收余值-开发成本销售-摊销/50-销售费税-出租成本税)×25%,0)；现金流出=开发成本投资+销售费用+销售税金+出租税金+出租成本+调整所得税；回收固定资产余值=(土地+开发成本-建设期财务费用×商业占比)×20%计入运营首年流入；NPV从首个非零现金流年按0期折现；利息保障倍数=(净利润+经营期财务费用+所得税+折旧摊销部分-0.8×其他收入)/(建设期+经营期财务费用)。";
