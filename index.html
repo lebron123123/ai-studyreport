@@ -1754,7 +1754,7 @@ function renderContent(text){
   });
   html = html.split(/\n{2,}/).map(p=>{
     if(p.includes("<table")) return p;
-    return p.trim()? '<p style="margin:0 0 10px;">'+escapeHtml(p).replace(/\n/g,"<br>")+'</p>' : "";
+    return p.trim()? '<p style="margin:0 0 10px;">'+escapeHtml(p).replace(/\*\*([^*\n]+)\*\*/g,"<b>$1</b>").replace(/\n/g,"<br>")+'</p>' : "";
   }).join("");
   return html;
 }
