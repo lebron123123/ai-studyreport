@@ -590,12 +590,12 @@ let scStep = 0;              // 测算模块步骤 0选类型 1参数 2结果
 let scResult = null;         // 测算结果
 let scParams = null;
 let aiChat = [];             // AI问答历史 [{role, content}]
-let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, metrics:[], score:[], examples:[]};   // 后台测算参数配置
+let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, metrics:[], score:[], examples:[], airules:[]};   // 后台测算参数配置
 async function fetchCalcConfig(){
   try{
     const r = await fetch("/api/calcconfig", {headers:authHeaders()});
     const d = await r.json();
-    if(d.ok && d.config) CALC_CFG = Object.assign({gaibao:{},rent:{},sale:{},metrics:[],score:[],examples:[]}, d.config);
+    if(d.ok && d.config) CALC_CFG = Object.assign({gaibao:{},rent:{},sale:{},metrics:[],score:[],examples:[],airules:[]}, d.config);
   }catch(e){}
 }
 function safeEval(expr, scope){
@@ -2080,6 +2080,88 @@ function archiveCardHtml(){
 }
 
 
+
+/* ================= 可研审核 · AI深度评审 ================= */
+const DEFAULT_AI_RULES = [{match:"*", rule:"①论证是否有具体依据（政策/数据/事实），避免空洞套话；②逻辑层次是否清晰、有分点递进；③表述是否符合正式公文文风；④涉及数字处是否明确来源或标注待填；⑤篇幅与深度是否达到正式可研报告水准。"}];
+function aiRulesFor(chName, secTitle){
+  const rules = (CALC_CFG.airules && CALC_CFG.airules.length)? CALC_CFG.airules : DEFAULT_AI_RULES;
+  const q = String(chName||"")+String(secTitle||"");
+  return rules.filter(r=> r.match==="*" || String(r.match||"").split(/[,，、\s]+/).filter(Boolean).some(k=>q.includes(k)));
+}
+async function aiAuditOne(c, s){
+  const rules = aiRulesFor(c.name, s.t);
+  const src = s.editedHtml? blocksToSource(s.editedHtml) : (s.content||"");
+  const sys = '你是政府投资项目可研报告评审专家。请依据【审核要点】评审给定小节，只输出一个JSON对象（不要markdown代码块、不要任何其他文字），格式：{"score":0到100整数,"issues":[{"point":"问题(15字内)","suggestion":"具体修改建议(40字内)"}]}。达标项不要列入issues；最多列3条最重要的问题；写得好就给高分、issues可为空数组。';
+  const user = '【小节】第'+c.cn+'章 '+c.name+' — '+s.t
+    +'\n【审核要点】\n'+rules.map((r,i)=>(i+1)+'. '+r.rule).join('\n')
+    +'\n【小节内容】\n'+src.slice(0,3000);
+  const text = await callGen(sys, user);
+  const clean = text.replace(/```json|```/g,"").trim();
+  const j = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}")+1));
+  return { score: Math.max(0,Math.min(100, parseInt(j.score)||0)), issues: Array.isArray(j.issues)? j.issues.slice(0,3):[] };
+}
+async function runAiAudit(){
+  const active = chapters.filter(c=>c.checked);
+  const tasks = [];
+  active.forEach(c=>c.sections.forEach((s,si)=>{ if(s.content||s.editedHtml) tasks.push({c,s,si}); }));
+  if(!tasks.length){ alert("没有可审核的内容"); return; }
+  const est = (tasks.length*(1500+200)/10000).toFixed(1);
+  if(!confirm("将对 "+tasks.length+" 个小节进行AI深度评审，预计消耗约 "+est+" 万tokens，占用生成额度 "+tasks.length+" 次。继续？")) return;
+  const box = document.getElementById("aiAuditBox");
+  box.style.display = "block";
+  let done = 0, results = [];
+  box.innerHTML = 'AI评审中… 0/'+tasks.length;
+  async function one(t){
+    try{ const r = await aiAuditOne(t.c, t.s); results.push(Object.assign({cn:t.c.cn, si:t.si, chName:t.c.name, secTitle:t.s.t}, r)); }
+    catch(e){ results.push({cn:t.c.cn, si:t.si, chName:t.c.name, secTitle:t.s.t, score:null, issues:[], err:e.message}); }
+    done++; box.innerHTML = 'AI评审中… '+done+'/'+tasks.length;
+  }
+  const queue = tasks.slice();
+  await Promise.all(Array.from({length:Math.min(3,queue.length)}, ()=>(async()=>{ while(queue.length) await one(queue.shift()); })()));
+  renderAiAudit(results);
+}
+function renderAiAudit(results){
+  const box = document.getElementById("aiAuditBox");
+  const scored = results.filter(r=>r.score!==null);
+  const avg = scored.length? Math.round(scored.reduce((s,r)=>s+r.score,0)/scored.length) : 0;
+  const dot = v=> v>=80? "var(--ok-green)" : v>=60? "#C99A2E" : "var(--seal-red)";
+  let htmlStr = '<div style="font-weight:700; margin:8px 0;">AI评审完成：全篇平均 <span style="color:'+dot(avg)+'; font-size:18px;">'+avg+'</span> 分'
+    +(results.some(r=>r.err)? '（'+results.filter(r=>r.err).length+' 节评审失败）':'')+'</div>';
+  results.sort((a,b)=>(a.score===null?-1:a.score)-(b.score===null?-1:b.score));
+  htmlStr += results.map(r=>{
+    let inner = '<div class="audit-row" style="flex-wrap:wrap;">'
+      +'<span style="font-family:var(--mono); font-weight:700; color:'+(r.score===null?"var(--ink-soft)":dot(r.score))+'; min-width:34px;">'+(r.score===null?"—":r.score)+'</span>'
+      +'<span style="color:var(--ink-soft); cursor:pointer;" data-aigoto="'+r.cn+'_'+r.si+'">第'+r.cn+'章 · '+escapeHtml(r.secTitle)+'</span>'
+      +(r.err? '<span style="margin-left:10px; color:var(--seal-red);">'+escapeHtml(r.err)+'</span>':'');
+    r.issues.forEach(it=>{
+      inner += '<div style="width:100%; padding:3px 0 3px 44px; display:flex; gap:8px; align-items:baseline;">'
+        +'<span style="color:var(--seal-red);">•</span><span>'+escapeHtml(it.point||"")+'：'+escapeHtml(it.suggestion||"")+'</span>'
+        +'<button class="ub-btn" data-adopt="'+r.cn+'_'+r.si+'" data-sug="'+escapeHtml(it.suggestion||"")+'" style="flex-shrink:0; padding:2px 10px; font-size:11px;">采纳→AI修改</button></div>';
+    });
+    return inner + '</div>';
+  }).join("");
+  box.innerHTML = htmlStr;
+  box.querySelectorAll("[data-aigoto]").forEach(el=>{ el.onclick = ()=>locateSection(el.dataset.aigoto); });
+  box.querySelectorAll("[data-adopt]").forEach(btn=>{
+    btn.onclick = ()=>{
+      const blk = locateSection(btn.dataset.adopt);
+      if(!blk) return;
+      const bar = blk.querySelector(".revise-bar");
+      bar.style.display = "flex";
+      const inp = bar.querySelector(".rev-input");
+      inp.value = btn.dataset.sug;
+      inp.focus();
+    };
+  });
+}
+function locateSection(key){
+  const parts = key.split("_");
+  const cn = parts[0], si = parts[1];
+  const el = document.querySelector('.section-block[data-cn="'+cn+'"][data-si="'+si+'"]');
+  if(el){ el.scrollIntoView({behavior:"smooth", block:"center"}); el.style.outline="2px solid var(--seal-red)"; setTimeout(()=>el.style.outline="",1800); }
+  return el;
+}
+
 /* ================= 可研审核 · 硬规则检查（零AI成本，确定性） ================= */
 function runAudit(){
   const issues = [];  // {sev:"err"|"warn"|"info", cn, si, secTitle, msg}
@@ -2165,7 +2247,7 @@ function stepReview(){
     +(!signed?'<div class="watermark">AI初稿 · 未经复核</div>':'')
     + archiveCardHtml()
     +'<div class="step-desc">每一段正文可直接点击编辑。数据类子章节的表格须由人工替换为真实测算结果后，方可确认签发。</div>'
-    +'<div class="cf-chart" style="margin:0 0 16px;"><div class="cf-head"><span>签发前审核检查</span><button class="ub-btn" id="auditBtn">运行审核检查</button></div><div id="auditBox" style="font-size:12.5px;"><span style="color:var(--ink-soft);">检查项：内容完整性（未生成/待填）、规范性（篇幅/数据表格/AI穿帮语）、全文与测算结果的数据一致性。</span></div></div>'
+    +'<div class="cf-chart" style="margin:0 0 16px;"><div class="cf-head"><span>签发前审核检查</span><span style="display:flex; gap:8px;"><button class="ub-btn" id="auditBtn">运行审核检查</button><button class="ub-btn" id="aiAuditBtn">AI深度审核</button></span></div><div id="aiAuditBox" style="font-size:12.5px; display:none;"></div><div id="auditBox" style="font-size:12.5px;"><span style="color:var(--ink-soft);">检查项：内容完整性（未生成/待填）、规范性（篇幅/数据表格/AI穿帮语）、全文与测算结果的数据一致性。</span></div></div>'
     + inner
     +(signed?'<div class="seal"><span>单位复核确认<br>'+new Date().toLocaleDateString('zh-CN')+'<br>责任人签发</span></div><div class="final-banner">✓ 已完成人工复核签发，可导出正式文本</div>':'')
     +'<div class="actions"><button class="btn ghost" id="backStep4r">← 返回生成</button>'
@@ -2301,6 +2383,7 @@ function bindEvents(){
   if(s("startGen")) s("startGen").onclick = runGeneration;
   if(s("toStep5r")) s("toStep5r").onclick = ()=>{ currentStep=5; renderTOC(); renderSheet(); };
   if(s("backStep4r")) s("backStep4r").onclick = ()=>{ currentStep=4; renderTOC(); renderSheet(); };
+  if(s("aiAuditBtn")) s("aiAuditBtn").onclick = runAiAudit;
   if(s("auditBtn")) s("auditBtn").onclick = ()=>{
     const issues = runAudit();
     document.getElementById("auditBox").innerHTML = auditPanelHtml(issues);
