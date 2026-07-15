@@ -590,6 +590,9 @@ let scStep = 0;              // 测算模块步骤 0选类型 1参数 2结果
 let scResult = null;         // 测算结果
 let scParams = null;
 let aiChat = [];             // AI问答历史 [{role, content}]
+let rvChapters = [];   // 智能审查:解析出的章节
+let rvStep = 0;        // 0上传 1结果
+let rvFileName = "";
 let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, metrics:[], score:[], examples:[], airules:[]};   // 后台测算参数配置
 async function fetchCalcConfig(){
   try{
@@ -807,6 +810,13 @@ function renderTOC(){
       const click = i<scStep? ' data-goc="'+i+'" style="cursor:pointer;"' : '';
       return '<div class="toc-item '+cls+'"'+click+'><span class="num">'+String(i+1).padStart(2,'0')+'</span><span>'+s+'</span></div>';
     }).join("");
+  }else if(appMode==="review"){
+    const RS = ["上传报告","审查结果"];
+    items += RS.map((s,i)=>{
+      const cls = i===rvStep?"active":(i<rvStep?"done":"");
+      const click = i<rvStep? ' data-gov="'+i+'" style="cursor:pointer;"' : '';
+      return '<div class="toc-item '+cls+'"'+click+'><span class="num">'+String(i+1).padStart(2,'0')+'</span><span>'+s+'</span></div>';
+    }).join("");
   }else if(appMode==="report"){
     items += STEPS.map((s,i)=>{
       const cls = i===currentStep?"active":(i<currentStep?"done":"");
@@ -817,6 +827,7 @@ function renderTOC(){
   el.innerHTML = items;
   el.querySelectorAll("[data-gor]").forEach(it=>{ it.onclick = ()=>{ currentStep = +it.dataset.gor; renderTOC(); renderSheet(); }; });
   el.querySelectorAll("[data-goc]").forEach(it=>{ it.onclick = ()=>{ scStep = +it.dataset.goc; renderTOC(); renderSheet(); }; });
+  el.querySelectorAll("[data-gov]").forEach(it=>{ it.onclick = ()=>{ rvStep = +it.dataset.gov; renderTOC(); renderSheet(); }; });
 }
 function goHome(){ appMode=null; renderTOC(); renderSheet(); }
 
@@ -824,6 +835,7 @@ function renderSheet(){
   const sheet = document.getElementById("sheet");
   if(appMode===null){ sheet.innerHTML = stepHome(); bindEvents(); bindCalcEvents(); mountAnchorNav(); return; }
   if(appMode==="calc"){ sheet.innerHTML = renderCalcModule(); bindEvents(); bindCalcEvents(); mountAnchorNav(); return; }
+  if(appMode==="review"){ sheet.innerHTML = renderReviewModule(); bindEvents(); bindReviewEvents(); mountAnchorNav(); return; }
   if(currentStep===0) sheet.innerHTML = stepDomain();
   if(currentStep===1) sheet.innerHTML = stepProjectInfo();
   if(currentStep===2) sheet.innerHTML = stepCalc();
@@ -884,6 +896,7 @@ function stepHome(){
     +'<div class="step-desc">选择要使用的功能模块。</div>'
     +'<div class="domain-grid">'
     +'<div class="domain-card" id="homeCalc"><div class="dn">财务测算</div><div class="dd">独立财务测算工具：非居改保 / 出租类 / 出售类三种模型，逐年明细、IRR/NPV，并可与AI就测算结果智能问答。</div><div class="dc">CALCULATOR · AI Q&A</div></div>'
+    +'<div class="domain-card" id="homeReview"><div class="dn">可研智能审查</div><div class="dd">上传已完成的可研报告（Word/PDF），自动拆解章节，同步执行硬规则检查与AI深度评审，输出问题清单与修改建议。</div><div class="dc">AUDIT · UPLOAD</div></div>'
     +'<div class="domain-card" id="homeReport"><div class="dn">可研生成</div><div class="dd">完整可行性研究报告生成：选择领域→录入信息→财务测算→逐章AI撰写→人工复核签发→导出标准Word。</div><div class="dc">FEASIBILITY REPORT</div></div>'
     +'</div>';
 }
@@ -1462,6 +1475,7 @@ function bindCalcEvents(){
   if(s("aiQ")) s("aiQ").addEventListener("keydown", e=>{ if(e.key==="Enter") askAI(); });
   if(s("homeCalc")) s("homeCalc").onclick=()=>{ appMode="calc"; scStep=0; renderTOC(); renderSheet(); };
   if(s("homeReport")) s("homeReport").onclick=()=>{ appMode="report"; renderTOC(); renderSheet(); };
+  if(s("homeReview")) s("homeReview").onclick=()=>{ appMode="review"; rvStep=0; renderTOC(); renderSheet(); };
 }
 
 function stepDomain(){
@@ -2081,6 +2095,104 @@ function archiveCardHtml(){
 
 
 
+
+/* ================= 可研智能审查（上传报告→硬规则+AI审） ================= */
+function renderReviewModule(){
+  if(rvStep===0){
+    return '<div class="doc-eyebrow">可研智能审查 · STEP 01</div>'
+      +'<h1 class="doc-title">上传待审查的可研报告</h1>'
+      +'<div class="step-desc">支持 Word(.docx)、PDF、txt。系统将自动拆解章节结构，随后可执行与生成流程完全一致的硬规则检查与AI深度评审。文件在浏览器本地解析，不上传服务器。</div>'
+      +'<div style="border:2px dashed var(--line-strong); background:#FFF; padding:44px 20px; text-align:center; margin-top:20px;">'
+      +'<button class="btn" id="rvPick">选择报告文件</button>'
+      +'<input type="file" id="rvFile" accept=".docx,.pdf,.txt" style="display:none;">'
+      +'<div id="rvStatus" style="font-size:12px; color:var(--ink-soft); margin-top:14px;">尚未选择文件</div></div>';
+  }
+  // 结果页
+  const nSec = rvChapters.reduce((n,c)=>n+c.sections.length,0);
+  let inner = rvChapters.map(c=>
+    '<div class="ch-block"><h3 style="font-family:var(--serif); color:var(--bp-navy); margin:22px 0 6px;">第'+c.cn+'章　'+escapeHtml(c.name)+'</h3>'
+    + c.sections.map((s,si)=>'<div class="section-block" data-cn="'+c.cn+'" data-si="'+si+'"><h4>'+escapeHtml(s.t)+'</h4>'
+        +'<div class="body">'+renderContent(s.content||"")+'</div></div>').join("")
+    +'</div>').join("");
+  return '<div class="doc-eyebrow">可研智能审查 · STEP 02</div>'
+    +'<h1 class="doc-title">审查：'+escapeHtml(rvFileName||"未命名报告")+'</h1>'
+    +'<div class="step-desc">已解析 '+rvChapters.length+' 章 / '+nSec+' 个小节。硬规则检查免费即时；AI深度评审逐节调用（消耗生成额度）。</div>'
+    +'<div class="cf-chart" style="margin:0 0 16px;"><div class="cf-head"><span>审查检查</span><span style="display:flex; gap:8px;"><button class="ub-btn" id="auditBtn">运行审核检查</button><button class="ub-btn" id="aiAuditBtn">AI深度审核</button></span></div><div id="aiAuditBox" style="font-size:12.5px; display:none;"></div><div id="auditBox" style="font-size:12.5px;"><span style="color:var(--ink-soft);">检查项：完整性（待填）、规范性（篇幅/AI穿帮语）与AI逐节评审。</span></div></div>'
+    + inner
+    +'<div class="actions"><button class="btn ghost" id="rvBack">← 换一份报告</button></div>';
+}
+async function rvParseFile(f){
+  const ext = (f.name.split(".").pop()||"").toLowerCase();
+  if(ext==="txt") return await f.text();
+  if(ext==="docx"){
+    if(!window.mammoth) await loadScript("mammoth.min.js");
+    const r = await window.mammoth.extractRawText({arrayBuffer: await f.arrayBuffer()});
+    return r.value||"";
+  }
+  if(ext==="pdf"){
+    if(!window.pdfjsLib) await loadScript("pdf.min.js");
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "pdf.worker.min.js";
+    const pdf = await window.pdfjsLib.getDocument({data: await f.arrayBuffer()}).promise;
+    const parts = [];
+    for(let p=1; p<=pdf.numPages; p++){
+      const tc = await (await pdf.getPage(p)).getTextContent();
+      parts.push(tc.items.map(it=>it.str).join(""));
+    }
+    return parts.join("\n");
+  }
+  throw new Error("不支持的格式 ."+ext);
+}
+function splitReportText(text){
+  const lines = text.split(/\r?\n/);
+  const chRe = /^第\s*([一二三四五六七八九十百]+)\s*[章篇]\s*[、．.:：\s]*(.*)$/;
+  const secRe = /^(\d+\.\d+)\s*[、．.:：\s]*(.+)$/;
+  const secRe2 = /^[（(]?([一二三四五六七八九十]+)[）)]\s*[、．.]?\s*(.{2,30})$/;
+  const chs = [];
+  let curC = null, curS = null;
+  const flush = ()=>{ if(curS && curC){ curS.content = curS.content.trim(); curC.sections.push(curS); curS=null; } };
+  lines.forEach(raw=>{
+    const line = raw.trim();
+    if(!line) { if(curS) curS.content += "\n\n"; return; }
+    let m;
+    if((m = line.match(chRe)) && line.length < 40){
+      flush();
+      curC = {cn:m[1], name:(m[2]||"").trim()||("第"+m[1]+"章"), sections:[]};
+      chs.push(curC); return;
+    }
+    if(curC && (m = line.match(secRe)) && line.length < 45){
+      flush();
+      curS = {t:m[2].trim(), content:""}; return;
+    }
+    if(curC && !curS && (m = line.match(secRe2)) && line.length < 34){
+      curS = {t:line, content:""}; return;
+    }
+    if(!curC){ curC = {cn:"—", name:"前置部分", sections:[]}; chs.push(curC); }
+    if(!curS) curS = {t:"正文", content:""};
+    curS.content += line + "\n";
+  });
+  flush();
+  chs.forEach(c=>{ if(!c.sections.length) c.sections.push({t:"（本章无子节）", content:""}); });
+  return chs.filter(c=>c.sections.some(s=>s.content.trim()) || c.sections.length);
+}
+function bindReviewEvents(){
+  const s = id=>document.getElementById(id);
+  if(s("rvPick")) s("rvPick").onclick = ()=>s("rvFile").click();
+  if(s("rvFile")) s("rvFile").onchange = async e=>{
+    const f = e.target.files[0];
+    if(!f) return;
+    s("rvStatus").textContent = "正在解析《"+f.name+"》…";
+    try{
+      const text = await rvParseFile(f);
+      if(!text.trim()) throw new Error("未提取到文字（可能是扫描件PDF）");
+      rvChapters = splitReportText(text);
+      if(!rvChapters.length) throw new Error("未能识别章节结构");
+      rvFileName = f.name.replace(/\.[^.]+$/,"");
+      rvStep = 1; renderTOC(); renderSheet();
+    }catch(err){ s("rvStatus").textContent = "解析失败："+err.message; }
+  };
+  if(s("rvBack")) s("rvBack").onclick = ()=>{ rvStep=0; rvChapters=[]; renderTOC(); renderSheet(); };
+}
+
 /* ================= 可研审核 · AI深度评审 ================= */
 const DEFAULT_AI_RULES = [{match:"*", rule:"①论证是否有具体依据（政策/数据/事实），避免空洞套话；②逻辑层次是否清晰、有分点递进；③表述是否符合正式公文文风；④涉及数字处是否明确来源或标注待填；⑤篇幅与深度是否达到正式可研报告水准。"}];
 function aiRulesFor(chName, secTitle){
@@ -2101,7 +2213,7 @@ async function aiAuditOne(c, s){
   return { score: Math.max(0,Math.min(100, parseInt(j.score)||0)), issues: Array.isArray(j.issues)? j.issues.slice(0,3):[] };
 }
 async function runAiAudit(){
-  const active = chapters.filter(c=>c.checked);
+  const active = appMode==="review"? rvChapters : chapters.filter(c=>c.checked);
   const tasks = [];
   active.forEach(c=>c.sections.forEach((s,si)=>{ if(s.content||s.editedHtml) tasks.push({c,s,si}); }));
   if(!tasks.length){ alert("没有可审核的内容"); return; }
@@ -2147,6 +2259,7 @@ function renderAiAudit(results){
       const blk = locateSection(btn.dataset.adopt);
       if(!blk) return;
       const bar = blk.querySelector(".revise-bar");
+      if(!bar) return;
       bar.style.display = "flex";
       const inp = bar.querySelector(".rev-input");
       inp.value = btn.dataset.sug;
@@ -2166,7 +2279,7 @@ function locateSection(key){
 function runAudit(){
   const issues = [];  // {sev:"err"|"warn"|"info", cn, si, secTitle, msg}
   const add = (sev,c,si,s,msg)=>issues.push({sev, cn:c.cn, si, secTitle:s? s.t:"", chName:c.name, msg});
-  const active = chapters.filter(c=>c.checked);
+  const active = appMode==="review"? rvChapters : chapters.filter(c=>c.checked);
   const plain = s => {
     const src = s.editedHtml? s.editedHtml.replace(/<[^>]+>/g," ") : (s.content||"");
     return src;
@@ -2194,7 +2307,7 @@ function runAudit(){
   // 一致性：全文数字 vs 测算结果（同一问题去重）
   const seen = new Set();
   const addOnce = (msg)=>{ if(seen.has(msg)) return; seen.add(msg); issues.push({sev:"err", cn:"—", si:null, secTitle:"", chName:"全文一致性", msg}); };
-  if(calcResult && calcResult.summary){
+  if(appMode!=="review" && calcResult && calcResult.summary){
     const S = calcResult.summary;
     const near = (a,b,tol)=>Math.abs(a-b)<=tol;
     // IRR：找“内部收益率/IRR”附近的百分数
