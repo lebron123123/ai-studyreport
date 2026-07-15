@@ -43,6 +43,7 @@
       <button class="btn ghost" id="btnSeed">导入内置默认大纲</button>
       <button class="btn ghost" id="btnCalcCfg">测算参数管理</button>
       <button class="btn ghost" id="btnExamples">黄金范例库</button>
+      <button class="btn ghost" id="btnAiRules">AI审核规则</button>
       <span style="margin-left:auto;font-size:12px;color:var(--soft);" id="loginInfo"></span>
     </div>
     <div id="listBox"></div>
@@ -111,6 +112,58 @@ async function saveExamples(){
     if(d.ok) msg("范例库已保存，生成时自动匹配注入","ok"); else msg(d.error||"保存失败","err");
   }catch(e){ msg("网络错误","err"); }
   btn.disabled=false; btn.textContent="保存范例库";
+}
+
+
+/* ================= AI审核规则 ================= */
+let arList = [];
+async function openAiRules(){
+  document.getElementById("listBox").style.display="none";
+  const box = document.getElementById("editBox");
+  box.style.display="block";
+  box.innerHTML = '<div style="padding:30px 0; color:var(--soft);">加载规则…</div>';
+  try{
+    const r = await fetch("/api/calcconfig",{headers:authHeaders()});
+    const d = await r.json();
+    arList = (d.ok && d.config && d.config.airules)? d.config.airules : [];
+  }catch(e){ arList = []; }
+  renderAiRules();
+}
+function renderAiRules(){
+  const box = document.getElementById("editBox");
+  box.innerHTML = '<h1 style="font-size:18px;">AI审核规则</h1>'
+    +'<div class="sub">复核页"AI深度审核"按这些要点逐节评审。<b>匹配关键词</b>命中章节标题即适用（多个用逗号分隔；填 <b>*</b> 表示适用所有小节）。要点写给AI看，例如："必须引用具体政策文件名；须包含供需两侧数据；每项风险须有对应对策"。未配置任何规则时使用内置通用规则。</div>'
+    +'<div id="arList">'+arList.map((e,i)=>arRowHtml(e,i)).join("")+'</div>'
+    +'<span class="add-link" id="addAr" style="margin-left:0;">+ 添加规则</span>'
+    +'<div class="bar" style="margin-top:18px;"><button class="btn" id="saveAr">保存规则</button>'
+    +'<button class="btn ghost" id="arBack">返回列表</button></div>';
+  document.getElementById("addAr").onclick = ()=>{ readArForm(); arList.push({match:"",rule:""}); renderAiRules(); };
+  document.getElementById("saveAr").onclick = saveAiRules;
+  document.getElementById("arBack").onclick = ()=>loadList();
+  document.querySelectorAll("[data-ardel]").forEach(b=>b.onclick=()=>{ readArForm(); arList.splice(+b.dataset.ardel,1); renderAiRules(); });
+}
+function arRowHtml(e,i){
+  return '<div style="border:1px solid var(--line); background:#fff; padding:10px 12px; margin-top:10px;">'
+    +'<div style="display:flex; gap:8px; align-items:center;">'
+    +'<input class="ar-match" placeholder="匹配关键词（如：市场分析,供需 或 *）" value="'+esc(e.match||"")+'" style="width:260px;">'
+    +'<button class="btn sm red" data-ardel="'+i+'" style="margin-left:auto;">删除</button></div>'
+    +'<textarea class="ar-rule" placeholder="审核要点（写给AI）…" style="margin-top:8px; min-height:60px;">'+esc(e.rule||"")+'</textarea></div>';
+}
+function readArForm(){
+  const ms=[...document.querySelectorAll(".ar-match")], rs=[...document.querySelectorAll(".ar-rule")];
+  arList = ms.map((m,i)=>({match:m.value.trim(), rule:rs[i].value.trim()})).filter(e=>e.match&&e.rule);
+}
+async function saveAiRules(){
+  readArForm();
+  const btn = document.getElementById("saveAr");
+  btn.disabled=true; btn.textContent="保存中…";
+  try{
+    const r = await fetch("/api/calcconfig",{method:"POST",headers:authHeaders(),
+      body:JSON.stringify({key:"airules", data:arList})});
+    const d = await r.json();
+    if(d.ok) msg("AI审核规则已保存","ok"); else msg(d.error||"保存失败","err");
+  }catch(e){ msg("网络错误","err"); }
+  btn.disabled=false; btn.textContent="保存规则";
 }
 
 /* ================= 测算参数管理 ================= */
@@ -420,6 +473,7 @@ else{
   document.getElementById("btnSeed").onclick = seedDefaults;
   document.getElementById("btnCalcCfg").onclick = openCalcCfg;
   document.getElementById("btnExamples").onclick = openExamples;
+  document.getElementById("btnAiRules").onclick = openAiRules;
   loadList();
 }
 </script>
