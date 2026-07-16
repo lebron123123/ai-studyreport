@@ -132,6 +132,26 @@
   const signNote = payload.signed
     ? "本报告已经人工复核确认签发，签发日期："+new Date().toLocaleDateString("zh-CN")
     : "本报告为AI生成初稿，尚未经过人工复核签发，其中标注\u201c待填\u201d的数据须补充真实测算结果，正式使用前须完成审核。";
+  // ===== 附图（图表PNG） =====
+  if(payload.images && payload.images.length){
+    children.push(new D.Paragraph({ children:[run("附　图",{size:28,bold:true})],
+      heading:D.HeadingLevel.HEADING_1, alignment:D.AlignmentType.CENTER,
+      spacing:{before:400, after:200}, pageBreakBefore:true }));
+    payload.images.forEach(im=>{
+      children.push(new D.Paragraph({children:[run(im.title,{size:24,bold:true})], spacing:{before:240, after:120}}));
+      try{
+        const bin = typeof atob!=="undefined" ? atob(im.b64) : Buffer.from(im.b64,"base64").toString("binary");
+        const bytes = new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+        children.push(new D.Paragraph({ alignment:D.AlignmentType.CENTER,
+          children:[ new D.ImageRun({ type:"png", data: bytes, transformation:{ width: im.w||600, height: im.h||200 } }) ],
+          spacing:{after:200} }));
+      }catch(e){
+        children.push(new D.Paragraph({children:[run("（图表嵌入失败："+e.message+"）",{size:21,color:"888888"})]}));
+      }
+    });
+  }
+
   children.push(new D.Paragraph({children:[run(signNote,{size:21,color:"888888"})], spacing:{before:600}}));
 
   /* ---------- 文档：页眉页脚+标题样式+自动更新域 ---------- */
