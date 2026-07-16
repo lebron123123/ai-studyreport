@@ -1,4 +1,4 @@
-// /api/revlog  修改意见记录（POST所有登录用户 / GET仅管理员）
+// /api/revlog  修改意见记录（POST所有登录用户 / GET仅管理员）  
 import { verifyAuth, json } from "./_auth.js";
 
 function isAdmin(env, user){
