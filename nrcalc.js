@@ -1,5 +1,5 @@
 // 非居改保财务测算引擎 —— 1:1 翻译自 calculator3.py 的 calc_non_resi_reform
-// 保持与 Streamlit 版完全一致的计算口径
+// 保持与 Streamlit 版完全一致的计算口径 
 
 window.NRCalc = (function(){
 const NR_DEFAULTS = {
