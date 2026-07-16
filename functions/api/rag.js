@@ -41,6 +41,20 @@ export async function onRequestPost(context){
       },
     }));
     await env.VECTORIZE.upsert(items);
+    // 登记入库台账（同名文件多批次累加）
+    try{
+      const title = String(chunks[0].title||"未命名").slice(0,80);
+      const ids = items.map(it=>it.id);
+      const row = await env.DB.prepare("SELECT ids, chunks FROM rag_files WHERE title=?").bind(title).first();
+      if(row){
+        const all = JSON.parse(row.ids).concat(ids);
+        await env.DB.prepare("UPDATE rag_files SET ids=?, chunks=?, created_at=? WHERE title=?")
+          .bind(JSON.stringify(all), all.length, Date.now(), title).run();
+      }else{
+        await env.DB.prepare("INSERT INTO rag_files(title, ids, chunks, created_at) VALUES(?,?,?,?)")
+          .bind(title, JSON.stringify(ids), ids.length, Date.now()).run();
+      }
+    }catch(e){}
     return json({ok:true, count: items.length});
   }
 
@@ -66,6 +80,25 @@ export async function onRequestPost(context){
       const d = await env.VECTORIZE.describe();
       return json({ok:true, count: d.vectorCount ?? d.vectorsCount ?? null, dimensions: d.dimensions});
     }catch(e){ return json({ok:true, count: null}); }
+  }
+
+  if(body.action === "list"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    const rows = await env.DB.prepare("SELECT title, chunks, created_at FROM rag_files ORDER BY created_at DESC LIMIT 500").all();
+    return json({ok:true, files: rows.results||[]});
+  }
+
+  if(body.action === "deleteByTitle"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员可删除"}, 403);
+    const title = String(body.title||"").slice(0,80);
+    const row = await env.DB.prepare("SELECT ids FROM rag_files WHERE title=?").bind(title).first();
+    if(!row) return json({ok:false, error:"台账中未找到该文件（可能是早期版本入库，需重建索引清理）"}, 404);
+    const ids = JSON.parse(row.ids);
+    for(let i=0; i<ids.length; i+=100){
+      await env.VECTORIZE.deleteByIds(ids.slice(i, i+100));
+    }
+    await env.DB.prepare("DELETE FROM rag_files WHERE title=?").bind(title).run();
+    return json({ok:true, deleted: ids.length});
   }
 
   return json({ok:false, error:"未知操作"}, 400);
