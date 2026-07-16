@@ -1521,7 +1521,8 @@ function stepProjectInfo(){
     +'<div><label>投资规模（万元，估算）</label><input id="f_scale" type="text" placeholder="例：5240" value="'+project.scale+'"></div>'
     +'<label>项目概况（建筑面积、现状、改造/建设内容、周边情况等，越详细越好）</label>'
     +'<textarea id="f_desc" placeholder="例：项目总建筑面积21300㎡，含集中商业与街区商业，已运营11年，现出租率下滑至70%，拟通过系统性改造升级重构业态与动线...">'+project.desc+'</textarea>'
-    +'<div style="margin-top:22px;"><b style="font-size:14px;">周边调研与产品定位（选填，驱动市场分析与定位章节）</b></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px;"><b style="font-size:14px;">周边调研与产品定位（选填，驱动市场分析与定位章节）</b><button type="button" class="btn ghost" id="aiPosBtn" style="padding:5px 14px;font-size:12px;">AI定位建议</button></div>'
+    +'<div id="aiPosBox"></div>'
     +'<div class="step-desc" style="margin:6px 0 0;">竞品数据须来自真实调研——AI只负责把这些真实数据组织成市场分析论述，不会自行编造周边情况。</div>'
     +'<div id="cpList">'
     + (project.competitors||[]).map((cp,i)=>cpRowHtml(cp,i)).join("")
@@ -2560,6 +2561,7 @@ function bindEvents(){
   document.querySelectorAll(".domain-card").forEach(card=>{
     card.onclick = ()=>{ loadDomain(card.dataset.key); renderSheet(); };
   });
+  if(s("aiPosBtn")) s("aiPosBtn").onclick = aiPositionSuggest;
   if(s("cpAdd")) s("cpAdd").onclick = ()=>{
     readCpFromDom(); saveProject();
     project.competitors = project.competitors||[];
@@ -2779,6 +2781,39 @@ function readCpFromDom(){
   project.competitors = names.map((n,i)=>({name:n.value.trim(), dist:d[i], rent:r[i], occ:o[i], note:nt[i]}));
 }
 
+
+
+async function aiPositionSuggest(){
+  saveProject();
+  const btn = document.getElementById("aiPosBtn");
+  const box = document.getElementById("aiPosBox");
+  btn.disabled = true; btn.textContent = "分析中…";
+  const GROUPS = ["新市民/青年人","园区产业职工","混合客群","家庭型租户"];
+  const UNITS = ["小户型为主（≤70㎡）","中小户型混合","大中小全覆盖"];
+  const RENTS = ["市场价9折以内","市场价7-9折","显著低于市场价（≤7折）"];
+  try{
+    const sys = '你是保障性租赁住房定位顾问。基于用户提供的真实项目信息与调研数据，给出产品定位建议。只输出一个JSON对象（无代码块无其他文字）：{"targetGroup":"必须从['+GROUPS.join("/")+']中选一","unitPlan":"从['+UNITS.join("/")+']中选一","rentPlan":"从['+RENTS.join("/")+']中选一","rationale":"120字内的定位理由，只引用给定的真实数据"}';
+    let user = '【项目】'+(project.name||"")+'｜'+(project.location||"")+'｜'+(project.desc||"").slice(0,300) + surveyBrief();
+    if(calcResult && calcResult.summary) user += "\n【测算】拟定起始租金"+(calcParams?calcParams.rent:"?")+"元/㎡/月，IRR "+calcResult.summary.irr+"%";
+    const text = await callGen(sys, user);
+    const clean = text.replace(/```json|```/g,"").trim();
+    const j = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}")+1));
+    box.innerHTML = '<div style="border:1px dashed var(--line-strong); background:#FFFDF5; padding:12px 14px; margin-top:10px; font-size:13px;">'
+      +'<b>AI定位建议</b>（仅供参考，采纳后仍可手动调整）<br>'
+      +'主力客群：<b>'+escapeHtml(j.targetGroup||"")+'</b>｜户型：<b>'+escapeHtml(j.unitPlan||"")+'</b>｜租金：<b>'+escapeHtml(j.rentPlan||"")+'</b>'
+      +'<div style="color:var(--ink-soft); margin-top:6px;">'+escapeHtml(j.rationale||"")+'</div>'
+      +'<button type="button" class="btn" id="aiPosAdopt" style="margin-top:10px; padding:6px 18px; font-size:12px;">采纳此建议</button></div>';
+    document.getElementById("aiPosAdopt").onclick = ()=>{
+      const set = (id,v,list)=>{ const el=document.getElementById(id); if(el && list.includes(v)) el.value=v; };
+      set("f_targetGroup", j.targetGroup, GROUPS);
+      set("f_unitPlan", j.unitPlan, UNITS);
+      set("f_rentPlan", j.rentPlan, RENTS);
+      saveProject(); saveDraft();
+      box.innerHTML = '<div style="color:var(--ok-green); font-size:12.5px; margin-top:8px;">✓ 已采纳并写入定位，生成章节时将保持一致。</div>';
+    };
+  }catch(e){ box.innerHTML = '<div style="color:var(--seal-red); font-size:12.5px; margin-top:8px;">建议生成失败：'+escapeHtml(e.message)+'</div>'; }
+  btn.disabled = false; btn.textContent = "AI定位建议";
+}
 
 // 周边调研与定位摘要(注入生成prompt;有真实数据才输出)
 function surveyBrief(){
