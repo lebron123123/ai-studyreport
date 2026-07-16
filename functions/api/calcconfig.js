@@ -9,6 +9,12 @@ function isAdmin(env, user){
   return admins.includes(user.username) || admins.includes(String(user.userId));
 }
 
+function passOk(env, request){
+  if(!env.ADMIN_PASS) return true;   // 未配置则不启用
+  return request.headers.get("x-admin-pass") === env.ADMIN_PASS;
+}
+
+
 export async function onRequestGet(context){
   const { request, env } = context;
   const user = await verifyAuth(request, env);
@@ -26,6 +32,7 @@ export async function onRequestPost(context){
   const user = await verifyAuth(request, env);
   if(!user) return json({ok:false, error:"未登录"}, 401);
   if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员可修改测算参数"}, 403);
+  if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
   let body;
   try{ body = await request.json(); }catch(e){ return json({ok:false, error:"请求格式有误"}, 400); }
   const key = String(body.key||"");
