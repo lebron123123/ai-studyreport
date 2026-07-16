@@ -9,6 +9,12 @@ function isAdmin(env, user){
   return admins.includes(user.username) || admins.includes(String(user.userId));
 }
 
+function passOk(env, request){
+  if(!env.ADMIN_PASS) return true;   // 未配置则不启用
+  return request.headers.get("x-admin-pass") === env.ADMIN_PASS;
+}
+
+
 async function embed(env, texts){
   // bge-m3：中文语义向量，1024维
   const r = await env.AI.run("@cf/baai/bge-m3", { text: texts });
@@ -25,6 +31,7 @@ export async function onRequestPost(context){
 
   if(body.action === "upsert"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员可入库"}, 403);
+  if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
     const chunks = (body.chunks||[]).slice(0, 20);   // 每请求最多20块
     if(!chunks.length) return json({ok:false, error:"无内容"}, 400);
     const texts = chunks.map(c=>String(c.text||"").slice(0, 2500));
@@ -76,6 +83,7 @@ export async function onRequestPost(context){
 
   if(body.action === "stats"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+  if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
     try{
       const d = await env.VECTORIZE.describe();
       return json({ok:true, count: d.vectorCount ?? d.vectorsCount ?? null, dimensions: d.dimensions});
@@ -84,12 +92,14 @@ export async function onRequestPost(context){
 
   if(body.action === "list"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+  if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
     const rows = await env.DB.prepare("SELECT title, chunks, created_at FROM rag_files ORDER BY created_at DESC LIMIT 500").all();
     return json({ok:true, files: rows.results||[]});
   }
 
   if(body.action === "deleteByTitle"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员可删除"}, 403);
+  if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
     const title = String(body.title||"").slice(0,80);
     const row = await env.DB.prepare("SELECT ids FROM rag_files WHERE title=?").bind(title).first();
     if(!row) return json({ok:false, error:"台账中未找到该文件（可能是早期版本入库，需重建索引清理）"}, 404);
