@@ -90,7 +90,7 @@ function calcNonResiReform(p, cfgIn){
     if(!isOperate[y]){ cost[y].collect=0; cost[y].collectAT=0; }
     else{
       const occ=resiOccupancy[y]||0, m=monthDict[y];
-      const c = p.residentialArea*p.collectPrice*occ*m/10000;
+      const c = p.residentialArea*p.collectPrice*occ*m/10000 * (p.collectFactor!==undefined? p.collectFactor : 1);
       cost[y].collect=round4(c); cost[y].collectAT=round4(c/(1+K.vatOut));
     }
   });
@@ -145,8 +145,11 @@ function calcNonResiReform(p, cfgIn){
   });
   // 2e 总成本
   allYears.forEach(y=>{
-    cost[y].total = round4(cost[y].collect+cost[y].eng+cost[y].op+cost[y].fin);
-    cost[y].totalAT = round4(cost[y].collectAT+cost[y].engAT+cost[y].opAT+cost[y].finAT);
+    const shareR = p.shareRatio!==undefined? p.shareRatio : 0;
+    cost[y].share = round4(income[y].rent * shareR);
+    cost[y].shareAT = round4(cost[y].share/(1+K.vatOut));
+    cost[y].total = round4(cost[y].collect+cost[y].eng+cost[y].op+cost[y].fin+cost[y].share);
+    cost[y].totalAT = round4(cost[y].collectAT+cost[y].engAT+cost[y].opAT+cost[y].finAT+cost[y].shareAT);
   });
 
   // ===== 3. 税金 =====
