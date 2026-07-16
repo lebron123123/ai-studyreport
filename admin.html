@@ -170,6 +170,8 @@ async function openRag(){
     +'<button class="btn" id="ragPick">选择报告文件（可多选）</button>'
     +'<input type="file" id="ragFiles" accept=".docx,.pdf,.txt" multiple style="display:none;">'
     +'<div id="ragProg" style="font-size:12px; color:var(--soft); margin-top:12px;">未开始</div></div>'
+    +'<div style="margin-top:18px; font-weight:600;">已入库文件</div>'
+    +'<div id="ragFileList" style="font-size:12.5px;"><span style="color:var(--soft);">读取中…</span></div>'
     +'<div style="margin-top:18px; font-weight:600;">检索测试</div>'
     +'<div style="display:flex; gap:8px; margin-top:6px;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1;"><button class="btn sm" id="ragTest">检索</button></div>'
     +'<div id="ragHits" style="font-size:12.5px;"></div>'
@@ -179,6 +181,7 @@ async function openRag(){
   document.getElementById("ragFiles").onchange = e=>ragIngest([...e.target.files]);
   document.getElementById("ragTest").onclick = ragTest;
   refreshRagStats();
+  refreshRagFiles();
 }
 async function refreshRagStats(){
   try{
@@ -212,7 +215,37 @@ async function ragIngest(files){
   }
   prog.innerHTML = "完成：入库 "+okChunks+"/"+totalChunks+" 块" + (failed.length? '<br><span style="color:var(--red);">失败：'+esc(failed.slice(0,5).join("；"))+'</span>':'');
   refreshRagStats();
+  refreshRagFiles();
 }
+
+async function refreshRagFiles(){
+  const box = document.getElementById("ragFileList");
+  try{
+    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"list"})});
+    const d = await r.json();
+    if(!d.ok){ box.innerHTML = '<span style="color:var(--soft);">'+esc(d.error||"不可用")+'</span>'; return; }
+    if(!(d.files||[]).length){ box.innerHTML = '<span style="color:var(--soft);">暂无（本功能上线前入库的内容不在台账中，如需清理请重建索引后重新上传）</span>'; return; }
+    box.innerHTML = d.files.map(f=>'<div style="display:flex; align-items:center; gap:10px; border:1px solid var(--line); background:#fff; padding:8px 12px; margin-top:6px;">'
+      +'<b style="flex:1;">'+esc(f.title)+'</b>'
+      +'<span style="color:var(--soft);">'+f.chunks+' 块</span>'
+      +'<span style="color:var(--soft);">'+new Date(f.created_at).toLocaleDateString("zh-CN")+'</span>'
+      +'<button class="btn sm red" data-ragdel="'+esc(f.title)+'">删除</button></div>').join("");
+    box.querySelectorAll("[data-ragdel]").forEach(b=>{
+      b.onclick = async ()=>{
+        const t = b.dataset.ragdel;
+        if(!confirm('确定从知识库删除《'+t+'》的全部向量块？此操作不可恢复。')) return;
+        b.disabled = true; b.textContent = "删除中…";
+        try{
+          const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"deleteByTitle", title:t})});
+          const d = await r.json();
+          if(d.ok) msg("已删除 "+d.deleted+" 块","ok"); else msg(d.error||"删除失败","err");
+        }catch(e){ msg("网络错误","err"); }
+        refreshRagFiles(); refreshRagStats();
+      };
+    });
+  }catch(e){ box.innerHTML = '<span style="color:var(--soft);">读取失败</span>'; }
+}
+
 async function ragTest(){
   const q = document.getElementById("ragQ").value.trim();
   if(!q) return;
