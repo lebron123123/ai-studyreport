@@ -2530,12 +2530,69 @@ function buildExportPayload(){
   return { project: project, signed: signed, docNo: getDocNo(), chapters: chs, appendix };
 }
 
+/* ===== 图表转PNG(嵌入Word用) ===== */
+const CHART_EXPORT_CSS = ".cfaxis{stroke:#B9B29E;stroke-width:1;stroke-dasharray:3 3;}"
+ +".cfbar{fill:#1E3A5C;opacity:.78;}.cfbar.neg{fill:#B7302B;opacity:.6;}"
+ +".cfline{fill:none;stroke:#7FB3C8;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:none !important;stroke-dashoffset:0 !important;animation:none !important;}"
+ +".cfx{font-family:Consolas,monospace;font-size:8.5px;fill:#66707A;}"
+ +".cfpay{fill:#B7302B;}.cfpay-t{font-family:Consolas,monospace;font-size:9px;fill:#B7302B;}"
+ +"text{font-family:'Microsoft YaHei',sans-serif;}";
+const CSS_VAR_MAP = {"--bp-navy":"#1E3A5C","--seal-red":"#B7302B","--bp-cyan":"#7FB3C8",
+  "--ink":"#1F262B","--ink-soft":"#66707A","--line-strong":"#B9B29E",
+  "--mono":"Consolas,monospace","--sans":"'Microsoft YaHei',sans-serif"};
+function svgForExport(svgStr){
+  let s = svgStr.replace(/var\((--[\w-]+)\)/g, (m,v)=> CSS_VAR_MAP[v] || "#333");
+  s = s.replace(/<svg([^>]*)>/, '<svg$1><style>'+CHART_EXPORT_CSS+'</style>');
+  if(!/xmlns=/.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  return s;
+}
+function svgToPng(svgStr, w, h){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgForExport(svgStr));
+    img.onload = ()=>{
+      try{
+        const scale = 2;
+        const cv = document.createElement("canvas");
+        cv.width = w*scale; cv.height = h*scale;
+        const ctx = cv.getContext("2d");
+        ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0,0,cv.width,cv.height);
+        ctx.drawImage(img, 0, 0, cv.width, cv.height);
+        resolve(cv.toDataURL("image/png").split(",")[1]);   // 纯base64
+      }catch(e){ reject(e); }
+    };
+    img.onerror = ()=>reject(new Error("SVG渲染失败"));
+    img.src = url;
+  });
+}
+async function collectReportImages(){
+  const imgs = [];
+  try{
+    // 附图1:现金流走势
+    if(calcResult){
+      const htmlStr = cashflowChartHtml();
+      const m = htmlStr.match(/<svg[\s\S]*?<\/svg>/);
+      if(m) imgs.push({title:"附图一　全周期现金流量走势图", b64: await svgToPng(m[0], 700, 200), w:620, h:177});
+    }
+    // 附图2/3:竞品对比
+    const cps = (project.competitors||[]).filter(c=>c.name);
+    const rentItems = cps.filter(c=>parseFloat(c.rent)).map(c=>({name:c.name, val:parseFloat(c.rent)}));
+    if(calcParams && parseFloat(calcParams.rent)) rentItems.push({name:"本项目", val:parseFloat(calcParams.rent), hl:1});
+    const occItems = cps.filter(c=>parseFloat(c.occ)).map(c=>({name:c.name, val:parseFloat(c.occ)}));
+    if(rentItems.length >= 2) imgs.push({title:"附图二　周边竞品租金对比（元/㎡/月）", b64: await svgToPng(cpBarSvg(rentItems,"","#1E3A5C"), 520, 210), w:520, h:210});
+    if(occItems.length >= 2) imgs.push({title:"附图"+(imgs.length>=2?"三":"二")+"　周边竞品出租率对比（%）", b64: await svgToPng(cpBarSvg(occItems,"%","#C99A2E"), 520, 210), w:520, h:210});
+  }catch(e){ console.warn("图表导出失败,跳过:", e.message); }
+  return imgs;
+}
+
 async function exportWord(){
   const btn = document.getElementById("exportWordBtn");
   if(btn){ btn.disabled = true; btn.textContent = "正在生成 .docx…"; }
   try{
     await ensureDocxLib();
-    const doc = window.buildDocxDocument(window.docx, buildExportPayload());
+    const payload = buildExportPayload();
+    payload.images = await collectReportImages();
+    const doc = window.buildDocxDocument(window.docx, payload);
     const blob = await window.docx.Packer.toBlob(doc);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
