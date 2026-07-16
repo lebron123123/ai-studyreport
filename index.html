@@ -1527,6 +1527,7 @@ function stepProjectInfo(){
     + (project.competitors||[]).map((cp,i)=>cpRowHtml(cp,i)).join("")
     +'</div>'
     +'<button type="button" class="btn ghost" id="cpAdd" style="padding:5px 14px;font-size:12px;margin-top:8px;">＋ 添加竞品</button>'
+    +'<div id="cpChartBox" style="margin-top:12px;"></div>'
     +'<div class="grid2" style="margin-top:14px;">'
     +'<div><label>主力客群</label><select id="f_targetGroup">'+["新市民/青年人","园区产业职工","混合客群","家庭型租户"].map(o=>'<option '+((project.targetGroup||"新市民/青年人")===o?"selected":"")+'>'+o+'</option>').join("")+'</select></div>'
     +'<div><label>周边产业/就业特征（选填）</label><input id="f_industryDesc" type="text" placeholder="例：周边3公里聚集电子信息产业园，从业人员约5万人" value="'+escapeHtml(project.industryDesc||"")+'"></div>'
@@ -2570,6 +2571,10 @@ function bindEvents(){
     project.competitors.splice(+b.dataset.ci,1);
     renderSheet();
   });
+  document.querySelectorAll(".cp-name,.cp-rent,.cp-occ").forEach(inp=>{
+    inp.addEventListener("input", ()=>{ clearTimeout(inp.__t); inp.__t = setTimeout(renderCpChart, 400); });
+  });
+  if(document.getElementById("cpChartBox")) renderCpChart();
   if(s("kbAdd")) s("kbAdd").onclick = ()=>{ readKbFromDom(); kbEntries.push({title:"",content:""}); renderSheet(); };
   if(s("kbUpload")) s("kbUpload").onclick = ()=>{ s("kbFile").click(); };
   if(s("kbFile")) s("kbFile").onchange = e=>{ if(e.target.files.length) kbHandleFiles([...e.target.files]); };
@@ -2717,6 +2722,44 @@ function readKbFromDom(){
     title: r.querySelector(".kb-title").value.trim(),
     content: r.querySelector(".kb-content").value
   })).filter(e=>e.title||e.content.trim());
+}
+
+
+function cpBarSvg(items, unit, color){
+  // items: [{name, val}] 简洁柱状图
+  const W = 520, H = 210, padL = 34, padR = 10, padT = 26, padB = 44;
+  const maxV = Math.max(...items.map(i=>i.val), 1) * 1.15;
+  const iw = (W - padL - padR) / items.length;
+  const bw = Math.min(iw * 0.52, 64);
+  let bars = "", labels = "";
+  items.forEach((it, i)=>{
+    const h = (it.val / maxV) * (H - padT - padB);
+    const x = padL + iw * i + (iw - bw) / 2;
+    const y = H - padB - h;
+    bars += '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+h.toFixed(1)+'" fill="'+(it.hl? "var(--seal-red)" : color)+'" opacity="0.88"/>';
+    bars += '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(y-6).toFixed(1)+'" text-anchor="middle" style="font-family:var(--mono); font-size:11px; fill:var(--ink);">'+it.val+unit+'</text>';
+    const nm = it.name.length>7? it.name.slice(0,6)+"…" : it.name;
+    labels += '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(H-padB+16)+'" text-anchor="middle" style="font-size:11px; fill:var(--ink-soft);">'+escapeHtml(nm)+(it.hl?'（本项目）':'')+'</text>';
+  });
+  return '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:auto;">'
+    +'<line x1="'+padL+'" y1="'+(H-padB)+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="var(--line-strong)" stroke-width="1"/>'
+    + bars + labels + '</svg>';
+}
+function renderCpChart(){
+  const box = document.getElementById("cpChartBox");
+  if(!box) return;
+  readCpFromDom();
+  const cps = (project.competitors||[]).filter(c=>c.name);
+  const rentItems = cps.filter(c=>parseFloat(c.rent)).map(c=>({name:c.name, val:parseFloat(c.rent)}));
+  const occItems = cps.filter(c=>parseFloat(c.occ)).map(c=>({name:c.name, val:parseFloat(c.occ)}));
+  // 本项目租金参考(若已做过测算)
+  if(calcParams && parseFloat(calcParams.rent)) rentItems.push({name:"本项目", val:parseFloat(calcParams.rent), hl:1});
+  if(!rentItems.length && !occItems.length){ box.innerHTML = ""; return; }
+  let out = '<div class="grid2" style="gap:14px;">';
+  if(rentItems.length) out += '<div class="cf-chart" style="margin:0;"><div class="cf-head"><span>竞品租金对比（元/㎡/月）</span></div>'+cpBarSvg(rentItems, "", "var(--bp-navy)")+'</div>';
+  if(occItems.length) out += '<div class="cf-chart" style="margin:0;"><div class="cf-head"><span>竞品出租率对比（%）</span></div>'+cpBarSvg(occItems, "%", "#C99A2E")+'</div>';
+  out += '</div>';
+  box.innerHTML = out;
 }
 
 function cpRowHtml(cp,i){
