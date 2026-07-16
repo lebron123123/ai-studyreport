@@ -44,6 +44,7 @@
       <button class="btn ghost" id="btnCalcCfg">测算参数管理</button>
       <button class="btn ghost" id="btnExamples">黄金范例库</button>
       <button class="btn ghost" id="btnAiRules">AI审核规则</button>
+      <button class="btn ghost" id="btnRag">RAG知识库</button>
       <span style="margin-left:auto;font-size:12px;color:var(--soft);" id="loginInfo"></span>
     </div>
     <div id="listBox"></div>
@@ -114,6 +115,118 @@ async function saveExamples(){
   btn.disabled=false; btn.textContent="保存范例库";
 }
 
+
+
+/* ================= RAG知识库（全量报告向量入库） ================= */
+function loadScript(src){ return new Promise((ok,err)=>{ const s=document.createElement("script"); s.src=src; s.onload=ok; s.onerror=()=>err(new Error("加载失败:"+src)); document.head.appendChild(s); }); }
+async function ragParseFile(f){
+  const ext = (f.name.split(".").pop()||"").toLowerCase();
+  if(ext==="txt") return await f.text();
+  if(ext==="docx"){
+    if(!window.mammoth) await loadScript("mammoth.min.js");
+    return (await window.mammoth.extractRawText({arrayBuffer: await f.arrayBuffer()})).value||"";
+  }
+  if(ext==="pdf"){
+    if(!window.pdfjsLib) await loadScript("pdf.min.js");
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "pdf.worker.min.js";
+    const pdf = await window.pdfjsLib.getDocument({data: await f.arrayBuffer()}).promise;
+    const parts = [];
+    for(let p=1; p<=pdf.numPages; p++){ const tc = await (await pdf.getPage(p)).getTextContent(); parts.push(tc.items.map(it=>it.str).join("")); }
+    return parts.join("\n");
+  }
+  throw new Error("不支持 ."+ext);
+}
+function ragSplit(text, title){
+  const lines = text.split(/\r?\n/);
+  const chRe = /^第\s*([一二三四五六七八九十百]+)\s*[章篇]\s*[、．.:：\s]*(.*)$/;
+  const secRe = /^(\d+\.\d+)\s*[、．.:：\s]*(.+)$/;
+  const chunks = [];
+  let ch="", sec="", buf=[];
+  const flush = ()=>{
+    const t = buf.join("\n").trim();
+    buf = [];
+    if(t.length < 120) return;   // 过短块不入库
+    // 超长按2000字切
+    for(let i=0;i<t.length;i+=2000) chunks.push({title, chapter:ch, section:sec, text:t.slice(i,i+2000)});
+  };
+  lines.forEach(raw=>{
+    const line = raw.trim();
+    let m;
+    if((m=line.match(chRe)) && line.length<40){ flush(); ch=(m[2]||("第"+m[1]+"章")).trim(); sec=""; return; }
+    if((m=line.match(secRe)) && line.length<45){ flush(); sec=m[2].trim(); return; }
+    if(line) buf.push(line);
+  });
+  flush();
+  return chunks;
+}
+async function openRag(){
+  document.getElementById("listBox").style.display="none";
+  const box = document.getElementById("editBox");
+  box.style.display="block";
+  box.innerHTML = '<h1 style="font-size:18px;">RAG知识库</h1>'
+    +'<div class="sub">批量上传存量可研报告（docx/pdf/txt），按章节切块、向量化后存入语义检索库。生成报告时自动检索最相关的段落注入AI。<b>需先按部署说明创建 Vectorize 索引并绑定 VECTORIZE 与 AI。</b></div>'
+    +'<div id="ragStats" style="font-size:12px; color:var(--soft); margin:8px 0;">读取库规模…</div>'
+    +'<div style="border:2px dashed var(--line); background:#fff; padding:26px; text-align:center;">'
+    +'<button class="btn" id="ragPick">选择报告文件（可多选）</button>'
+    +'<input type="file" id="ragFiles" accept=".docx,.pdf,.txt" multiple style="display:none;">'
+    +'<div id="ragProg" style="font-size:12px; color:var(--soft); margin-top:12px;">未开始</div></div>'
+    +'<div style="margin-top:18px; font-weight:600;">检索测试</div>'
+    +'<div style="display:flex; gap:8px; margin-top:6px;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1;"><button class="btn sm" id="ragTest">检索</button></div>'
+    +'<div id="ragHits" style="font-size:12.5px;"></div>'
+    +'<div class="bar" style="margin-top:18px;"><button class="btn ghost" id="ragBack">返回列表</button></div>';
+  document.getElementById("ragBack").onclick = ()=>loadList();
+  document.getElementById("ragPick").onclick = ()=>document.getElementById("ragFiles").click();
+  document.getElementById("ragFiles").onchange = e=>ragIngest([...e.target.files]);
+  document.getElementById("ragTest").onclick = ragTest;
+  refreshRagStats();
+}
+async function refreshRagStats(){
+  try{
+    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"stats"})});
+    const d = await r.json();
+    document.getElementById("ragStats").textContent = d.ok? ("当前库内向量块数："+(d.count===null?"未知（索引可用）":d.count)) : ("状态："+(d.error||"不可用"));
+  }catch(e){ document.getElementById("ragStats").textContent = "状态读取失败"; }
+}
+async function ragIngest(files){
+  const prog = document.getElementById("ragProg");
+  let totalChunks = 0, okChunks = 0, failed = [];
+  for(let fi=0; fi<files.length; fi++){
+    const f = files[fi];
+    prog.textContent = "解析 "+(fi+1)+"/"+files.length+"：《"+f.name+"》…";
+    let chunks;
+    try{
+      const text = await ragParseFile(f);
+      chunks = ragSplit(text, f.name.replace(/\.[^.]+$/,""));
+      if(!chunks.length){ failed.push(f.name+"（无有效块）"); continue; }
+    }catch(e){ failed.push(f.name+"（"+e.message+"）"); continue; }
+    totalChunks += chunks.length;
+    for(let i=0; i<chunks.length; i+=10){
+      prog.textContent = "《"+f.name+"》向量化入库 "+Math.min(i+10,chunks.length)+"/"+chunks.length+"（文件"+(fi+1)+"/"+files.length+"）";
+      try{
+        const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),
+          body:JSON.stringify({action:"upsert", chunks:chunks.slice(i,i+10)})});
+        const d = await r.json();
+        if(d.ok) okChunks += d.count; else{ failed.push(f.name+"批次"+i+"："+d.error); break; }
+      }catch(e){ failed.push(f.name+"批次"+i+"：网络错误"); break; }
+    }
+  }
+  prog.innerHTML = "完成：入库 "+okChunks+"/"+totalChunks+" 块" + (failed.length? '<br><span style="color:var(--red);">失败：'+esc(failed.slice(0,5).join("；"))+'</span>':'');
+  refreshRagStats();
+}
+async function ragTest(){
+  const q = document.getElementById("ragQ").value.trim();
+  if(!q) return;
+  const box = document.getElementById("ragHits");
+  box.textContent = "检索中…";
+  try{
+    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"query", query:q, topK:3})});
+    const d = await r.json();
+    if(!d.ok){ box.textContent = d.error; return; }
+    box.innerHTML = (d.matches||[]).map(m=>'<div style="border:1px solid var(--line); background:#fff; padding:8px 10px; margin-top:8px;">'
+      +'<b>'+esc(m.title||"")+'</b> ｜ '+esc(m.chapter||"")+' / '+esc(m.section||"")+' ｜ 相似度 '+m.score
+      +'<div style="color:var(--soft); margin-top:4px;">'+esc((m.text||"").slice(0,160))+'…</div></div>').join("") || "无结果";
+  }catch(e){ box.textContent = "检索失败"; }
+}
 
 /* ================= AI审核规则 ================= */
 let arList = [];
@@ -513,6 +626,7 @@ else{
   document.getElementById("btnCalcCfg").onclick = openCalcCfg;
   document.getElementById("btnExamples").onclick = openExamples;
   document.getElementById("btnAiRules").onclick = openAiRules;
+  document.getElementById("btnRag").onclick = openRag;
   loadList();
 }
 </script>
