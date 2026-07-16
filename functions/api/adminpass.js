@@ -1,4 +1,4 @@
-// /api/adminpass  管理员二次密码校验
+// /api/adminpass  管理员二次密码校验 
 import { verifyAuth, json } from "./_auth.js";
 
 function isAdmin(env, user){
