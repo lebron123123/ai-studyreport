@@ -1,5 +1,5 @@
 // /api/poi  周边配套抓取（高德Web服务：地理编码+周边搜索）
-import { verifyAuth, json } from "./_auth.js";  
+import { verifyAuth, json } from "./_auth.js";
 
 const CATS = [
   ["地铁站", "轨道交通"],
@@ -54,6 +54,27 @@ export async function onRequestPost(context){
   // ===== 第二步:按确认的精确坐标抓周边 =====
   const loc = String(body.location||"").trim();
   if(!/^-?[\d.]+,-?[\d.]+$/.test(loc)) return json({ok:false, error:"缺少确认的位置坐标"}, 400);
+
+  // ===== 竞品公寓搜索(名称+距离真实,租金/出租率无公开数据须人工调研) =====
+  if(body.action === "competitors"){
+    const out = [];
+    for(const kw of ["公寓", "长租公寓"]){
+      try{
+        const r = await fetch("https://restapi.amap.com/v3/place/around?key="+env.AMAP_KEY
+          +"&location="+loc+"&keywords="+encodeURIComponent(kw)
+          +"&radius=3000&offset=10&page=1&sortrule=distance");
+        const d = await r.json();
+        if(d.status==="1" && d.pois) d.pois.forEach(p=>{
+          if(!out.some(x=>x.name===p.name)) out.push({
+            name: p.name, dist: p.distance? Math.round(p.distance/100)/10 : null,
+            address: typeof p.address==="string"? p.address : "",
+          });
+        });
+      }catch(e){}
+    }
+    out.sort((a,b)=>(a.dist??99)-(b.dist??99));
+    return json({ok:true, competitors: out.slice(0, 8)});
+  }
 
   // 六类周边搜索（半径3km，各取前4）
   const result = {};
