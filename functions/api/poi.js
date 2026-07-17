@@ -1,4 +1,4 @@
-// /api/poi  周边配套抓取（高德Web服务：地理编码+周边搜索） 
+// /api/poi  周边配套抓取（高德Web服务：地理编码+周边搜索）
 import { verifyAuth, json } from "./_auth.js";
 
 const CATS = [
@@ -20,19 +20,25 @@ export async function onRequestPost(context){
   // ===== 第一步:候选搜索(POI名称精确匹配,人工确认后再抓周边) =====
   if(body.action === "search"){
     const address = String(body.address||"").trim().slice(0, 100);
-    if(!address) return json({ok:false, error:"请先填写建设地点"}, 400);
+    if(!address) return json({ok:false, error:"请输入项目/小区名称"}, 400);
+    // 支持"城市 名称"格式:空格前视为城市,限定搜索范围
+    let city = "", kw = address;
+    const sp = address.split(/\s+/);
+    if(sp.length > 1){ city = sp[0]; kw = sp.slice(1).join(""); }
     // 优先POI搜索(小区/楼盘名精确命中真实项目)
     const pR = await fetch("https://restapi.amap.com/v3/place/text?key="+env.AMAP_KEY
-      +"&keywords="+encodeURIComponent(address)+"&offset=5&page=1&extensions=base");
+      +"&keywords="+encodeURIComponent(kw)
+      +(city? "&city="+encodeURIComponent(city)+"&citylimit=true" : "")
+      +"&offset=8&page=1&extensions=base");
     const pd = await pR.json();
-    let cands = (pd.status==="1" && pd.pois)? pd.pois.slice(0,5).map(p=>({
+    let cands = (pd.status==="1" && pd.pois)? pd.pois.slice(0,8).map(p=>({
       name: p.name, district: (p.pname||"")+(p.cityname&&p.cityname!==p.pname?p.cityname:"")+(p.adname||""),
       address: typeof p.address==="string"? p.address : "", location: p.location,
     })).filter(c=>c.location) : [];
     // 兜底:结构化地址走地理编码
     if(!cands.length){
       const geoR = await fetch("https://restapi.amap.com/v3/geocode/geo?key="+env.AMAP_KEY
-        +"&address="+encodeURIComponent(address));
+        +"&address="+encodeURIComponent(kw)+(city? "&city="+encodeURIComponent(city):""));
       const geo = await geoR.json();
       if(geo.status==="1" && geo.geocodes && geo.geocodes.length){
         cands = geo.geocodes.slice(0,3).map(gc=>({
