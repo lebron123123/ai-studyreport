@@ -1523,6 +1523,8 @@ function stepProjectInfo(){
     +'<textarea id="f_desc" placeholder="例：项目总建筑面积21300㎡，含集中商业与街区商业，已运营11年，现出租率下滑至70%，拟通过系统性改造升级重构业态与动线...">'+project.desc+'</textarea>'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px;"><b style="font-size:14px;">周边调研与产品定位（选填，驱动市场分析与定位章节）</b><button type="button" class="btn ghost" id="aiPosBtn" style="padding:5px 14px;font-size:12px;">AI定位建议</button></div>'
     +'<div id="aiPosBox"></div>'
+    +'<div style="display:flex; gap:8px; align-items:center; margin-top:10px;"><button type="button" class="btn ghost" id="poiBtn" style="padding:5px 14px;font-size:12px;">📍 抓取周边配套（按建设地点）</button><span id="poiStatus" style="font-size:12px; color:var(--ink-soft);"></span></div>'
+    +'<div><label style="margin-top:10px;">周边配套（自动抓取自地图，可手动增删修改，将注入区位与市场章节）</label><textarea id="f_poiDesc" style="min-height:72px;" placeholder="点上方按钮自动抓取，或手动填写">'+escapeHtml(project.poiDesc||"")+'</textarea></div>'
     +'<div class="step-desc" style="margin:6px 0 0;">竞品数据须来自真实调研——AI只负责把这些真实数据组织成市场分析论述，不会自行编造周边情况。</div>'
     +'<div id="cpList">'
     + (project.competitors||[]).map((cp,i)=>cpRowHtml(cp,i)).join("")
@@ -2618,6 +2620,7 @@ function bindEvents(){
   document.querySelectorAll(".domain-card").forEach(card=>{
     card.onclick = ()=>{ loadDomain(card.dataset.key); renderSheet(); };
   });
+  if(s("poiBtn")) s("poiBtn").onclick = fetchPoi;
   if(s("aiPosBtn")) s("aiPosBtn").onclick = aiPositionSuggest;
   if(s("cpAdd")) s("cpAdd").onclick = ()=>{
     readCpFromDom(); saveProject();
@@ -2840,6 +2843,32 @@ function readCpFromDom(){
 
 
 
+
+async function fetchPoi(){
+  saveProject();
+  const btn = document.getElementById("poiBtn");
+  const st = document.getElementById("poiStatus");
+  const addr = (project.location||"").trim();
+  if(!addr){ st.textContent = "请先在上方填写建设地点（含城市名）"; return; }
+  btn.disabled = true; st.textContent = "抓取中…";
+  try{
+    const r = await fetch("/api/poi", {method:"POST",
+      headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
+      body: JSON.stringify({address: addr})});
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error||"抓取失败");
+    let lines = [];
+    Object.entries(d.pois||{}).forEach(([label, items])=>{
+      if(items && items.length) lines.push(label+"："+items.map(p=>p.name+(p.dist!==null?"（约"+p.dist+"km）":"")).join("、"));
+    });
+    if(!lines.length) throw new Error("3公里内未检索到配套，请检查地址");
+    document.getElementById("f_poiDesc").value = lines.join("\n");
+    saveProject(); saveDraft();
+    st.textContent = "✓ 已抓取（"+(d.formatted||addr)+"），可手动编辑";
+  }catch(e){ st.textContent = "失败："+e.message; }
+  btn.disabled = false;
+}
+
 async function aiPositionSuggest(){
   saveProject();
   const btn = document.getElementById("aiPosBtn");
@@ -2880,6 +2909,9 @@ function surveyBrief(){
     out += "\n【周边竞品调研（真实数据，市场分析必须引用，不得另行编造其他竞品）】\n竞品|距离km|租金(元/㎡/月)|出租率|备注\n";
     cps.forEach(c=>{ out += c.name+"|"+(c.dist||"—")+"|"+(c.rent||"—")+"|"+(c.occ?c.occ+"%":"—")+"|"+(c.note||"—")+"\n"; });
   }
+  if(project.poiDesc && project.poiDesc.trim()){
+    out += "\n【周边配套（地图实测数据，区位与市场章节须引用，不得另行编造配套）】\n"+project.poiDesc.trim()+"\n";
+  }
   if(project.targetGroup || project.industryDesc){
     out += "\n【客群定位】主力客群："+(project.targetGroup||"未定")+(project.industryDesc? "；周边产业特征："+project.industryDesc : "")+"\n";
   }
@@ -2895,6 +2927,7 @@ function saveProject(){
   project.name=g("f_name"); project.owner=g("f_owner"); project.type=g("f_type");
   project.location=g("f_location"); project.scale=g("f_scale"); project.desc=g("f_desc");
   readCpFromDom();
+  project.poiDesc=g("f_poiDesc");
   project.targetGroup=g("f_targetGroup"); project.industryDesc=g("f_industryDesc");
   project.unitPlan=g("f_unitPlan"); project.rentPlan=g("f_rentPlan");
 }
