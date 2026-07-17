@@ -1523,7 +1523,10 @@ function stepProjectInfo(){
     +'<textarea id="f_desc" placeholder="例：项目总建筑面积21300㎡，含集中商业与街区商业，已运营11年，现出租率下滑至70%，拟通过系统性改造升级重构业态与动线...">'+project.desc+'</textarea>'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px;"><b style="font-size:14px;">周边调研与产品定位（选填，驱动市场分析与定位章节）</b><button type="button" class="btn ghost" id="aiPosBtn" style="padding:5px 14px;font-size:12px;">AI定位建议</button></div>'
     +'<div id="aiPosBox"></div>'
-    +'<div style="display:flex; gap:8px; align-items:center; margin-top:10px;"><button type="button" class="btn ghost" id="poiBtn" style="padding:5px 14px;font-size:12px;">📍 抓取周边配套（按建设地点）</button><span id="poiStatus" style="font-size:12px; color:var(--ink-soft);"></span></div>'
+    +'<div style="display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap;">'
+    +'<input id="poiKw" type="text" placeholder="项目/小区全名，可加城市，如：深圳 安居华越龙苑" value="'+escapeHtml(project.poiKw || project.name || "")+'" style="flex:1; min-width:240px; font-size:12.5px; padding:6px 10px;">'
+    +'<button type="button" class="btn ghost" id="poiBtn" style="padding:5px 14px;font-size:12px;">📍 搜索位置并抓取周边</button></div>'
+    +'<div id="poiStatus" style="font-size:12px; color:var(--ink-soft); margin-top:6px;"></div>'
     +'<div><label style="margin-top:10px;">周边配套（自动抓取自地图，可手动增删修改，将注入区位与市场章节）</label><textarea id="f_poiDesc" style="min-height:72px;" placeholder="点上方按钮自动抓取，或手动填写">'+escapeHtml(project.poiDesc||"")+'</textarea></div>'
     +'<div class="step-desc" style="margin:6px 0 0;">竞品数据须来自真实调研——AI只负责把这些真实数据组织成市场分析论述，不会自行编造周边情况。</div>'
     +'<div id="cpList">'
@@ -2848,8 +2851,10 @@ async function fetchPoi(){
   saveProject();
   const btn = document.getElementById("poiBtn");
   const st = document.getElementById("poiStatus");
-  const addr = (project.location||"").trim() || (project.name||"").trim();
-  if(!addr){ st.textContent = "请先在上方填写建设地点或项目名称"; return; }
+  let addr = (document.getElementById("poiKw").value||"").trim();
+  if(!addr && document.getElementById("f_name")){ addr = document.getElementById("f_name").value.trim(); if(addr) document.getElementById("poiKw").value = addr; }
+  if(!addr){ st.textContent = "请输入项目/小区名称（建议加城市名，如：深圳 安居华越龙苑）"; return; }
+  project.poiKw = addr;
   btn.disabled = true; st.innerHTML = "定位候选中…";
   try{
     const r = await fetch("/api/poi", {method:"POST",
@@ -2861,7 +2866,7 @@ async function fetchPoi(){
     st.innerHTML = '<b style="color:var(--seal-red);">请确认项目位置（防止定位错片区）：</b><br>'
       + d.candidates.map((c,i)=>'<a href="javascript:void(0)" class="poi-cand" data-loc="'+c.location+'" style="display:inline-block; margin:4px 6px 0 0; padding:4px 10px; border:1px solid var(--line-strong); background:#fff; font-size:12px; text-decoration:none; color:var(--ink);">'
         + escapeHtml(c.name)+'<span style="color:var(--ink-soft);">｜'+escapeHtml(c.district)+(c.address?'｜'+escapeHtml(String(c.address).slice(0,24)):'')+'</span></a>').join("")
-      + '<br><span style="color:var(--ink-soft); font-size:11px;">都不对？请把"建设地点"填得更具体（含城市与街道）后重试。</span>';
+      + '<br><span style="color:var(--ink-soft); font-size:11px;">都不对？请把搜索词改成"城市 + 项目全名"（如：深圳 安居华越龙苑）后重试；选定后仍请人工核对抓取结果。</span>';
     document.querySelectorAll(".poi-cand").forEach(a=>{
       a.onclick = ()=>fetchPoiAround(a.dataset.loc, a.textContent.split("｜")[0]);
     });
@@ -2947,6 +2952,7 @@ function saveProject(){
   project.location=g("f_location"); project.scale=g("f_scale"); project.desc=g("f_desc");
   readCpFromDom();
   project.poiDesc=g("f_poiDesc");
+  if(document.getElementById("poiKw")) project.poiKw=document.getElementById("poiKw").value.trim();
   project.targetGroup=g("f_targetGroup"); project.industryDesc=g("f_industryDesc");
   project.unitPlan=g("f_unitPlan"); project.rentPlan=g("f_rentPlan");
 }
