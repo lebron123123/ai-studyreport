@@ -1540,7 +1540,7 @@ function stepProjectInfo(){
     +'<div><label>主力客群</label><select id="f_targetGroup">'+["新市民/青年人","园区产业职工","混合客群","家庭型租户"].map(o=>'<option '+((project.targetGroup||"新市民/青年人")===o?"selected":"")+'>'+o+'</option>').join("")+'</select></div>'
     +'<div><label>周边产业/就业特征（选填）</label><input id="f_industryDesc" type="text" placeholder="例：周边3公里聚集电子信息产业园，从业人员约5万人" value="'+escapeHtml(project.industryDesc||"")+'"></div>'
     +'<div><label>户型策略</label><select id="f_unitPlan">'+["小户型为主（≤70㎡）","中小户型混合","大中小全覆盖"].map(o=>'<option '+((project.unitPlan||"小户型为主（≤70㎡）")===o?"selected":"")+'>'+o+'</option>').join("")+'</select></div>'
-    +'<div><label>租金策略</label><select id="f_rentPlan">'+["市场价9折以内","市场价7-9折","显著低于市场价（≤7折）"].map(o=>'<option '+((project.rentPlan||"市场价9折以内")===o?"selected":"")+'>'+o+'</option>').join("")+'</select></div>'
+    +'<div><label>租金策略</label><select id="f_rentPlan">'+["市场价9折以内","市场价7-9折","市场价6折）"].map(o=>'<option '+((project.rentPlan||"市场价9折以内")===o?"selected":"")+'>'+o+'</option>').join("")+'</select></div>'
     +'</div>'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px;"><b style="font-size:14px;">参考资料库（可选）</b><span style="display:flex;gap:8px;"><button type="button" class="btn ghost" id="kbUpload" style="padding:5px 14px;font-size:12px;">上传文件</button><button type="button" class="btn ghost" id="kbAdd" style="padding:5px 14px;font-size:12px;">＋ 粘贴文本</button></span></div>'
     +'<input type="file" id="kbFile" accept=".pdf,.docx,.txt,.md" multiple style="display:none;">'
