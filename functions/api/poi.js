@@ -1,5 +1,5 @@
 // /api/poi  周边配套抓取（高德Web服务：地理编码+周边搜索）
-import { verifyAuth, json } from "./_auth.js";
+import { verifyAuth, json } from "./_auth.js"; 
 
 const CATS = [
   ["地铁站", "轨道交通"],
