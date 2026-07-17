@@ -17,18 +17,39 @@ export async function onRequestPost(context){
   if(!env.AMAP_KEY) return json({ok:false, error:"未配置 AMAP_KEY 环境变量"}, 500);
   let body;
   try{ body = await request.json(); }catch(e){ return json({ok:false, error:"格式有误"}, 400); }
-  const address = String(body.address||"").trim().slice(0, 100);
-  if(!address) return json({ok:false, error:"请先填写建设地点"}, 400);
+  // ===== 第一步:候选搜索(POI名称精确匹配,人工确认后再抓周边) =====
+  if(body.action === "search"){
+    const address = String(body.address||"").trim().slice(0, 100);
+    if(!address) return json({ok:false, error:"请先填写建设地点"}, 400);
+    // 优先POI搜索(小区/楼盘名精确命中真实项目)
+    const pR = await fetch("https://restapi.amap.com/v3/place/text?key="+env.AMAP_KEY
+      +"&keywords="+encodeURIComponent(address)+"&offset=5&page=1&extensions=base");
+    const pd = await pR.json();
+    let cands = (pd.status==="1" && pd.pois)? pd.pois.slice(0,5).map(p=>({
+      name: p.name, district: (p.pname||"")+(p.cityname&&p.cityname!==p.pname?p.cityname:"")+(p.adname||""),
+      address: typeof p.address==="string"? p.address : "", location: p.location,
+    })).filter(c=>c.location) : [];
+    // 兜底:结构化地址走地理编码
+    if(!cands.length){
+      const geoR = await fetch("https://restapi.amap.com/v3/geocode/geo?key="+env.AMAP_KEY
+        +"&address="+encodeURIComponent(address));
+      const geo = await geoR.json();
+      if(geo.status==="1" && geo.geocodes && geo.geocodes.length){
+        cands = geo.geocodes.slice(0,3).map(gc=>({
+          name: gc.formatted_address, district: (gc.province||"")+(gc.district||""),
+          address: "（按地址解析，精度"+(gc.level||"未知")+"）", location: gc.location,
+        }));
+      }
+    }
+    if(!cands.length) return json({ok:false, error:"未找到匹配位置，请换更具体的名称或地址（含城市名）"}, 400);
+    return json({ok:true, candidates: cands});
+  }
 
-  // 1. 地理编码
-  const geoR = await fetch("https://restapi.amap.com/v3/geocode/geo?key="+env.AMAP_KEY
-    +"&address="+encodeURIComponent(address));
-  const geo = await geoR.json();
-  if(geo.status!=="1" || !geo.geocodes || !geo.geocodes.length)
-    return json({ok:false, error:"地址解析失败，请填写更具体的建设地点（含城市名）"}, 400);
-  const loc = geo.geocodes[0].location;   // "lng,lat"
+  // ===== 第二步:按确认的精确坐标抓周边 =====
+  const loc = String(body.location||"").trim();
+  if(!/^-?[\d.]+,-?[\d.]+$/.test(loc)) return json({ok:false, error:"缺少确认的位置坐标"}, 400);
 
-  // 2. 六类周边搜索（半径3km，各取前4）
+  // 六类周边搜索（半径3km，各取前4）
   const result = {};
   for(const [kw, label] of CATS){
     try{
@@ -43,5 +64,5 @@ export async function onRequestPost(context){
       }
     }catch(e){}
   }
-  return json({ok:true, location: loc, formatted: geo.geocodes[0].formatted_address, pois: result});
+  return json({ok:true, location: loc, pois: result});
 }
