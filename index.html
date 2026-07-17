@@ -1,4 +1,4 @@
-<meta charset="utf-8"> 
+<meta charset="utf-8">
 <style>
   :root{
     /* 蓝图·公文 配色体系 */
@@ -590,6 +590,7 @@ let scStep = 0;              // 测算模块步骤 0选类型 1参数 2结果
 let scResult = null;         // 测算结果
 let scParams = null;
 let aiChat = [];             // AI问答历史 [{role, content}]
+let rptCtype = "rent";   // 报告流程·非改保领域的测算类型
 let rvChapters = [];   // 智能审查:解析出的章节
 let rvStep = 0;        // 0上传 1结果
 let rvFileName = "";
@@ -1557,20 +1558,34 @@ function stepProjectInfo(){
 }
 
 
+
+// 领域绑定测算类型:改保领域只跑改保、出租领域只跑出租;其余领域自由选择
+function domainCalcLock(){
+  if(domainKey === "baozhang_gaibao") return "gaibao";
+  const k = String(domainKey||"");
+  let label = "";
+  try{ const o = getOutlines()[domainKey]; label = (o && o.label) || ""; }catch(e){}
+  if(/rent|chuzu/i.test(k) || label.includes("出租")) return "rent";
+  return null;
+}
+
 function stepCalc(){
-  const isGaibao = domainKey==="baozhang_gaibao";
+  const lock = domainCalcLock();
+  const isGaibao = lock==="gaibao";
+  if(lock==="rent") rptCtype = "rent";   // 锁定出租,防旧值串型
   return '<div class="doc-eyebrow">STEP 03 · 财务测算 · '+project.industry+'</div>'
     +'<h1 class="doc-title">财务测算（可选）</h1>'
     +'<div class="step-desc">'
-    +(isGaibao
-      ? '填入真实测算参数后点击"执行测算"，系统将用与内部测算器完全一致的公式，当场算出收入、成本、税金、损益、现金流、IRR与净现值，并把<b>真实测算结果自动写入报告的财务章节</b>。也可以点"跳过测算"，财务章节将以"待填"框架生成。'
-      : '当前"保障房·新建"领域的测算模块正在建设中，本步骤可直接跳过；财务章节将以"待填"框架生成。')
+    +'填入真实测算参数后点击"执行测算"，系统将用与内部测算器完全一致的公式，当场算出收入、成本、税金、损益、现金流、IRR与净现值，并把<b>真实测算结果自动写入报告的财务章节</b>。也可以点"跳过测算"，财务章节将以"待填"框架生成。'
     +'</div>'
-    + (isGaibao ? calcFormHtml() : '')
+    + (isGaibao ? calcFormHtml()
+       : lock==="rent" ? '<div class="note-box" style="margin-bottom:12px;">本领域绑定<b>出租类（长期持有经营）</b>测算模型。</div>' + rentFormHtml()
+       : '<div class="grid2"><div><label>测算类型</label><select id="rptCtype"><option value="rent" '+(rptCtype==="rent"?"selected":"")+'>出租类（长期持有经营）</option><option value="sale" '+(rptCtype==="sale"?"selected":"")+'>出售类（配售/出售为主）</option></select></div><div></div></div>'
+         + (rptCtype==="sale"? saleFormHtml() : rentFormHtml()))
     +'<div id="calcResultBox">'+(calcResult? calcResultHtml():'')+'</div>'
     +'<div class="actions">'
     +'<button class="btn ghost" id="backStep1c">← 上一步</button>'
-    +(isGaibao?'<button class="btn ghost" id="runCalcBtn">执行测算</button>':'')
+    +'<button class="btn ghost" id="runCalcBtn">执行测算</button>'
     +'<button class="btn" id="toStep3c">'+(calcResult?'下一步：选择章节 →':'跳过测算，下一步 →')+'</button>'
     +'</div>';
 }
@@ -1704,12 +1719,37 @@ function computeModeCompare(p){
     mk("减租金合作分成（收楼付"+cp+"%｜分成"+sp+"%）","share",cp,sp),
   ];
 }
+
+function runRptCalcOther(){
+  try{
+    if(rptCtype === "sale"){
+      calcParams = readSaleForm();
+      const p = calcParams;
+      const opStart = p.buildStart + p.buildYears;
+      const ramp = {}; if(p.rate1) ramp[opStart]=p.rate1; if(p.rate2) ramp[opStart+1]=p.rate2; if(p.rate3) ramp[opStart+2]=p.rate3;
+      const repay = {}; for(let i=0;i<p.repayYears;i++) repay[p.repayStart+i]=p.repayAmount;
+      calcResult = window.SaleCalc.calc(Object.assign({}, p, {saleRamp:ramp, customRepay:repay}), CALC_CFG.sale);
+    }else{
+      calcParams = readRentForm();
+      calcResult = window.RentCalc.calc(calcParams, CALC_CFG.rent);
+    }
+    calcResult.__ctype = rptCtype;
+    scParams = calcParams; scResult = calcResult;   // 供共享部件读取
+    saveDraft();
+    document.getElementById("calcResultBox").innerHTML = calcResultHtml() + modeCompareHtml();
+    animateCountUps();
+    document.getElementById("toStep3c").textContent = "下一步：选择章节 →";
+  }catch(e){ alert("测算失败："+e.message); }
+}
+
 function runCalc(){
+  if(domainKey !== "baozhang_gaibao"){ return runRptCalcOther(); }
   calcParams = readCalcForm();
   calcResult = window.NRCalc.calc(assembleCalcInput(calcParams), CALC_CFG.gaibao);
+  calcResult.__ctype = "gaibao";
   calcResult.sens = computeSensitivity(calcParams);
   try{ calcResult.modeCompare = computeModeCompare(calcParams); }catch(e){ calcResult.modeCompare = null; }
-  document.getElementById("calcResultBox").innerHTML = calcResultHtml() + modeCompareHtml() + detailTablesHtml(calcResult, "gaibao");
+  document.getElementById("calcResultBox").innerHTML = calcResultHtml() + modeCompareHtml();
   animateCountUps();
   const nextBtn = document.getElementById("toStep3c");
   if(nextBtn) nextBtn.textContent = "下一步：选择章节 →";
@@ -1790,6 +1830,7 @@ function calcResultHtml(){
     +'<div class="metric"><div class="mv" style="font-size:17px; padding-top:3px;">'+payback+'</div><div class="ml">累计现金流回正</div></div>'
     +'</div>'
     + cashflowChartHtml()
+    + detailTablesHtml(calcResult, (calcResult&&calcResult.__ctype)||"gaibao")
     + sensTableHtml()
     +'<div class="note-box" style="margin-top:14px;">以上结果由内置公式实时计算（与内部测算器口径一致），将自动写入报告财务章节；数值可复算、可追溯。</div>';
 }
@@ -1917,11 +1958,14 @@ function buildCalcDigest(){
   const y0 = r.allYears[0], yN = r.allYears[r.allYears.length-1];
   const fmt = x=> Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
   let modeBlock = "";
+  if((r.__ctype||"gaibao") !== "gaibao"){ /* 非改保无合作模式块 */ }
+  else{
   const modeName = (p&&p.mode)==="share"? ("减租金合作分成（收楼支付"+(p.collectPct||50)+"%，业主分成"+(p.sharePct||30)+"%）") : "满租金整租经营";
   modeBlock += "【合作模式】本项目采用："+modeName+"\n";
   if(r.modeCompare && r.modeCompare.length){
     modeBlock += "【合作模式比选表】模式|总收入(万)|总成本(万)|净利润(万)|净现值(万)|IRR|回正\n";
     r.modeCompare.forEach(m=>{ modeBlock += m.label+"|"+fmt(m.totalIncome)+"|"+fmt(m.totalCost)+"|"+fmt(m.totalNetProfit)+"|"+fmt(m.totalNpv)+"|"+(m.irr===null?"—":m.irr+"%")+"|"+(m.payback?m.payback.year+"年":"未回正")+"\n"; });
+  }
   }
   // 分年现金流表（节选前若干年+汇总）
   let cfRows = "年份|现金流入(万元)|现金流出(万元)|净现金流量(万元)|累计净现金流量(万元)\n";
@@ -2653,6 +2697,7 @@ function bindEvents(){
   if(s("toStep2")) s("toStep2").onclick = ()=>{ saveProject(); saveDraft(); currentStep=2; renderTOC(); renderSheet(); };
   if(s("backStep1c")) s("backStep1c").onclick = ()=>{ currentStep=1; renderTOC(); renderSheet(); };
   if(s("runCalcBtn")) s("runCalcBtn").onclick = runCalc;
+  if(s("rptCtype")) s("rptCtype").onchange = ()=>{ rptCtype = s("rptCtype").value; scParams=null; calcParams=null; calcResult=null; renderSheet(); };
   if(s("toStep3c")) s("toStep3c").onclick = ()=>{ currentStep=3; renderTOC(); renderSheet(); };
   if(s("backStep2ch")) s("backStep2ch").onclick = ()=>{ currentStep=2; renderTOC(); renderSheet(); };
   if(s("chAll")) s("chAll").onclick = ()=>{ chapters.forEach(c=>c.checked=true); saveDraft(); renderSheet(); };
