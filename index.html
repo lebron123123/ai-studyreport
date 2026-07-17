@@ -1533,6 +1533,8 @@ function stepProjectInfo(){
     + (project.competitors||[]).map((cp,i)=>cpRowHtml(cp,i)).join("")
     +'</div>'
     +'<button type="button" class="btn ghost" id="cpAdd" style="padding:5px 14px;font-size:12px;margin-top:8px;">＋ 添加竞品</button>'
+    +'<button type="button" class="btn ghost" id="cpFetch" style="padding:5px 14px;font-size:12px;margin-top:8px;margin-left:8px;">📍 抓取周边公寓项目</button>'
+    +'<span id="cpFetchSt" style="font-size:12px; color:var(--ink-soft); margin-left:8px;"></span>'
     +'<div id="cpChartBox" style="margin-top:12px;"></div>'
     +'<div class="grid2" style="margin-top:14px;">'
     +'<div><label>主力客群</label><select id="f_targetGroup">'+["新市民/青年人","园区产业职工","混合客群","家庭型租户"].map(o=>'<option '+((project.targetGroup||"新市民/青年人")===o?"selected":"")+'>'+o+'</option>').join("")+'</select></div>'
@@ -2623,6 +2625,7 @@ function bindEvents(){
   document.querySelectorAll(".domain-card").forEach(card=>{
     card.onclick = ()=>{ loadDomain(card.dataset.key); renderSheet(); };
   });
+  if(s("cpFetch")) s("cpFetch").onclick = fetchCompetitors;
   if(s("poiBtn")) s("poiBtn").onclick = fetchPoi;
   if(s("aiPosBtn")) s("aiPosBtn").onclick = aiPositionSuggest;
   if(s("cpAdd")) s("cpAdd").onclick = ()=>{
@@ -2874,6 +2877,7 @@ async function fetchPoi(){
   btn.disabled = false;
 }
 async function fetchPoiAround(loc, label){
+  project.poiLoc = loc; project.poiLocLabel = label;   // 记住确认坐标供竞品抓取复用
   const st = document.getElementById("poiStatus");
   st.textContent = "已确认「"+label+"」，抓取3公里周边…";
   try{
@@ -2890,6 +2894,35 @@ async function fetchPoiAround(loc, label){
     document.getElementById("f_poiDesc").value = lines.join("\n");
     saveProject(); saveDraft();
     st.textContent = "✓ 已按「"+label+"」抓取，请核对后可手动编辑";
+  }catch(e){ st.textContent = "失败："+e.message; }
+}
+
+
+async function fetchCompetitors(){
+  const st = document.getElementById("cpFetchSt");
+  if(!project.poiLoc){ st.innerHTML = '<span style="color:var(--seal-red);">请先在上方完成"搜索位置"并确认项目位置</span>'; return; }
+  st.textContent = "抓取周边公寓中…";
+  try{
+    const r = await fetch("/api/poi", {method:"POST",
+      headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
+      body: JSON.stringify({action:"competitors", location: project.poiLoc})});
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error||"抓取失败");
+    if(!(d.competitors||[]).length) throw new Error("3公里内未检索到公寓类项目");
+    readCpFromDom(); saveProject();
+    project.competitors = project.competitors||[];
+    let added = 0;
+    d.competitors.forEach(c=>{
+      if(!project.competitors.some(x=>x.name===c.name)){
+        project.competitors.push({name:c.name, dist:c.dist!==null? String(c.dist):"", rent:"", occ:"", note:"（地图抓取，租金/出租率须人工调研）"});
+        added++;
+      }
+    });
+    renderSheet();
+    setTimeout(()=>{
+      const st2 = document.getElementById("cpFetchSt");
+      if(st2) st2.innerHTML = '✓ 已抓取'+added+'个周边公寓（名称与距离为地图实测）。<b style="color:var(--seal-red);">租金与出租率无公开数据，须人工调研后填入，空着不会注入报告。</b>';
+    }, 100);
   }catch(e){ st.textContent = "失败："+e.message; }
 }
 
