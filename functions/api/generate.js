@@ -28,19 +28,26 @@ export async function onRequestPost(context) {
 
   const wantStream = !!body.stream;
 
+  // 工具调用(function calling)透传:仅在非流式的Agent问答场景使用,普通生成不受影响
+  const dsPayload = {
+    model: "deepseek-chat",
+    messages: dsMessages,
+    max_tokens: 1200,
+    temperature: 0.3,
+    stream: wantStream,
+  };
+  if(Array.isArray(body.tools) && body.tools.length){
+    dsPayload.tools = body.tools;
+    dsPayload.tool_choice = body.tool_choice || "auto";
+  }
+
   const upstream = await fetch("https://api.deepseek.com/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": "Bearer " + env.DEEPSEEK_API_KEY,
     },
-    body: JSON.stringify({
-      model: "deepseek-chat",
-      messages: dsMessages,
-      max_tokens: 1200,
-      temperature: 0.3,
-      stream: wantStream,
-    }),
+    body: JSON.stringify(dsPayload),
   });
 
   if (!upstream.ok) {
@@ -67,7 +74,9 @@ export async function onRequestPost(context) {
   } else {
     // 非流式：原逻辑
     const data = await upstream.json();
-    const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-    return json({ content: [{ type: "text", text }], usage: data.usage || null });
+    const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
+    const text = msg.content || "";
+    // 有工具调用时一并返回,前端据此执行工具、回填结果、再次调用(ReAct循环)
+    return json({ content: [{ type: "text", text }], tool_calls: msg.tool_calls || null, usage: data.usage || null });
   }
 }
