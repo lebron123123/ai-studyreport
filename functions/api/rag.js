@@ -1,4 +1,4 @@
-// /api/rag  全量RAG知识库（Vectorize + Workers AI bge-m3）
+// /api/rag  全量RAG知识库（Vectorize + Workers AI bge-m3） 
 // POST {action:"upsert", chunks:[{title,chapter,section,text}]}  管理员入库
 // POST {action:"query", query, topK}                             登录用户检索
 // POST {action:"stats"}                                          管理员查看规模
