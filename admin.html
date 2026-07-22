@@ -220,7 +220,8 @@ async function openRag(){
     +'<div id="ragFileList" style="font-size:12.5px;"><span style="color:var(--soft);">读取中…</span></div>'
     +'<div style="margin-top:18px; display:flex; gap:16px;"><b style="font-weight:600;">检索测试</b>'
     +'<a href="javascript:void(0)" id="ragDash" style="font-size:12px;">📊 知识库看板</a>'
-    +'<a href="javascript:void(0)" id="ragLog" style="font-size:12px;">📜 检索日志</a></div>'
+    +'<a href="javascript:void(0)" id="ragLog" style="font-size:12px;">📜 检索日志</a>'
+    +'<a href="javascript:void(0)" id="ragGraph" style="font-size:12px;">🕸 知识图谱</a></div>'
     +'<div style="display:flex; gap:8px; margin-top:6px;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1;"><select id="ragQCat" style="padding:5px 8px;"><option value="">全部分类</option><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select><button class="btn sm" id="ragTest">检索</button></div>'
     +'<div id="ragHits" style="font-size:12.5px;"></div>'
     +'<div id="ragPanel" style="margin-top:10px;"></div>'
@@ -231,6 +232,7 @@ async function openRag(){
   document.getElementById("ragTest").onclick = ragTest;
   document.getElementById("ragDash").onclick = ragDashboard;
   document.getElementById("ragLog").onclick = ragLogs;
+  document.getElementById("ragGraph").onclick = ragGraphView;
   document.getElementById("ragFilter").onchange = refreshRagFiles;
   refreshRagStats();
   refreshRagFiles();
@@ -337,7 +339,20 @@ async function ragTest(){
     if(!d.ok){ box.textContent = d.error; return; }
     box.innerHTML = (d.matches||[]).map(m=>'<div style="border:1px solid var(--line); background:#fff; padding:8px 10px; margin-top:8px;">'
       +'<b>'+esc(m.title||"")+'</b>'+(m.category?' <span style="font-size:11px; padding:0 6px; border:1px solid var(--line); color:var(--soft);">'+esc(m.category)+'</span>':'')+(m.level==1?' <span style="font-size:11px; color:#1F7A3D;">权威</span>':m.level==3?' <span style="font-size:11px; color:#888;">存档</span>':'')+' ｜ '+esc(m.chapter||"")+' / '+esc(m.section||"")+' ｜ 相似度 '+m.score
-      +'<div style="color:var(--soft); margin-top:4px;">'+esc((m.text||"").slice(0,160))+'…</div></div>').join("") || "无结果";
+      +(m.kwHits&&m.kwHits.length?' <span style="font-size:11px; color:#1a5fb4;">🔍命中词：'+esc(m.kwHits.join("、"))+'</span>':'')
+      +'<div style="color:var(--soft); margin-top:4px;">'+esc((m.text||"").slice(0,160))+'…</div>'
+      +'<div style="margin-top:6px; font-size:11px;">这条结果对检索\''+esc(q)+'\'：<a href="javascript:void(0)" class="fb-good" data-q="'+esc(q)+'" data-t="'+esc(m.title||"")+'" style="margin:0 8px;">👍有用</a><a href="javascript:void(0)" class="fb-bad" data-q="'+esc(q)+'" data-t="'+esc(m.title||"")+'">👎无关</a></div>'
+      +'</div>').join("") || "无结果";
+    // 反馈按钮
+    box.querySelectorAll(".fb-good,.fb-bad").forEach(a=>{
+      a.onclick = async ()=>{
+        const useful = a.classList.contains("fb-good");
+        try{
+          await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"feedback", query:a.dataset.q, title:a.dataset.t, useful})});
+          a.parentElement.innerHTML = '<span style="color:var(--soft);">已反馈，谢谢</span>';
+        }catch(e){}
+      };
+    });
   }catch(e){ box.textContent = "检索失败"; }
 }
 
@@ -370,6 +385,10 @@ async function ragDashboard(){
       html += '<div style="font-size:12.5px; font-weight:600; margin:10px 0 4px; color:var(--red);">❄ 从未被检索命中（可能是冗余/低质文件，建议核查）</div><div style="font-size:12px; color:var(--soft);">';
       html += b.coldFiles.map(esc).join("；")+'</div>';
     }
+    if((b.poorFiles||[]).length){
+      html += '<div style="font-size:12.5px; font-weight:600; margin:10px 0 4px; color:var(--red);">👎 被人工标记"无关"较多（检索质量差，建议核查内容或分类）</div><div style="font-size:12px; color:var(--soft);">';
+      html += b.poorFiles.map(f=>esc(f.title)+"（无关"+f.bad+"次/有用"+f.good+"次）").join("；")+'</div>';
+    }
     html += '</div>';
     box.innerHTML = html;
   }catch(e){ box.innerHTML = "加载失败"; }
@@ -393,6 +412,53 @@ async function ragLogs(){
     box.innerHTML = html;
   }catch(e){ box.innerHTML = "加载失败"; }
 }
+
+async function ragGraphView(){
+  const box = document.getElementById("ragPanel");
+  document.getElementById("ragHits").innerHTML = "";
+  box.innerHTML = '<div style="color:var(--soft); padding:10px 0;">构建知识关联图…</div>';
+  try{
+    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"graph"})});
+    const d = await r.json();
+    if(!d.ok){ box.innerHTML = esc(d.error||"不可用"); return; }
+    const g = d.graph||{nodes:[],edges:[]};
+    if(!g.nodes.length){ box.innerHTML = '<span style="color:var(--soft);">暂无启用的文件可构建关联图</span>'; return; }
+    const W=680, H=440, cx=W/2, cy=H/2, R=Math.min(W,H)/2-60;
+    const n = g.nodes.length;
+    const CATC = {"可研报告":"#1E3A5C","政策文件":"#B7302B","制度规范":"#1F7A3D","业务逻辑":"#8A6D1B","会议纪要":"#7A5C99","其他":"#888","未分类":"#aaa"};
+    // 同类节点聚在相近角度
+    const cats = [...new Set(g.nodes.map(x=>x.category))];
+    const pos = g.nodes.map((nd,i)=>{
+      const ci = cats.indexOf(nd.category);
+      const inCat = g.nodes.filter(x=>x.category===nd.category);
+      const idxInCat = inCat.indexOf(nd);
+      const baseAng = (ci/cats.length)*2*Math.PI;
+      const spread = (idxInCat - (inCat.length-1)/2) * 0.18;
+      const ang = baseAng + spread;
+      return {x: cx+R*Math.cos(ang), y: cy+R*Math.sin(ang)};
+    });
+    let svg = '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%; height:auto; border:1px solid var(--line); background:#fff;">';
+    // 边
+    g.edges.forEach(e=>{
+      const a=pos[e.source], b=pos[e.target];
+      svg += '<line x1="'+a.x.toFixed(0)+'" y1="'+a.y.toFixed(0)+'" x2="'+b.x.toFixed(0)+'" y2="'+b.y.toFixed(0)+'" stroke="#ccc" stroke-width="'+Math.min(e.weight,3)+'"/>';
+    });
+    // 节点
+    g.nodes.forEach((nd,i)=>{
+      const p=pos[i]; const c=CATC[nd.category]||"#888";
+      const rad = nd.level===1? 8 : nd.level===3? 4 : 6;
+      svg += '<circle cx="'+p.x.toFixed(0)+'" cy="'+p.y.toFixed(0)+'" r="'+rad+'" fill="'+c+'"><title>'+esc(nd.title)+' ['+esc(nd.category)+']</title></circle>';
+      const short = nd.title.length>8? nd.title.slice(0,8)+"…" : nd.title;
+      svg += '<text x="'+p.x.toFixed(0)+'" y="'+(p.y-rad-3).toFixed(0)+'" text-anchor="middle" style="font-size:9px; fill:#555;">'+esc(short)+'</text>';
+    });
+    svg += '</svg>';
+    let legend = '<div style="font-size:11px; margin-top:6px;">分类：'+cats.map(c=>'<span style="color:'+(CATC[c]||"#888")+';">●</span>'+esc(c)).join("　")+'</div>';
+    box.innerHTML = '<div style="border:1px solid var(--line); background:#fff; padding:12px 14px;"><div style="font-weight:600; margin-bottom:8px;">🕸 知识关联图</div>'
+      +'<div style="font-size:11px; color:var(--soft); margin-bottom:8px;">节点=文档（大小按权威等级），连线=同分类或标题含共同关键词。鼠标悬停看完整标题。规模较大时仅展示前60个文档。</div>'
+      + svg + legend + '</div>';
+  }catch(e){ box.innerHTML = "构建失败"; }
+}
+
 
 
 /* ================= AI审核规则 ================= */
