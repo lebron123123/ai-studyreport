@@ -1,4 +1,4 @@
-<meta charset="utf-8">  
+<meta charset="utf-8"> 
 <title>可研报告工坊 · 大纲管理</title>
 <style>
   :root{--bp:#1E3A5C;--bg:#F2EFE7;--card:#FBFAF5;--ink:#1F262B;--soft:#66707A;--line:#D8D3C4;--red:#B7302B;--ok:#3E6B45;
@@ -258,7 +258,8 @@ async function openRag(){
     +'<a href="javascript:void(0)" id="ragDash" style="font-size:12px;">📊 知识库看板</a>'
     +'<a href="javascript:void(0)" id="ragLog" style="font-size:12px;">📜 检索日志</a>'
     +'<a href="javascript:void(0)" id="ragGraph" style="font-size:12px;">🕸 知识图谱</a>'
-    +'<a href="javascript:void(0)" id="ragUsers" style="font-size:12px;">👥 用户权限</a></div>'
+    +'<a href="javascript:void(0)" id="ragUsers" style="font-size:12px;">👥 用户权限</a>'
+    +'<a href="javascript:void(0)" id="ragEval" style="font-size:12px;">🎯 检索评测</a></div>'
     +'<div style="display:flex; gap:8px; margin-top:6px;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1;"><select id="ragQCat" style="padding:5px 8px;"><option value="">全部分类</option><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select><button class="btn sm" id="ragTest">检索</button></div>'
     +'<div id="ragHits" style="font-size:12.5px;"></div>'
     +'<div id="ragPanel" style="margin-top:10px;"></div>'
@@ -271,6 +272,7 @@ async function openRag(){
   document.getElementById("ragLog").onclick = ragLogs;
   document.getElementById("ragGraph").onclick = ragGraphView;
   document.getElementById("ragUsers").onclick = ragUsersView;
+  document.getElementById("ragEval").onclick = ragEvalView;
   document.getElementById("ragFilter").onchange = refreshRagFiles;
   refreshRagStats();
   refreshRagFiles();
@@ -559,6 +561,79 @@ async function ragUsersView(){
     });
   }catch(e){ box.innerHTML = "加载失败"; }
 }
+
+async function ragEvalView(){
+  const box = document.getElementById("ragPanel");
+  document.getElementById("ragHits").innerHTML = "";
+  box.innerHTML = '<div style="color:var(--soft); padding:10px 0;">加载评测集…</div>';
+  await ragEvalRender();
+}
+async function ragEvalRender(){
+  const box = document.getElementById("ragPanel");
+  try{
+    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"evalList"})});
+    const d = await r.json();
+    const cases = d.ok ? (d.cases||[]) : [];
+    let html = '<div style="border:1px solid var(--line); background:#fff; padding:12px 14px;">';
+    html += '<div style="font-weight:600; margin-bottom:6px;">🎯 检索评测（标准问答集）</div>';
+    html += '<div style="font-size:11px; color:var(--soft); margin-bottom:10px;">基于你熟悉的真实文档，出几道"搜XX词应该命中XX文件"的标准题，一键跑分，持续验证检索准确率（尤其在改切块参数、调整加权系数之后，用它确认没有变差）。</div>';
+    html += '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">'
+      +'<input id="evQ" placeholder="检索词，如：市场供需分析" style="flex:1; min-width:160px;">'
+      +'<input id="evTitle" placeholder="应命中的文件标题（须与已入库标题完全一致）" style="flex:1.4; min-width:200px;">'
+      +'<input id="evNote" placeholder="备注(选填)" style="flex:1; min-width:100px;">'
+      +'<button class="btn sm" id="evAdd">添加</button></div>';
+    if(cases.length){
+      html += '<table class="tbl" style="width:100%; font-size:12px; margin-bottom:10px;"><tr><th style="text-align:left;">检索词</th><th style="text-align:left;">应命中文件</th><th>操作</th></tr>';
+      cases.forEach(c=>{ html += '<tr><td>'+esc(c.query)+'</td><td>'+esc(c.expect_title)+'</td><td style="text-align:center;"><a href="javascript:void(0)" class="ev-del" data-id="'+c.id+'" style="color:var(--red);">删除</a></td></tr>'; });
+      html += '</table><button class="btn" id="evRun">▶ 运行评测（'+cases.length+'条）</button>';
+    }else{
+      html += '<div style="color:var(--soft); font-size:12px;">暂无标准问答，先添加几条再运行评测。</div>';
+    }
+    html += '<div id="evReport" style="margin-top:12px;"></div></div>';
+    box.innerHTML = html;
+
+    document.getElementById("evAdd").onclick = async ()=>{
+      const q = document.getElementById("evQ").value.trim();
+      const et = document.getElementById("evTitle").value.trim();
+      const note = document.getElementById("evNote").value.trim();
+      if(!q || !et){ msg("检索词与应命中文件标题都要填","err"); return; }
+      const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"evalAdd", query:q, expectTitle:et, note})});
+      const d = await r.json();
+      if(d.ok){ msg("已添加","ok"); ragEvalRender(); } else msg(d.error||"添加失败","err");
+    };
+    box.querySelectorAll(".ev-del").forEach(a=>{
+      a.onclick = async ()=>{
+        await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"evalDelete", id:parseInt(a.dataset.id)})});
+        ragEvalRender();
+      };
+    });
+    const runBtn = document.getElementById("evRun");
+    if(runBtn) runBtn.onclick = async ()=>{
+      runBtn.disabled = true; runBtn.textContent = "评测运行中…";
+      const rep = document.getElementById("evReport");
+      rep.innerHTML = '<span style="color:var(--soft);">正在逐条检索比对…</span>';
+      try{
+        const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"evalRun"})});
+        const d = await r.json();
+        if(!d.ok){ rep.innerHTML = esc(d.error||"评测失败"); return; }
+        const rp = d.report;
+        const color = rp.accuracy>=80? "#1F7A3D" : rp.accuracy>=60? "#8A6D1B" : "#B7302B";
+        let h = '<div style="border-top:2px solid var(--line); padding-top:10px;">';
+        h += '<div style="font-size:15px; font-weight:700; color:'+color+';">检索准确率：'+rp.accuracy+'%　（'+rp.hit+'/'+rp.total+' 命中）'+(rp.avgRank?'　平均命中排名第'+rp.avgRank+'位':'')+'</div>';
+        h += '<table class="tbl" style="width:100%; font-size:12px; margin-top:8px;"><tr><th style="text-align:left;">检索词</th><th style="text-align:left;">应命中</th><th>结果</th><th style="text-align:left;">实际返回前5</th></tr>';
+        rp.results.forEach(x=>{
+          h += '<tr><td>'+esc(x.query)+'</td><td>'+esc(x.expectTitle)+'</td>'
+            +'<td style="text-align:center; color:'+(x.hit?"#1F7A3D":"#B7302B")+';">'+(x.hit?"✓第"+x.rank+"位":"✗未命中")+'</td>'
+            +'<td style="color:var(--soft); font-size:11px;">'+esc((x.topTitles||[]).join("；"))+'</td></tr>';
+        });
+        h += '</table></div>';
+        rep.innerHTML = h;
+      }catch(e){ rep.innerHTML = "评测请求失败"; }
+      runBtn.disabled = false; runBtn.textContent = "▶ 运行评测";
+    };
+  }catch(e){ box.innerHTML = "加载失败"; }
+}
+
 
 
 
