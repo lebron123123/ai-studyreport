@@ -372,7 +372,7 @@ async function ragTest(){
     const d = await r.json();
     if(!d.ok){ box.textContent = d.error; return; }
     box.innerHTML = (d.matches||[]).map(m=>'<div style="border:1px solid var(--line); background:#fff; padding:8px 10px; margin-top:8px;">'
-      +'<b>'+esc(m.title||"")+'</b>'+(m.category?' <span style="font-size:11px; padding:0 6px; border:1px solid var(--line); color:var(--soft);">'+esc(m.category)+'</span>':'')+(m.level==1?' <span style="font-size:11px; color:#1F7A3D;">权威</span>':m.level==3?' <span style="font-size:11px; color:#888;">存档</span>':'')+' ｜ '+esc(m.chapter||"")+' / '+esc(m.section||"")+' ｜ 相似度 '+m.score
+      +'<b>'+esc(m.title||"")+'</b>'+(m.category?' <span style="font-size:11px; padding:0 6px; border:1px solid var(--line); color:var(--soft);">'+esc(m.category)+'</span>':'')+(m.level==1?' <span style="font-size:11px; color:#1F7A3D;">权威</span>':m.level==3?' <span style="font-size:11px; color:#888;">存档</span>':'')+' ｜ '+esc(m.chapter||"")+' / '+esc(m.section||"")+' ｜ 相似度 '+m.score+(m.rerankScore!==undefined?' <span style="color:#B7302B; font-weight:600;">｜重排 '+m.rerankScore+'</span>':'')
       +(m.kwHits&&m.kwHits.length?' <span style="font-size:11px; color:#1a5fb4;">🔍命中词：'+esc(m.kwHits.join("、"))+'</span>':'')
       +'<div style="color:var(--soft); margin-top:4px;">'+esc((m.text||"").slice(0,160))+'…</div>'
       +'<div style="margin-top:6px; font-size:11px;">这条结果对检索\''+esc(q)+'\'：<a href="javascript:void(0)" class="fb-good" data-q="'+esc(q)+'" data-t="'+esc(m.title||"")+'" style="margin:0 8px;">👍有用</a><a href="javascript:void(0)" class="fb-bad" data-q="'+esc(q)+'" data-t="'+esc(m.title||"")+'">👎无关</a></div>'
