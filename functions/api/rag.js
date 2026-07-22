@@ -71,23 +71,20 @@ export async function onRequestPost(context){
     return json({ok:true, count: items.length});
   }
 
-  if(body.action === "query"){
-    const q = String(body.query||"").trim().slice(0, 500);
-    if(!q) return json({ok:false, error:"查询为空"}, 400);
-    const topK = Math.min(parseInt(body.topK)||3, 8);
-    // 第一级:向量大召回(上万份材料时,固定20会漏,扩大到40候选)
-    const recall = Math.min(parseInt(body.recall)||40, 60);
+  // 检索核心逻辑抽成共用函数:query接口和评测(evalRun)都调用它,保证评测结果和真实检索完全一致
+  async function runRetrieval(q, opts){
+    opts = opts || {};
+    const topK = Math.min(parseInt(opts.topK)||3, 8);
+    const recall = Math.min(parseInt(opts.recall)||40, 60);
     const [vec] = await embed(env, [q]);
     const r = await env.VECTORIZE.query(vec, { topK: recall, returnMetadata: "all" });
-    // 读取当前用户的部门与权限等级(默认:无部门、等级1只能看公开)
     let myDept = "", myClearance = 1;
     try{
       const u = await env.DB.prepare("SELECT department, clearance FROM users WHERE id=?").bind(user.userId).first();
       if(u){ myDept = u.department||""; myClearance = parseInt(u.clearance)||1; }
     }catch(e){}
-    // 读取文件权限信息(停用/密级/可见部门)——按标题过滤,改权限无需重新向量化
     let disabled = new Set();
-    let permMap = {};   // title -> {security, dept_scope}
+    let permMap = {};
     try{
       const dr = await env.DB.prepare("SELECT title, enabled, security, dept_scope FROM rag_files_v2").all();
       (dr.results||[]).forEach(x=>{
@@ -95,24 +92,21 @@ export async function onRequestPost(context){
         permMap[x.title] = { security: parseInt(x.security)||1, dept_scope: x.dept_scope||"全部门" };
       });
     }catch(e){}
-    // 权限判定:用户可见 = 密级≤本人等级 且 (文件全部门可见 或 属本人部门)
-    const iAmAdmin = isAdmin(env, user);   // 管理员豁免:始终可见全部
+    const iAmAdmin = isAdmin(env, user);
     const canSee = (title)=>{
       if(iAmAdmin) return true;
       const p = permMap[title];
-      if(!p) return true;   // 台账无记录(早期入库)默认可见,不误伤
+      if(!p) return true;
       if(p.security > myClearance) return false;
       if(p.dept_scope && p.dept_scope !== "全部门" && p.dept_scope !== myDept) return false;
       return true;
     };
-    const wantCat = body.category ? String(body.category) : null;  // 指定分类则只检索该类
-    const LW = {1:1.15, 2:1.0, 3:0.85};   // 等级加权:权威×1.15 参考×1.0 存档×0.85
-    // 混合检索:从查询里提取关键词(2字以上的中文词/英文词),命中正文/标题则加分
+    const wantCat = opts.category ? String(opts.category) : null;
+    const LW = {1:1.15, 2:1.0, 3:0.85};
     const kws = (q.match(/[\u4e00-\u9fa5]{2,}|[A-Za-z]{2,}|\d{2,}/g) || []).slice(0, 8);
     let matches = (r.matches||[]).map(m=>{
       const md = m.metadata||{};
       const lvl = parseInt(md.level)||2;
-      // 关键词命中:每命中一个不同关键词,加0.03分(在标题命中权重更高,加0.05)
       const hay = String(md.text||"") + " " + String(md.title||"") + String(md.chapter||"") + String(md.section||"");
       const titleHay = String(md.title||"") + String(md.chapter||"") + String(md.section||"");
       let kwBonus = 0, kwHitList = [];
@@ -130,22 +124,19 @@ export async function onRequestPost(context){
       };
     }).filter(m=>{
       if(disabled.has(m.title)) return false;
-      if(!canSee(m.title)) return false;   // 权限过滤:越权文档不返回
+      if(!canSee(m.title)) return false;
       if(wantCat && m.category !== wantCat) return false;
       return true;
     });
     matches.sort((a,b)=>b.score-a.score);
 
-    // 第二级:Rerank精排(用bge-reranker对粗排候选重新打分)
-    // 取粗排前若干个送重排(reranker有512token限制,截取每块前1000字符)
     const rerankN = Math.min(matches.length, 20);
-    const useRerank = body.rerank !== false && rerankN > 1;
+    const useRerank = opts.rerank !== false && rerankN > 1;
     if(useRerank){
       try{
         const cand = matches.slice(0, rerankN);
         const contexts = cand.map(m=>({ text: String(m.text||"").slice(0, 1000) }));
         const rr = await env.AI.run("@cf/baai/bge-reranker-base", { query: q, contexts, top_k: rerankN });
-        // rr.response: [{id/index, score}] —— 按重排分重新排序
         const ranked = (rr && (rr.response || rr.results || rr)) || [];
         if(Array.isArray(ranked) && ranked.length){
           const reordered = [];
@@ -156,16 +147,20 @@ export async function onRequestPost(context){
               reordered.push(cand[idx]);
             }
           });
-          // 重排成功:用重排结果 + 剩余未重排的候选兜底
           if(reordered.length){
             const rest = matches.slice(rerankN);
             matches = reordered.concat(rest);
           }
         }
-      }catch(e){ /* 重排失败则退回向量粗排,不影响可用性 */ }
+      }catch(e){}
     }
-    matches = matches.slice(0, topK);
-    // 记录检索日志(可追溯)
+    return { all: matches, top: matches.slice(0, topK), category: wantCat };
+  }
+
+  if(body.action === "query"){
+    const q = String(body.query||"").trim().slice(0, 500);
+    if(!q) return json({ok:false, error:"查询为空"}, 400);
+    const { top: matches, category: wantCat } = await runRetrieval(q, body);
     try{
       const titles = matches.map(m=>m.title).filter(Boolean).slice(0,5).join("；");
       await env.DB.prepare("INSERT INTO rag_logs(user_id, query, category, hit_titles, hit_count, top_score, created_at) VALUES(?,?,?,?,?,?,?)")
@@ -305,6 +300,56 @@ export async function onRequestPost(context){
     const dscope = String(body.deptScope||"全部门").slice(0,40);
     await env.DB.prepare("UPDATE rag_files_v2 SET security=?, dept_scope=? WHERE title=?").bind(sec, dscope, title).run();
     return json({ok:true});
+  }
+
+  if(body.action === "evalAdd"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const q = String(body.query||"").trim().slice(0,200);
+    const et = String(body.expectTitle||"").trim().slice(0,80);
+    if(!q || !et) return json({ok:false, error:"检索词与应命中文件标题均不能为空"}, 400);
+    await env.DB.prepare("INSERT INTO rag_evalset(query, expect_title, note, created_at) VALUES(?,?,?,?)")
+      .bind(q, et, String(body.note||"").slice(0,100), Date.now()).run();
+    return json({ok:true});
+  }
+
+  if(body.action === "evalList"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    const rows = await env.DB.prepare("SELECT id, query, expect_title, note, created_at FROM rag_evalset ORDER BY id DESC").all();
+    return json({ok:true, cases: rows.results||[]});
+  }
+
+  if(body.action === "evalDelete"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    await env.DB.prepare("DELETE FROM rag_evalset WHERE id=?").bind(parseInt(body.id)).run();
+    return json({ok:true});
+  }
+
+  if(body.action === "evalRun"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const rows = await env.DB.prepare("SELECT id, query, expect_title, note FROM rag_evalset ORDER BY id ASC").all();
+    const cases = rows.results || [];
+    if(!cases.length) return json({ok:false, error:"评测集为空，请先添加标准问答"}, 400);
+    const results = [];
+    let hitCount = 0;
+    for(const c of cases){
+      let rankInfo = { hit:false, rank:null, topTitles:[] };
+      try{
+        const { top } = await runRetrieval(c.query, { topK: 5 });
+        const titles = top.map(m=>m.title);
+        rankInfo.topTitles = titles;
+        const idx = titles.indexOf(c.expect_title);
+        if(idx >= 0){ rankInfo.hit = true; rankInfo.rank = idx+1; hitCount++; }
+      }catch(e){ rankInfo.error = e.message; }
+      results.push({ id:c.id, query:c.query, expectTitle:c.expect_title, note:c.note, ...rankInfo });
+    }
+    const accuracy = Math.round(hitCount/cases.length*1000)/10;
+    // 平均命中排名(仅统计命中的,越小越好)
+    const hitRanks = results.filter(r=>r.hit).map(r=>r.rank);
+    const avgRank = hitRanks.length ? Math.round(hitRanks.reduce((a,b)=>a+b,0)/hitRanks.length*10)/10 : null;
+    return json({ok:true, report:{ total:cases.length, hit:hitCount, accuracy, avgRank, results }});
   }
 
   if(body.action === "deleteByTitle"){
