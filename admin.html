@@ -207,11 +207,16 @@ async function openRag(){
   box.innerHTML = '<h1 style="font-size:18px;">RAG知识库</h1>'
     +'<div class="sub">批量上传存量可研报告（docx/pdf/txt），按章节切块、向量化后存入语义检索库。生成报告时自动检索最相关的段落注入AI。<b>需先按部署说明创建 Vectorize 索引并绑定 VECTORIZE 与 AI。</b></div>'
     +'<div id="ragStats" style="font-size:12px; color:var(--soft); margin:8px 0;">读取库规模…</div>'
+    +'<div style="display:flex; gap:12px; margin-bottom:10px; flex-wrap:wrap; align-items:center;">'
+    +'<label style="font-size:13px;">分类：<select id="ragCat" style="padding:5px 8px;"><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select></label>'
+    +'<label style="font-size:13px;">权威等级：<select id="ragLevel" style="padding:5px 8px;"><option value="1">权威（政策/正式文件）</option><option value="2" selected>参考（一般报告）</option><option value="3">存档（历史/非正式）</option></select></label>'
+    +'<span style="font-size:11px; color:var(--soft);">上传的这批文件将统一归入所选分类与等级</span></div>'
     +'<div style="border:2px dashed var(--line); background:#fff; padding:26px; text-align:center;">'
-    +'<button class="btn" id="ragPick">选择报告文件（可多选）</button>'
+    +'<button class="btn" id="ragPick">选择文件（可多选）</button>'
     +'<input type="file" id="ragFiles" accept=".docx,.pdf,.txt" multiple style="display:none;">'
     +'<div id="ragProg" style="font-size:12px; color:var(--soft); margin-top:12px;">未开始</div></div>'
-    +'<div style="margin-top:18px; font-weight:600;">已入库文件</div>'
+    +'<div style="margin-top:18px; display:flex; justify-content:space-between; align-items:center;"><b style="font-weight:600;">已入库文件</b>'
+    +'<label style="font-size:12px;">筛选分类：<select id="ragFilter" style="padding:4px 8px;"><option value="">全部</option><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select></label></div>'
     +'<div id="ragFileList" style="font-size:12.5px;"><span style="color:var(--soft);">读取中…</span></div>'
     +'<div style="margin-top:18px; font-weight:600;">检索测试</div>'
     +'<div style="display:flex; gap:8px; margin-top:6px;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1;"><button class="btn sm" id="ragTest">检索</button></div>'
@@ -221,6 +226,7 @@ async function openRag(){
   document.getElementById("ragPick").onclick = ()=>document.getElementById("ragFiles").click();
   document.getElementById("ragFiles").onchange = e=>ragIngest([...e.target.files]);
   document.getElementById("ragTest").onclick = ragTest;
+  document.getElementById("ragFilter").onchange = refreshRagFiles;
   refreshRagStats();
   refreshRagFiles();
 }
@@ -247,8 +253,10 @@ async function ragIngest(files){
     for(let i=0; i<chunks.length; i+=10){
       prog.textContent = "《"+f.name+"》向量化入库 "+Math.min(i+10,chunks.length)+"/"+chunks.length+"（文件"+(fi+1)+"/"+files.length+"）";
       try{
+        const cat = document.getElementById("ragCat")? document.getElementById("ragCat").value : "未分类";
+        const lvl = document.getElementById("ragLevel")? document.getElementById("ragLevel").value : 2;
         const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),
-          body:JSON.stringify({action:"upsert", chunks:chunks.slice(i,i+10)})});
+          body:JSON.stringify({action:"upsert", chunks:chunks.slice(i,i+10), category:cat, level:lvl})});
         const d = await r.json();
         if(d.ok) okChunks += d.count; else{ failed.push(f.name+"批次"+i+"："+d.error); break; }
       }catch(e){ failed.push(f.name+"批次"+i+"：网络错误"); break; }
@@ -266,11 +274,35 @@ async function refreshRagFiles(){
     const d = await r.json();
     if(!d.ok){ box.innerHTML = '<span style="color:var(--soft);">'+esc(d.error||"不可用")+'</span>'; return; }
     if(!(d.files||[]).length){ box.innerHTML = '<span style="color:var(--soft);">暂无（本功能上线前入库的内容不在台账中，如需清理请重建索引后重新上传）</span>'; return; }
-    box.innerHTML = d.files.map(f=>'<div style="display:flex; align-items:center; gap:10px; border:1px solid var(--line); background:#fff; padding:8px 12px; margin-top:6px;">'
-      +'<b style="flex:1;">'+esc(f.title)+'</b>'
-      +'<span style="color:var(--soft);">'+f.chunks+' 块</span>'
-      +'<span style="color:var(--soft);">'+new Date(f.created_at).toLocaleDateString("zh-CN")+'</span>'
-      +'<button class="btn sm red" data-ragdel="'+esc(f.title)+'">删除</button></div>').join("");
+    const flt = document.getElementById("ragFilter") ? document.getElementById("ragFilter").value : "";
+    const LVN = {1:"权威",2:"参考",3:"存档"};
+    const LVC = {1:"#1F7A3D",2:"#8A6D1B",3:"#888"};
+    let files = d.files;
+    if(flt) files = files.filter(f=>(f.category||"未分类")===flt);
+    if(!files.length){ box.innerHTML = '<span style="color:var(--soft);">该分类下暂无文件</span>'; return; }
+    box.innerHTML = files.map(f=>{
+      const en = f.enabled!==0;
+      const lvl = parseInt(f.level)||2;
+      return '<div style="display:flex; align-items:center; gap:8px; border:1px solid var(--line); background:'+(en?"#fff":"#F5F5F5")+'; padding:8px 12px; margin-top:6px; '+(en?"":"opacity:.6;")+'">'
+      +'<b style="flex:1;">'+esc(f.title)+(en?"":" （已停用）")+'</b>'
+      +'<span style="font-size:11px; padding:1px 7px; border:1px solid var(--line); border-radius:2px; color:var(--soft);">'+esc(f.category||"未分类")+'</span>'
+      +'<span style="font-size:11px; color:'+LVC[lvl]+';">'+LVN[lvl]+'</span>'
+      +'<span style="color:var(--soft);">'+f.chunks+'块</span>'
+      +'<button class="btn sm" data-ragtoggle="'+esc(f.title)+'" data-en="'+(en?1:0)+'">'+(en?"停用":"启用")+'</button>'
+      +'<button class="btn sm red" data-ragdel="'+esc(f.title)+'">删除</button></div>';
+    }).join("");
+    box.querySelectorAll("[data-ragtoggle]").forEach(b=>{
+      b.onclick = async ()=>{
+        const t=b.dataset.ragtoggle, wantEnable = b.dataset.en==="0";
+        b.disabled=true;
+        try{
+          const r=await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"toggle", title:t, enabled:wantEnable})});
+          const d=await r.json();
+          if(d.ok) msg(wantEnable?"已启用":"已停用（不再参与检索）","ok"); else msg(d.error||"操作失败","err");
+        }catch(e){ msg("网络错误","err"); }
+        refreshRagFiles();
+      };
+    });
     box.querySelectorAll("[data-ragdel]").forEach(b=>{
       b.onclick = async ()=>{
         const t = b.dataset.ragdel;
@@ -297,7 +329,7 @@ async function ragTest(){
     const d = await r.json();
     if(!d.ok){ box.textContent = d.error; return; }
     box.innerHTML = (d.matches||[]).map(m=>'<div style="border:1px solid var(--line); background:#fff; padding:8px 10px; margin-top:8px;">'
-      +'<b>'+esc(m.title||"")+'</b> ｜ '+esc(m.chapter||"")+' / '+esc(m.section||"")+' ｜ 相似度 '+m.score
+      +'<b>'+esc(m.title||"")+'</b>'+(m.category?' <span style="font-size:11px; padding:0 6px; border:1px solid var(--line); color:var(--soft);">'+esc(m.category)+'</span>':'')+(m.level==1?' <span style="font-size:11px; color:#1F7A3D;">权威</span>':m.level==3?' <span style="font-size:11px; color:#888;">存档</span>':'')+' ｜ '+esc(m.chapter||"")+' / '+esc(m.section||"")+' ｜ 相似度 '+m.score
       +'<div style="color:var(--soft); margin-top:4px;">'+esc((m.text||"").slice(0,160))+'…</div></div>').join("") || "无结果";
   }catch(e){ box.textContent = "检索失败"; }
 }
