@@ -1,0 +1,9 @@
+{
+  "name": "ai-studyreport",
+  "private": true,
+  "version": "1.0.0",
+  "description": "可研报告生成工具 —— 财务测算引擎回归测试",
+  "scripts": {
+    "test": "node --test tests/calc-engines.test.js"
+  }
+}
