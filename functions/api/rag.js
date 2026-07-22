@@ -72,10 +72,11 @@ export async function onRequestPost(context){
   if(body.action === "query"){
     const q = String(body.query||"").trim().slice(0, 500);
     if(!q) return json({ok:false, error:"查询为空"}, 400);
-    const topK = Math.min(parseInt(body.topK)||3, 5);
-    // 取回更多候选,再按分类过滤/等级加权后截取
+    const topK = Math.min(parseInt(body.topK)||3, 8);
+    // 第一级:向量大召回(上万份材料时,固定20会漏,扩大到40候选)
+    const recall = Math.min(parseInt(body.recall)||40, 60);
     const [vec] = await embed(env, [q]);
-    const r = await env.VECTORIZE.query(vec, { topK: Math.min(topK*3, 20), returnMetadata: "all" });
+    const r = await env.VECTORIZE.query(vec, { topK: recall, returnMetadata: "all" });
     // 读取已停用文件标题(停用的不参与检索)
     let disabled = new Set();
     try{
@@ -111,6 +112,35 @@ export async function onRequestPost(context){
       return true;
     });
     matches.sort((a,b)=>b.score-a.score);
+
+    // 第二级:Rerank精排(用bge-reranker对粗排候选重新打分)
+    // 取粗排前若干个送重排(reranker有512token限制,截取每块前1000字符)
+    const rerankN = Math.min(matches.length, 20);
+    const useRerank = body.rerank !== false && rerankN > 1;
+    if(useRerank){
+      try{
+        const cand = matches.slice(0, rerankN);
+        const contexts = cand.map(m=>({ text: String(m.text||"").slice(0, 1000) }));
+        const rr = await env.AI.run("@cf/baai/bge-reranker-base", { query: q, contexts, top_k: rerankN });
+        // rr.response: [{id/index, score}] —— 按重排分重新排序
+        const ranked = (rr && (rr.response || rr.results || rr)) || [];
+        if(Array.isArray(ranked) && ranked.length){
+          const reordered = [];
+          ranked.forEach(item=>{
+            const idx = (item.id !== undefined) ? item.id : item.index;
+            if(idx !== undefined && cand[idx]){
+              cand[idx].rerankScore = Math.round((item.score||0)*1000)/1000;
+              reordered.push(cand[idx]);
+            }
+          });
+          // 重排成功:用重排结果 + 剩余未重排的候选兜底
+          if(reordered.length){
+            const rest = matches.slice(rerankN);
+            matches = reordered.concat(rest);
+          }
+        }
+      }catch(e){ /* 重排失败则退回向量粗排,不影响可用性 */ }
+    }
     matches = matches.slice(0, topK);
     // 记录检索日志(可追溯)
     try{
