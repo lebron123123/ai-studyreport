@@ -84,12 +84,24 @@ export async function onRequestPost(context){
     }catch(e){}
     const wantCat = body.category ? String(body.category) : null;  // 指定分类则只检索该类
     const LW = {1:1.15, 2:1.0, 3:0.85};   // 等级加权:权威×1.15 参考×1.0 存档×0.85
+    // 混合检索:从查询里提取关键词(2字以上的中文词/英文词),命中正文/标题则加分
+    const kws = (q.match(/[\u4e00-\u9fa5]{2,}|[A-Za-z]{2,}|\d{2,}/g) || []).slice(0, 8);
     let matches = (r.matches||[]).map(m=>{
       const md = m.metadata||{};
       const lvl = parseInt(md.level)||2;
+      // 关键词命中:每命中一个不同关键词,加0.03分(在标题命中权重更高,加0.05)
+      const hay = String(md.text||"") + " " + String(md.title||"") + String(md.chapter||"") + String(md.section||"");
+      const titleHay = String(md.title||"") + String(md.chapter||"") + String(md.section||"");
+      let kwBonus = 0, kwHitList = [];
+      kws.forEach(k=>{
+        if(titleHay.includes(k)){ kwBonus += 0.05; kwHitList.push(k); }
+        else if(hay.includes(k)){ kwBonus += 0.03; kwHitList.push(k); }
+      });
+      const base = m.score * (LW[lvl]||1);
       return {
         rawScore: m.score,
-        score: Math.round(m.score * (LW[lvl]||1) * 1000)/1000,
+        score: Math.round((base + kwBonus) * 1000)/1000,
+        kwHits: kwHitList,
         title: md.title, chapter: md.chapter, section: md.section,
         category: md.category||"未分类", level: lvl, text: md.text,
       };
@@ -144,11 +156,43 @@ export async function onRequestPost(context){
     return json({ok:true});
   }
 
+  if(body.action === "feedback"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    await env.DB.prepare("INSERT INTO rag_feedback(query, title, useful, created_at) VALUES(?,?,?,?)")
+      .bind(String(body.query||"").slice(0,200), String(body.title||"").slice(0,80), body.useful?1:0, Date.now()).run();
+    return json({ok:true});
+  }
+
   if(body.action === "logs"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
     if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
     const rows = await env.DB.prepare("SELECT query, category, hit_titles, hit_count, top_score, created_at FROM rag_logs ORDER BY id DESC LIMIT 200").all();
     return json({ok:true, logs: rows.results||[]});
+  }
+
+  if(body.action === "graph"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const rows = await env.DB.prepare("SELECT title, category, level FROM rag_files_v2 WHERE enabled=1 LIMIT 60").all();
+    const files = rows.results || [];
+    // 节点=文件,边=同分类 或 标题共享2字以上词
+    const nodes = files.map((f,i)=>({id:i, title:f.title, category:f.category||"未分类", level:parseInt(f.level)||2}));
+    const edges = [];
+    const tokenize = t => (String(t).match(/[\u4e00-\u9fa5]{2,}|[A-Za-z]{3,}/g)||[]);
+    for(let i=0;i<files.length;i++){
+      for(let j=i+1;j<files.length;j++){
+        let weight = 0, reason = "";
+        if(files[i].category === files[j].category){ weight += 1; reason = "同类"; }
+        // 标题共词
+        const ti = new Set(tokenize(files[i].title)), tj = tokenize(files[j].title);
+        const shared = tj.filter(w=>ti.has(w));
+        if(shared.length){ weight += shared.length; reason = (reason?reason+"+":"")+"共词:"+shared.slice(0,2).join(","); }
+        if(weight >= 1 && reason.includes("共词")) edges.push({source:i, target:j, weight, reason});
+        else if(weight >= 1 && files[i].category===files[j].category && edges.filter(e=>e.source===i||e.target===i).length<3) edges.push({source:i, target:j, weight, reason});
+      }
+    }
+    return json({ok:true, graph:{nodes, edges}});
   }
 
   if(body.action === "dashboard"){
@@ -176,6 +220,9 @@ export async function onRequestPost(context){
       const allF = await env.DB.prepare("SELECT title FROM rag_files_v2").all();
       const hitSet = new Set(Object.keys(freq));
       out.coldFiles = (allF.results||[]).map(f=>f.title).filter(t=>!hitSet.has(t)).slice(0,20);
+      // 反馈统计:被标"无关"最多的文件(检索质量差,建议核查)
+      const fb = await env.DB.prepare("SELECT title, SUM(CASE WHEN useful=1 THEN 1 ELSE 0 END) as good, SUM(CASE WHEN useful=0 THEN 1 ELSE 0 END) as bad FROM rag_feedback GROUP BY title HAVING bad > 0 ORDER BY bad DESC LIMIT 10").all();
+      out.poorFiles = (fb.results||[]).map(f=>({title:f.title, good:f.good, bad:f.bad}));
     }catch(e){ out.error = e.message; }
     return json({ok:true, dashboard: out});
   }
