@@ -1,54 +1,85 @@
 <meta charset="utf-8"> 
 <title>可研报告工坊 · 大纲管理</title>
 <style>
-  :root{--bp:#1E3A5C;--bg:#F2EFE7;--card:#FBFAF5;--ink:#1F262B;--soft:#66707A;--line:#D8D3C4;--red:#B7302B;--ok:#3E6B45;
-    --mono:"SF Mono","Consolas",monospace;--sans:"PingFang SC","Microsoft YaHei",sans-serif;--serif:"Songti SC","SimSun",serif;}
+  :root{
+    --bp:#2C6CA6;--bp-deep:#1E4B72;--bg:#F7FAFD;--card:#FFFFFF;--ink:#1C2733;--soft:#66788C;
+    --line:#DCE6F0;--line-soft:#EAF1F8;--red:#C24A42;--ok:#3E7A53;
+    --side-bg:#EEF4FA;--side-line:#DCE6F2;--side-active:#FFFFFF;--side-hover:#E4EDF6;
+    --mono:"SF Mono","Consolas",monospace;--sans:"PingFang SC","Microsoft YaHei",sans-serif;--serif:"Songti SC","SimSun",serif;
+  }
   *{box-sizing:border-box;} body{margin:0;background:var(--bg);font-family:var(--sans);color:var(--ink);}
-  .wrap{max-width:900px;margin:0 auto;padding:30px 24px;}
-  h1{font-family:var(--serif);font-size:22px;color:var(--bp);margin:0 0 6px;}
-  .sub{font-size:12px;color:var(--soft);margin-bottom:24px;}
-  .bar{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;}
-  .btn{font-size:13px;font-weight:600;padding:9px 20px;border:1px solid var(--bp);border-radius:2px;background:var(--bp);color:#fff;cursor:pointer;}
-  .btn:hover{filter:brightness(1.1);} .btn.ghost{background:transparent;color:var(--bp);} .btn.ghost:hover{background:var(--bp);color:#fff;}
+  .shell{display:flex;min-height:100vh;}
+  /* ===== 左侧导航栏 ===== */
+  .side{width:230px;flex-shrink:0;background:var(--side-bg);border-right:1px solid var(--side-line);
+    padding:22px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto;}
+  .side-brand{padding:2px 10px 20px;}
+  .side-brand .t1{font-family:var(--serif);font-size:16px;font-weight:700;color:var(--bp-deep);}
+  .side-brand .t2{font-size:10.5px;letter-spacing:.12em;color:var(--soft);margin-top:2px;}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;font-size:13.5px;
+    color:var(--ink);cursor:pointer;margin-bottom:2px;transition:background .15s ease-out;user-select:none;}
+  .nav-item:hover{background:var(--side-hover);}
+  .nav-item.active{background:var(--side-active);font-weight:600;color:var(--bp-deep);box-shadow:0 1px 3px rgba(30,75,114,.12);}
+  .nav-item .ic{font-size:15px;width:18px;text-align:center;flex-shrink:0;}
+  .nav-sep{height:1px;background:var(--side-line);margin:12px 4px;}
+  .side-foot{margin-top:auto;padding:10px 12px;font-size:11px;color:var(--soft);}
+  /* ===== 右侧内容区 ===== */
+  .main{flex:1;min-width:0;padding:30px 40px;max-width:960px;}
+  h1{font-family:var(--serif);font-size:21px;color:var(--bp-deep);margin:0 0 6px;}
+  .sub{font-size:12.5px;color:var(--soft);margin-bottom:22px;}
+  .bar{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;align-items:center;}
+  .btn{font-size:13px;font-weight:600;padding:9px 18px;border:1px solid var(--bp);border-radius:7px;background:var(--bp);color:#fff;cursor:pointer;transition:filter .12s ease-out;}
+  .btn:hover{filter:brightness(1.08);} .btn.ghost{background:transparent;color:var(--bp);} .btn.ghost:hover{background:var(--line-soft);}
   .btn:disabled{opacity:.4;cursor:not-allowed;}
-  .btn.sm{padding:5px 12px;font-size:12px;}
-  .btn.red{background:var(--red);border-color:var(--red);} .btn.red:hover{filter:brightness(1.1);}
-  input,textarea,select{font-family:var(--sans);font-size:14px;padding:8px 10px;border:1px solid var(--line);background:#fff;width:100%;outline:none;}
+  .btn.sm{padding:5px 12px;font-size:12px;border-radius:6px;}
+  .btn.red{background:var(--red);border-color:var(--red);} .btn.red:hover{filter:brightness(1.08);}
+  input,textarea,select{font-family:var(--sans);font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;width:100%;outline:none;transition:border-color .12s ease-out;}
   input:focus,textarea:focus{border-color:var(--bp);}
   label{display:block;font-size:12px;color:var(--soft);margin:12px 0 4px;}
-  .card{background:var(--card);border:1px solid var(--line);padding:18px 22px;margin-bottom:12px;border-radius:2px;display:flex;justify-content:space-between;align-items:center;}
+  .card{background:var(--card);border:1px solid var(--line);padding:18px 22px;margin-bottom:12px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 1px 2px rgba(30,75,114,.05);}
   .card .name{font-weight:600;font-size:15px;} .card .meta{font-size:11px;color:var(--soft);font-family:var(--mono);}
   .card .ops{display:flex;gap:8px;}
   .empty{text-align:center;color:var(--soft);padding:40px 0;}
-  .ch-list{margin-top:10px;} .ch-row{border:1px solid var(--line);margin-bottom:8px;background:#fff;padding:12px 14px;border-radius:2px;}
+  .ch-list{margin-top:10px;} .ch-row{border:1px solid var(--line);margin-bottom:8px;background:#fff;padding:12px 14px;border-radius:8px;}
   .ch-head{display:flex;gap:10px;align-items:center;margin-bottom:8px;}
   .ch-head input{flex:1;font-weight:600;}
   .sec-row{display:flex;gap:8px;align-items:center;margin:4px 0 4px 24px;}
   .sec-row input{flex:1;} .sec-row select{width:70px;flex-shrink:0;}
   .add-link{font-size:12px;color:var(--bp);cursor:pointer;margin-left:24px;margin-top:4px;display:inline-block;}
   .add-link:hover{text-decoration:underline;}
-  .msg{padding:10px 14px;margin-bottom:14px;font-size:13px;border-radius:2px;}
-  .msg.ok{background:#EAF1EA;color:var(--ok);border:1px solid var(--ok);}
-  .msg.err{background:#FDF6F5;color:var(--red);border:1px solid var(--red);}
-  .preview{background:#F5F3EA;border:1px solid var(--line);padding:14px 18px;margin-top:14px;font-size:13px;max-height:300px;overflow-y:auto;white-space:pre-wrap;font-family:var(--mono);color:var(--soft);}
+  .msg{padding:10px 14px;margin-bottom:14px;font-size:13px;border-radius:8px;}
+  .msg.ok{background:#EAF6EE;color:var(--ok);border:1px solid #BFE0CA;}
+  .msg.err{background:#FCEEEC;color:var(--red);border:1px solid #F0C6C0;}
+  .preview{background:var(--line-soft);border:1px solid var(--line);padding:14px 18px;margin-top:14px;font-size:13px;max-height:300px;overflow-y:auto;white-space:pre-wrap;font-family:var(--mono);color:var(--soft);border-radius:8px;}
+  /* 通用小组件复用的表格样式 */
+  .tbl{border-collapse:collapse;} .tbl th,.tbl td{padding:6px 8px;border-bottom:1px solid var(--line-soft);}
+  .tbl th{color:var(--soft);font-weight:600;}
+  /* RAG等子页面的二级标签导航(替代原来容易换行的文字链接行) */
+  .subnav{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 4px;}
+  .subnav a{font-size:12.5px;padding:6px 13px;border-radius:20px;background:var(--line-soft);color:var(--bp-deep);
+    text-decoration:none;border:1px solid transparent;transition:background .12s ease-out;}
+  .subnav a:hover{background:#DCEBF7;}
 </style>
-<div class="wrap">
-  <h1>可研报告工坊 · 大纲管理后台</h1>
-  <div class="sub">管理员可在此新建/编辑/删除报告领域大纲。修改后立即生效，所有用户下次选领域时将看到最新版本。</div>
-  <div id="msgBox"></div>
-  <div id="app">
-    <div class="bar">
-      <button class="btn" id="btnNew">+ 新建领域大纲</button>
-      <button class="btn ghost" id="btnRefresh">刷新列表</button>
-      <button class="btn ghost" id="btnSeed">导入内置默认大纲</button>
-      <button class="btn ghost" id="btnCalcCfg">测算参数管理</button>
-      <button class="btn ghost" id="btnExamples">黄金范例库</button>
-      <button class="btn ghost" id="btnAiRules">AI审核规则</button>
-      <button class="btn ghost" id="btnRag">RAG知识库</button>
-      <span style="margin-left:auto;font-size:12px;color:var(--soft);" id="loginInfo"></span>
+<div class="shell">
+  <nav class="side">
+    <div class="side-brand"><div class="t1">可研报告工坊</div><div class="t2">ADMIN CONSOLE</div></div>
+    <div class="nav-item active" id="btnRefresh"><span class="ic">📋</span>大纲列表</div>
+    <div class="nav-item" id="btnNew"><span class="ic">✚</span>新建领域大纲</div>
+    <div class="nav-item" id="btnSeed"><span class="ic">⬇</span>导入内置默认大纲</div>
+    <div class="nav-sep"></div>
+    <div class="nav-item" id="btnCalcCfg"><span class="ic">🧮</span>测算参数管理</div>
+    <div class="nav-item" id="btnExamples"><span class="ic">📖</span>黄金范例库</div>
+    <div class="nav-item" id="btnAiRules"><span class="ic">🛡</span>AI审核规则</div>
+    <div class="nav-item" id="btnRag"><span class="ic">🗂</span>RAG知识库</div>
+    <div class="side-foot" id="loginInfo"></div>
+  </nav>
+  <div class="main">
+    <h1>大纲管理后台</h1>
+    <div class="sub">管理员可在此新建/编辑/删除报告领域大纲。修改后立即生效，所有用户下次选领域时将看到最新版本。</div>
+    <div id="msgBox"></div>
+    <div id="app">
+      <div id="listBox"></div>
+      <div id="editBox" style="display:none;"></div>
     </div>
-    <div id="listBox"></div>
-    <div id="editBox" style="display:none;"></div>
   </div>
 </div>
 <script>
@@ -127,7 +158,7 @@ function renderExamples(){
     +'<button class="btn ghost" id="exBack">返回列表</button></div>';
   document.getElementById("addEx").onclick = ()=>{ readExForm(); exList.push({match:"",title:"",content:""}); renderExamples(); };
   document.getElementById("saveEx").onclick = saveExamples;
-  document.getElementById("exBack").onclick = ()=>loadList();
+  document.getElementById("exBack").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
   document.querySelectorAll("[data-exdel]").forEach(b=>b.onclick=()=>{ readExForm(); exList.splice(+b.dataset.exdel,1); renderExamples(); });
 }
 function exRowHtml(e,i){
@@ -254,17 +285,17 @@ async function openRag(){
     +'<div style="margin-top:18px; display:flex; justify-content:space-between; align-items:center;"><b style="font-weight:600;">已入库文件</b>'
     +'<label style="font-size:12px;">筛选分类：<select id="ragFilter" style="padding:4px 8px;"><option value="">全部</option><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select></label></div>'
     +'<div id="ragFileList" style="font-size:12.5px;"><span style="color:var(--soft);">读取中…</span></div>'
-    +'<div style="margin-top:18px; display:flex; gap:16px;"><b style="font-weight:600;">检索测试</b>'
-    +'<a href="javascript:void(0)" id="ragDash" style="font-size:12px;">📊 知识库看板</a>'
-    +'<a href="javascript:void(0)" id="ragLog" style="font-size:12px;">📜 检索日志</a>'
-    +'<a href="javascript:void(0)" id="ragGraph" style="font-size:12px;">🕸 知识图谱</a>'
-    +'<a href="javascript:void(0)" id="ragUsers" style="font-size:12px;">👥 用户权限</a>'
-    +'<a href="javascript:void(0)" id="ragEval" style="font-size:12px;">🎯 检索评测</a></div>'
+    +'<div class="subnav" style="margin-top:18px; align-items:center;"><b style="font-weight:600; margin-right:6px;">检索测试</b>'
+    +'<a href="javascript:void(0)" id="ragDash">📊 知识库看板</a>'
+    +'<a href="javascript:void(0)" id="ragLog">📜 检索日志</a>'
+    +'<a href="javascript:void(0)" id="ragGraph">🕸 知识图谱</a>'
+    +'<a href="javascript:void(0)" id="ragUsers">👥 用户权限</a>'
+    +'<a href="javascript:void(0)" id="ragEval">🎯 检索评测</a></div>'
     +'<div style="display:flex; gap:8px; margin-top:6px;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1;"><select id="ragQCat" style="padding:5px 8px;"><option value="">全部分类</option><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select><button class="btn sm" id="ragTest">检索</button></div>'
     +'<div id="ragHits" style="font-size:12.5px;"></div>'
     +'<div id="ragPanel" style="margin-top:10px;"></div>'
     +'<div class="bar" style="margin-top:18px;"><button class="btn ghost" id="ragBack">返回列表</button></div>';
-  document.getElementById("ragBack").onclick = ()=>loadList();
+  document.getElementById("ragBack").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
   document.getElementById("ragPick").onclick = ()=>document.getElementById("ragFiles").click();
   document.getElementById("ragFiles").onchange = e=>ragIngest([...e.target.files]);
   document.getElementById("ragTest").onclick = ragTest;
@@ -664,7 +695,7 @@ function renderAiRules(){
     +'<button class="btn ghost" id="arBack">返回列表</button></div>';
   document.getElementById("addAr").onclick = ()=>{ readArForm(); arList.push({match:"",rule:""}); renderAiRules(); };
   document.getElementById("saveAr").onclick = saveAiRules;
-  document.getElementById("arBack").onclick = ()=>loadList();
+  document.getElementById("arBack").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
   document.querySelectorAll("[data-ardel]").forEach(b=>b.onclick=()=>{ readArForm(); arList.splice(+b.dataset.ardel,1); renderAiRules(); });
   document.getElementById("evolveAr").onclick = evolveRules;
 }
@@ -813,7 +844,7 @@ function renderCalcCfg(){
     +'<button class="btn ghost" id="cfgBack">返回列表</button></div>';
   box.innerHTML = html;
   document.getElementById("saveCalcCfg").onclick = saveCalcCfg;
-  document.getElementById("cfgBack").onclick = ()=>loadList();
+  document.getElementById("cfgBack").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
   document.getElementById("addMetric").onclick = ()=>{
     readCfgForm(); calcCfg.metrics.push({name:"",expr:"",scope:"all"}); renderCalcCfg();
   };
@@ -1030,13 +1061,18 @@ function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")
 if(!getToken()){ document.getElementById("app").innerHTML='<div class="empty">请先在主站登录后再访问此页面（登录态通过浏览器共享）。</div>'; }
 else{
   document.getElementById("loginInfo").textContent = "当前用户："+getUser();
-  document.getElementById("btnNew").onclick = ()=>openEdit(null);
-  document.getElementById("btnRefresh").onclick = loadList;
-  document.getElementById("btnSeed").onclick = seedDefaults;
-  document.getElementById("btnCalcCfg").onclick = openCalcCfg;
-  document.getElementById("btnExamples").onclick = openExamples;
-  document.getElementById("btnAiRules").onclick = openAiRules;
-  document.getElementById("btnRag").onclick = openRag;
+  function setActiveNav(id){
+    document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));
+    const el = document.getElementById(id);
+    if(el) el.classList.add("active");
+  }
+  document.getElementById("btnNew").onclick = ()=>{ setActiveNav("btnNew"); openEdit(null); };
+  document.getElementById("btnRefresh").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
+  document.getElementById("btnSeed").onclick = ()=>{ setActiveNav("btnRefresh"); seedDefaults(); };
+  document.getElementById("btnCalcCfg").onclick = ()=>{ setActiveNav("btnCalcCfg"); openCalcCfg(); };
+  document.getElementById("btnExamples").onclick = ()=>{ setActiveNav("btnExamples"); openExamples(); };
+  document.getElementById("btnAiRules").onclick = ()=>{ setActiveNav("btnAiRules"); openAiRules(); };
+  document.getElementById("btnRag").onclick = ()=>{ setActiveNav("btnRag"); openRag(); };
   (async ()=>{ if(await adminGate()) loadList(); })();
 }
 </script>
