@@ -218,14 +218,19 @@ async function openRag(){
     +'<div style="margin-top:18px; display:flex; justify-content:space-between; align-items:center;"><b style="font-weight:600;">已入库文件</b>'
     +'<label style="font-size:12px;">筛选分类：<select id="ragFilter" style="padding:4px 8px;"><option value="">全部</option><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select></label></div>'
     +'<div id="ragFileList" style="font-size:12.5px;"><span style="color:var(--soft);">读取中…</span></div>'
-    +'<div style="margin-top:18px; font-weight:600;">检索测试</div>'
-    +'<div style="display:flex; gap:8px; margin-top:6px;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1;"><button class="btn sm" id="ragTest">检索</button></div>'
+    +'<div style="margin-top:18px; display:flex; gap:16px;"><b style="font-weight:600;">检索测试</b>'
+    +'<a href="javascript:void(0)" id="ragDash" style="font-size:12px;">📊 知识库看板</a>'
+    +'<a href="javascript:void(0)" id="ragLog" style="font-size:12px;">📜 检索日志</a></div>'
+    +'<div style="display:flex; gap:8px; margin-top:6px;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1;"><select id="ragQCat" style="padding:5px 8px;"><option value="">全部分类</option><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select><button class="btn sm" id="ragTest">检索</button></div>'
     +'<div id="ragHits" style="font-size:12.5px;"></div>'
+    +'<div id="ragPanel" style="margin-top:10px;"></div>'
     +'<div class="bar" style="margin-top:18px;"><button class="btn ghost" id="ragBack">返回列表</button></div>';
   document.getElementById("ragBack").onclick = ()=>loadList();
   document.getElementById("ragPick").onclick = ()=>document.getElementById("ragFiles").click();
   document.getElementById("ragFiles").onchange = e=>ragIngest([...e.target.files]);
   document.getElementById("ragTest").onclick = ragTest;
+  document.getElementById("ragDash").onclick = ragDashboard;
+  document.getElementById("ragLog").onclick = ragLogs;
   document.getElementById("ragFilter").onchange = refreshRagFiles;
   refreshRagStats();
   refreshRagFiles();
@@ -322,10 +327,12 @@ async function refreshRagFiles(){
 async function ragTest(){
   const q = document.getElementById("ragQ").value.trim();
   if(!q) return;
+  const qcat = document.getElementById("ragQCat") ? document.getElementById("ragQCat").value : "";
+  document.getElementById("ragPanel").innerHTML = "";
   const box = document.getElementById("ragHits");
   box.textContent = "检索中…";
   try{
-    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"query", query:q, topK:3})});
+    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"query", query:q, topK:3, category:qcat||undefined})});
     const d = await r.json();
     if(!d.ok){ box.textContent = d.error; return; }
     box.innerHTML = (d.matches||[]).map(m=>'<div style="border:1px solid var(--line); background:#fff; padding:8px 10px; margin-top:8px;">'
@@ -333,6 +340,60 @@ async function ragTest(){
       +'<div style="color:var(--soft); margin-top:4px;">'+esc((m.text||"").slice(0,160))+'…</div></div>').join("") || "无结果";
   }catch(e){ box.textContent = "检索失败"; }
 }
+
+async function ragDashboard(){
+  const box = document.getElementById("ragPanel");
+  document.getElementById("ragHits").innerHTML = "";
+  box.innerHTML = '<div style="color:var(--soft); padding:10px 0;">加载看板…</div>';
+  try{
+    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"dashboard"})});
+    const d = await r.json();
+    if(!d.ok){ box.innerHTML = esc(d.error||"不可用"); return; }
+    const b = d.dashboard||{};
+    const LVN = {1:"权威",2:"参考",3:"存档"};
+    let html = '<div style="border:1px solid var(--line); background:#fff; padding:14px 16px;">';
+    html += '<div style="font-weight:600; margin-bottom:8px;">📊 知识库总览</div>';
+    html += '<div style="display:flex; gap:24px; margin-bottom:12px; font-size:13px;"><span>累计检索：<b>'+(b.totalQueries||0)+'</b> 次</span><span>近7天：<b>'+(b.weekQueries||0)+'</b> 次</span></div>';
+    // 分类分布
+    html += '<div style="font-size:12.5px; font-weight:600; margin:8px 0 4px;">按分类</div><table class="tbl" style="width:100%; font-size:12px;"><tr><th style="text-align:left;">分类</th><th>文件数</th><th>向量块</th><th>已停用</th></tr>';
+    (b.byCategory||[]).forEach(c=>{ html += '<tr><td>'+esc(c.category||"未分类")+'</td><td style="text-align:center;">'+c.files+'</td><td style="text-align:center;">'+(c.chunks||0)+'</td><td style="text-align:center;">'+(c.disabled||0)+'</td></tr>'; });
+    html += '</table>';
+    // 等级分布
+    html += '<div style="font-size:12.5px; font-weight:600; margin:10px 0 4px;">按等级</div><div style="font-size:12px;">'+(b.byLevel||[]).map(l=>LVN[l.level]+"："+l.files+"份").join("　")+'</div>';
+    // 热门文件
+    if((b.hotFiles||[]).length){
+      html += '<div style="font-size:12.5px; font-weight:600; margin:10px 0 4px;">🔥 最常被检索命中（近500次检索）</div><div style="font-size:12px;">';
+      html += b.hotFiles.map(f=>esc(f.title)+"（"+f.n+"）").join("；")+'</div>';
+    }
+    // 冷门文件
+    if((b.coldFiles||[]).length){
+      html += '<div style="font-size:12.5px; font-weight:600; margin:10px 0 4px; color:var(--red);">❄ 从未被检索命中（可能是冗余/低质文件，建议核查）</div><div style="font-size:12px; color:var(--soft);">';
+      html += b.coldFiles.map(esc).join("；")+'</div>';
+    }
+    html += '</div>';
+    box.innerHTML = html;
+  }catch(e){ box.innerHTML = "加载失败"; }
+}
+async function ragLogs(){
+  const box = document.getElementById("ragPanel");
+  document.getElementById("ragHits").innerHTML = "";
+  box.innerHTML = '<div style="color:var(--soft); padding:10px 0;">加载日志…</div>';
+  try{
+    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"logs"})});
+    const d = await r.json();
+    if(!d.ok){ box.innerHTML = esc(d.error||"不可用"); return; }
+    if(!(d.logs||[]).length){ box.innerHTML = '<span style="color:var(--soft);">暂无检索记录</span>'; return; }
+    let html = '<div style="border:1px solid var(--line); background:#fff; padding:12px 14px;"><div style="font-weight:600; margin-bottom:8px;">📜 检索日志（最近200条）</div>';
+    html += '<table class="tbl" style="width:100%; font-size:12px;"><tr><th style="text-align:left;">时间</th><th style="text-align:left;">检索词</th><th>分类</th><th>命中</th><th>最高分</th><th style="text-align:left;">命中文件</th></tr>';
+    d.logs.forEach(l=>{
+      const t = new Date(l.created_at); const ts = (t.getMonth()+1)+"/"+t.getDate()+" "+String(t.getHours()).padStart(2,"0")+":"+String(t.getMinutes()).padStart(2,"0");
+      html += '<tr><td>'+ts+'</td><td>'+esc(l.query||"")+'</td><td style="text-align:center;">'+esc(l.category||"全部")+'</td><td style="text-align:center;">'+l.hit_count+'</td><td style="text-align:center;">'+(l.top_score||0)+'</td><td style="color:var(--soft);">'+esc((l.hit_titles||"").slice(0,40))+'</td></tr>';
+    });
+    html += '</table></div>';
+    box.innerHTML = html;
+  }catch(e){ box.innerHTML = "加载失败"; }
+}
+
 
 /* ================= AI审核规则 ================= */
 let arList = [];
