@@ -437,12 +437,11 @@ function scStepResult(){
 
 /* ================= AI 智能问答 ================= */
 function aiChatHtml(){
-  let msgs = aiChat.map(m=>'<div style="margin:8px 0; padding:10px 14px; border-radius:2px; font-size:13px; line-height:1.75; '+(m.role==="user"?'background:#EDF1F5; border-left:3px solid var(--bp-navy);':'background:#FFF; border:1px solid var(--line);')+'">'+(m.role==="user"?"<b>你：</b>":"<b>AI：</b>")+escapeHtml(m.content).replace(/\n/g,"<br>")+'</div>').join("");
   return '<div class="cf-chart" style="margin-top:16px;">'
-    +'<div class="cf-head"><span>AI 智能问答（基于本次测算结果）</span></div>'
-    +'<div id="aiMsgs">'+msgs+'</div>'
+    +'<div class="cf-head"><span>AI 智能问答（可自主检索测算结果与知识库）</span></div>'
+    +'<div id="aiMsgs"></div>'
     +'<div style="display:flex; gap:8px; margin-top:10px;">'
-    +'<input id="aiQ" type="text" placeholder="例如：为什么IRR这么低？装修重置费是怎么摊的？" style="flex:1;">'
+    +'<input id="aiQ" type="text" placeholder="例如：为什么IRR这么低？有没有类似项目的政策依据？" style="flex:1;">'
     +'<button class="btn" id="aiAsk" style="flex-shrink:0;">提问</button></div></div>';
 }
 function buildScDigest(){
@@ -467,6 +466,48 @@ function buildScDigest(){
   }
   return lines;
 }
+// ===== Agent化问答:工具调用 + 自主循环(第一步) =====
+// 工具一:查询本次测算的完整数字摘要(需要时才取,而不是每次都硬塞给模型)
+// 工具二:检索RAG知识库(政策/历史报告等真实资料)
+const AI_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "get_calc_summary",
+      description: "获取本次财务测算的完整真实数据摘要(收入/成本/税金/利润/IRR/NPV/分年现金流/评分/核心公式口径)。回答任何涉及具体数字、计算过程、测算结果的问题前，必须先调用此工具获取真实数据，禁止凭记忆编造数字。",
+      parameters: { type:"object", properties:{}, required:[] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_knowledge_base",
+      description: "检索单位内部知识库(历史可研报告、政策文件、制度规范等真实资料)。当问题涉及政策依据、行业惯例、历史项目参考、需要引用真实文档来源时调用。",
+      parameters: {
+        type:"object",
+        properties:{
+          query:{type:"string", description:"检索关键词或问题"},
+          category:{type:"string", description:"限定分类(可选)：可研报告/政策文件/制度规范/业务逻辑/会议纪要/其他"},
+        },
+        required:["query"],
+      },
+    },
+  },
+];
+async function execTool(name, args){
+  if(name === "get_calc_summary") return buildScDigest() || "（本次尚未完成测算，暂无数据）";
+  if(name === "search_knowledge_base"){
+    try{
+      const r = await fetch("/api/rag",{method:"POST",
+        headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
+        body:JSON.stringify({action:"query", query:args.query||"", category:args.category, topK:4})});
+      const d = await r.json();
+      if(!d.ok || !(d.matches||[]).length) return "（知识库未检索到相关内容）";
+      return d.matches.map(m=>"【"+m.title+(m.chapter?" · "+m.chapter:"")+"】"+String(m.text||"").slice(0,300)).join("\n\n");
+    }catch(e){ return "（知识库检索失败："+e.message+"）"; }
+  }
+  return "（未知工具）";
+}
 async function askAI(){
   const inp = document.getElementById("aiQ");
   const q = inp.value.trim();
@@ -474,20 +515,56 @@ async function askAI(){
   const btn = document.getElementById("aiAsk");
   btn.disabled = true; btn.textContent = "思考中…";
   aiChat.push({role:"user", content:q});
-  document.getElementById("aiMsgs").innerHTML = aiChat.map(m=>'<div style="margin:8px 0; padding:10px 14px; font-size:13px; line-height:1.75; '+(m.role==="user"?'background:#EDF1F5; border-left:3px solid var(--bp-navy);':'background:#FFF; border:1px solid var(--line);')+'">'+(m.role==="user"?"<b>你：</b>":"<b>AI：</b>")+escapeHtml(m.content).replace(/\n/g,"<br>")+'</div>').join("");
+  renderAiMsgs();
   inp.value = "";
+  const traceEl = ()=>{ const t=document.getElementById("aiTrace"); return t; };
+  let trace = [];
   try{
-    const sys = "你是保障性住房项目财务测算专家。用户完成了一次财务测算，以下是完整结果与口径。请基于这些真实数据回答用户问题：数字直接引用不得改动；涉及公式时解释计算逻辑；回答简明、专业、分点，200-400字。\n\n"+buildScDigest();
-    const msgs = aiChat.slice(-6).map(m=>({role:m.role==="user"?"user":"assistant", content:m.content}));
-    const resp = await fetch("/api/generate",{method:"POST",
-      headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
-      body:JSON.stringify({system:sys, messages:msgs})});
-    const data = await resp.json();
-    if(data.error) throw new Error(data.error);
-    const text = (data.content||[]).map(b=>b.text||"").join("").trim();
-    aiChat.push({role:"assistant", content:text||"（未返回内容）"});
+    const sys = "你是保障性住房项目财务测算专家。你可以调用工具获取真实数据后再回答，禁止在未调用工具、没有真实依据的情况下编造具体数字。回答简明、专业、分点，200-400字，涉及数字必须逐字引用工具返回的真实结果。";
+    // 维护一份"给模型看"的对话(含工具调用记录),与"给用户看"的aiChat分开
+    let convo = aiChat.slice(-6).filter(m=>!m.hidden).map(m=>({role:m.role, content:m.content}));
+    let rounds = 0;
+    while(rounds < 3){
+      rounds++;
+      const resp = await fetch("/api/generate",{method:"POST",
+        headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
+        body:JSON.stringify({system:sys, messages:convo, tools:AI_TOOLS})});
+      const data = await resp.json();
+      if(data.error) throw new Error(data.error);
+      const calls = data.tool_calls;
+      const text = (data.content||[]).map(b=>b.text||"").join("").trim();
+      if(calls && calls.length){
+        // 模型请求调用工具:展示"正在检索…"过程,执行工具,把结果回填继续对话
+        convo.push({role:"assistant", content:text||null, tool_calls:calls});
+        for(const c of calls){
+          let args = {};
+          try{ args = JSON.parse(c.function.arguments||"{}"); }catch(e){}
+          const label = c.function.name==="get_calc_summary" ? "📊 读取本次测算结果"
+            : "🔍 检索知识库："+(args.query||"");
+          trace.push(label);
+          if(traceEl()) traceEl().innerHTML = trace.map(t=>'<div style="font-size:11.5px; color:var(--ink-soft);">'+escapeHtml(t)+'…</div>').join("");
+          const result = await execTool(c.function.name, args);
+          convo.push({role:"tool", tool_call_id:c.id, content:result});
+        }
+        continue;   // 带着工具结果再问一轮
+      }
+      // 无工具调用:模型给出最终答案
+      aiChat.push({role:"assistant", content:text||"（未返回内容）", trace: trace.slice()});
+      break;
+    }
+    if(rounds>=3 && !aiChat.length) aiChat.push({role:"assistant", content:"多次尝试后仍无法给出确定回答，请换个问法或补充信息。"});
   }catch(e){ aiChat.push({role:"assistant", content:"回答失败："+e.message}); }
-  renderSheet();
+  renderAiMsgs();
+  btn.disabled = false; btn.textContent = "提问";
+}
+function renderAiMsgs(){
+  const box = document.getElementById("aiMsgs");
+  if(!box) return;
+  box.innerHTML = aiChat.map(m=>{
+    const traceHtml = (m.trace && m.trace.length) ? '<div style="margin-bottom:6px; padding-bottom:6px; border-bottom:1px dashed var(--line);">'+m.trace.map(t=>'<div style="font-size:11px; color:var(--ink-soft);">'+escapeHtml(t)+'</div>').join("")+'</div>' : "";
+    return '<div style="margin:8px 0; padding:10px 14px; font-size:13px; line-height:1.75; '+(m.role==="user"?'background:#EDF1F5; border-radius:8px;':'background:#FFF; border:1px solid var(--line); border-radius:8px;')+'">'
+      +(m.role==="user"?"<b>你：</b>":"<b>AI：</b>")+traceHtml+escapeHtml(m.content).replace(/\n/g,"<br>")+'</div>';
+  }).join("") + '<div id="aiTrace" style="margin-top:6px;"></div>';
 }
 function bindCalcEvents(){
   const s=id=>document.getElementById(id);
@@ -750,6 +827,3 @@ function buildCalcDigest(){
         + r.sens.map(x=>x.label+"：IRR "+(x.irr===null?"—":x.irr+"%")+"，累计净现值 "+fmt(x.npv)+"万元").join("\n") : "");
   return modeBlock + digest;
 }
-
-
-
