@@ -55,15 +55,17 @@ export async function onRequestPost(context){
       const title = String(chunks[0].title||"未命名").slice(0,80);
       const cat = String(body.category||"未分类").slice(0,30);
       const lvl = parseInt(body.level)||2;
+      const sec = parseInt(body.security)||1;                       // 密级:1公开 2内部 3涉密
+      const dscope = String(body.deptScope||"全部门").slice(0,40);   // 可见部门
       const ids = items.map(it=>it.id);
       const row = await env.DB.prepare("SELECT ids, chunks FROM rag_files_v2 WHERE title=?").bind(title).first();
       if(row){
         const all = JSON.parse(row.ids).concat(ids);
-        await env.DB.prepare("UPDATE rag_files_v2 SET ids=?, chunks=?, category=?, level=?, created_at=? WHERE title=?")
-          .bind(JSON.stringify(all), all.length, cat, lvl, Date.now(), title).run();
+        await env.DB.prepare("UPDATE rag_files_v2 SET ids=?, chunks=?, category=?, level=?, security=?, dept_scope=?, created_at=? WHERE title=?")
+          .bind(JSON.stringify(all), all.length, cat, lvl, sec, dscope, Date.now(), title).run();
       }else{
-        await env.DB.prepare("INSERT INTO rag_files_v2(title, ids, chunks, category, level, enabled, created_at) VALUES(?,?,?,?,?,1,?)")
-          .bind(title, JSON.stringify(ids), ids.length, cat, lvl, Date.now()).run();
+        await env.DB.prepare("INSERT INTO rag_files_v2(title, ids, chunks, category, level, enabled, security, dept_scope, created_at) VALUES(?,?,?,?,?,1,?,?,?)")
+          .bind(title, JSON.stringify(ids), ids.length, cat, lvl, sec, dscope, Date.now()).run();
       }
     }catch(e){}
     return json({ok:true, count: items.length});
@@ -77,12 +79,32 @@ export async function onRequestPost(context){
     const recall = Math.min(parseInt(body.recall)||40, 60);
     const [vec] = await embed(env, [q]);
     const r = await env.VECTORIZE.query(vec, { topK: recall, returnMetadata: "all" });
-    // 读取已停用文件标题(停用的不参与检索)
-    let disabled = new Set();
+    // 读取当前用户的部门与权限等级(默认:无部门、等级1只能看公开)
+    let myDept = "", myClearance = 1;
     try{
-      const dr = await env.DB.prepare("SELECT title FROM rag_files_v2 WHERE enabled=0").all();
-      (dr.results||[]).forEach(x=>disabled.add(x.title));
+      const u = await env.DB.prepare("SELECT department, clearance FROM users WHERE id=?").bind(user.userId).first();
+      if(u){ myDept = u.department||""; myClearance = parseInt(u.clearance)||1; }
     }catch(e){}
+    // 读取文件权限信息(停用/密级/可见部门)——按标题过滤,改权限无需重新向量化
+    let disabled = new Set();
+    let permMap = {};   // title -> {security, dept_scope}
+    try{
+      const dr = await env.DB.prepare("SELECT title, enabled, security, dept_scope FROM rag_files_v2").all();
+      (dr.results||[]).forEach(x=>{
+        if(x.enabled===0) disabled.add(x.title);
+        permMap[x.title] = { security: parseInt(x.security)||1, dept_scope: x.dept_scope||"全部门" };
+      });
+    }catch(e){}
+    // 权限判定:用户可见 = 密级≤本人等级 且 (文件全部门可见 或 属本人部门)
+    const iAmAdmin = isAdmin(env, user);   // 管理员豁免:始终可见全部
+    const canSee = (title)=>{
+      if(iAmAdmin) return true;
+      const p = permMap[title];
+      if(!p) return true;   // 台账无记录(早期入库)默认可见,不误伤
+      if(p.security > myClearance) return false;
+      if(p.dept_scope && p.dept_scope !== "全部门" && p.dept_scope !== myDept) return false;
+      return true;
+    };
     const wantCat = body.category ? String(body.category) : null;  // 指定分类则只检索该类
     const LW = {1:1.15, 2:1.0, 3:0.85};   // 等级加权:权威×1.15 参考×1.0 存档×0.85
     // 混合检索:从查询里提取关键词(2字以上的中文词/英文词),命中正文/标题则加分
@@ -108,6 +130,7 @@ export async function onRequestPost(context){
       };
     }).filter(m=>{
       if(disabled.has(m.title)) return false;
+      if(!canSee(m.title)) return false;   // 权限过滤:越权文档不返回
       if(wantCat && m.category !== wantCat) return false;
       return true;
     });
@@ -163,7 +186,7 @@ export async function onRequestPost(context){
   if(body.action === "list"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
   if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
-    const rows = await env.DB.prepare("SELECT title, chunks, category, level, enabled, created_at FROM rag_files_v2 ORDER BY created_at DESC LIMIT 500").all();
+    const rows = await env.DB.prepare("SELECT title, chunks, category, level, enabled, security, dept_scope, created_at FROM rag_files_v2 ORDER BY created_at DESC LIMIT 500").all();
     return json({ok:true, files: rows.results||[]});
   }
 
@@ -197,7 +220,7 @@ export async function onRequestPost(context){
   if(body.action === "logs"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
     if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
-    const rows = await env.DB.prepare("SELECT query, category, hit_titles, hit_count, top_score, created_at FROM rag_logs ORDER BY id DESC LIMIT 200").all();
+    const rows = await env.DB.prepare("SELECT l.query, l.category, l.hit_titles, l.hit_count, l.top_score, l.created_at, u.username FROM rag_logs l LEFT JOIN users u ON l.user_id=u.id ORDER BY l.id DESC LIMIT 200").all();
     return json({ok:true, logs: rows.results||[]});
   }
 
@@ -255,6 +278,33 @@ export async function onRequestPost(context){
       out.poorFiles = (fb.results||[]).map(f=>({title:f.title, good:f.good, bad:f.bad}));
     }catch(e){ out.error = e.message; }
     return json({ok:true, dashboard: out});
+  }
+
+  if(body.action === "users"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const rows = await env.DB.prepare("SELECT id, username, department, clearance, created_at FROM users ORDER BY id DESC LIMIT 500").all();
+    return json({ok:true, users: rows.results||[]});
+  }
+
+  if(body.action === "setUserPerm"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const uid = parseInt(body.userId);
+    const dept = String(body.department||"").slice(0,40);
+    const clr = Math.min(Math.max(parseInt(body.clearance)||1, 1), 3);
+    await env.DB.prepare("UPDATE users SET department=?, clearance=? WHERE id=?").bind(dept, clr, uid).run();
+    return json({ok:true});
+  }
+
+  if(body.action === "setScope"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const title = String(body.title||"").slice(0,80);
+    const sec = Math.min(Math.max(parseInt(body.security)||1, 1), 3);
+    const dscope = String(body.deptScope||"全部门").slice(0,40);
+    await env.DB.prepare("UPDATE rag_files_v2 SET security=?, dept_scope=? WHERE title=?").bind(sec, dscope, title).run();
+    return json({ok:true});
   }
 
   if(body.action === "deleteByTitle"){
