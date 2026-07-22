@@ -244,7 +244,9 @@ async function openRag(){
     +'<div style="display:flex; gap:12px; margin-bottom:10px; flex-wrap:wrap; align-items:center;">'
     +'<label style="font-size:13px;">分类：<select id="ragCat" style="padding:5px 8px;"><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select></label>'
     +'<label style="font-size:13px;">权威等级：<select id="ragLevel" style="padding:5px 8px;"><option value="1">权威（政策/正式文件）</option><option value="2" selected>参考（一般报告）</option><option value="3">存档（历史/非正式）</option></select></label>'
-    +'<span style="font-size:11px; color:var(--soft);">上传的这批文件将统一归入所选分类与等级</span></div>'
+    +'<label style="font-size:13px;">密级：<select id="ragSec" style="padding:5px 8px;"><option value="1" selected>公开（全员可见）</option><option value="2">内部（需内部权限）</option><option value="3">涉密（需涉密权限）</option></select></label>'
+    +'<label style="font-size:13px;">可见部门：<input id="ragDept" placeholder="全部门" style="padding:5px 8px; width:110px;"></label>'
+    +'<span style="font-size:11px; color:var(--soft); width:100%;">上传的这批文件统一按以上分类/等级/密级/部门归档；可见部门留空=全部门可见</span></div>'
     +'<div style="border:2px dashed var(--line); background:#fff; padding:26px; text-align:center;">'
     +'<button class="btn" id="ragPick">选择文件（可多选）</button>'
     +'<input type="file" id="ragFiles" accept=".docx,.pdf,.txt" multiple style="display:none;">'
@@ -255,7 +257,8 @@ async function openRag(){
     +'<div style="margin-top:18px; display:flex; gap:16px;"><b style="font-weight:600;">检索测试</b>'
     +'<a href="javascript:void(0)" id="ragDash" style="font-size:12px;">📊 知识库看板</a>'
     +'<a href="javascript:void(0)" id="ragLog" style="font-size:12px;">📜 检索日志</a>'
-    +'<a href="javascript:void(0)" id="ragGraph" style="font-size:12px;">🕸 知识图谱</a></div>'
+    +'<a href="javascript:void(0)" id="ragGraph" style="font-size:12px;">🕸 知识图谱</a>'
+    +'<a href="javascript:void(0)" id="ragUsers" style="font-size:12px;">👥 用户权限</a></div>'
     +'<div style="display:flex; gap:8px; margin-top:6px;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1;"><select id="ragQCat" style="padding:5px 8px;"><option value="">全部分类</option><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select><button class="btn sm" id="ragTest">检索</button></div>'
     +'<div id="ragHits" style="font-size:12.5px;"></div>'
     +'<div id="ragPanel" style="margin-top:10px;"></div>'
@@ -267,6 +270,7 @@ async function openRag(){
   document.getElementById("ragDash").onclick = ragDashboard;
   document.getElementById("ragLog").onclick = ragLogs;
   document.getElementById("ragGraph").onclick = ragGraphView;
+  document.getElementById("ragUsers").onclick = ragUsersView;
   document.getElementById("ragFilter").onchange = refreshRagFiles;
   refreshRagStats();
   refreshRagFiles();
@@ -296,8 +300,10 @@ async function ragIngest(files){
       try{
         const cat = document.getElementById("ragCat")? document.getElementById("ragCat").value : "未分类";
         const lvl = document.getElementById("ragLevel")? document.getElementById("ragLevel").value : 2;
+        const sec = document.getElementById("ragSec")? document.getElementById("ragSec").value : 1;
+        const dept = document.getElementById("ragDept") && document.getElementById("ragDept").value.trim() ? document.getElementById("ragDept").value.trim() : "全部门";
         const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),
-          body:JSON.stringify({action:"upsert", chunks:chunks.slice(i,i+10), category:cat, level:lvl})});
+          body:JSON.stringify({action:"upsert", chunks:chunks.slice(i,i+10), category:cat, level:lvl, security:sec, deptScope:dept})});
         const d = await r.json();
         if(d.ok) okChunks += d.count; else{ failed.push(f.name+"批次"+i+"："+d.error); break; }
       }catch(e){ failed.push(f.name+"批次"+i+"：网络错误"); break; }
@@ -317,6 +323,7 @@ async function refreshRagFiles(){
     if(!(d.files||[]).length){ box.innerHTML = '<span style="color:var(--soft);">暂无（本功能上线前入库的内容不在台账中，如需清理请重建索引后重新上传）</span>'; return; }
     const flt = document.getElementById("ragFilter") ? document.getElementById("ragFilter").value : "";
     const LVN = {1:"权威",2:"参考",3:"存档"};
+    const SECN = {1:"🌐公开",2:"🔒内部",3:"⛔涉密"};
     const LVC = {1:"#1F7A3D",2:"#8A6D1B",3:"#888"};
     let files = d.files;
     if(flt) files = files.filter(f=>(f.category||"未分类")===flt);
@@ -328,10 +335,30 @@ async function refreshRagFiles(){
       +'<b style="flex:1;">'+esc(f.title)+(en?"":" （已停用）")+'</b>'
       +'<span style="font-size:11px; padding:1px 7px; border:1px solid var(--line); border-radius:2px; color:var(--soft);">'+esc(f.category||"未分类")+'</span>'
       +'<span style="font-size:11px; color:'+LVC[lvl]+';">'+LVN[lvl]+'</span>'
+      +'<span style="font-size:11px; color:'+(f.security==3?"#B7302B":f.security==2?"#8A6D1B":"#1F7A3D")+';">'+SECN[parseInt(f.security)||1]+'</span>'
+      +(f.dept_scope && f.dept_scope!=="全部门" ? '<span style="font-size:11px; padding:1px 6px; background:#EEF; color:#33a;">'+esc(f.dept_scope)+'</span>' : '')
       +'<span style="color:var(--soft);">'+f.chunks+'块</span>'
+      +'<button class="btn sm" data-ragscope="'+esc(f.title)+'" data-sec="'+(parseInt(f.security)||1)+'" data-dept="'+esc(f.dept_scope||"全部门")+'">权限</button>'
       +'<button class="btn sm" data-ragtoggle="'+esc(f.title)+'" data-en="'+(en?1:0)+'">'+(en?"停用":"启用")+'</button>'
       +'<button class="btn sm red" data-ragdel="'+esc(f.title)+'">删除</button></div>';
     }).join("");
+    box.querySelectorAll("[data-ragscope]").forEach(b=>{
+      b.onclick = ()=>{
+        const t=b.dataset.ragscope;
+        const sec = prompt("设置《"+t+"》的密级：\n1 = 公开（全员可见）\n2 = 内部\n3 = 涉密\n请输入 1/2/3：", b.dataset.sec);
+        if(sec===null) return;
+        const dept = prompt("设置可见部门（留空或填“全部门”=所有部门可见；填具体部门名则仅该部门+管理员可见）：", b.dataset.dept);
+        if(dept===null) return;
+        (async ()=>{
+          try{
+            const r=await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"setScope", title:t, security:parseInt(sec)||1, deptScope:dept.trim()||"全部门"})});
+            const d=await r.json();
+            if(d.ok) msg("权限已更新","ok"); else msg(d.error||"失败","err");
+          }catch(e){ msg("网络错误","err"); }
+          refreshRagFiles();
+        })();
+      };
+    });
     box.querySelectorAll("[data-ragtoggle]").forEach(b=>{
       b.onclick = async ()=>{
         const t=b.dataset.ragtoggle, wantEnable = b.dataset.en==="0";
@@ -400,6 +427,7 @@ async function ragDashboard(){
     if(!d.ok){ box.innerHTML = esc(d.error||"不可用"); return; }
     const b = d.dashboard||{};
     const LVN = {1:"权威",2:"参考",3:"存档"};
+    const SECN = {1:"🌐公开",2:"🔒内部",3:"⛔涉密"};
     let html = '<div style="border:1px solid var(--line); background:#fff; padding:14px 16px;">';
     html += '<div style="font-weight:600; margin-bottom:8px;">📊 知识库总览</div>';
     html += '<div style="display:flex; gap:24px; margin-bottom:12px; font-size:13px;"><span>累计检索：<b>'+(b.totalQueries||0)+'</b> 次</span><span>近7天：<b>'+(b.weekQueries||0)+'</b> 次</span></div>';
@@ -437,10 +465,10 @@ async function ragLogs(){
     if(!d.ok){ box.innerHTML = esc(d.error||"不可用"); return; }
     if(!(d.logs||[]).length){ box.innerHTML = '<span style="color:var(--soft);">暂无检索记录</span>'; return; }
     let html = '<div style="border:1px solid var(--line); background:#fff; padding:12px 14px;"><div style="font-weight:600; margin-bottom:8px;">📜 检索日志（最近200条）</div>';
-    html += '<table class="tbl" style="width:100%; font-size:12px;"><tr><th style="text-align:left;">时间</th><th style="text-align:left;">检索词</th><th>分类</th><th>命中</th><th>最高分</th><th style="text-align:left;">命中文件</th></tr>';
+    html += '<table class="tbl" style="width:100%; font-size:12px;"><tr><th style="text-align:left;">时间</th><th style="text-align:left;">用户</th><th style="text-align:left;">检索词</th><th>分类</th><th>命中</th><th>最高分</th><th style="text-align:left;">命中文件</th></tr>';
     d.logs.forEach(l=>{
       const t = new Date(l.created_at); const ts = (t.getMonth()+1)+"/"+t.getDate()+" "+String(t.getHours()).padStart(2,"0")+":"+String(t.getMinutes()).padStart(2,"0");
-      html += '<tr><td>'+ts+'</td><td>'+esc(l.query||"")+'</td><td style="text-align:center;">'+esc(l.category||"全部")+'</td><td style="text-align:center;">'+l.hit_count+'</td><td style="text-align:center;">'+(l.top_score||0)+'</td><td style="color:var(--soft);">'+esc((l.hit_titles||"").slice(0,40))+'</td></tr>';
+      html += '<tr><td>'+ts+'</td><td>'+esc(l.username||"—")+'</td><td>'+esc(l.query||"")+'</td><td style="text-align:center;">'+esc(l.category||"全部")+'</td><td style="text-align:center;">'+l.hit_count+'</td><td style="text-align:center;">'+(l.top_score||0)+'</td><td style="color:var(--soft);">'+esc((l.hit_titles||"").slice(0,40))+'</td></tr>';
     });
     html += '</table></div>';
     box.innerHTML = html;
@@ -492,6 +520,46 @@ async function ragGraphView(){
       + svg + legend + '</div>';
   }catch(e){ box.innerHTML = "构建失败"; }
 }
+
+async function ragUsersView(){
+  const box = document.getElementById("ragPanel");
+  document.getElementById("ragHits").innerHTML = "";
+  box.innerHTML = '<div style="color:var(--soft); padding:10px 0;">加载用户列表…</div>';
+  try{
+    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"users"})});
+    const d = await r.json();
+    if(!d.ok){ box.innerHTML = esc(d.error||"不可用"); return; }
+    const CLN = {1:"普通（仅公开）",2:"内部",3:"涉密"};
+    let html = '<div style="border:1px solid var(--line); background:#fff; padding:12px 14px;"><div style="font-weight:600; margin-bottom:6px;">👥 用户权限管理</div>';
+    html += '<div style="font-size:11px; color:var(--soft); margin-bottom:8px;">设置每个用户的所属部门与权限等级。用户检索时，只能看到「密级≤本人等级」且「本部门或全部门可见」的文档。管理员始终可见全部。</div>';
+    html += '<table class="tbl" style="width:100%; font-size:12px;"><tr><th style="text-align:left;">用户</th><th style="text-align:left;">部门</th><th>权限等级</th><th>操作</th></tr>';
+    (d.users||[]).forEach(u=>{
+      html += '<tr><td><b>'+esc(u.username)+'</b></td>'
+        +'<td>'+esc(u.department||"（未设）")+'</td>'
+        +'<td style="text-align:center;">'+CLN[parseInt(u.clearance)||1]+'</td>'
+        +'<td style="text-align:center;"><a href="javascript:void(0)" class="usr-edit" data-uid="'+u.id+'" data-name="'+esc(u.username)+'" data-dept="'+esc(u.department||"")+'" data-clr="'+(parseInt(u.clearance)||1)+'">设置</a></td></tr>';
+    });
+    html += '</table></div>';
+    box.innerHTML = html;
+    box.querySelectorAll(".usr-edit").forEach(a=>{
+      a.onclick = ()=>{
+        const dept = prompt("设置用户「"+a.dataset.name+"」的所属部门（留空=无部门，只能看全部门+公开文档）：", a.dataset.dept);
+        if(dept===null) return;
+        const clr = prompt("设置权限等级：\n1 = 普通（仅看公开文档）\n2 = 内部（可看内部及公开）\n3 = 涉密（可看全部密级）\n请输入 1/2/3：", a.dataset.clr);
+        if(clr===null) return;
+        (async ()=>{
+          try{
+            const r=await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"setUserPerm", userId:parseInt(a.dataset.uid), department:dept.trim(), clearance:parseInt(clr)||1})});
+            const d=await r.json();
+            if(d.ok) msg("已更新","ok"); else msg(d.error||"失败","err");
+          }catch(e){ msg("网络错误","err"); }
+          ragUsersView();
+        })();
+      };
+    });
+  }catch(e){ box.innerHTML = "加载失败"; }
+}
+
 
 
 
