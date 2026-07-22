@@ -1,4 +1,4 @@
-// POST /api/generate  AI生成接口（登录鉴权 + 按用户限额 + 流式/非流式双模式）
+// POST /api/generate  AI生成接口（登录鉴权 + 按用户限额 + 流式/非流式双模式） 
 import { verifyAuth, json } from "./_auth.js";
 
 export async function onRequestPost(context) {
