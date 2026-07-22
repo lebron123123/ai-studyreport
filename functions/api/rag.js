@@ -100,6 +100,12 @@ export async function onRequestPost(context){
     });
     matches.sort((a,b)=>b.score-a.score);
     matches = matches.slice(0, topK);
+    // 记录检索日志(可追溯)
+    try{
+      const titles = matches.map(m=>m.title).filter(Boolean).slice(0,5).join("；");
+      await env.DB.prepare("INSERT INTO rag_logs(user_id, query, category, hit_titles, hit_count, top_score, created_at) VALUES(?,?,?,?,?,?,?)")
+        .bind(user.userId, q.slice(0,200), wantCat||"", titles, matches.length, matches[0]?matches[0].score:0, Date.now()).run();
+    }catch(e){}
     return json({ok:true, matches});
   }
 
@@ -136,6 +142,42 @@ export async function onRequestPost(context){
     const lvl = parseInt(body.level)||2;
     await env.DB.prepare("UPDATE rag_files_v2 SET category=?, level=? WHERE title=?").bind(cat, lvl, title).run();
     return json({ok:true});
+  }
+
+  if(body.action === "logs"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const rows = await env.DB.prepare("SELECT query, category, hit_titles, hit_count, top_score, created_at FROM rag_logs ORDER BY id DESC LIMIT 200").all();
+    return json({ok:true, logs: rows.results||[]});
+  }
+
+  if(body.action === "dashboard"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const out = {};
+    try{
+      // 各分类文件数与块数
+      const cat = await env.DB.prepare("SELECT category, COUNT(*) as files, SUM(chunks) as chunks, SUM(CASE WHEN enabled=0 THEN 1 ELSE 0 END) as disabled FROM rag_files_v2 GROUP BY category").all();
+      out.byCategory = cat.results||[];
+      // 各等级文件数
+      const lv = await env.DB.prepare("SELECT level, COUNT(*) as files FROM rag_files_v2 GROUP BY level").all();
+      out.byLevel = lv.results||[];
+      // 检索总次数与近7天
+      const tot = await env.DB.prepare("SELECT COUNT(*) as n FROM rag_logs").first();
+      out.totalQueries = tot ? tot.n : 0;
+      const wk = await env.DB.prepare("SELECT COUNT(*) as n FROM rag_logs WHERE created_at > ?").bind(Date.now()-7*86400000).first();
+      out.weekQueries = wk ? wk.n : 0;
+      // 命中最频繁的文件Top10
+      const hot = await env.DB.prepare("SELECT hit_titles FROM rag_logs WHERE hit_titles != '' ORDER BY id DESC LIMIT 500").all();
+      const freq = {};
+      (hot.results||[]).forEach(r=>{ String(r.hit_titles||"").split("；").forEach(t=>{ if(t) freq[t]=(freq[t]||0)+1; }); });
+      out.hotFiles = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([title,n])=>({title,n}));
+      // 从未被检索命中的文件(冷门/可疑垃圾)
+      const allF = await env.DB.prepare("SELECT title FROM rag_files_v2").all();
+      const hitSet = new Set(Object.keys(freq));
+      out.coldFiles = (allF.results||[]).map(f=>f.title).filter(t=>!hitSet.has(t)).slice(0,20);
+    }catch(e){ out.error = e.message; }
+    return json({ok:true, dashboard: out});
   }
 
   if(body.action === "deleteByTitle"){
