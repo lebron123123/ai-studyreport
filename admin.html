@@ -1,4 +1,4 @@
-<meta charset="utf-8">  
+<meta charset="utf-8"> 
 <title>可研报告工坊 · 大纲管理</title>
 <style>
   :root{--bp:#1E3A5C;--bg:#F2EFE7;--card:#FBFAF5;--ink:#1F262B;--soft:#66707A;--line:#D8D3C4;--red:#B7302B;--ok:#3E6B45;
@@ -177,6 +177,31 @@ async function ragParseFile(f){
   }
   throw new Error("不支持 ."+ext);
 }
+// 语义切块:按标题分节 → 节内按句子边界+重叠切块 → 每块带上下文锚点
+const RAG_CHUNK_SIZE = 1000;   // 目标块大小(字符)
+const RAG_OVERLAP = 150;       // 相邻块重叠(字符),避免答案被切断
+function ragSplitBySentence(text, size, overlap){
+  // 在句子边界(。！？；\n)切,尽量不从句中劈开;相邻块保留overlap重叠
+  const parts = [];
+  let i = 0;
+  const N = text.length;
+  while(i < N){
+    let end = Math.min(i + size, N);
+    if(end < N){
+      // 从end往回找最近的句子边界,窗口内找不到就硬切
+      let cut = -1;
+      for(let j=end; j>i+size*0.5; j--){
+        if("。！？；\n".includes(text[j])){ cut = j+1; break; }
+      }
+      if(cut > 0) end = cut;
+    }
+    const seg = text.slice(i, end).trim();
+    if(seg) parts.push(seg);
+    if(end >= N) break;
+    i = Math.max(end - overlap, i + 1);   // 回退overlap形成重叠
+  }
+  return parts;
+}
 function ragSplit(text, title){
   const lines = text.split(/\r?\n/);
   const chRe = /^第\s*([一二三四五六七八九十百]+)\s*[章篇]\s*[、．.:：\s]*(.*)$/;
@@ -186,9 +211,18 @@ function ragSplit(text, title){
   const flush = ()=>{
     const t = buf.join("\n").trim();
     buf = [];
-    if(t.length < 120) return;   // 过短块不入库
-    // 超长按2000字切
-    for(let i=0;i<t.length;i+=2000) chunks.push({title, chapter:ch, section:sec, text:t.slice(i,i+2000)});
+    if(t.length < 80) return;   // 过短块不入库
+    // 上下文锚点:每块开头标注它属于哪个文档/章/节(帮助检索时理解片段归属)
+    const anchor = "【"+title+(ch?" · "+ch:"")+(sec?" · "+sec:"")+"】\n";
+    if(t.length <= RAG_CHUNK_SIZE){
+      chunks.push({title, chapter:ch, section:sec, text: anchor + t});
+    }else{
+      // 语义切块+重叠
+      const segs = ragSplitBySentence(t, RAG_CHUNK_SIZE, RAG_OVERLAP);
+      segs.forEach((s,idx)=>{
+        chunks.push({title, chapter:ch, section:sec, text: anchor + (segs.length>1?"("+(idx+1)+"/"+segs.length+") ":"") + s});
+      });
+    }
   };
   lines.forEach(raw=>{
     const line = raw.trim();
