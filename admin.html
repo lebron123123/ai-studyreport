@@ -210,8 +210,21 @@ async function ragParseFile(f){
   throw new Error("不支持 ."+ext);
 }
 // 语义切块:按标题分节 → 节内按句子边界+重叠切块 → 每块带上下文锚点
-const RAG_CHUNK_SIZE = 1000;   // 目标块大小(字符)
-const RAG_OVERLAP = 150;       // 相邻块重叠(字符),避免答案被切断
+// 按文档类型定制切块参数：不同类型文档的语义颗粒度不同，统一参数会削足适履
+// size=目标块大小(字符) overlap=相邻块重叠(字符) splitBy=额外的结构切分点
+const RAG_CHUNK_PROFILE = {
+  "可研报告":  { size:1200, overlap:100, splitBy:null,     note:"按章节切分，保持章节完整性" },
+  "政策文件":  { size:800,  overlap:50,  splitBy:"clause", note:"按条款切分，每条政策独立成块" },
+  "制度规范":  { size:600,  overlap:50,  splitBy:"clause", note:"按条目切分，每条标准独立可引用" },
+  "业务逻辑":  { size:800,  overlap:100, splitBy:null,     note:"按段落切分，保持论述完整性" },
+  "会议纪要":  { size:500,  overlap:50,  splitBy:"topic",  note:"按议题切分，每个议题独立成块" },
+  "其他":     { size:1000, overlap:150, splitBy:null,     note:"通用参数" },
+};
+function ragProfileOf(category){
+  return RAG_CHUNK_PROFILE[category] || RAG_CHUNK_PROFILE["其他"];
+}
+const RAG_CHUNK_SIZE = 1000;   // 兼容保留：未指定分类时的默认值
+const RAG_OVERLAP = 150;
 function ragSplitBySentence(text, size, overlap){
   // 在句子边界(。！？；\n)切,尽量不从句中劈开;相邻块保留overlap重叠
   const parts = [];
@@ -234,23 +247,28 @@ function ragSplitBySentence(text, size, overlap){
   }
   return parts;
 }
-function ragSplit(text, title){
+function ragSplit(text, title, category){
+  const prof = ragProfileOf(category);
   const lines = text.split(/\r?\n/);
   const chRe = /^第\s*([一二三四五六七八九十百]+)\s*[章篇]\s*[、．.:：\s]*(.*)$/;
   const secRe = /^(\d+\.\d+)\s*[、．.:：\s]*(.+)$/;
+  // 政策/制度类：识别"第X条"作为独立切分点，让每条政策/标准独立成块便于精确引用
+  const clauseRe = /^第\s*([一二三四五六七八九十百千0-9]+)\s*条\s*[、．.:：\s]*(.*)$/;
+  // 会议纪要类：识别"议题/议程/一、"等作为切分点
+  const topicRe = /^(?:议题|议程|事项)\s*[一二三四五六七八九十0-9]*\s*[、．.:：]\s*(.*)$|^[一二三四五六七八九十]+\s*[、．]\s*(.+)$/;
   const chunks = [];
   let ch="", sec="", buf=[];
+  // 过短块门槛：按类型区分——政策条款、会议议题本身就可能很短，用统一80字门槛会丢内容
+  const minLen = (prof.splitBy === "clause" || prof.splitBy === "topic") ? 25 : 80;
   const flush = ()=>{
     const t = buf.join("\n").trim();
     buf = [];
-    if(t.length < 80) return;   // 过短块不入库
-    // 上下文锚点:每块开头标注它属于哪个文档/章/节(帮助检索时理解片段归属)
+    if(t.length < minLen) return;   // 过短块不入库
     const anchor = "【"+title+(ch?" · "+ch:"")+(sec?" · "+sec:"")+"】\n";
-    if(t.length <= RAG_CHUNK_SIZE){
+    if(t.length <= prof.size){
       chunks.push({title, chapter:ch, section:sec, text: anchor + t});
     }else{
-      // 语义切块+重叠
-      const segs = ragSplitBySentence(t, RAG_CHUNK_SIZE, RAG_OVERLAP);
+      const segs = ragSplitBySentence(t, prof.size, prof.overlap);
       segs.forEach((s,idx)=>{
         chunks.push({title, chapter:ch, section:sec, text: anchor + (segs.length>1?"("+(idx+1)+"/"+segs.length+") ":"") + s});
       });
@@ -261,6 +279,23 @@ function ragSplit(text, title){
     let m;
     if((m=line.match(chRe)) && line.length<40){ flush(); ch=(m[2]||("第"+m[1]+"章")).trim(); sec=""; return; }
     if((m=line.match(secRe)) && line.length<45){ flush(); sec=m[2].trim(); return; }
+    // 政策/制度：遇到"第X条"就切一刀，该条标题作为section
+    // 注意：真实政策文件中"第X条"后常紧跟整段条文（同一行可达数百字），因此不能用行长度限制
+    if(prof.splitBy === "clause" && (m=line.match(clauseRe))){
+      flush();
+      const head = (m[2]||"").trim().slice(0, 20);   // 取条文开头做小节名，不取全文
+      sec = ("第"+m[1]+"条"+(head?" "+head:"")).trim();
+      buf.push(line);   // 条款原文保留在正文里，便于引用时看到完整条文
+      return;
+    }
+    // 会议纪要：遇到议题就切一刀（同理，议题标题后可能紧跟议题内容）
+    if(prof.splitBy === "topic" && (m=line.match(topicRe))){
+      flush();
+      const t = (m[1]||m[2]||"").trim().slice(0, 20);
+      sec = t || line.slice(0, 20);
+      buf.push(line);
+      return;
+    }
     if(line) buf.push(line);
   });
   flush();
@@ -278,7 +313,8 @@ async function openRag(){
     +'<label style="font-size:13px;">权威等级：<select id="ragLevel" style="padding:5px 8px;"><option value="1">权威（政策/正式文件）</option><option value="2" selected>参考（一般报告）</option><option value="3">存档（历史/非正式）</option></select></label>'
     +'<label style="font-size:13px;">密级：<select id="ragSec" style="padding:5px 8px;"><option value="1" selected>公开（全员可见）</option><option value="2">内部（需内部权限）</option><option value="3">涉密（需涉密权限）</option></select></label>'
     +'<label style="font-size:13px;">可见部门：<input id="ragDept" placeholder="全部门" style="padding:5px 8px; width:110px;"></label>'
-    +'<span style="font-size:11px; color:var(--soft); width:100%;">上传的这批文件统一按以上分类/等级/密级/部门归档；可见部门留空=全部门可见</span></div>'
+    +'<span style="font-size:11px; color:var(--soft); width:100%;">上传的这批文件统一按以上分类/等级/密级/部门归档；可见部门留空=全部门可见</span>'
+    +'<span id="ragChunkHint" style="font-size:11px; color:var(--bp,#2C6CA6); width:100%;"></span></div>'
     +'<div style="border:2px dashed var(--line); background:#fff; padding:26px; text-align:center;">'
     +'<button class="btn" id="ragPick">选择文件（可多选）</button>'
     +'<input type="file" id="ragFiles" accept=".docx,.pdf,.txt" multiple style="display:none;">'
@@ -306,6 +342,16 @@ async function openRag(){
   document.getElementById("ragUsers").onclick = ragUsersView;
   document.getElementById("ragEval").onclick = ragEvalView;
   document.getElementById("ragFilter").onchange = refreshRagFiles;
+  // 切块策略提示：让管理员知道选不同分类会用不同的切块方式
+  const updChunkHint = ()=>{
+    const el = document.getElementById("ragChunkHint");
+    const sel = document.getElementById("ragCat");
+    if(!el || !sel) return;
+    const p = ragProfileOf(sel.value);
+    el.textContent = "✂ 切块策略：" + p.note + "（每块约" + p.size + "字，重叠" + p.overlap + "字）";
+  };
+  if(document.getElementById("ragCat")) document.getElementById("ragCat").onchange = updChunkHint;
+  updChunkHint();
   refreshRagStats();
   refreshRagFiles();
 }
@@ -319,20 +365,23 @@ async function refreshRagStats(){
 async function ragIngest(files){
   const prog = document.getElementById("ragProg");
   let totalChunks = 0, okChunks = 0, failed = [];
+  // 分类提前读取：切块参数按分类定制，必须在切块前拿到
+  const ingestCat = document.getElementById("ragCat") ? document.getElementById("ragCat").value : "未分类";
+  const prof = ragProfileOf(ingestCat);
   for(let fi=0; fi<files.length; fi++){
     const f = files[fi];
-    prog.textContent = "解析 "+(fi+1)+"/"+files.length+"：《"+f.name+"》…";
+    prog.textContent = "解析 "+(fi+1)+"/"+files.length+"：《"+f.name+"》（"+ingestCat+"："+prof.note+"）…";
     let chunks;
     try{
       const text = await ragParseFile(f);
-      chunks = ragSplit(text, f.name.replace(/\.[^.]+$/,""));
+      chunks = ragSplit(text, f.name.replace(/\.[^.]+$/,""), ingestCat);
       if(!chunks.length){ failed.push(f.name+"（无有效块）"); continue; }
     }catch(e){ failed.push(f.name+"（"+e.message+"）"); continue; }
     totalChunks += chunks.length;
     for(let i=0; i<chunks.length; i+=10){
       prog.textContent = "《"+f.name+"》向量化入库 "+Math.min(i+10,chunks.length)+"/"+chunks.length+"（文件"+(fi+1)+"/"+files.length+"）";
       try{
-        const cat = document.getElementById("ragCat")? document.getElementById("ragCat").value : "未分类";
+        const cat = ingestCat;   // 用入库开始时锁定的分类，避免中途改动导致切块与归档分类不一致
         const lvl = document.getElementById("ragLevel")? document.getElementById("ragLevel").value : 2;
         const sec = document.getElementById("ragSec")? document.getElementById("ragSec").value : 1;
         const dept = document.getElementById("ragDept") && document.getElementById("ragDept").value.trim() ? document.getElementById("ragDept").value.trim() : "全部门";
