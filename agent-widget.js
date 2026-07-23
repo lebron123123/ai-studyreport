@@ -139,6 +139,61 @@
     },
   });
 
+  // 工具：记住用户偏好(AI主动调用,内容对用户完全透明可查可删)
+  AC.registerTool("remember_preference", {
+    schema: {
+      type: "function",
+      function: {
+        name: "remember_preference",
+        description: "当用户明确表达了长期偏好、常用信息或希望你记住的事情时调用(例如'我一般做非居改保项目'、'记住我们单位叫XX'、'我常用的竞品是XX')。不要记录一次性的临时信息或敏感数据(密码、身份证等)。记录的内容用户可以随时查看和删除。",
+        parameters: {
+          type:"object",
+          properties:{
+            key:{ type:"string", description:"偏好名称，简短，如'常做项目类型'、'所属单位'" },
+            value:{ type:"string", description:"偏好内容，如'非居改保'、'XX安居集团'" },
+          },
+          required:["key","value"],
+        },
+      },
+    },
+    validate: (args)=> AC.V.all([
+      AC.V.requiredString(args, "key", 40, "key"),
+      AC.V.requiredString(args, "value", 200, "value"),
+    ]),
+    label: (args)=>"🧠 记住："+(args.key||"")+"="+(args.value||""),
+    run: async (args)=>{
+      try{
+        const ok = await AC.saveMemory(args.key, args.value, "auto");
+        return ok ? "已记住：" + args.key + "＝" + args.value + "（用户可在助手面板的记忆管理里查看或删除）"
+                  : "（记忆保存失败，请稍后再试）";
+      }catch(e){ return "（记忆保存出错："+e.message+"）"; }
+    },
+  });
+
+  // 工具：忘记某条记忆
+  AC.registerTool("forget_preference", {
+    schema: {
+      type: "function",
+      function: {
+        name: "forget_preference",
+        description: "当用户要求忘记/删除某条已记住的信息时调用(例如'别记我的单位了')。",
+        parameters: {
+          type:"object",
+          properties:{ key:{ type:"string", description:"要删除的偏好名称，需与已记住的名称一致" } },
+          required:["key"],
+        },
+      },
+    },
+    validate: (args)=> AC.V.requiredString(args, "key", 40, "key"),
+    label: (args)=>"🗑 忘记："+(args.key||""),
+    run: async (args)=>{
+      try{
+        const ok = await AC.deleteMemory(args.key);
+        return ok ? "已忘记「"+args.key+"」" : "（删除失败或该条记忆不存在）";
+      }catch(e){ return "（删除记忆出错："+e.message+"）"; }
+    },
+  });
+
   /* ---------- 注入 UI ---------- */
 
   /* ---------- 注入 UI ---------- */
@@ -184,7 +239,8 @@
   const panel = document.createElement("div");
   panel.id = "awPanel";
   panel.innerHTML = `
-    <div id="awHead"><span>🤖 AI 助手</span><button class="awClose" id="awClose">×</button></div>
+    <div id="awHead"><span>🤖 AI 助手</span><span><a href="javascript:void(0)" id="awMemBtn" style="font-size:11.5px; font-weight:400; margin-right:10px; color:var(--bp-navy,#2C6CA6);">🧠 记忆</a><button class="awClose" id="awClose">×</button></span></div>
+    <div id="awMemPanel" style="display:none; padding:10px 14px; border-bottom:1px solid var(--line,#DCE6F0); background:#F7FAFD; font-size:12px; max-height:180px; overflow-y:auto;"></div>
     <div id="awMsgs"><div id="awEmpty">可以问我任何关于当前页面、测算结果、知识库资料的问题。</div></div>
     <div id="awInputBar">
       <input id="awInput" type="text" placeholder="随时问我…">
@@ -263,6 +319,44 @@
     renderAw();
     sendBtn.disabled = false; sendBtn.textContent = "发送";
   }
+
+  // ---------- 记忆管理面板（用户可见可删，不搞黑箱） ----------
+  async function renderMemPanel(){
+    const box = document.getElementById("awMemPanel");
+    box.innerHTML = '<span style="color:var(--ink-soft,#66788C);">加载中…</span>';
+    try{
+      const mem = await AC.loadMemory(true);
+      const loadErr = AC.memoryLoadError ? AC.memoryLoadError() : null;
+      if(loadErr){
+        box.innerHTML = '<div style="color:var(--seal-red,#C24A42);">记忆读取失败（'+esc(loadErr)+'），这不代表记忆被清空，请稍后重试。</div>';
+        return;
+      }
+      if(!mem.length){
+        box.innerHTML = '<div style="color:var(--ink-soft,#66788C);">还没有记住任何信息。你可以直接告诉我，比如"我一般做非居改保项目"，我会记下来，下次不用重复说。</div>';
+        return;
+      }
+      box.innerHTML = '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">'
+        +'<b style="font-size:11.5px;">助手记住的信息（'+mem.length+'条）</b>'
+        +'<a href="javascript:void(0)" id="awMemClear" style="font-size:11px; color:var(--seal-red,#C24A42);">全部清空</a></div>'
+        + mem.map(m=>'<div style="display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-bottom:1px solid #EAF1F8;">'
+          +'<span><b>'+esc(m.mkey)+'</b>：'+esc(m.mvalue)+'</span>'
+          +'<a href="javascript:void(0)" class="aw-mem-del" data-k="'+esc(m.mkey)+'" style="flex-shrink:0; color:var(--ink-soft,#66788C); font-size:11px;">删除</a></div>').join("");
+      box.querySelectorAll(".aw-mem-del").forEach(a=>{
+        a.onclick = async ()=>{ await AC.deleteMemory(a.dataset.k); renderMemPanel(); };
+      });
+      const clr = document.getElementById("awMemClear");
+      if(clr) clr.onclick = async ()=>{
+        if(!confirm("确定清空助手记住的全部信息？此操作不可撤销。")) return;
+        await AC.deleteMemory("__ALL__"); renderMemPanel();
+      };
+    }catch(e){ box.innerHTML = '<span style="color:var(--seal-red,#C24A42);">加载失败</span>'; }
+  }
+  document.getElementById("awMemBtn").onclick = ()=>{
+    const p = document.getElementById("awMemPanel");
+    const showing = p.style.display !== "none";
+    p.style.display = showing ? "none" : "block";
+    if(!showing) renderMemPanel();
+  };
 
   btn.onclick = ()=>{ panel.classList.toggle("open"); if(panel.classList.contains("open")) document.getElementById("awInput").focus(); };
   document.getElementById("awClose").onclick = ()=> panel.classList.remove("open");
