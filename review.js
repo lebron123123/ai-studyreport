@@ -138,6 +138,7 @@ async function runAiAudit(){
   renderAiAudit(results);
 }
 function renderAiAudit(results){
+  window.__lastAuditResults = results;   // 暴露给悬浮助手的工具读取，不改变原有渲染行为
   const box = document.getElementById("aiAuditBox");
   const scored = results.filter(r=>r.score!==null);
   const avg = scored.length? Math.round(scored.reduce((s,r)=>s+r.score,0)/scored.length) : 0;
@@ -281,4 +282,3 @@ function findChapterSection(cn, si){
   return {chapter:c, section:c.sections[si]};
 }
 function findSection(cn, si){ const r = findChapterSection(cn, si); return r? r.section : null; }
-
