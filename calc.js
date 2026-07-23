@@ -1,4 +1,4 @@
-// 测算相关模块 —— 从 index.html 内联脚本拆分而来  
+// 测算相关模块 —— 从 index.html 内联脚本拆分而来
 // 覆盖：测算表单渲染/读取、明细表规格、Excel导出前的数据准备、灵敏度分析、模式对比、AI问答、汇总卡片渲染等
 let calcType = null;         // 'gaibao' | 'rent' | 'sale'
 let scStep = 0;              // 测算模块步骤 0选类型 1参数 2结果
@@ -466,6 +466,10 @@ function buildScDigest(){
   }
   return lines;
 }
+// 知识库分类名单（与后台 admin.html 的 RAG_CATEGORIES 保持一致；此处仅用于工具参数校验）
+const KB_CATEGORY_NAMES = ["可研报告","项目复盘","风险案例","政策文件","制度规范","成本标准","产品标准",
+  "技术方案","报批经验","市场研究","行业报告","业务逻辑","会议纪要","模板范文","其他"];
+
 // ===== Agent问答:注册工具 + 调用通用引擎(agent-core.js) =====
 // 工具注册在文件加载时执行一次;引擎负责ReAct循环、参数校验、链路日志
 (function registerCalcTools(){
@@ -490,12 +494,12 @@ function buildScDigest(){
       type: "function",
       function: {
         name: "search_knowledge_base",
-        description: "检索单位内部知识库(历史可研报告、政策文件、制度规范等真实资料)。当问题涉及政策依据、行业惯例、历史项目参考、需要引用真实文档来源时调用。",
+        description: "检索单位内部知识库(历史可研报告、项目复盘、风险案例、政策文件、制度规范、成本标准、产品标准、技术方案、报批经验、市场研究、行业报告等真实资料)。当问题涉及政策依据、行业惯例、成本基准、历史项目参考、需要引用真实文档来源时调用。",
         parameters: {
           type:"object",
           properties:{
             query:{type:"string", description:"检索关键词或问题"},
-            category:{type:"string", description:"限定分类(可选)：可研报告/政策文件/制度规范/业务逻辑/会议纪要/其他"},
+            category:{type:"string", description:"限定分类(可选)。项目资料类：可研报告/项目复盘/风险案例；政策标准类：政策文件/制度规范/成本标准/产品标准；专业方案类：技术方案/报批经验；市场研究类：市场研究/行业报告；其他：业务逻辑/会议纪要/模板范文/其他。不确定时不传此参数，检索全部分类。"},
           },
           required:["query"],
         },
@@ -503,7 +507,7 @@ function buildScDigest(){
     },
     validate: (args)=> AC.V.all([
       AC.V.requiredString(args, "query", 200, "query"),
-      AC.V.optionalEnum(args, "category", ["可研报告","政策文件","制度规范","业务逻辑","会议纪要","其他"], "category"),
+      AC.V.optionalEnum(args, "category", KB_CATEGORY_NAMES, "category"),
     ]),
     label: (args)=>"🔍 检索知识库：" + (args.query || ""),
     run: async (args)=>{
