@@ -1,4 +1,4 @@
-// 测算相关模块 —— 从 index.html 内联脚本拆分而来
+// 测算相关模块 —— 从 index.html 内联脚本拆分而来 
 // 覆盖：测算表单渲染/读取、明细表规格、Excel导出前的数据准备、灵敏度分析、模式对比、AI问答、汇总卡片渲染等
 let calcType = null;         // 'gaibao' | 'rent' | 'sale'
 let scStep = 0;              // 测算模块步骤 0选类型 1参数 2结果
