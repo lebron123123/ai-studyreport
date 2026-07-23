@@ -27,6 +27,14 @@ function mountAnchorNav(){
 function renderTOC(){
   const el = document.getElementById("tocList");
   let items = "";
+  if(appMode===null){
+    const HM = [
+      {id:"homeCalc",  ic:"📊", label:"财务测算"},
+      {id:"homeReview",ic:"🔍", label:"可研智能审查"},
+      {id:"homeReport",ic:"📄", label:"可研生成"},
+    ];
+    items += HM.map(m=>'<div class="toc-item" data-home="'+m.id+'" style="cursor:pointer;"><span class="num">'+m.ic+'</span><span>'+m.label+'</span></div>').join("");
+  }
   if(appMode!==null){
     items += '<div class="toc-item" style="cursor:pointer;" onclick="goHome()"><span class="num">⌂</span><span>返回首页</span></div>';
   }
@@ -55,6 +63,9 @@ function renderTOC(){
   el.querySelectorAll("[data-gor]").forEach(it=>{ it.onclick = ()=>{ currentStep = +it.dataset.gor; renderTOC(); renderSheet(); }; });
   el.querySelectorAll("[data-goc]").forEach(it=>{ it.onclick = ()=>{ scStep = +it.dataset.goc; renderTOC(); renderSheet(); }; });
   el.querySelectorAll("[data-gov]").forEach(it=>{ it.onclick = ()=>{ rvStep = +it.dataset.gov; renderTOC(); renderSheet(); }; });
+  el.querySelectorAll("[data-home]").forEach(it=>{
+    it.onclick = ()=>{ const card = document.getElementById(it.dataset.home); if(card) card.click(); };
+  });
 }
 function goHome(){ appMode=null; renderTOC(); renderSheet(); }
 
@@ -118,13 +129,14 @@ function domainIcon(k){
 
 /* ================= 首页：两大功能分类 ================= */
 function stepHome(){
-  return '<div class="doc-eyebrow">HOME · 功能选择</div>'
+  return '<div class="doc-eyebrow">HOME · 欢迎</div>'
     +'<h1 class="doc-title">可研报告工坊</h1>'
-    +'<div class="step-desc">选择要使用的功能模块。</div>'
-    +'<div class="domain-grid">'
-    +'<div class="domain-card" id="homeCalc"><div class="dn">财务测算</div><div class="dd">独立财务测算工具：非居改保 / 出租类 / 出售类三种模型，逐年明细、IRR/NPV，并可与AI就测算结果智能问答。</div><div class="dc">CALCULATOR · AI Q&A</div></div>'
-    +'<div class="domain-card" id="homeReview"><div class="dn">可研智能审查</div><div class="dd">上传已完成的可研报告（Word/PDF），自动拆解章节，同步执行硬规则检查与AI深度评审，输出问题清单与修改建议。</div><div class="dc">AUDIT · UPLOAD</div></div>'
-    +'<div class="domain-card" id="homeReport"><div class="dn">可研生成</div><div class="dd">完整可行性研究报告生成：选择领域→录入信息→财务测算→逐章AI撰写→人工复核签发→导出标准Word。</div><div class="dc">FEASIBILITY REPORT</div></div>'
+    +'<div class="step-desc">请从左侧选择要使用的功能模块：财务测算、可研智能审查、可研生成。</div>'
+    // 三个入口按钮仍然渲染(供左侧导航点击复用同一套逻辑)，但不在正文区展示为卡片
+    +'<div style="display:none;">'
+    +'<div class="domain-card" id="homeCalc"></div>'
+    +'<div class="domain-card" id="homeReview"></div>'
+    +'<div class="domain-card" id="homeReport"></div>'
     +'</div>';
 }
 
