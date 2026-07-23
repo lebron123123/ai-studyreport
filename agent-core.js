@@ -32,6 +32,69 @@ window.AgentCore = (function(){
 
   function unregisterTool(name){ delete TOOLS[name]; }
 
+  /* ---------- 长期记忆 ---------- */
+  let MEM_CACHE = null;     // [{mkey,mvalue,source,updated_at}]
+  let MEM_LOADED_AT = 0;
+
+  let MEM_LAST_ERROR = null;   // 区分"确实没有记忆"与"加载失败"，避免误导用户
+  async function loadMemory(force){
+    // 60秒内复用缓存，避免每轮对话都打一次接口
+    if(!force && MEM_CACHE && (Date.now() - MEM_LOADED_AT) < 60000) return MEM_CACHE;
+    try{
+      const r = await fetch("/api/agent", {
+        method:"POST",
+        headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+        body: JSON.stringify({ action:"memGet" }),
+      });
+      const d = await r.json();
+      if(d && d.ok){
+        MEM_CACHE = d.memory || [];
+        MEM_LOADED_AT = Date.now();
+        MEM_LAST_ERROR = null;
+      }else{
+        MEM_LAST_ERROR = (d && d.error) || "记忆服务返回异常";
+        MEM_CACHE = MEM_CACHE || [];
+      }
+    }catch(e){
+      MEM_LAST_ERROR = e.message || "网络错误";
+      MEM_CACHE = MEM_CACHE || [];
+    }
+    return MEM_CACHE;
+  }
+  function memoryLoadError(){ return MEM_LAST_ERROR; }
+
+  async function saveMemory(key, value, source){
+    try{
+      const r = await fetch("/api/agent", {
+        method:"POST",
+        headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+        body: JSON.stringify({ action:"memSet", key, value, source: source||"auto" }),
+      });
+      const d = await r.json();
+      if(d && d.ok){ MEM_CACHE = null; MEM_LOADED_AT = 0; }   // 失效缓存，下次重新拉
+      return !!(d && d.ok);
+    }catch(e){ return false; }
+  }
+
+  async function deleteMemory(key){
+    try{
+      const r = await fetch("/api/agent", {
+        method:"POST",
+        headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+        body: JSON.stringify({ action:"memDelete", key }),
+      });
+      const d = await r.json();
+      if(d && d.ok){ MEM_CACHE = null; MEM_LOADED_AT = 0; }
+      return !!(d && d.ok);
+    }catch(e){ return false; }
+  }
+
+  function memoryToPrompt(mem){
+    if(!mem || !mem.length) return "";
+    return "\n\n【关于这位用户你已知道的信息(来自历史对话，仅供参考，如与本次对话内容冲突以本次为准)】\n"
+      + mem.map(m=>"- "+m.mkey+"："+m.mvalue).join("\n");
+  }
+
   /** 取出可用工具的 schema 列表（可按名单过滤，供不同页面暴露不同工具集） */
   function toolSchemas(allowNames){
     return Object.keys(TOOLS)
@@ -102,6 +165,14 @@ window.AgentCore = (function(){
     const startedAt = Date.now();
 
     let convo = (opt.messages || []).slice();
+    // 长期记忆：自动加载并注入系统提示词(可用 opt.useMemory=false 关闭)
+    let sysWithMem = opt.system || "";
+    if(opt.useMemory !== false){
+      try{
+        const mem = await loadMemory();
+        sysWithMem += memoryToPrompt(mem);
+      }catch(e){}
+    }
     const trace = [];
     const allToolCalls = [];
     let rounds = 0;
@@ -118,7 +189,7 @@ window.AgentCore = (function(){
     try{
       while(rounds < maxRounds){
         rounds++;
-        const payload = { system: opt.system || "", messages: convo };
+        const payload = { system: sysWithMem, messages: convo };
         if(schemas.length) payload.tools = schemas;
 
         const resp = await fetch("/api/generate", {
@@ -195,5 +266,6 @@ window.AgentCore = (function(){
     return { text: finalText, rounds, toolCalls: allToolCalls, trace, error: errorMsg };
   }
 
-  return { registerTool, unregisterTool, toolSchemas, validateArgs, run, V, _tools: TOOLS };
+  return { registerTool, unregisterTool, toolSchemas, validateArgs, run, V, _tools: TOOLS,
+           loadMemory, saveMemory, deleteMemory, memoryToPrompt, memoryLoadError };
 })();
