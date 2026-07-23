@@ -28,6 +28,42 @@ export async function onRequestPost(context){
     return json({ok:true});
   }
 
+  // ===== 长期记忆:每个用户自己的偏好(用户可见可删,不是黑箱) =====
+  if(body.action === "memGet"){
+    const rows = await env.DB.prepare("SELECT mkey, mvalue, source, updated_at FROM agent_memory WHERE user_id=? ORDER BY updated_at DESC LIMIT 30")
+      .bind(user.userId).all();
+    return json({ok:true, memory: rows.results||[]});
+  }
+
+  if(body.action === "memSet"){
+    const k = String(body.key||"").trim().slice(0,40);
+    const v = String(body.value||"").trim().slice(0,200);
+    if(!k || !v) return json({ok:false, error:"键与值不能为空"}, 400);
+    // 上限保护:每人最多30条,超出时淘汰最旧的
+    try{
+      const cnt = await env.DB.prepare("SELECT COUNT(*) as n FROM agent_memory WHERE user_id=?").bind(user.userId).first();
+      if(cnt && cnt.n >= 30){
+        await env.DB.prepare("DELETE FROM agent_memory WHERE id = (SELECT id FROM agent_memory WHERE user_id=? ORDER BY updated_at ASC LIMIT 1)")
+          .bind(user.userId).run();
+      }
+    }catch(e){}
+    await env.DB.prepare("INSERT INTO agent_memory(user_id, mkey, mvalue, source, updated_at) VALUES(?,?,?,?,?) "
+      + "ON CONFLICT(user_id, mkey) DO UPDATE SET mvalue=excluded.mvalue, source=excluded.source, updated_at=excluded.updated_at")
+      .bind(user.userId, k, v, String(body.source||"auto").slice(0,10), Date.now()).run();
+    return json({ok:true});
+  }
+
+  if(body.action === "memDelete"){
+    const k = String(body.key||"").trim();
+    if(k === "__ALL__"){
+      await env.DB.prepare("DELETE FROM agent_memory WHERE user_id=?").bind(user.userId).run();
+      return json({ok:true, cleared:true});
+    }
+    if(!k) return json({ok:false, error:"缺少key"}, 400);
+    await env.DB.prepare("DELETE FROM agent_memory WHERE user_id=? AND mkey=?").bind(user.userId, k).run();
+    return json({ok:true});
+  }
+
   // 管理员查看调用记录(可观测,替代LangSmith的追踪面板)
   if(body.action === "list"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
