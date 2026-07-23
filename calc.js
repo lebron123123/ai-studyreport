@@ -512,7 +512,11 @@ function buildScDigest(){
         body:JSON.stringify({action:"query", query:args.query||"", category:args.category, topK:4})});
       const d = await r.json();
       if(!d.ok || !(d.matches||[]).length) return "（知识库未检索到相关内容）";
-      return d.matches.map(m=>"【"+m.title+(m.chapter?" · "+m.chapter:"")+"】"+String(m.text||"").slice(0,300)).join("\n\n");
+      // 分层标注：让AI知道每条资料的可信程度，低匹配的不要当权威依据用
+      const tier = (s)=> s>=0.85 ? "高匹配" : s>=0.70 ? "中匹配" : "低匹配·仅供参考";
+      return "以下资料按匹配度标注，高匹配可作为依据引用，低匹配仅作背景参考、不要据此下结论：\n\n"
+        + d.matches.map(m=>"【"+m.title+(m.chapter?" · "+m.chapter:"")+"｜"+tier(Number(m.score)||0)+"】"
+          +String(m.text||"").slice(0,300)).join("\n\n");
     },
   });
 })();
