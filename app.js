@@ -1,7 +1,7 @@
 // 应用外壳/路由模块 —— 从 index.html 内联脚本拆分而来（步骤路由、TOC导航、首页、公共工具函数、全局事件绑定）  
 const STEPS = ["选择领域","项目信息","财务测算","章节范围","逐章生成","复核与签发"];
 let currentStep = 0;
-let appMode = null;          // null=首页 | 'report'=可研生成 | 'calc'=独立测算
+let appMode = null;          // null=首页 | 'report'=可研生成 | 'calc'=独立测算  
 function mountAnchorNav(){
   const old = document.getElementById("anchorNav");
   if(old) old.remove();
