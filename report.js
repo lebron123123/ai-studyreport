@@ -382,6 +382,19 @@ async function kbHandleFiles(files){
 
 // 全量RAG：语义检索存量报告库（未部署Vectorize时静默跳过）
 let ragAvailable = null;
+// 相似度分层策略（参考行业实践：不同匹配度的资料，可信程度不同，应区别使用）
+const RAG_TIER = {
+  HIGH: 0.85,    // 高匹配：内容高度相关，可直接借鉴论述结构
+  MID:  0.70,    // 中匹配：主题相关，需甄别后借鉴
+  LOW:  0.55,    // 低匹配：仅作思路启发，不宜照搬
+  MIN:  0.55,    // 低于此值不返回（避免噪音干扰生成）
+};
+function ragTierOf(score){
+  const s = Number(score) || 0;
+  if(s >= RAG_TIER.HIGH) return { key:"high", label:"高匹配" };
+  if(s >= RAG_TIER.MID)  return { key:"mid",  label:"中匹配" };
+  return { key:"low", label:"低匹配·仅供参考" };
+}
 async function ragRetrieve(chapterName, secTitle){
   if(ragAvailable === false) return "";
   try{
@@ -392,15 +405,18 @@ async function ragRetrieve(chapterName, secTitle){
     const d = await r.json();
     if(!d.ok){ if(/未绑定|不可用/.test(d.error||"")) ragAvailable = false; return ""; }
     ragAvailable = true;
-    const hits = (d.matches||[]).filter(m=>m.score>=0.5 && m.text);
+    // 相似度分层：不同置信度的参考资料，给AI的使用指引不同（避免把勉强沾边的当权威用）
+    const hits = (d.matches||[]).filter(m=>m.text && m.score >= RAG_TIER.MIN);
     if(!hits.length) return "";
     let out = "\n\n【历史报告参考】（语义检索自本单位存量优秀报告，供借鉴结构与论证方式；其中项目名称与数据不得照抄）\n";
+    out += "注：每条参考标注了匹配度等级，请按等级区别对待——高匹配可直接借鉴其论述结构；中匹配需甄别后借鉴；低匹配仅作思路启发，不要照搬其具体表述。\n\n";
     let budget = 2200;
     hits.forEach(m=>{
       if(budget<=200) return;
+      const tier = ragTierOf(m.score);
       const c = String(m.text).slice(0, Math.min(1400, budget));
       budget -= c.length;
-      out += "《"+(m.title||"历史报告")+"·"+(m.section||m.chapter||"")+"》：\n"+c+"\n\n";
+      out += "《"+(m.title||"历史报告")+"·"+(m.section||m.chapter||"")+"》【"+tier.label+"·匹配度"+m.score+"】\n"+c+"\n\n";
     });
     return out;
   }catch(e){ return ""; }
@@ -580,5 +596,3 @@ function readKbFromDom(){
     content: r.querySelector(".kb-content").value
   })).filter(e=>e.title||e.content.trim());
 }
-
-
