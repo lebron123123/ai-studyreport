@@ -178,6 +178,9 @@ window.AgentCore = (function(){
     let rounds = 0;
     let finalText = "";
     let errorMsg = "";
+    let selfCheckCount = 0;
+    const maxSelfCheck = (opt.maxSelfCheck === undefined) ? 1 : opt.maxSelfCheck;   // 最多自查重答1次，避免无限打转与token浪费
+    const selfCheckNotes = [];
 
     const pushTrace = (line)=>{
       trace.push(line);
@@ -236,7 +239,43 @@ window.AgentCore = (function(){
           continue;   // 带着工具结果再问一轮
         }
 
-        finalText = text || "";
+        // ===== 回答自我核查：模型给出答案后，先让它自评是否合格，不合格则补查重答 =====
+        const candidate = text || "";
+        if(opt.selfCheck !== false && candidate && selfCheckCount < maxSelfCheck){
+          selfCheckCount++;
+          let verdict = null;
+          try{
+            const checkSys = "你是严格的质量审核员。判断给出的【回答】是否合格，标准：(1)是否切题、直接回应了用户问题；"
+              + "(2)涉及具体数字/政策/事实时，是否有工具返回的真实依据支撑，而不是凭空编造；(3)是否存在明显缺漏导致用户无法据此行动。"
+              + "只输出JSON，不要任何其他文字：{\"ok\":true或false,\"reason\":\"不合格时说明原因(30字内)\",\"advice\":\"不合格时给出应补充查询什么(30字内)\"}";
+            const checkUser = "【用户问题】" + (opt.traceQuery || "(未提供)")
+              + "\n\n【已调用的工具及结果摘要】" + (allToolCalls.length
+                  ? allToolCalls.map(t=>t.name + (t.error ? "(失败:"+t.error+")" : "(成功)")).join("、")
+                  : "未调用任何工具")
+              + "\n\n【回答】" + candidate;
+            const cr = await fetch("/api/generate", {
+              method: "POST",
+              headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+              body: JSON.stringify({ system: checkSys, messages: [{role:"user", content: checkUser}] }),
+            });
+            const cd = await cr.json();
+            const ctext = (cd.content || []).map(b=>b.text || "").join("").trim();
+            const cleaned = ctext.replace(/```json|```/g, "").trim();
+            const jStart = cleaned.indexOf("{"), jEnd = cleaned.lastIndexOf("}");
+            if(jStart >= 0 && jEnd > jStart) verdict = JSON.parse(cleaned.slice(jStart, jEnd+1));
+          }catch(e){ verdict = null; }   // 自检本身失败时不阻断，直接采用原答案
+
+          if(verdict && verdict.ok === false && rounds < maxRounds){
+            selfCheckNotes.push(verdict.reason || "回答质量不足");
+            pushTrace("🔎 自我核查未通过：" + (verdict.reason || "回答质量不足") + "，正在补充查询…");
+            convo.push({ role:"assistant", content: candidate });
+            convo.push({ role:"user", content: "你上面的回答经自查存在问题：" + (verdict.reason || "不够充分")
+              + "。请" + (verdict.advice || "补充调用工具获取真实依据") + "，然后重新给出完整回答。" });
+            continue;   // 回到循环，带着自评意见重新查询/作答
+          }
+        }
+
+        finalText = candidate;
         break;
       }
       if(!finalText && rounds >= maxRounds){
@@ -263,7 +302,8 @@ window.AgentCore = (function(){
       });
     }catch(e){}
 
-    return { text: finalText, rounds, toolCalls: allToolCalls, trace, error: errorMsg };
+    return { text: finalText, rounds, toolCalls: allToolCalls, trace, error: errorMsg,
+             selfChecked: selfCheckCount > 0, selfCheckNotes };
   }
 
   return { registerTool, unregisterTool, toolSchemas, validateArgs, run, V, _tools: TOOLS,
