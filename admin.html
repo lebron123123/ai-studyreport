@@ -1,4 +1,4 @@
-<meta charset="utf-8">  
+<meta charset="utf-8"> 
 <title>可研报告工坊 · 大纲管理</title>
 <style>
   :root{
@@ -70,6 +70,7 @@
     <div class="nav-item" id="btnExamples"><span class="ic">📖</span>黄金范例库</div>
     <div class="nav-item" id="btnAiRules"><span class="ic">🛡</span>AI审核规则</div>
     <div class="nav-item" id="btnRag"><span class="ic">🗂</span>RAG知识库</div>
+    <div class="nav-item" id="btnAgent"><span class="ic">🤖</span>Agent调用记录</div>
     <div class="side-foot" id="loginInfo"></div>
   </nav>
   <div class="main">
@@ -665,6 +666,42 @@ async function ragEvalRender(){
   }catch(e){ box.innerHTML = "加载失败"; }
 }
 
+async function openAgentTraces(){
+  document.getElementById("listBox").style.display="none";
+  document.getElementById("editBox").style.display="block";
+  const box = document.getElementById("editBox");
+  box.innerHTML = '<h1>Agent调用记录</h1><div class="sub">自建的调用链路日志（替代第三方LangSmith，数据留在本账号内不出境）——每次"AI智能问答"的自主查询过程都会记录在此，用于调试与观察Agent行为是否合理。</div><div id="agentPanel"><span style="color:var(--soft);">加载中…</span></div><div class="bar" style="margin-top:18px;"><button class="btn ghost" id="agentBack">返回列表</button></div>';
+  document.getElementById("agentBack").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
+  try{
+    const [sr, lr] = await Promise.all([
+      fetch("/api/agent",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"stats"})}),
+      fetch("/api/agent",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"list"})}),
+    ]);
+    const sd = await sr.json(), ld = await lr.json();
+    const panel = document.getElementById("agentPanel");
+    let html = '';
+    if(sd.ok){
+      const s = sd.stats;
+      html += '<div class="card" style="display:block;"><b>累计调用</b> '+(s.n||0)+' 次　<b>平均轮数</b> '+(s.avgRounds?Number(s.avgRounds).toFixed(1):0)+'　<b>平均耗时</b> '+(s.avgMs?Math.round(s.avgMs):0)+'ms</div>';
+    }
+    if(ld.ok && (ld.traces||[]).length){
+      html += '<table class="tbl" style="width:100%; font-size:12px; margin-top:10px;"><tr><th style="text-align:left;">时间</th><th style="text-align:left;">提问</th><th>轮数</th><th style="text-align:left;">工具调用轨迹</th><th style="text-align:left;">最终回答</th></tr>';
+      ld.traces.forEach(t=>{
+        const dt = new Date(t.created_at); const ts = (dt.getMonth()+1)+"/"+dt.getDate()+" "+String(dt.getHours()).padStart(2,"0")+":"+String(dt.getMinutes()).padStart(2,"0");
+        let calls = [];
+        try{ calls = JSON.parse(t.tool_calls||"[]"); }catch(e){}
+        const callsHtml = calls.map(c=>c.error? ('<span style="color:var(--red);">✗'+esc(c.name)+'</span>') : ('✓'+esc(c.name)+(c.args&&c.args.query?'('+esc(c.args.query)+')':''))).join("；");
+        html += '<tr><td>'+ts+'</td><td>'+esc(t.query||"")+'</td><td style="text-align:center;">'+t.rounds+'</td><td style="font-size:11px;">'+callsHtml+'</td><td style="color:var(--soft); font-size:11px;">'+esc((t.final_answer||"").slice(0,60))+'</td></tr>';
+      });
+      html += '</table>';
+    }else{
+      html += '<div style="color:var(--soft); margin-top:10px;">暂无调用记录，去财务测算页试着问AI一个问题吧。</div>';
+    }
+    panel.innerHTML = html;
+  }catch(e){ document.getElementById("agentPanel").innerHTML = "加载失败："+esc(e.message); }
+}
+
+
 
 
 
@@ -1073,6 +1110,7 @@ else{
   document.getElementById("btnExamples").onclick = ()=>{ setActiveNav("btnExamples"); openExamples(); };
   document.getElementById("btnAiRules").onclick = ()=>{ setActiveNav("btnAiRules"); openAiRules(); };
   document.getElementById("btnRag").onclick = ()=>{ setActiveNav("btnRag"); openRag(); };
+  document.getElementById("btnAgent").onclick = ()=>{ setActiveNav("btnAgent"); openAgentTraces(); };
   (async ()=>{ if(await adminGate()) loadList(); })();
 }
 </script>
