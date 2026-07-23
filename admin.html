@@ -1,4 +1,4 @@
-<meta charset="utf-8">  
+<meta charset="utf-8"> 
 <title>可研报告工坊 · 大纲管理</title>
 <style>
   :root{
@@ -421,6 +421,14 @@ async function refreshRagFiles(){
   }catch(e){ box.innerHTML = '<span style="color:var(--soft);">读取失败</span>'; }
 }
 
+
+// 相似度分层徽章：让管理员一眼看出这条命中有多可信
+function ragTierBadge(score){
+  const s = Number(score) || 0;
+  if(s >= 0.85) return ' <span style="font-size:11px; padding:0 6px; border-radius:3px; background:#E6F4EA; color:#1F7A3D;">高匹配</span>';
+  if(s >= 0.70) return ' <span style="font-size:11px; padding:0 6px; border-radius:3px; background:#FFF6E0; color:#8A6D1B;">中匹配</span>';
+  return ' <span style="font-size:11px; padding:0 6px; border-radius:3px; background:#F3F4F6; color:#888;">低匹配</span>';
+}
 async function ragTest(){
   const q = document.getElementById("ragQ").value.trim();
   if(!q) return;
@@ -433,7 +441,7 @@ async function ragTest(){
     const d = await r.json();
     if(!d.ok){ box.textContent = d.error; return; }
     box.innerHTML = (d.matches||[]).map(m=>'<div style="border:1px solid var(--line); background:#fff; padding:8px 10px; margin-top:8px;">'
-      +'<b>'+esc(m.title||"")+'</b>'+(m.category?' <span style="font-size:11px; padding:0 6px; border:1px solid var(--line); color:var(--soft);">'+esc(m.category)+'</span>':'')+(m.level==1?' <span style="font-size:11px; color:#1F7A3D;">权威</span>':m.level==3?' <span style="font-size:11px; color:#888;">存档</span>':'')+' ｜ '+esc(m.chapter||"")+' / '+esc(m.section||"")+' ｜ 相似度 '+m.score+(m.rerankScore!==undefined?' <span style="color:#B7302B; font-weight:600;">｜重排 '+m.rerankScore+'</span>':'')
+      +'<b>'+esc(m.title||"")+'</b>'+(m.category?' <span style="font-size:11px; padding:0 6px; border:1px solid var(--line); color:var(--soft);">'+esc(m.category)+'</span>':'')+(m.level==1?' <span style="font-size:11px; color:#1F7A3D;">权威</span>':m.level==3?' <span style="font-size:11px; color:#888;">存档</span>':'')+' ｜ '+esc(m.chapter||"")+' / '+esc(m.section||"")+' ｜ 相似度 '+m.score+ragTierBadge(m.score)+(m.rerankScore!==undefined?' <span style="color:#B7302B; font-weight:600;">｜重排 '+m.rerankScore+'</span>':'')
       +(m.kwHits&&m.kwHits.length?' <span style="font-size:11px; color:#1a5fb4;">🔍命中词：'+esc(m.kwHits.join("、"))+'</span>':'')
       +'<div style="color:var(--soft); margin-top:4px;">'+esc((m.text||"").slice(0,160))+'…</div>'
       +'<div style="margin-top:6px; font-size:11px;">这条结果对检索\''+esc(q)+'\'：<a href="javascript:void(0)" class="fb-good" data-q="'+esc(q)+'" data-t="'+esc(m.title||"")+'" style="margin:0 8px;">👍有用</a><a href="javascript:void(0)" class="fb-bad" data-q="'+esc(q)+'" data-t="'+esc(m.title||"")+'">👎无关</a></div>'
