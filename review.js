@@ -1,5 +1,5 @@
 // 审核相关模块 —— 从 index.html 内联脚本拆分而来（智能审查上传报告、硬规则检查、AI深度评审）
-let rvChapters = [];   // 智能审查:解析出的章节
+let rvChapters = [];   // 智能审查:解析出的章节 
 let rvStep = 0;        // 0上传 1结果
 let rvFileName = "";
 function renderReviewModule(){
