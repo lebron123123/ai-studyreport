@@ -1,4 +1,4 @@
-<meta charset="utf-8">   
+<meta charset="utf-8"> 
 <title>可研报告工坊 · 大纲管理</title>
 <style>
   :root{
@@ -210,18 +210,53 @@ async function ragParseFile(f){
   throw new Error("不支持 ."+ext);
 }
 // 语义切块:按标题分节 → 节内按句子边界+重叠切块 → 每块带上下文锚点
-// 按文档类型定制切块参数：不同类型文档的语义颗粒度不同，统一参数会削足适履
-// size=目标块大小(字符) overlap=相邻块重叠(字符) splitBy=额外的结构切分点
-const RAG_CHUNK_PROFILE = {
-  "可研报告":  { size:1200, overlap:100, splitBy:null,     note:"按章节切分，保持章节完整性" },
-  "政策文件":  { size:800,  overlap:50,  splitBy:"clause", note:"按条款切分，每条政策独立成块" },
-  "制度规范":  { size:600,  overlap:50,  splitBy:"clause", note:"按条目切分，每条标准独立可引用" },
-  "业务逻辑":  { size:800,  overlap:100, splitBy:null,     note:"按段落切分，保持论述完整性" },
-  "会议纪要":  { size:500,  overlap:50,  splitBy:"topic",  note:"按议题切分，每个议题独立成块" },
-  "其他":     { size:1000, overlap:150, splitBy:null,     note:"通用参数" },
-};
+// ===== 知识库文档分类：单一数据源 =====
+// 所有下拉框、切块参数、图谱配色都从这里生成，新增分类只需在此处加一行
+// group=界面分组  size=块大小  overlap=重叠  splitBy=结构切分点  color=图谱配色
+const RAG_CATEGORIES = [
+  // 【项目资料】本单位历史项目沉淀
+  { name:"可研报告", group:"项目资料", size:1200, overlap:100, splitBy:null,     color:"#1E3A5C", note:"按章节切分，保持章节完整性" },
+  { name:"项目复盘", group:"项目资料", size:800,  overlap:100, splitBy:null,     color:"#2C6CA6", note:"按段落/要点切分，保持论述完整性" },
+  { name:"风险案例", group:"项目资料", size:800,  overlap:100, splitBy:null,     color:"#C24A42", note:"按案例切分，每个案例独立成块" },
+  // 【政策标准】外部政策与内部标准
+  { name:"政策文件", group:"政策标准", size:800,  overlap:50,  splitBy:"clause", color:"#B7302B", note:"按条款切分，每条政策独立成块" },
+  { name:"制度规范", group:"政策标准", size:600,  overlap:50,  splitBy:"clause", color:"#1F7A3D", note:"按条目切分，每条制度独立可引用" },
+  { name:"成本标准", group:"政策标准", size:500,  overlap:50,  splitBy:"clause", color:"#3E7A53", note:"按条目切分，每项标准独立可引用" },
+  { name:"产品标准", group:"政策标准", size:600,  overlap:50,  splitBy:"clause", color:"#5B8C5A", note:"按条目切分，每项标准独立可引用" },
+  // 【专业方案】技术与报批经验
+  { name:"技术方案", group:"专业方案", size:800,  overlap:100, splitBy:null,     color:"#8A6D1B", note:"按方案要点切分" },
+  { name:"报批经验", group:"专业方案", size:800,  overlap:100, splitBy:null,     color:"#A67C2E", note:"按环节切分，保持流程完整" },
+  // 【市场研究】
+  { name:"市场研究", group:"市场研究", size:1000, overlap:100, splitBy:null,     color:"#7A5C99", note:"按小节切分，保持分析逻辑完整" },
+  { name:"行业报告", group:"市场研究", size:1000, overlap:100, splitBy:null,     color:"#9070B0", note:"按小节切分，保持分析逻辑完整" },
+  // 【其他】
+  { name:"业务逻辑", group:"其他",     size:800,  overlap:100, splitBy:null,     color:"#666",    note:"按段落切分，保持论述完整性" },
+  { name:"会议纪要", group:"其他",     size:500,  overlap:50,  splitBy:"topic",  color:"#7A7A9A", note:"按议题切分，每个议题独立成块" },
+  { name:"模板范文", group:"其他",     size:1200, overlap:100, splitBy:null,     color:"#8899AA", note:"按章节切分，保持范文结构完整" },
+  { name:"其他",     group:"其他",     size:1000, overlap:150, splitBy:null,     color:"#888",    note:"通用参数" },
+];
+// 由单一数据源派生：切块参数表
+const RAG_CHUNK_PROFILE = {};
+RAG_CATEGORIES.forEach(c=>{ RAG_CHUNK_PROFILE[c.name] = { size:c.size, overlap:c.overlap, splitBy:c.splitBy, note:c.note }; });
 function ragProfileOf(category){
   return RAG_CHUNK_PROFILE[category] || RAG_CHUNK_PROFILE["其他"];
+}
+// 由单一数据源派生：分组下拉选项HTML（含"未分类"兼容旧数据）
+function ragCatOptionsHtml(includeAll, allLabel){
+  let html = includeAll ? '<option value="">'+(allLabel||"全部")+'</option>' : '';
+  const groups = [];
+  RAG_CATEGORIES.forEach(c=>{ if(groups.indexOf(c.group)<0) groups.push(c.group); });
+  groups.forEach(g=>{
+    html += '<optgroup label="'+g+'">';
+    RAG_CATEGORIES.filter(c=>c.group===g).forEach(c=>{ html += '<option>'+c.name+'</option>'; });
+    html += '</optgroup>';
+  });
+  return html;
+}
+// 由单一数据源派生：图谱配色
+function ragCatColor(name){
+  const c = RAG_CATEGORIES.find(x=>x.name===name);
+  return c ? c.color : "#aaa";
 }
 const RAG_CHUNK_SIZE = 1000;   // 兼容保留：未指定分类时的默认值
 const RAG_OVERLAP = 150;
@@ -309,7 +344,7 @@ async function openRag(){
     +'<div class="sub">批量上传存量可研报告（docx/pdf/txt），按章节切块、向量化后存入语义检索库。生成报告时自动检索最相关的段落注入AI。<b>需先按部署说明创建 Vectorize 索引并绑定 VECTORIZE 与 AI。</b></div>'
     +'<div id="ragStats" style="font-size:12px; color:var(--soft); margin:8px 0;">读取库规模…</div>'
     +'<div style="display:flex; gap:12px; margin-bottom:10px; flex-wrap:wrap; align-items:center;">'
-    +'<label style="font-size:13px;">分类：<select id="ragCat" style="padding:5px 8px;"><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select></label>'
+    +'<label style="font-size:13px;">分类：<select id="ragCat" style="padding:5px 8px;">'+ragCatOptionsHtml(false)+'</select></label>'
     +'<label style="font-size:13px;">权威等级：<select id="ragLevel" style="padding:5px 8px;"><option value="1">权威（政策/正式文件）</option><option value="2" selected>参考（一般报告）</option><option value="3">存档（历史/非正式）</option></select></label>'
     +'<label style="font-size:13px;">密级：<select id="ragSec" style="padding:5px 8px;"><option value="1" selected>公开（全员可见）</option><option value="2">内部（需内部权限）</option><option value="3">涉密（需涉密权限）</option></select></label>'
     +'<label style="font-size:13px;">可见部门：<input id="ragDept" placeholder="全部门" style="padding:5px 8px; width:110px;"></label>'
@@ -320,7 +355,7 @@ async function openRag(){
     +'<input type="file" id="ragFiles" accept=".docx,.pdf,.txt" multiple style="display:none;">'
     +'<div id="ragProg" style="font-size:12px; color:var(--soft); margin-top:12px;">未开始</div></div>'
     +'<div style="margin-top:18px; display:flex; justify-content:space-between; align-items:center;"><b style="font-weight:600;">已入库文件</b>'
-    +'<label style="font-size:12px;">筛选分类：<select id="ragFilter" style="padding:4px 8px;"><option value="">全部</option><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select></label></div>'
+    +'<label style="font-size:12px;">筛选分类：<select id="ragFilter" style="padding:4px 8px;">'+ragCatOptionsHtml(true,"全部")+'</select></label></div>'
     +'<div id="ragFileList" style="font-size:12.5px;"><span style="color:var(--soft);">读取中…</span></div>'
     +'<div class="subnav" style="margin-top:18px; align-items:center;"><b style="font-weight:600; margin-right:6px;">检索测试</b>'
     +'<a href="javascript:void(0)" id="ragDash">📊 知识库看板</a>'
@@ -328,7 +363,7 @@ async function openRag(){
     +'<a href="javascript:void(0)" id="ragGraph">🕸 知识图谱</a>'
     +'<a href="javascript:void(0)" id="ragUsers">👥 用户权限</a>'
     +'<a href="javascript:void(0)" id="ragEval">🎯 检索评测</a></div>'
-    +'<div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; align-items:center;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1 1 260px; min-width:200px;"><select id="ragQCat" style="width:130px; flex-shrink:0;"><option value="">全部分类</option><option>可研报告</option><option>政策文件</option><option>制度规范</option><option>业务逻辑</option><option>会议纪要</option><option>其他</option></select><button class="btn sm" id="ragTest" style="flex-shrink:0;">检索</button></div>'
+    +'<div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; align-items:center;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1 1 260px; min-width:200px;"><select id="ragQCat" style="width:130px; flex-shrink:0;">'+ragCatOptionsHtml(true,"全部分类")+'</select><button class="btn sm" id="ragTest" style="flex-shrink:0;">检索</button></div>'
     +'<div id="ragHits" style="font-size:12.5px;"></div>'
     +'<div id="ragPanel" style="margin-top:10px;"></div>'
     +'<div class="bar" style="margin-top:18px;"><button class="btn ghost" id="ragBack">返回列表</button></div>';
@@ -578,7 +613,7 @@ async function ragGraphView(){
     if(!g.nodes.length){ box.innerHTML = '<span style="color:var(--soft);">暂无启用的文件可构建关联图</span>'; return; }
     const W=680, H=440, cx=W/2, cy=H/2, R=Math.min(W,H)/2-60;
     const n = g.nodes.length;
-    const CATC = {"可研报告":"#1E3A5C","政策文件":"#B7302B","制度规范":"#1F7A3D","业务逻辑":"#8A6D1B","会议纪要":"#7A5C99","其他":"#888","未分类":"#aaa"};
+    const CATC = new Proxy({}, { get:(t,k)=> ragCatColor(String(k)) });   // 配色统一从分类数据源取
     // 同类节点聚在相近角度
     const cats = [...new Set(g.nodes.map(x=>x.category))];
     const pos = g.nodes.map((nd,i)=>{
