@@ -466,72 +466,57 @@ function buildScDigest(){
   }
   return lines;
 }
-// ===== Agent化问答:工具调用 + 自主循环(第一步) =====
-// 工具一:查询本次测算的完整数字摘要(需要时才取,而不是每次都硬塞给模型)
-// 工具二:检索RAG知识库(政策/历史报告等真实资料)
-const AI_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "get_calc_summary",
-      description: "获取本次财务测算的完整真实数据摘要(收入/成本/税金/利润/IRR/NPV/分年现金流/评分/核心公式口径)。回答任何涉及具体数字、计算过程、测算结果的问题前，必须先调用此工具获取真实数据，禁止凭记忆编造数字。",
-      parameters: { type:"object", properties:{}, required:[] },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "search_knowledge_base",
-      description: "检索单位内部知识库(历史可研报告、政策文件、制度规范等真实资料)。当问题涉及政策依据、行业惯例、历史项目参考、需要引用真实文档来源时调用。",
-      parameters: {
-        type:"object",
-        properties:{
-          query:{type:"string", description:"检索关键词或问题"},
-          category:{type:"string", description:"限定分类(可选)：可研报告/政策文件/制度规范/业务逻辑/会议纪要/其他"},
-        },
-        required:["query"],
+// ===== Agent问答:注册工具 + 调用通用引擎(agent-core.js) =====
+// 工具注册在文件加载时执行一次;引擎负责ReAct循环、参数校验、链路日志
+(function registerCalcTools(){
+  if(!window.AgentCore) return;   // 防御:引擎未加载时不报错
+  const AC = window.AgentCore;
+
+  AC.registerTool("get_calc_summary", {
+    schema: {
+      type: "function",
+      function: {
+        name: "get_calc_summary",
+        description: "获取本次财务测算的完整真实数据摘要(收入/成本/税金/利润/IRR/NPV/分年现金流/评分/核心公式口径)。回答任何涉及具体数字、计算过程、测算结果的问题前，必须先调用此工具获取真实数据，禁止凭记忆编造数字。",
+        parameters: { type:"object", properties:{}, required:[] },
       },
     },
-  },
-];
+    label: ()=>"📊 读取本次测算结果",
+    run: async ()=> buildScDigest() || "（本次尚未完成测算，暂无数据）",
+  });
 
-// 工具参数校验(借鉴Pydantic思路的轻量JS实现):调用前先查参数是否合规
-// 校验不过时不执行工具，而是把错误原因回复给模型，让它自己纠正后重试——这本身就是一种自我纠错能力
-function validateToolArgs(name, args){
-  args = args || {};
-  if(name === "search_knowledge_base"){
-    if(!args.query || typeof args.query !== "string" || !args.query.trim()){
-      return { ok:false, error:"参数错误：query 不能为空，请提供具体的检索关键词" };
-    }
-    if(args.query.length > 200){
-      return { ok:false, error:"参数错误：query 过长(超过200字)，请提炼为简短关键词后重试" };
-    }
-    const validCats = ["可研报告","政策文件","制度规范","业务逻辑","会议纪要","其他"];
-    if(args.category !== undefined && args.category !== "" && !validCats.includes(args.category)){
-      return { ok:false, error:"参数错误：category 必须是["+validCats.join("/")+"]之一，或不传该参数" };
-    }
-    return { ok:true };
-  }
-  if(name === "get_calc_summary"){
-    return { ok:true };   // 无参数,恒通过
-  }
-  return { ok:false, error:"未知工具：'+name+'" };
-}
-
-async function execTool(name, args){
-  if(name === "get_calc_summary") return buildScDigest() || "（本次尚未完成测算，暂无数据）";
-  if(name === "search_knowledge_base"){
-    try{
+  AC.registerTool("search_knowledge_base", {
+    schema: {
+      type: "function",
+      function: {
+        name: "search_knowledge_base",
+        description: "检索单位内部知识库(历史可研报告、政策文件、制度规范等真实资料)。当问题涉及政策依据、行业惯例、历史项目参考、需要引用真实文档来源时调用。",
+        parameters: {
+          type:"object",
+          properties:{
+            query:{type:"string", description:"检索关键词或问题"},
+            category:{type:"string", description:"限定分类(可选)：可研报告/政策文件/制度规范/业务逻辑/会议纪要/其他"},
+          },
+          required:["query"],
+        },
+      },
+    },
+    validate: (args)=> AC.V.all([
+      AC.V.requiredString(args, "query", 200, "query"),
+      AC.V.optionalEnum(args, "category", ["可研报告","政策文件","制度规范","业务逻辑","会议纪要","其他"], "category"),
+    ]),
+    label: (args)=>"🔍 检索知识库：" + (args.query || ""),
+    run: async (args)=>{
       const r = await fetch("/api/rag",{method:"POST",
         headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
         body:JSON.stringify({action:"query", query:args.query||"", category:args.category, topK:4})});
       const d = await r.json();
       if(!d.ok || !(d.matches||[]).length) return "（知识库未检索到相关内容）";
       return d.matches.map(m=>"【"+m.title+(m.chapter?" · "+m.chapter:"")+"】"+String(m.text||"").slice(0,300)).join("\n\n");
-    }catch(e){ return "（知识库检索失败："+e.message+"）"; }
-  }
-  return "（未知工具）";
-}
+    },
+  });
+})();
+
 async function askAI(){
   const inp = document.getElementById("aiQ");
   const q = inp.value.trim();
@@ -541,65 +526,26 @@ async function askAI(){
   aiChat.push({role:"user", content:q});
   renderAiMsgs();
   inp.value = "";
-  const traceEl = ()=>{ const t=document.getElementById("aiTrace"); return t; };
-  let trace = [];
-  try{
-    const sys = "你是保障性住房项目财务测算专家。你可以调用工具获取真实数据后再回答，禁止在未调用工具、没有真实依据的情况下编造具体数字。回答简明、专业、分点，200-400字，涉及数字必须逐字引用工具返回的真实结果。";
-    // 维护一份"给模型看"的对话(含工具调用记录),与"给用户看"的aiChat分开
-    let convo = aiChat.slice(-6).filter(m=>!m.hidden).map(m=>({role:m.role, content:m.content}));
-    let rounds = 0;
-    let allToolCalls = [];
-    let finalAnswer = "";
-    const startedAt = Date.now();
-    while(rounds < 3){
-      rounds++;
-      const resp = await fetch("/api/generate",{method:"POST",
-        headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
-        body:JSON.stringify({system:sys, messages:convo, tools:AI_TOOLS})});
-      const data = await resp.json();
-      if(data.error) throw new Error(data.error);
-      const calls = data.tool_calls;
-      const text = (data.content||[]).map(b=>b.text||"").join("").trim();
-      if(calls && calls.length){
-        // 模型请求调用工具:展示"正在检索…"过程,先校验参数,合规才真正执行
-        convo.push({role:"assistant", content:text||null, tool_calls:calls});
-        for(const c of calls){
-          let args = {};
-          try{ args = JSON.parse(c.function.arguments||"{}"); }catch(e){}
-          const v = validateToolArgs(c.function.name, args);
-          if(!v.ok){
-            // 参数不合规:不执行工具,把错误原因回给模型自己纠正(自我纠错,下一轮它会带着正确参数重试)
-            trace.push("⚠️ 参数校验未通过："+v.error);
-            if(traceEl()) traceEl().innerHTML = trace.map(t=>'<div style="font-size:11.5px; color:var(--ink-soft);">'+escapeHtml(t)+'…</div>').join("");
-            convo.push({role:"tool", tool_call_id:c.id, content:"工具调用失败："+v.error});
-            allToolCalls.push({name:c.function.name, args, error:v.error});
-            continue;
-          }
-          const label = c.function.name==="get_calc_summary" ? "📊 读取本次测算结果"
-            : "🔍 检索知识库："+(args.query||"");
-          trace.push(label);
-          if(traceEl()) traceEl().innerHTML = trace.map(t=>'<div style="font-size:11.5px; color:var(--ink-soft);">'+escapeHtml(t)+'…</div>').join("");
-          const result = await execTool(c.function.name, args);
-          convo.push({role:"tool", tool_call_id:c.id, content:result});
-          allToolCalls.push({name:c.function.name, args});
-        }
-        continue;   // 带着工具结果再问一轮
-      }
-      // 无工具调用:模型给出最终答案
-      aiChat.push({role:"assistant", content:text||"（未返回内容）", trace: trace.slice()});
-      finalAnswer = text||"";
-      break;
-    }
-    if(rounds>=3 && !aiChat.length) aiChat.push({role:"assistant", content:"多次尝试后仍无法给出确定回答，请换个问法或补充信息。"});
-  }catch(e){ aiChat.push({role:"assistant", content:"回答失败："+e.message}); }
-  // 上报调用链路(自建日志,替代第三方LangSmith,数据留在自己账号内;失败不影响使用)
-  try{
-    await fetch("/api/agent",{method:"POST", headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
-      body:JSON.stringify({action:"trace", query:q, rounds, toolCalls:allToolCalls, finalAnswer, durationMs: Date.now()-startedAt})});
-  }catch(e){}
+
+  const sys = "你是保障性住房项目财务测算专家。你可以调用工具获取真实数据后再回答，禁止在未调用工具、没有真实依据的情况下编造具体数字。回答简明、专业、分点，200-400字，涉及数字必须逐字引用工具返回的真实结果。";
+  const msgs = aiChat.slice(-6).filter(m=>!m.hidden).map(m=>({role:m.role, content:m.content}));
+
+  const res = await window.AgentCore.run({
+    system: sys,
+    messages: msgs,
+    tools: ["get_calc_summary", "search_knowledge_base"],
+    traceQuery: q,
+    onTrace: (lines)=>{
+      const t = document.getElementById("aiTrace");
+      if(t) t.innerHTML = lines.map(x=>'<div style="font-size:11.5px; color:var(--ink-soft);">'+escapeHtml(x)+'…</div>').join("");
+    },
+  });
+
+  aiChat.push({role:"assistant", content: res.text || "（未返回内容）", trace: res.trace});
   renderAiMsgs();
   btn.disabled = false; btn.textContent = "提问";
 }
+
 function renderAiMsgs(){
   const box = document.getElementById("aiMsgs");
   if(!box) return;
