@@ -278,7 +278,12 @@
     box.innerHTML = awChat.map(m=>{
       const traceHtml = (m.trace && m.trace.length) ? '<div class="aw-trace">'+m.trace.map(t=>esc(t)).join("<br>")+'</div>' : "";
       const navBtn = m.role==="assistant" ? renderNavButtons(m.navTarget) : "";
-      return '<div class="aw-m '+(m.role==="user"?"aw-u":"aw-a")+'">'+(m.role==="user"?"<b>你：</b>":"<b>AI：</b>")+traceHtml+esc(m.content).replace(/\n/g,"<br>")+navBtn+'</div>';
+      const scBadge = (m.role==="assistant" && m.selfChecked)
+        ? '<div style="font-size:10.5px; color:var(--ok-green,#3E7A53); margin-top:5px;">✓ 已自我核查'
+          + ((m.selfCheckNotes && m.selfCheckNotes.length) ? '（首版存在「'+esc(m.selfCheckNotes[0])+'」，已补充后重答）' : '')
+          + '</div>'
+        : "";
+      return '<div class="aw-m '+(m.role==="user"?"aw-u":"aw-a")+'">'+(m.role==="user"?"<b>你：</b>":"<b>AI：</b>")+traceHtml+esc(m.content).replace(/\n/g,"<br>")+scBadge+navBtn+'</div>';
     }).join("");
     box.querySelectorAll(".aw-nav-btn").forEach(b=>{ b.onclick = ()=> doNav(b.dataset.nav); });
     box.scrollTop = box.scrollHeight;
@@ -315,7 +320,8 @@
     (res.toolCalls||[]).forEach(tc=>{
       if(tc.name === "suggest_navigation" && !tc.error && tc.args && tc.args.target) navTarget = tc.args.target;
     });
-    awChat.push({role:"assistant", content: res.text || "（未返回内容）", trace: res.trace, navTarget});
+    awChat.push({role:"assistant", content: res.text || "（未返回内容）", trace: res.trace, navTarget,
+                 selfChecked: res.selfChecked, selfCheckNotes: res.selfCheckNotes});
     renderAw();
     sendBtn.disabled = false; sendBtn.textContent = "发送";
   }
