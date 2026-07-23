@@ -494,6 +494,30 @@ const AI_TOOLS = [
     },
   },
 ];
+
+// 工具参数校验(借鉴Pydantic思路的轻量JS实现):调用前先查参数是否合规
+// 校验不过时不执行工具，而是把错误原因回复给模型，让它自己纠正后重试——这本身就是一种自我纠错能力
+function validateToolArgs(name, args){
+  args = args || {};
+  if(name === "search_knowledge_base"){
+    if(!args.query || typeof args.query !== "string" || !args.query.trim()){
+      return { ok:false, error:"参数错误：query 不能为空，请提供具体的检索关键词" };
+    }
+    if(args.query.length > 200){
+      return { ok:false, error:"参数错误：query 过长(超过200字)，请提炼为简短关键词后重试" };
+    }
+    const validCats = ["可研报告","政策文件","制度规范","业务逻辑","会议纪要","其他"];
+    if(args.category !== undefined && args.category !== "" && !validCats.includes(args.category)){
+      return { ok:false, error:"参数错误：category 必须是["+validCats.join("/")+"]之一，或不传该参数" };
+    }
+    return { ok:true };
+  }
+  if(name === "get_calc_summary"){
+    return { ok:true };   // 无参数,恒通过
+  }
+  return { ok:false, error:"未知工具：'+name+'" };
+}
+
 async function execTool(name, args){
   if(name === "get_calc_summary") return buildScDigest() || "（本次尚未完成测算，暂无数据）";
   if(name === "search_knowledge_base"){
@@ -524,6 +548,9 @@ async function askAI(){
     // 维护一份"给模型看"的对话(含工具调用记录),与"给用户看"的aiChat分开
     let convo = aiChat.slice(-6).filter(m=>!m.hidden).map(m=>({role:m.role, content:m.content}));
     let rounds = 0;
+    let allToolCalls = [];
+    let finalAnswer = "";
+    const startedAt = Date.now();
     while(rounds < 3){
       rounds++;
       const resp = await fetch("/api/generate",{method:"POST",
@@ -534,26 +561,42 @@ async function askAI(){
       const calls = data.tool_calls;
       const text = (data.content||[]).map(b=>b.text||"").join("").trim();
       if(calls && calls.length){
-        // 模型请求调用工具:展示"正在检索…"过程,执行工具,把结果回填继续对话
+        // 模型请求调用工具:展示"正在检索…"过程,先校验参数,合规才真正执行
         convo.push({role:"assistant", content:text||null, tool_calls:calls});
         for(const c of calls){
           let args = {};
           try{ args = JSON.parse(c.function.arguments||"{}"); }catch(e){}
+          const v = validateToolArgs(c.function.name, args);
+          if(!v.ok){
+            // 参数不合规:不执行工具,把错误原因回给模型自己纠正(自我纠错,下一轮它会带着正确参数重试)
+            trace.push("⚠️ 参数校验未通过："+v.error);
+            if(traceEl()) traceEl().innerHTML = trace.map(t=>'<div style="font-size:11.5px; color:var(--ink-soft);">'+escapeHtml(t)+'…</div>').join("");
+            convo.push({role:"tool", tool_call_id:c.id, content:"工具调用失败："+v.error});
+            allToolCalls.push({name:c.function.name, args, error:v.error});
+            continue;
+          }
           const label = c.function.name==="get_calc_summary" ? "📊 读取本次测算结果"
             : "🔍 检索知识库："+(args.query||"");
           trace.push(label);
           if(traceEl()) traceEl().innerHTML = trace.map(t=>'<div style="font-size:11.5px; color:var(--ink-soft);">'+escapeHtml(t)+'…</div>').join("");
           const result = await execTool(c.function.name, args);
           convo.push({role:"tool", tool_call_id:c.id, content:result});
+          allToolCalls.push({name:c.function.name, args});
         }
         continue;   // 带着工具结果再问一轮
       }
       // 无工具调用:模型给出最终答案
       aiChat.push({role:"assistant", content:text||"（未返回内容）", trace: trace.slice()});
+      finalAnswer = text||"";
       break;
     }
     if(rounds>=3 && !aiChat.length) aiChat.push({role:"assistant", content:"多次尝试后仍无法给出确定回答，请换个问法或补充信息。"});
   }catch(e){ aiChat.push({role:"assistant", content:"回答失败："+e.message}); }
+  // 上报调用链路(自建日志,替代第三方LangSmith,数据留在自己账号内;失败不影响使用)
+  try{
+    await fetch("/api/agent",{method:"POST", headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
+      body:JSON.stringify({action:"trace", query:q, rounds, toolCalls:allToolCalls, finalAnswer, durationMs: Date.now()-startedAt})});
+  }catch(e){}
   renderAiMsgs();
   btn.disabled = false; btn.textContent = "提问";
 }
