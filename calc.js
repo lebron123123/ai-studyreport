@@ -1,4 +1,4 @@
-// 测算相关模块 —— 从 index.html 内联脚本拆分而来  
+// 测算相关模块 —— 从 index.html 内联脚本拆分而来
 // 覆盖：测算表单渲染/读取、明细表规格、Excel导出前的数据准备、灵敏度分析、模式对比、AI问答、汇总卡片渲染等
 let calcType = null;         // 'gaibao' | 'rent' | 'sale'
 let scStep = 0;              // 测算模块步骤 0选类型 1参数 2结果
@@ -602,6 +602,7 @@ function bindCalcEvents(){
   if(s("homeCalc")) s("homeCalc").onclick=()=>{ appMode="calc"; scStep=0; renderTOC(); renderSheet(); };
   if(s("homeReport")) s("homeReport").onclick=()=>{ appMode="report"; renderTOC(); renderSheet(); };
   if(s("homeReview")) s("homeReview").onclick=()=>{ appMode="review"; rvStep=0; renderTOC(); renderSheet(); };
+  if(s("homeOffice")) s("homeOffice").onclick=()=>{ appMode="office"; renderTOC(); renderSheet(); };
 }
 
 function calcFormHtml(){
@@ -832,3 +833,6 @@ function buildCalcDigest(){
         + r.sens.map(x=>x.label+"：IRR "+(x.irr===null?"—":x.irr+"%")+"，累计净现值 "+fmt(x.npv)+"万元").join("\n") : "");
   return modeBlock + digest;
 }
+
+
+
