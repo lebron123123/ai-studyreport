@@ -416,7 +416,8 @@ async function ragRetrieve(chapterName, secTitle){
       const tier = ragTierOf(m.score);
       const c = String(m.text).slice(0, Math.min(1400, budget));
       budget -= c.length;
-      out += "《"+(m.title||"历史报告")+"·"+(m.section||m.chapter||"")+"》【"+tier.label+"·匹配度"+m.score+"】\n"+c+"\n\n";
+      const lifeTag = (m.lifecycle && m.lifecycle !== "valid") ? "⚠该文件"+(m.lifecycleNote||"时效异常")+"，不得作为现行依据引用；" : "";
+      out += "《"+(m.title||"历史报告")+"·"+(m.section||m.chapter||"")+"》【"+lifeTag+tier.label+"·匹配度"+m.score+"】\n"+c+"\n\n";
     });
     return out;
   }catch(e){ return ""; }
