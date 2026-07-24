@@ -348,7 +348,9 @@ async function openRag(){
     +'<label style="font-size:13px;">权威等级：<select id="ragLevel" style="padding:5px 8px;"><option value="1">权威（政策/正式文件）</option><option value="2" selected>参考（一般报告）</option><option value="3">存档（历史/非正式）</option></select></label>'
     +'<label style="font-size:13px;">密级：<select id="ragSec" style="padding:5px 8px;"><option value="1" selected>公开（全员可见）</option><option value="2">内部（需内部权限）</option><option value="3">涉密（需涉密权限）</option></select></label>'
     +'<label style="font-size:13px;">可见部门：<input id="ragDept" placeholder="全部门" style="padding:5px 8px; width:110px;"></label>'
-    +'<span style="font-size:11px; color:var(--soft); width:100%;">上传的这批文件统一按以上分类/等级/密级/部门归档；可见部门留空=全部门可见</span>'
+    +'<label style="font-size:13px;">生效日期：<input id="ragEffDate" type="date" style="padding:4px 6px; width:150px;"></label>'
+    +'<label style="font-size:13px;">失效日期：<input id="ragExpDate" type="date" style="padding:4px 6px; width:150px;"></label>'
+    +'<span style="font-size:11px; color:var(--soft); width:100%;">上传的这批文件统一按以上分类/等级/密级/部门归档；可见部门留空=全部门可见；<b>日期留空=长期有效</b>（政策类文件建议填失效日期，过期后自动降权并标注，避免旧政策被当作现行依据）</span>'
     +'<span id="ragChunkHint" style="font-size:11px; color:var(--bp,#2C6CA6); width:100%;"></span></div>'
     +'<div style="border:2px dashed var(--line); background:#fff; padding:26px; text-align:center;">'
     +'<button class="btn" id="ragPick">选择文件（可多选）</button>'
@@ -403,6 +405,9 @@ async function ragIngest(files){
   // 分类提前读取：切块参数按分类定制，必须在切块前拿到
   const ingestCat = document.getElementById("ragCat") ? document.getElementById("ragCat").value : "未分类";
   const prof = ragProfileOf(ingestCat);
+  // 时效日期同样在入库开始时锁定，避免上传过程中被改动导致批次内不一致
+  const ingestEffD = document.getElementById("ragEffDate") ? document.getElementById("ragEffDate").value : "";
+  const ingestExpD = document.getElementById("ragExpDate") ? document.getElementById("ragExpDate").value : "";
   for(let fi=0; fi<files.length; fi++){
     const f = files[fi];
     prog.textContent = "解析 "+(fi+1)+"/"+files.length+"：《"+f.name+"》（"+ingestCat+"："+prof.note+"）…";
@@ -421,7 +426,8 @@ async function ragIngest(files){
         const sec = document.getElementById("ragSec")? document.getElementById("ragSec").value : 1;
         const dept = document.getElementById("ragDept") && document.getElementById("ragDept").value.trim() ? document.getElementById("ragDept").value.trim() : "全部门";
         const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),
-          body:JSON.stringify({action:"upsert", chunks:chunks.slice(i,i+10), category:cat, level:lvl, security:sec, deptScope:dept})});
+          body:JSON.stringify({action:"upsert", chunks:chunks.slice(i,i+10), category:cat, level:lvl, security:sec, deptScope:dept,
+                               effectiveDate:ingestEffD, expiryDate:ingestExpD})});
         const d = await r.json();
         if(d.ok) okChunks += d.count; else{ failed.push(f.name+"批次"+i+"："+d.error); break; }
       }catch(e){ failed.push(f.name+"批次"+i+"：网络错误"); break; }
@@ -432,6 +438,27 @@ async function ragIngest(files){
   refreshRagFiles();
 }
 
+
+// 知识时效：徽章显示（过期/待生效/临近失效/长期有效）
+function ragLifeStatus(effDate, expDate){
+  const today = new Date().toISOString().slice(0,10);
+  // 非法日期一律按"未设置"处理，避免脏数据导致误判为未生效/已失效
+  const norm = (s)=>{ s = String(s||"").trim(); return /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s)) ? s : ""; };
+  const eff = norm(effDate), exp = norm(expDate);
+  if(exp && exp < today) return { key:"expired", label:"已失效", color:"#B7302B", bg:"#FDECEA", tip:"失效于"+exp };
+  if(eff && eff > today) return { key:"pending", label:"未生效", color:"#8A6D1B", bg:"#FFF8E1", tip:eff+"起生效" };
+  if(exp){
+    const d = (new Date(exp) - new Date(today)) / 86400000;
+    if(d >= 0 && d <= 30) return { key:"expiring", label:"即将失效", color:"#C77700", bg:"#FFF3E0", tip:exp+"失效" };
+    return { key:"valid", label:"", color:"", bg:"", tip:"有效至"+exp };
+  }
+  return { key:"valid", label:"", color:"", bg:"", tip:"长期有效" };
+}
+function ragLifeBadge(effDate, expDate){
+  const s = ragLifeStatus(effDate, expDate);
+  if(!s.label) return '';
+  return '<span title="'+esc(s.tip)+'" style="font-size:11px; padding:1px 7px; border-radius:3px; background:'+s.bg+'; color:'+s.color+';">'+s.label+'</span>';
+}
 async function refreshRagFiles(){
   const box = document.getElementById("ragFileList");
   try{
@@ -455,11 +482,31 @@ async function refreshRagFiles(){
       +'<span style="font-size:11px; color:'+LVC[lvl]+';">'+LVN[lvl]+'</span>'
       +'<span style="font-size:11px; color:'+(f.security==3?"#B7302B":f.security==2?"#8A6D1B":"#1F7A3D")+';">'+SECN[parseInt(f.security)||1]+'</span>'
       +(f.dept_scope && f.dept_scope!=="全部门" ? '<span style="font-size:11px; padding:1px 6px; background:#EEF; color:#33a;">'+esc(f.dept_scope)+'</span>' : '')
+      +ragLifeBadge(f.effective_date, f.expiry_date)
       +'<span style="color:var(--soft);">'+f.chunks+'块</span>'
+      +'<button class="btn sm" data-raglife="'+esc(f.title)+'" data-eff="'+esc(f.effective_date||"")+'" data-exp="'+esc(f.expiry_date||"")+'">时效</button>'
       +'<button class="btn sm" data-ragscope="'+esc(f.title)+'" data-sec="'+(parseInt(f.security)||1)+'" data-dept="'+esc(f.dept_scope||"全部门")+'">权限</button>'
       +'<button class="btn sm" data-ragtoggle="'+esc(f.title)+'" data-en="'+(en?1:0)+'">'+(en?"停用":"启用")+'</button>'
       +'<button class="btn sm red" data-ragdel="'+esc(f.title)+'">删除</button></div>';
     }).join("");
+    box.querySelectorAll("[data-raglife]").forEach(b=>{
+      b.onclick = async ()=>{
+        const t = b.dataset.raglife;
+        const eff = prompt("生效日期（YYYY-MM-DD，留空=不限）\n文件：" + t, b.dataset.eff || "");
+        if(eff === null) return;
+        const exp = prompt("失效日期（YYYY-MM-DD，留空=长期有效）\n政策类文件建议填写，过期后自动降权并标注", b.dataset.exp || "");
+        if(exp === null) return;
+        const fmtOk = (s)=> s==="" || /^\d{4}-\d{2}-\d{2}$/.test(s);
+        if(!fmtOk(eff.trim()) || !fmtOk(exp.trim())){ msg("日期格式须为 YYYY-MM-DD 或留空","err"); return; }
+        if(eff.trim() && exp.trim() && eff.trim() > exp.trim()){ msg("生效日期不能晚于失效日期","err"); return; }
+        try{
+          const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),
+            body:JSON.stringify({action:"setLifecycle", title:t, effectiveDate:eff.trim(), expiryDate:exp.trim()})});
+          const d = await r.json();
+          if(d.ok){ msg("时效已更新","ok"); refreshRagFiles(); } else msg(d.error||"更新失败","err");
+        }catch(e){ msg("网络错误","err"); }
+      };
+    });
     box.querySelectorAll("[data-ragscope]").forEach(b=>{
       b.onclick = ()=>{
         const t=b.dataset.ragscope;
@@ -525,7 +572,7 @@ async function ragTest(){
     const d = await r.json();
     if(!d.ok){ box.textContent = d.error; return; }
     box.innerHTML = (d.matches||[]).map(m=>'<div style="border:1px solid var(--line); background:#fff; padding:8px 10px; margin-top:8px;">'
-      +'<b>'+esc(m.title||"")+'</b>'+(m.category?' <span style="font-size:11px; padding:0 6px; border:1px solid var(--line); color:var(--soft);">'+esc(m.category)+'</span>':'')+(m.level==1?' <span style="font-size:11px; color:#1F7A3D;">权威</span>':m.level==3?' <span style="font-size:11px; color:#888;">存档</span>':'')+' ｜ '+esc(m.chapter||"")+' / '+esc(m.section||"")+' ｜ 相似度 '+m.score+ragTierBadge(m.score)+(m.rerankScore!==undefined?' <span style="color:#B7302B; font-weight:600;">｜重排 '+m.rerankScore+'</span>':'')
+      +'<b>'+esc(m.title||"")+'</b>'+(m.category?' <span style="font-size:11px; padding:0 6px; border:1px solid var(--line); color:var(--soft);">'+esc(m.category)+'</span>':'')+(m.level==1?' <span style="font-size:11px; color:#1F7A3D;">权威</span>':m.level==3?' <span style="font-size:11px; color:#888;">存档</span>':'')+' ｜ '+esc(m.chapter||"")+' / '+esc(m.section||"")+' ｜ 相似度 '+m.score+ragTierBadge(m.score)+(m.lifecycle && m.lifecycle!=="valid" ? ' <span style="font-size:11px; padding:0 6px; border-radius:3px; background:#FDECEA; color:#B7302B;">⚠'+esc(m.lifecycleNote||m.lifecycle)+'</span>' : '')+(m.rerankScore!==undefined?' <span style="color:#B7302B; font-weight:600;">｜重排 '+m.rerankScore+'</span>':'')
       +(m.kwHits&&m.kwHits.length?' <span style="font-size:11px; color:#1a5fb4;">🔍命中词：'+esc(m.kwHits.join("、"))+'</span>':'')
       +'<div style="color:var(--soft); margin-top:4px;">'+esc((m.text||"").slice(0,160))+'…</div>'
       +'<div style="margin-top:6px; font-size:11px;">这条结果对检索\''+esc(q)+'\'：<a href="javascript:void(0)" class="fb-good" data-q="'+esc(q)+'" data-t="'+esc(m.title||"")+'" style="margin:0 8px;">👍有用</a><a href="javascript:void(0)" class="fb-bad" data-q="'+esc(q)+'" data-t="'+esc(m.title||"")+'">👎无关</a></div>'
