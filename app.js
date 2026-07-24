@@ -1,7 +1,7 @@
-// 应用外壳/路由模块 —— 从 index.html 内联脚本拆分而来（步骤路由、TOC导航、首页、公共工具函数、全局事件绑定）  
+// 应用外壳/路由模块 —— 从 index.html 内联脚本拆分而来（步骤路由、TOC导航、首页、公共工具函数、全局事件绑定）
 const STEPS = ["选择领域","项目信息","财务测算","章节范围","逐章生成","复核与签发"];
 let currentStep = 0;
-let appMode = null;          // null=首页 | 'report'=可研生成 | 'calc'=独立测算  
+let appMode = null;          // null=首页 | 'report'=可研生成 | 'calc'=独立测算
 function mountAnchorNav(){
   const old = document.getElementById("anchorNav");
   if(old) old.remove();
@@ -32,6 +32,7 @@ function renderTOC(){
       {id:"homeCalc",  ic:"📊", label:"财务测算"},
       {id:"homeReview",ic:"🔍", label:"可研智能审查"},
       {id:"homeReport",ic:"📄", label:"可研生成"},
+      {id:"homeOffice",ic:"💬", label:"AI办公助手"},
     ];
     items += HM.map(m=>'<div class="toc-item" data-home="'+m.id+'" style="cursor:pointer;"><span class="num">'+m.ic+'</span><span>'+m.label+'</span></div>').join("");
   }
@@ -74,6 +75,7 @@ function renderSheet(){
   if(appMode===null){ sheet.innerHTML = stepHome(); bindEvents(); bindCalcEvents(); mountAnchorNav(); return; }
   if(appMode==="calc"){ sheet.innerHTML = renderCalcModule(); bindEvents(); bindCalcEvents(); mountAnchorNav(); return; }
   if(appMode==="review"){ sheet.innerHTML = renderReviewModule(); bindEvents(); bindReviewEvents(); mountAnchorNav(); return; }
+  if(appMode==="office"){ sheet.innerHTML = stepOffice(); bindEvents(); bindOfficeEvents(); return; }
   if(currentStep===0) sheet.innerHTML = stepDomain();
   if(currentStep===1) sheet.innerHTML = stepProjectInfo();
   if(currentStep===2) sheet.innerHTML = stepCalc();
@@ -137,6 +139,7 @@ function stepHome(){
     +'<div class="domain-card" id="homeCalc"></div>'
     +'<div class="domain-card" id="homeReview"></div>'
     +'<div class="domain-card" id="homeReport"></div>'
+    +'<div class="domain-card" id="homeOffice"></div>'
     +'</div>';
 }
 
