@@ -123,6 +123,27 @@ function buildExportPayload(){
     })
   }));
 
+  // 溯源清单：逐节记录生成依据与置信度，作为附录随报告一并交付（满足可追溯审计要求）
+  const provRows = [["章节", "小节", "置信度", "主要依据"]];
+  let provCount = 0;
+  active.forEach(c=>{
+    c.sections.forEach(s=>{
+      if(!s.prov || !s.prov.confidence) return;
+      provCount++;
+      const cf = s.prov.confidence;
+      const parts = [];
+      if(s.prov.hasCalcData) parts.push("内置公式测算数据");
+      if((s.prov.kbDocs||[]).length) parts.push("资料库：" + s.prov.kbDocs.map(d=>d.title).join("、"));
+      if((s.prov.rag||[]).length) parts.push("知识库：" + s.prov.rag.map(r=>r.title+"("+r.tier+r.score+")"
+        + (r.lifecycle && r.lifecycle!=="valid" ? "⚠"+(r.lifecycleNote||"") : "")).join("；"));
+      if((s.prov.examples||[]).length) parts.push("范例：" + s.prov.examples.map(e=>e.title).join("、"));
+      if(!parts.length) parts.push("项目信息与模型通用知识");
+      provRows.push(["第"+c.cn+"章 "+c.name, s.title||s.t, cf.label+"("+Math.round(cf.score*100)+"分)", parts.join("；")]);
+    });
+  });
+  const provenance = provCount ? { rows: provRows,
+    note: "本表记录报告各小节的生成依据与置信度评级，供复核与审计追溯。置信度按素材构成计算：引用内置公式测算数据者最高，有高匹配知识库依据者次之，仅凭项目信息生成者最低。标注⚠的资料存在时效问题，须人工核实后方可作为依据。" } : null;
+
   let appendix = null;
   if(calcResult){
     const r = calcResult, s = r.summary;
@@ -139,7 +160,7 @@ function buildExportPayload(){
       mainRows, sensRows,
     };
   }
-  return { project: project, signed: signed, docNo: getDocNo(), chapters: chs, appendix };
+  return { project: project, signed: signed, docNo: getDocNo(), chapters: chs, appendix, provenance };
 }
 
 /* ===== 图表转PNG(嵌入Word用) ===== */
@@ -216,5 +237,3 @@ async function exportWord(){
   }
   if(btn){ btn.disabled = false; btn.textContent = "导出 Word"; }
 }
-
-
