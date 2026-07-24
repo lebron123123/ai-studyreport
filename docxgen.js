@@ -133,6 +133,26 @@
     ? "本报告已经人工复核确认签发，签发日期："+new Date().toLocaleDateString("zh-CN")
     : "本报告为AI生成初稿，尚未经过人工复核签发，其中标注\u201c待填\u201d的数据须补充真实测算结果，正式使用前须完成审核。";
   // ===== 附图（图表PNG） =====
+  // ===== 溯源附录：逐节生成依据与置信度（可追溯审计） =====
+  if(payload.provenance && payload.provenance.rows && payload.provenance.rows.length > 1){
+    children.push(new D.Paragraph({ children:[run("附：内容溯源与依据说明",{size:28,bold:true})],
+      heading:D.HeadingLevel.HEADING_1, alignment:D.AlignmentType.CENTER,
+      spacing:{before:400, after:200}, pageBreakBefore:true }));
+    children.push(new D.Paragraph({ children:[run(payload.provenance.note,{size:20,color:"666666"})],
+      spacing:{after:200} }));
+    const rows = payload.provenance.rows;
+    const table = new D.Table({
+      width:{ size:100, type:D.WidthType.PERCENTAGE },
+      rows: rows.map((r, ri)=> new D.TableRow({
+        children: r.map(cell=> new D.TableCell({
+          children:[ new D.Paragraph({ children:[run(String(cell==null?"":cell), { size: ri===0?19:18, bold: ri===0 })] }) ],
+          shading: ri===0 ? { fill:"E8EEF5" } : undefined,
+        })),
+      })),
+    });
+    children.push(table);
+  }
+
   if(payload.images && payload.images.length){
     children.push(new D.Paragraph({ children:[run("附　图",{size:28,bold:true})],
       heading:D.HeadingLevel.HEADING_1, alignment:D.AlignmentType.CENTER,
