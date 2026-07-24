@@ -2,7 +2,7 @@
 // POST {action:"upsert", chunks:[{title,chapter,section,text}]}  管理员入库
 // POST {action:"query", query, topK}                             登录用户检索
 // POST {action:"stats"}                                          管理员查看规模
-import { verifyAuth, json } from "./_auth.js";
+import { verifyAuth, json } from "./_auth.js"; 
 
 function isAdmin(env, user){
   const admins = (env.ADMIN_USERS || "").split(",").map(s=>s.trim()).filter(Boolean);
