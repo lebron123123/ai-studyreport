@@ -29,6 +29,52 @@ export async function onRequestPost(context){
   let body;
   try{ body = await request.json(); }catch(e){ return json({ok:false, error:"格式有误"}, 400); }
 
+  // 多格式解析：用 Workers AI 的 toMarkdown 处理浏览器端解析不了的格式
+  // 支持：图片(jpg/png/webp，走视觉模型≈OCR)、xlsx/csv/pptx等Office格式、html/xml
+  // 注意：扫描版PDF（整页为图片、无文字层）toMarkdown 亦无法提取，需人工转文字后上传
+  if(body.action === "parseFile"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const name = String(body.name||"file").slice(0,120);
+    const b64 = String(body.dataBase64||"");
+    if(!b64) return json({ok:false, error:"文件内容为空"}, 400);
+    try{
+      // base64 → 二进制
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+      const results = await env.AI.toMarkdown([{ name, blob: new Blob([bytes], { type:"application/octet-stream" }) }]);
+      const first = Array.isArray(results) ? results[0] : results;
+      const text = (first && first.data) ? String(first.data) : "";
+      if(!text.trim()) return json({ok:false, error:"未能从该文件中提取到文字内容（若为扫描件PDF，请先用OCR工具转成文字或图片格式后再上传）"}, 400);
+      return json({ok:true, text, mimeType: first && first.mimeType, tokens: first && first.tokens});
+    }catch(e){
+      return json({ok:false, error:"解析失败："+e.message}, 500);
+    }
+  }
+
+  // 上传预检：判断这份文件是"全新"、"内容完全重复"还是"同名旧版需替换"
+  if(body.action === "precheck"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const title = String(body.title||"").slice(0,80);
+    const hash = String(body.contentHash||"").slice(0,64);
+    if(!title) return json({ok:false, error:"缺少文件名"}, 400);
+    try{
+      // 内容哈希完全一致 → 真重复（哪怕改了文件名也能识别出来）
+      if(hash){
+        const dup = await env.DB.prepare("SELECT title, version, updated_at, created_at FROM rag_files_v2 WHERE content_hash=? LIMIT 1").bind(hash).first();
+        if(dup) return json({ok:true, verdict:"duplicate", existingTitle:dup.title, version:dup.version||1,
+          at: dup.updated_at || dup.created_at });
+      }
+      // 同名但内容不同 → 视为新版本，建议替换
+      const same = await env.DB.prepare("SELECT title, version, chunks, updated_at, created_at FROM rag_files_v2 WHERE title=?").bind(title).first();
+      if(same) return json({ok:true, verdict:"newVersion", existingTitle:same.title, version:same.version||1,
+        chunks:same.chunks, at: same.updated_at || same.created_at });
+      return json({ok:true, verdict:"new"});
+    }catch(e){ return json({ok:true, verdict:"new", warn:e.message}); }
+  }
+
   if(body.action === "upsert"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员可入库"}, 403);
   if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
@@ -49,8 +95,26 @@ export async function onRequestPost(context){
         text: texts[i],
       },
     }));
+    // 替换模式：本批次是该文件的第一批时，先删除旧版本的全部向量，避免新旧版本同时被检索到
+    // （replaceMode=true 且 isFirstBatch=true 时才删，后续批次继续追加本次的新块）
+    let replacedOld = 0;
+    if(body.replaceMode && body.isFirstBatch){
+      try{
+        const title0 = String(chunks[0].title||"未命名").slice(0,80);
+        const oldRow = await env.DB.prepare("SELECT ids FROM rag_files_v2 WHERE title=?").bind(title0).first();
+        if(oldRow && oldRow.ids){
+          const oldIds = JSON.parse(oldRow.ids);
+          if(oldIds.length){
+            await env.VECTORIZE.deleteByIds(oldIds);
+            replacedOld = oldIds.length;
+          }
+          // 清空台账里的旧id，本批次开始重新累计
+          await env.DB.prepare("UPDATE rag_files_v2 SET ids='[]', chunks=0 WHERE title=?").bind(title0).run();
+        }
+      }catch(e){ /* 删除失败不阻断入库，但会在返回里提示 */ }
+    }
     await env.VECTORIZE.upsert(items);
-    // 登记入库台账（同名文件多批次累加）
+    // 登记入库台账（同一文件的多个批次累加本次的块）
     try{
       const title = String(chunks[0].title||"未命名").slice(0,80);
       const cat = String(body.category||"未分类").slice(0,30);
@@ -61,17 +125,20 @@ export async function onRequestPost(context){
       const effD = dateOk(body.effectiveDate);
       const expD = dateOk(body.expiryDate);
       const ids = items.map(it=>it.id);
-      const row = await env.DB.prepare("SELECT ids, chunks FROM rag_files_v2 WHERE title=?").bind(title).first();
+      const chash = String(body.contentHash||"").slice(0,64);
+      const row = await env.DB.prepare("SELECT ids, chunks, version FROM rag_files_v2 WHERE title=?").bind(title).first();
       if(row){
-        const all = JSON.parse(row.ids).concat(ids);
-        await env.DB.prepare("UPDATE rag_files_v2 SET ids=?, chunks=?, category=?, level=?, security=?, dept_scope=?, effective_date=?, expiry_date=?, created_at=? WHERE title=?")
-          .bind(JSON.stringify(all), all.length, cat, lvl, sec, dscope, effD, expD, Date.now(), title).run();
+        const all = JSON.parse(row.ids||"[]").concat(ids);
+        // 版本号：替换模式的第一批次才+1，同一次上传的后续批次不重复递增
+        const newVer = (body.replaceMode && body.isFirstBatch) ? (parseInt(row.version)||1) + 1 : (parseInt(row.version)||1);
+        await env.DB.prepare("UPDATE rag_files_v2 SET ids=?, chunks=?, category=?, level=?, security=?, dept_scope=?, effective_date=?, expiry_date=?, content_hash=?, version=?, updated_at=? WHERE title=?")
+          .bind(JSON.stringify(all), all.length, cat, lvl, sec, dscope, effD, expD, chash, newVer, Date.now(), title).run();
       }else{
-        await env.DB.prepare("INSERT INTO rag_files_v2(title, ids, chunks, category, level, enabled, security, dept_scope, effective_date, expiry_date, created_at) VALUES(?,?,?,?,?,1,?,?,?,?,?)")
-          .bind(title, JSON.stringify(ids), ids.length, cat, lvl, sec, dscope, effD, expD, Date.now()).run();
+        await env.DB.prepare("INSERT INTO rag_files_v2(title, ids, chunks, category, level, enabled, security, dept_scope, effective_date, expiry_date, content_hash, version, updated_at, created_at) VALUES(?,?,?,?,?,1,?,?,?,?,?,1,?,?)")
+          .bind(title, JSON.stringify(ids), ids.length, cat, lvl, sec, dscope, effD, expD, chash, Date.now(), Date.now()).run();
       }
     }catch(e){}
-    return json({ok:true, count: items.length});
+    return json({ok:true, count: items.length, replacedOld});
   }
 
   // 检索核心逻辑抽成共用函数:query接口和评测(evalRun)都调用它,保证评测结果和真实检索完全一致
@@ -204,7 +271,7 @@ export async function onRequestPost(context){
   if(body.action === "list"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
   if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
-    const rows = await env.DB.prepare("SELECT title, chunks, category, level, enabled, security, dept_scope, effective_date, expiry_date, created_at FROM rag_files_v2 ORDER BY created_at DESC LIMIT 500").all();
+    const rows = await env.DB.prepare("SELECT title, chunks, category, level, enabled, security, dept_scope, effective_date, expiry_date, version, updated_at, created_at FROM rag_files_v2 ORDER BY created_at DESC LIMIT 500").all();
     return json({ok:true, files: rows.results||[]});
   }
 
