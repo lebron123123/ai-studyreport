@@ -1,4 +1,4 @@
-// 真 .docx 文档构建器 —— 浏览器与Node共用  
+// 真 .docx 文档构建器 —— 浏览器与Node共用    
 // payload = {
 //   project:{name,owner,industry,location,scale}, signed, docNo,
 //   chapters:[{cn,name,sections:[{title, blocks:[{type:"p",text}|{type:"table",rows:[[..],..]}]}]}],
