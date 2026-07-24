@@ -287,7 +287,8 @@ async function runGeneration(){
       s.content = text;
       secEl.classList.remove("pending"); secEl.classList.remove("gen");
       secEl.querySelector(".body").innerHTML = renderContent(text);
-      secEl.querySelector("h4").insertAdjacentHTML("beforeend", '<span class="done-stamp">已拟</span>');
+      secEl.querySelector("h4").insertAdjacentHTML("beforeend", '<span class="done-stamp">已拟</span>' + provBadgeHtml(c.cn, si, s.prov));
+      bindProvToggle(secEl);
       saveDraft();
     }catch(e){
       failed++;
@@ -382,6 +383,79 @@ async function kbHandleFiles(files){
 
 // 全量RAG：语义检索存量报告库（未部署Vectorize时静默跳过）
 let ragAvailable = null;
+
+
+// 溯源徽章：小节标题后显示置信度，点击展开依据详情
+function provBadgeHtml(cn, si, prov){
+  if(!prov || !prov.confidence) return "";
+  const cf = prov.confidence;
+  return '<span class="prov-badge" data-prov="'+cn+'_'+si+'" title="点击查看本节生成依据" '
+    +'style="cursor:pointer; font-family:var(--mono); font-size:9.5px; letter-spacing:.5px; padding:1px 7px; '
+    +'border:1px solid '+cf.color+'; color:'+cf.color+'; border-radius:2px; margin-left:6px;">依据 '+cf.label+'</span>'
+    +'<div class="prov-detail" data-provbox="'+cn+'_'+si+'" style="display:none; margin-top:8px; padding:10px 12px; '
+    +'background:#F7FAFD; border:1px solid var(--line); border-radius:6px; font-size:11.5px; line-height:1.75; color:var(--ink-soft); font-weight:400;">'
+    + provDetailHtml(prov) + '</div>';
+}
+function provDetailHtml(p){
+  const cf = p.confidence || {};
+  let h = '<div style="color:'+(cf.color||"#666")+'; font-weight:600; margin-bottom:6px;">本节生成依据（置信度 '+(cf.label||"")+'，'+Math.round((cf.score||0)*100)+'分）</div>';
+  h += '<div style="margin-bottom:6px;">' + (cf.basis||[]).map(b=>"· "+escapeHtml(b)).join("<br>") + '</div>';
+  if(p.hasCalcData) h += '<div>📊 <b>财务数据来源</b>：本项目内置公式实时测算结果（非AI生成，可在财务测算页复算核对）</div>';
+  if((p.kbDocs||[]).length) h += '<div>📎 <b>引用资料</b>：' + p.kbDocs.map(d=>escapeHtml(d.title)).join("、") + '</div>';
+  if((p.rag||[]).length){
+    h += '<div>📚 <b>知识库检索命中</b>：<br>' + p.rag.map(r=>{
+      const life = (r.lifecycle && r.lifecycle!=="valid") ? ' <span style="color:var(--seal-red);">⚠'+escapeHtml(r.lifecycleNote||r.lifecycle)+'</span>' : '';
+      return '　《'+escapeHtml(r.title)+(r.section?" · "+escapeHtml(r.section):"")+'》 '+r.tier+' '+r.score+life;
+    }).join("<br>") + '</div>';
+  }
+  if((p.examples||[]).length) h += '<div>✍ <b>参照范例</b>：' + p.examples.map(e=>escapeHtml(e.title)).join("、") + '</div>';
+  if((p.projectFields||[]).length) h += '<div>📁 <b>使用的项目信息</b>：' + p.projectFields.join("、") + '</div>';
+  h += '<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--line); font-size:10.5px;">'
+    + '🤖 生成模型：' + escapeHtml(p.model||"-") + '　⏱ 生成时间：' + (p.generatedAt ? new Date(p.generatedAt).toLocaleString("zh-CN") : "-") + '</div>';
+  return h;
+}
+function bindProvToggle(scope){
+  (scope||document).querySelectorAll(".prov-badge").forEach(b=>{
+    if(b.__bound) return; b.__bound = true;
+    b.onclick = ()=>{
+      const box = (scope||document).querySelector('[data-provbox="'+b.dataset.prov+'"]');
+      if(box) box.style.display = box.style.display === "none" ? "block" : "none";
+    };
+  });
+}
+
+/* ===== 多级溯源体系 =====
+   L1 数据溯源：财务数字来自哪次测算（确定性引擎，非AI生成）
+   L2 素材溯源：本节生成时注入了哪些知识库文档/范例/项目资料
+   L3 模型溯源：用什么模型、什么时间生成
+   置信度：按素材构成加权，让人一眼看出"这节有多少真凭实据"
+*/
+let provCollector = null;   // 生成单节期间的临时采集器
+function provStart(){ provCollector = { rag:[], examples:[], kbDocs:[], hasCalcData:false, projectFields:[] }; }
+function provTake(){ const p = provCollector; provCollector = null; return p; }
+
+// 置信度：有真实测算数据 > 有高匹配知识库依据 > 仅项目信息 > 纯AI发挥
+function provConfidence(p){
+  if(!p) return { score:0.5, label:"一般", color:"#8A6D1B", basis:["无溯源记录"] };
+  const basis = [];
+  let score = 0.55;   // 基线：仅凭项目信息与模型常识生成
+  if(p.hasCalcData){ score = Math.max(score, 0.95); basis.push("引用了内置公式计算的真实测算数据"); }
+  const hiRag = p.rag.filter(r=>r.score >= 0.85);
+  const midRag = p.rag.filter(r=>r.score >= 0.70 && r.score < 0.85);
+  if(hiRag.length){ score = Math.max(score, 0.85); basis.push("有"+hiRag.length+"条高匹配知识库依据"); }
+  else if(midRag.length){ score = Math.max(score, 0.72); basis.push("有"+midRag.length+"条中匹配知识库依据"); }
+  else if(p.rag.length){ basis.push("仅有低匹配知识库参考"); }
+  if(p.kbDocs.length){ score = Math.max(score, 0.80); basis.push("引用了"+p.kbDocs.length+"份人工上传的项目资料"); }
+  if(p.examples.length) basis.push("参照了"+p.examples.length+"篇黄金范例的结构");
+  // 有过期资料则扣分并提示
+  const expired = p.rag.filter(r=>r.lifecycle && r.lifecycle !== "valid");
+  if(expired.length){ score = Math.max(0.5, score - 0.1); basis.push("⚠含"+expired.length+"条时效异常资料，需人工核实"); }
+  if(!basis.length) basis.push("主要依据项目信息与模型通用知识，无外部资料支撑");
+  const label = score >= 0.9 ? "高" : score >= 0.75 ? "较高" : score >= 0.6 ? "中" : "偏低";
+  const color = score >= 0.9 ? "#3E7A53" : score >= 0.75 ? "#1F7A3D" : score >= 0.6 ? "#8A6D1B" : "#C24A42";
+  return { score: Math.round(score*100)/100, label, color, basis };
+}
+
 // 相似度分层策略（参考行业实践：不同匹配度的资料，可信程度不同，应区别使用）
 const RAG_TIER = {
   HIGH: 0.85,    // 高匹配：内容高度相关，可直接借鉴论述结构
@@ -414,6 +488,8 @@ async function ragRetrieve(chapterName, secTitle){
     hits.forEach(m=>{
       if(budget<=200) return;
       const tier = ragTierOf(m.score);
+      if(provCollector) provCollector.rag.push({ title:m.title||"历史报告", section:m.section||m.chapter||"",
+        score:m.score, tier:tier.label, lifecycle:m.lifecycle||"valid", lifecycleNote:m.lifecycleNote||"" });
       const c = String(m.text).slice(0, Math.min(1400, budget));
       budget -= c.length;
       const lifeTag = (m.lifecycle && m.lifecycle !== "valid") ? "⚠该文件"+(m.lifecycleNote||"时效异常")+"，不得作为现行依据引用；" : "";
@@ -437,6 +513,7 @@ function exampleRetrieve(chapterName, secTitle){
   let budget = 3000;
   hits.forEach(e=>{
     if(budget<=200) return;
+    if(provCollector) provCollector.examples.push({ title: e.title||"范文" });
     const c = String(e.content||"").slice(0, Math.min(1800, budget));
     budget -= c.length;
     out += "《"+(e.title||"范文")+"》：\n"+c+"\n\n";
@@ -466,6 +543,7 @@ function kbRetrieve(chapterName, secTitle){
   let budget = 2600;
   scored.forEach(({e})=>{
     if(budget<=100) return;
+    if(provCollector) provCollector.kbDocs.push({ title: e.title||"未命名资料" });
     const c = String(e.content||"").slice(0, Math.min(1500, budget));
     budget -= c.length;
     out += "《"+(e.title||"未命名资料")+"》：\n"+c+"\n\n";
@@ -510,7 +588,9 @@ async function reviseSection(c, s, instruction, onChunk){
 }
 
 async function generateSection(c, s, onChunk){
+  provStart();   // 开启溯源采集
   const digest = s.numeric ? buildCalcDigest() : null;
+  if(digest) provCollector.hasCalcData = true;
   let tableHint = "";
   if(s.numeric && digest){
     tableHint = '\n本子标题涉及财务数字。下面提供了本项目由内置公式实际计算出的真实测算结果，请：①严格依据这些真实数字撰写分析（数字直接引用，不得改动、不得另行编造）；②在正文中生成1-2个数据表格支撑论述，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔）：\n[[TABLE]]\n列1|列2|列3\n行1|数值|数值\n[[/TABLE]]\n表格数据从测算结果中选取，允许按年份归并或取关键年份，但数值必须与测算结果一致。\n\n'+digest;
@@ -518,9 +598,23 @@ async function generateSection(c, s, onChunk){
     tableHint = '\n本子标题涉及具体数字或测算，请：①用文字说明测算口径、方法与逻辑；②生成一个结构完整的数据表格，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔，每行一个换行）：\n[[TABLE]]\n列1|列2|列3\n项目A|待填|待填\n[[/TABLE]]\n表格中的具体数值一律填"待填"，绝不编造精确数字；但表格的行项目、列结构要专业完整、贴合真实可研报告。';
   }
   const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n3. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n4. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+tableHint;
+  // 记录本节用到了哪些项目信息字段（L2溯源的一部分）
+  [["项目名称",project.name],["建设/委托单位",project.owner],["建设地点",project.location],
+   ["投资规模",project.scale],["项目概况",project.desc]].forEach(([k,v])=>{
+    if(v && String(v).trim() && provCollector) provCollector.projectFields.push(k);
+  });
   const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + exampleRetrieve(c.name, s.t) + kbRetrieve(c.name, s.t) + await ragRetrieve(c.name, s.t);
 
-  return callGen(sys, user, onChunk);
+  const text = await callGen(sys, user, onChunk);
+  // 生成完成：把溯源档案挂到该小节上（含模型与时间，即L3模型溯源）
+  const prov = provTake();
+  if(prov){
+    prov.model = "deepseek-chat";
+    prov.generatedAt = new Date().toISOString();
+    prov.confidence = provConfidence(prov);
+    s.prov = prov;
+  }
+  return text;
 }
 
 async function callGen(sys, user, onChunk){
