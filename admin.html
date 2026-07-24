@@ -192,12 +192,57 @@ async function saveExamples(){
 
 /* ================= RAG知识库（全量报告向量入库） ================= */
 function loadScript(src){ return new Promise((ok,err)=>{ const s=document.createElement("script"); s.src=src; s.onload=ok; s.onerror=()=>err(new Error("加载失败:"+src)); document.head.appendChild(s); }); }
+
+// 把解析出的HTML转成"保留表格结构"的纯文本：
+// 表格转为 Markdown 表格（| 分隔 + 表头分隔行），其余按段落换行，避免结构信息丢失
+function htmlToStructuredText(html){
+  const doc = new DOMParser().parseFromString("<div>"+html+"</div>", "text/html");
+  const root = doc.body.firstChild;
+  if(!root) return "";
+  const cellText = (td)=> (td.textContent||"").replace(/\s+/g," ").replace(/\|/g,"｜").trim();
+  const walk = (node)=>{
+    let out = "";
+    node.childNodes.forEach(n=>{
+      if(n.nodeType === 3){ out += n.textContent; return; }
+      if(n.nodeType !== 1) return;
+      const tag = n.tagName.toLowerCase();
+      if(tag === "table"){
+        // 嵌套表格：只处理最外层，内层表格的内容按纯文字并入单元格，避免行列错乱
+        const rows = [...n.querySelectorAll("tr")].filter(tr=> tr.closest("table") === n);
+        if(!rows.length) return;
+        const matrix = rows.map(tr=> [...tr.querySelectorAll("th,td")].map(cellText));
+        const width = Math.max(...matrix.map(r=>r.length));
+        const lines = [];
+        matrix.forEach((r, ri)=>{
+          while(r.length < width) r.push("");
+          lines.push("| " + r.join(" | ") + " |");
+          if(ri === 0) lines.push("|" + Array(width).fill("---").join("|") + "|");   // Markdown表头分隔行
+        });
+        out += "\n\n[表格开始]\n" + lines.join("\n") + "\n[表格结束]\n\n";
+        return;
+      }
+      if(tag === "br"){ out += "\n"; return; }
+      const isBlock = ["p","div","h1","h2","h3","h4","h5","h6","li","tr","section"].includes(tag);
+      out += walk(n);
+      if(isBlock) out += "\n";
+    });
+    return out;
+  };
+  // 清理：行首尾空白、3个以上连续换行压成2个（HTML里的缩进会带进大量无意义空白）
+  return walk(root)
+    .split("\n").map(l=>l.replace(/[ \t\u3000]+/g, " ").trim()).join("\n")
+    .replace(/\n{3,}/g, "\n\n").trim();
+}
+
 async function ragParseFile(f){
   const ext = (f.name.split(".").pop()||"").toLowerCase();
   if(ext==="txt") return await f.text();
   if(ext==="docx"){
     if(!window.mammoth) await loadScript("mammoth.min.js");
-    return (await window.mammoth.extractRawText({arrayBuffer: await f.arrayBuffer()})).value||"";
+    // 用 convertToHtml 而非 extractRawText：后者会把表格拍平成一串无结构文字，
+    // 导致"哪个数字属于哪一行哪一列"的关系全部丢失，检索出来AI对不上表头
+    const res = await window.mammoth.convertToHtml({arrayBuffer: await f.arrayBuffer()});
+    return htmlToStructuredText(res.value || "");
   }
   if(ext==="pdf"){
     if(!window.pdfjsLib) await loadScript("pdf.min.js");
@@ -313,6 +358,62 @@ function ragSplitBySentence(text, size, overlap){
   }
   return parts;
 }
+
+// 表格感知切块：把内容按"表格块 / 普通文本块"拆开，
+// 表格整体保留不切断；超大表格按数据行切分，但每一块都重复表头（保证任何一块都能读懂列含义）
+function ragSplitWithTables(text, prof, anchorForHeader){
+  const parts = [];
+  const re = /\[表格开始\]\n([\s\S]*?)\n\[表格结束\]/g;
+  let last = 0, m;
+  while((m = re.exec(text))){
+    if(m.index > last){ const t = text.slice(last, m.index).trim(); if(t) parts.push({type:"text", content:t}); }
+    parts.push({type:"table", content:m[1]});
+    last = re.lastIndex;
+  }
+  if(last < text.length){ const t = text.slice(last).trim(); if(t) parts.push({type:"text", content:t}); }
+
+  const out = [];
+  let buf = "";
+  const flushBuf = ()=>{ if(buf.trim()) out.push(buf.trim()); buf = ""; };
+
+  parts.forEach(p=>{
+    if(p.type === "text"){
+      // 普通文本：能塞进当前块就塞，塞不下先收尾再按句子切
+      if((buf + p.content).length <= prof.size){ buf += (buf?"\n":"") + p.content; }
+      else{
+        flushBuf();
+        ragSplitBySentence(p.content, prof.size, prof.overlap).forEach(s=>out.push(s));
+      }
+      return;
+    }
+    // 表格
+    const tableText = "[表格]\n" + p.content;
+    if(tableText.length <= prof.size){
+      // 整张表能装下：优先和前面的文字放一起（表格常有前置说明），装不下就单独成块
+      if((buf + "\n" + tableText).length <= prof.size){ buf += (buf?"\n":"") + tableText; }
+      else{ flushBuf(); out.push(tableText); }
+      return;
+    }
+    // 超大表格：按行切，每块重复表头
+    flushBuf();
+    const lines = p.content.split("\n").filter(l=>l.trim());
+    const header = lines.slice(0, 2).join("\n");    // 表头行 + Markdown分隔行
+    const bodyLines = lines.slice(2);
+    let cur = [];
+    let curLen = header.length;
+    bodyLines.forEach(line=>{
+      if(curLen + line.length > prof.size && cur.length){
+        out.push("[表格·续]\n" + header + "\n" + cur.join("\n"));
+        cur = []; curLen = header.length;
+      }
+      cur.push(line); curLen += line.length + 1;
+    });
+    if(cur.length) out.push("[表格·续]\n" + header + "\n" + cur.join("\n"));
+  });
+  flushBuf();
+  return out.length ? out : [text.slice(0, prof.size)];
+}
+
 function ragSplit(text, title, category){
   const prof = ragProfileOf(category);
   const lines = text.split(/\r?\n/);
@@ -333,6 +434,12 @@ function ragSplit(text, title, category){
     const anchor = "【"+title+(ch?" · "+ch:"")+(sec?" · "+sec:"")+"】\n";
     if(t.length <= prof.size){
       chunks.push({title, chapter:ch, section:sec, text: anchor + t});
+    }else if(/\[表格开始\]/.test(t)){
+      // 含表格的内容：表格必须整块保留（被切断会导致表头与数据分离，检索出来对不上）
+      ragSplitWithTables(t, prof, anchor).forEach((seg, idx, arr)=>{
+        chunks.push({title, chapter:ch, section:sec,
+          text: anchor + (arr.length>1?"("+(idx+1)+"/"+arr.length+") ":"") + seg});
+      });
     }else{
       const segs = ragSplitBySentence(t, prof.size, prof.overlap);
       segs.forEach((s,idx)=>{
