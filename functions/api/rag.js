@@ -1,4 +1,4 @@
-// /api/rag  全量RAG知识库（Vectorize + Workers AI bge-m3） 
+// /api/rag  全量RAG知识库（Vectorize + Workers AI bge-m3）
 // POST {action:"upsert", chunks:[{title,chapter,section,text}]}  管理员入库
 // POST {action:"query", query, topK}                             登录用户检索
 // POST {action:"stats"}                                          管理员查看规模
@@ -57,15 +57,18 @@ export async function onRequestPost(context){
       const lvl = parseInt(body.level)||2;
       const sec = parseInt(body.security)||1;                       // 密级:1公开 2内部 3涉密
       const dscope = String(body.deptScope||"全部门").slice(0,40);   // 可见部门
+      const dateOk = (s)=> /^\d{4}-\d{2}-\d{2}$/.test(String(s||"")) ? String(s) : "";   // 只接受YYYY-MM-DD
+      const effD = dateOk(body.effectiveDate);
+      const expD = dateOk(body.expiryDate);
       const ids = items.map(it=>it.id);
       const row = await env.DB.prepare("SELECT ids, chunks FROM rag_files_v2 WHERE title=?").bind(title).first();
       if(row){
         const all = JSON.parse(row.ids).concat(ids);
-        await env.DB.prepare("UPDATE rag_files_v2 SET ids=?, chunks=?, category=?, level=?, security=?, dept_scope=?, created_at=? WHERE title=?")
-          .bind(JSON.stringify(all), all.length, cat, lvl, sec, dscope, Date.now(), title).run();
+        await env.DB.prepare("UPDATE rag_files_v2 SET ids=?, chunks=?, category=?, level=?, security=?, dept_scope=?, effective_date=?, expiry_date=?, created_at=? WHERE title=?")
+          .bind(JSON.stringify(all), all.length, cat, lvl, sec, dscope, effD, expD, Date.now(), title).run();
       }else{
-        await env.DB.prepare("INSERT INTO rag_files_v2(title, ids, chunks, category, level, enabled, security, dept_scope, created_at) VALUES(?,?,?,?,?,1,?,?,?)")
-          .bind(title, JSON.stringify(ids), ids.length, cat, lvl, sec, dscope, Date.now()).run();
+        await env.DB.prepare("INSERT INTO rag_files_v2(title, ids, chunks, category, level, enabled, security, dept_scope, effective_date, expiry_date, created_at) VALUES(?,?,?,?,?,1,?,?,?,?,?)")
+          .bind(title, JSON.stringify(ids), ids.length, cat, lvl, sec, dscope, effD, expD, Date.now()).run();
       }
     }catch(e){}
     return json({ok:true, count: items.length});
@@ -86,10 +89,11 @@ export async function onRequestPost(context){
     let disabled = new Set();
     let permMap = {};
     try{
-      const dr = await env.DB.prepare("SELECT title, enabled, security, dept_scope FROM rag_files_v2").all();
+      const dr = await env.DB.prepare("SELECT title, enabled, security, dept_scope, effective_date, expiry_date FROM rag_files_v2").all();
       (dr.results||[]).forEach(x=>{
         if(x.enabled===0) disabled.add(x.title);
-        permMap[x.title] = { security: parseInt(x.security)||1, dept_scope: x.dept_scope||"全部门" };
+        permMap[x.title] = { security: parseInt(x.security)||1, dept_scope: x.dept_scope||"全部门",
+                             effective_date: x.effective_date||"", expiry_date: x.expiry_date||"" };
       });
     }catch(e){}
     const iAmAdmin = isAdmin(env, user);
@@ -100,6 +104,23 @@ export async function onRequestPost(context){
       if(p.security > myClearance) return false;
       if(p.dept_scope && p.dept_scope !== "全部门" && p.dept_scope !== myDept) return false;
       return true;
+    };
+    // 知识时效判定：政策等文件有生效/失效日期，过期的降权并明确标注，避免旧政策被当作现行依据引用
+    const todayStr = new Date().toISOString().slice(0,10);   // YYYY-MM-DD
+    const normDate = (s)=>{ s = String(s||"").trim(); return /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s)) ? s : ""; };
+    const lifecycleOf = (title)=>{
+      const p = permMap[title];
+      if(!p) return { status:"valid", weight:1, note:"" };
+      const eff = normDate(p.effective_date);
+      const exp = normDate(p.expiry_date);
+      if(exp && exp < todayStr) return { status:"expired", weight:0.5, note:"已于"+exp+"失效" };
+      if(eff && eff > todayStr) return { status:"pending", weight:0.7, note:eff+"起生效（尚未生效）" };
+      // 临近失效（30天内）提示但不降权
+      if(exp){
+        const d = (new Date(exp) - new Date(todayStr)) / 86400000;
+        if(d >= 0 && d <= 30) return { status:"expiring", weight:1, note:exp+"即将失效" };
+      }
+      return { status:"valid", weight:1, note:"" };
     };
     const wantCat = opts.category ? String(opts.category) : null;
     const LW = {1:1.15, 2:1.0, 3:0.85};
@@ -114,9 +135,11 @@ export async function onRequestPost(context){
         if(titleHay.includes(k)){ kwBonus += 0.05; kwHitList.push(k); }
         else if(hay.includes(k)){ kwBonus += 0.03; kwHitList.push(k); }
       });
-      const base = m.score * (LW[lvl]||1);
+      const lc = lifecycleOf(md.title);
+      const base = m.score * (LW[lvl]||1) * lc.weight;
       return {
         rawScore: m.score,
+        lifecycle: lc.status, lifecycleNote: lc.note,
         score: Math.round((base + kwBonus) * 1000)/1000,
         kwHits: kwHitList,
         title: md.title, chapter: md.chapter, section: md.section,
@@ -181,7 +204,7 @@ export async function onRequestPost(context){
   if(body.action === "list"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
   if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
-    const rows = await env.DB.prepare("SELECT title, chunks, category, level, enabled, security, dept_scope, created_at FROM rag_files_v2 ORDER BY created_at DESC LIMIT 500").all();
+    const rows = await env.DB.prepare("SELECT title, chunks, category, level, enabled, security, dept_scope, effective_date, expiry_date, created_at FROM rag_files_v2 ORDER BY created_at DESC LIMIT 500").all();
     return json({ok:true, files: rows.results||[]});
   }
 
@@ -350,6 +373,19 @@ export async function onRequestPost(context){
     const hitRanks = results.filter(r=>r.hit).map(r=>r.rank);
     const avgRank = hitRanks.length ? Math.round(hitRanks.reduce((a,b)=>a+b,0)/hitRanks.length*10)/10 : null;
     return json({ok:true, report:{ total:cases.length, hit:hitCount, accuracy, avgRank, results }});
+  }
+
+  if(body.action === "setLifecycle"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const title = String(body.title||"").slice(0,80);
+    const dateOk = (s)=> /^\d{4}-\d{2}-\d{2}$/.test(String(s||"")) ? String(s) : "";
+    const effD = dateOk(body.effectiveDate);
+    const expD = dateOk(body.expiryDate);
+    if(effD && expD && effD > expD) return json({ok:false, error:"生效日期不能晚于失效日期"}, 400);
+    await env.DB.prepare("UPDATE rag_files_v2 SET effective_date=?, expiry_date=? WHERE title=?")
+      .bind(effD, expD, title).run();
+    return json({ok:true});
   }
 
   if(body.action === "deleteByTitle"){
