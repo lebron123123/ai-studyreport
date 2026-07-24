@@ -1,4 +1,4 @@
-<meta charset="utf-8">   
+<meta charset="utf-8"> 
 <title>可研报告工坊 · 大纲管理</title>
 <style>
   :root{
@@ -502,7 +502,8 @@ async function openRag(){
     +'<a href="javascript:void(0)" id="ragLog">📜 检索日志</a>'
     +'<a href="javascript:void(0)" id="ragGraph">🕸 知识图谱</a>'
     +'<a href="javascript:void(0)" id="ragUsers">👥 用户权限</a>'
-    +'<a href="javascript:void(0)" id="ragEval">🎯 检索评测</a></div>'
+    +'<a href="javascript:void(0)" id="ragEval">🎯 检索评测</a>'
+    +'<a href="javascript:void(0)" id="ragWeights">⚖️ 检索调优</a></div>'
     +'<div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; align-items:center;"><input id="ragQ" placeholder="如：市场分析 供需" style="flex:1 1 260px; min-width:200px;"><select id="ragQCat" style="width:130px; flex-shrink:0;">'+ragCatOptionsHtml(true,"全部分类")+'</select><button class="btn sm" id="ragTest" style="flex-shrink:0;">检索</button></div>'
     +'<div id="ragHits" style="font-size:12.5px;"></div>'
     +'<div id="ragPanel" style="margin-top:10px;"></div>'
@@ -516,6 +517,7 @@ async function openRag(){
   document.getElementById("ragGraph").onclick = ragGraphView;
   document.getElementById("ragUsers").onclick = ragUsersView;
   document.getElementById("ragEval").onclick = ragEvalView;
+  document.getElementById("ragWeights").onclick = ragWeightsView;
   document.getElementById("ragFilter").onchange = refreshRagFiles;
   // 切块策略提示：让管理员知道选不同分类会用不同的切块方式
   const updChunkHint = ()=>{
@@ -961,6 +963,92 @@ async function ragEvalRender(){
     };
   }catch(e){ box.innerHTML = "加载失败"; }
 }
+
+// 检索调优面板：把原来写死在代码里的加权参数做成可视化滑条
+async function ragWeightsView(){
+  const box = document.getElementById("ragPanel");
+  document.getElementById("ragHits").innerHTML = "";
+  box.innerHTML = '<div style="color:var(--soft); padding:10px 0;">加载配置…</div>';
+  try{
+    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"getWeights"})});
+    const d = await r.json();
+    if(!d.ok){ box.innerHTML = esc(d.error||"不可用"); return; }
+    const c = d.config, dft = d.defaults;
+    const row = (label, id, val, min, max, step, hint, dftVal)=>
+      '<div style="display:flex; align-items:center; gap:10px; margin:8px 0; font-size:12.5px;">'
+      +'<span style="width:150px; flex-shrink:0;">'+label+'</span>'
+      +'<input type="range" id="'+id+'" min="'+min+'" max="'+max+'" step="'+step+'" value="'+val+'" style="flex:1; max-width:220px;">'
+      +'<input type="number" id="'+id+'_n" min="'+min+'" max="'+max+'" step="'+step+'" value="'+val+'" style="width:72px; padding:3px 6px; font-size:12px;">'
+      +'<span style="color:var(--soft); font-size:11px;">'+hint+'（默认'+dftVal+'）</span></div>';
+
+    box.innerHTML = '<div style="border:1px solid var(--line); background:#fff; padding:14px 16px;">'
+      +'<div style="font-weight:600; margin-bottom:4px;">⚖️ 检索调优</div>'
+      +'<div style="font-size:11px; color:var(--soft); margin-bottom:12px;">这些参数原本写死在代码里，现在可自行调整。改完建议去「🎯检索评测」跑一次，用准确率对比验证调整是否真的变好。</div>'
+
+      +'<div style="font-weight:600; font-size:12.5px; margin:10px 0 4px;">权威等级加权</div>'
+      + row("权威文件", "wAuth", c.levelWeight.authority, 0.5, 2, 0.05, "政策原文等", dft.levelWeight.authority)
+      + row("参考文件", "wRef", c.levelWeight.reference, 0.5, 2, 0.05, "一般报告", dft.levelWeight.reference)
+      + row("存档文件", "wArch", c.levelWeight.archive, 0.1, 2, 0.05, "历史资料", dft.levelWeight.archive)
+
+      +'<div style="font-weight:600; font-size:12.5px; margin:14px 0 4px;">时效降权</div>'
+      + row("已失效文件", "wExp", c.lifecycle.expired, 0, 1, 0.05, "越小越靠后", dft.lifecycle.expired)
+      + row("尚未生效文件", "wPend", c.lifecycle.pending, 0, 1, 0.05, "越小越靠后", dft.lifecycle.pending)
+
+      +'<div style="font-weight:600; font-size:12.5px; margin:14px 0 4px;">关键词命中加分（混合检索）</div>'
+      + row("命中标题", "wKwT", c.keywordBonus.title, 0, 0.3, 0.01, "加分越高越偏关键词", dft.keywordBonus.title)
+      + row("命中正文", "wKwB", c.keywordBonus.body, 0, 0.3, 0.01, "加分越高越偏关键词", dft.keywordBonus.body)
+
+      +'<div style="font-weight:600; font-size:12.5px; margin:14px 0 4px;">召回与精排规模</div>'
+      + row("向量召回候选数", "wRecall", c.recall, 10, 60, 5, "越大越不易漏、越慢", dft.recall)
+      + row("送入精排候选数", "wRerankN", c.rerankN, 5, 30, 1, "越大越准、越慢", dft.rerankN)
+
+      +'<div style="font-weight:600; font-size:12.5px; margin:14px 0 4px;">相似度分层阈值</div>'
+      + row("高匹配门槛", "wTierH", c.tier.high, 0.5, 1, 0.01, "≥此值=可直接借鉴", dft.tier.high)
+      + row("中匹配门槛", "wTierM", c.tier.mid, 0.3, 1, 0.01, "≥此值=需甄别借鉴", dft.tier.mid)
+      + row("最低过滤阈值", "wTierMin", c.tier.min, 0.1, 1, 0.01, "低于此值直接丢弃", dft.tier.min)
+
+      +'<div style="margin-top:16px;"><button class="btn" id="wSave">保存配置</button>'
+      +'<button class="btn ghost" id="wReset" style="margin-left:8px;">恢复默认值</button>'
+      +'<span id="wMsg" style="margin-left:12px; font-size:12px;"></span></div></div>';
+
+    // 滑条与数字框双向联动
+    ["wAuth","wRef","wArch","wExp","wPend","wKwT","wKwB","wRecall","wRerankN","wTierH","wTierM","wTierMin"].forEach(id=>{
+      const s = document.getElementById(id), n = document.getElementById(id+"_n");
+      if(!s || !n) return;
+      s.oninput = ()=>{ n.value = s.value; };
+      n.oninput = ()=>{ s.value = n.value; };
+    });
+    const val = id=> parseFloat(document.getElementById(id).value);
+    document.getElementById("wSave").onclick = async ()=>{
+      const cfg = {
+        levelWeight:{ authority:val("wAuth"), reference:val("wRef"), archive:val("wArch") },
+        lifecycle:{ expired:val("wExp"), pending:val("wPend") },
+        keywordBonus:{ title:val("wKwT"), body:val("wKwB") },
+        recall: val("wRecall"), rerankN: val("wRerankN"),
+        tier:{ high:val("wTierH"), mid:val("wTierM"), min:val("wTierMin") },
+      };
+      const mEl = document.getElementById("wMsg");
+      mEl.textContent = "保存中…"; mEl.style.color = "var(--soft)";
+      try{
+        const rr = await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"setWeights", config:cfg})});
+        const dd = await rr.json();
+        if(dd.ok){ mEl.textContent = "✓ 已保存，立即生效"; mEl.style.color = "var(--ok)"; }
+        else{ mEl.textContent = dd.error || "保存失败"; mEl.style.color = "var(--red)"; }
+      }catch(e){ mEl.textContent = "网络错误"; mEl.style.color = "var(--red)"; }
+    };
+    document.getElementById("wReset").onclick = ()=>{
+      const set = (id, v)=>{ const s=document.getElementById(id), n=document.getElementById(id+"_n"); if(s&&n){ s.value=v; n.value=v; } };
+      set("wAuth",dft.levelWeight.authority); set("wRef",dft.levelWeight.reference); set("wArch",dft.levelWeight.archive);
+      set("wExp",dft.lifecycle.expired); set("wPend",dft.lifecycle.pending);
+      set("wKwT",dft.keywordBonus.title); set("wKwB",dft.keywordBonus.body);
+      set("wRecall",dft.recall); set("wRerankN",dft.rerankN);
+      set("wTierH",dft.tier.high); set("wTierM",dft.tier.mid); set("wTierMin",dft.tier.min);
+      document.getElementById("wMsg").textContent = "已恢复默认值，记得点保存";
+      document.getElementById("wMsg").style.color = "var(--soft)";
+    };
+  }catch(e){ box.innerHTML = "加载失败"; }
+}
+
 
 async function openAgentTraces(){
   document.getElementById("listBox").style.display="none";
