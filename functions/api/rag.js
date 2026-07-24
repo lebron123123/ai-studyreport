@@ -1,8 +1,8 @@
-// /api/rag  全量RAG知识库（Vectorize + Workers AI bge-m3） 
+// /api/rag  全量RAG知识库（Vectorize + Workers AI bge-m3）
 // POST {action:"upsert", chunks:[{title,chapter,section,text}]}  管理员入库
 // POST {action:"query", query, topK}                             登录用户检索
 // POST {action:"stats"}                                          管理员查看规模
-import { verifyAuth, json } from "./_auth.js"; 
+import { verifyAuth, json } from "./_auth.js";
 
 function isAdmin(env, user){
   const admins = (env.ADMIN_USERS || "").split(",").map(s=>s.trim()).filter(Boolean);
@@ -141,11 +141,85 @@ export async function onRequestPost(context){
     return json({ok:true, count: items.length, replacedOld});
   }
 
+  // ===== 检索加权配置（可在后台调整，无需改代码） =====
+  const RAG_CFG_DEFAULT = {
+    levelWeight:   { authority:1.15, reference:1.0, archive:0.85 },  // 权威等级加权
+    lifecycle:     { expired:0.5, pending:0.7 },                      // 时效降权
+    keywordBonus:  { title:0.05, body:0.03 },                         // 关键词命中加分
+    recall:        40,                                                 // 向量召回候选数
+    rerankN:       20,                                                 // 送入精排的候选数
+    tier:          { high:0.85, mid:0.70, min:0.55 },                 // 相似度分层阈值
+  };
+  async function loadRagConfig(){
+    try{
+      const row = await env.DB.prepare("SELECT data FROM configs WHERE key=?").bind("rag_weights").first();
+      if(row && row.data){
+        const saved = JSON.parse(row.data);
+        // 深合并：保存的配置覆盖默认值，缺失项自动用默认值兜底
+        return {
+          levelWeight:  Object.assign({}, RAG_CFG_DEFAULT.levelWeight,  saved.levelWeight||{}),
+          lifecycle:    Object.assign({}, RAG_CFG_DEFAULT.lifecycle,    saved.lifecycle||{}),
+          keywordBonus: Object.assign({}, RAG_CFG_DEFAULT.keywordBonus, saved.keywordBonus||{}),
+          recall:  parseInt(saved.recall)  || RAG_CFG_DEFAULT.recall,
+          rerankN: parseInt(saved.rerankN) || RAG_CFG_DEFAULT.rerankN,
+          tier:    Object.assign({}, RAG_CFG_DEFAULT.tier, saved.tier||{}),
+        };
+      }
+    }catch(e){}
+    return RAG_CFG_DEFAULT;
+  }
+
+  // 检索配置读写接口
+  if(body.action === "getWeights"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    const cfg = await loadRagConfig();
+    return json({ok:true, config: cfg, defaults: RAG_CFG_DEFAULT});
+  }
+  if(body.action === "setWeights"){
+    if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
+    if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
+    const c = body.config || {};
+    // 数值范围保护：避免填成离谱的值导致检索失效
+    const clamp = (v, lo, hi, dft)=>{ const n = parseFloat(v); return isNaN(n) ? dft : Math.min(hi, Math.max(lo, n)); };
+    const safe = {
+      levelWeight: {
+        authority: clamp(c.levelWeight&&c.levelWeight.authority, 0.5, 2, 1.15),
+        reference: clamp(c.levelWeight&&c.levelWeight.reference, 0.5, 2, 1.0),
+        archive:   clamp(c.levelWeight&&c.levelWeight.archive,   0.1, 2, 0.85),
+      },
+      lifecycle: {
+        expired: clamp(c.lifecycle&&c.lifecycle.expired, 0, 1, 0.5),
+        pending: clamp(c.lifecycle&&c.lifecycle.pending, 0, 1, 0.7),
+      },
+      keywordBonus: {
+        title: clamp(c.keywordBonus&&c.keywordBonus.title, 0, 0.3, 0.05),
+        body:  clamp(c.keywordBonus&&c.keywordBonus.body,  0, 0.3, 0.03),
+      },
+      recall:  Math.round(clamp(c.recall,  10, 60, 40)),
+      rerankN: Math.round(clamp(c.rerankN, 5,  30, 20)),
+      tier: {
+        high: clamp(c.tier&&c.tier.high, 0.5, 1, 0.85),
+        mid:  clamp(c.tier&&c.tier.mid,  0.3, 1, 0.70),
+        min:  clamp(c.tier&&c.tier.min,  0.1, 1, 0.55),
+      },
+    };
+    // 逻辑校验：三档阈值必须递减
+    if(!(safe.tier.high > safe.tier.mid && safe.tier.mid > safe.tier.min)){
+      return json({ok:false, error:"分层阈值必须满足：高匹配 > 中匹配 > 最低阈值"}, 400);
+    }
+    const dataStr = JSON.stringify(safe);
+    const exist = await env.DB.prepare("SELECT key FROM configs WHERE key=?").bind("rag_weights").first();
+    if(exist) await env.DB.prepare("UPDATE configs SET data=?, updated_at=? WHERE key=?").bind(dataStr, Date.now(), "rag_weights").run();
+    else await env.DB.prepare("INSERT INTO configs(key, data, updated_at) VALUES(?,?,?)").bind("rag_weights", dataStr, Date.now()).run();
+    return json({ok:true, config: safe});
+  }
+
   // 检索核心逻辑抽成共用函数:query接口和评测(evalRun)都调用它,保证评测结果和真实检索完全一致
   async function runRetrieval(q, opts){
     opts = opts || {};
+    const CFG = await loadRagConfig();   // 检索加权配置（后台可调）
     const topK = Math.min(parseInt(opts.topK)||3, 8);
-    const recall = Math.min(parseInt(opts.recall)||40, 60);
+    const recall = Math.min(parseInt(opts.recall) || CFG.recall, 60);
     const [vec] = await embed(env, [q]);
     const r = await env.VECTORIZE.query(vec, { topK: recall, returnMetadata: "all" });
     let myDept = "", myClearance = 1;
@@ -180,8 +254,8 @@ export async function onRequestPost(context){
       if(!p) return { status:"valid", weight:1, note:"" };
       const eff = normDate(p.effective_date);
       const exp = normDate(p.expiry_date);
-      if(exp && exp < todayStr) return { status:"expired", weight:0.5, note:"已于"+exp+"失效" };
-      if(eff && eff > todayStr) return { status:"pending", weight:0.7, note:eff+"起生效（尚未生效）" };
+      if(exp && exp < todayStr) return { status:"expired", weight:CFG.lifecycle.expired, note:"已于"+exp+"失效" };
+      if(eff && eff > todayStr) return { status:"pending", weight:CFG.lifecycle.pending, note:eff+"起生效（尚未生效）" };
       // 临近失效（30天内）提示但不降权
       if(exp){
         const d = (new Date(exp) - new Date(todayStr)) / 86400000;
@@ -190,7 +264,7 @@ export async function onRequestPost(context){
       return { status:"valid", weight:1, note:"" };
     };
     const wantCat = opts.category ? String(opts.category) : null;
-    const LW = {1:1.15, 2:1.0, 3:0.85};
+    const LW = {1:CFG.levelWeight.authority, 2:CFG.levelWeight.reference, 3:CFG.levelWeight.archive};
     const kws = (q.match(/[\u4e00-\u9fa5]{2,}|[A-Za-z]{2,}|\d{2,}/g) || []).slice(0, 8);
     let matches = (r.matches||[]).map(m=>{
       const md = m.metadata||{};
@@ -199,8 +273,8 @@ export async function onRequestPost(context){
       const titleHay = String(md.title||"") + String(md.chapter||"") + String(md.section||"");
       let kwBonus = 0, kwHitList = [];
       kws.forEach(k=>{
-        if(titleHay.includes(k)){ kwBonus += 0.05; kwHitList.push(k); }
-        else if(hay.includes(k)){ kwBonus += 0.03; kwHitList.push(k); }
+        if(titleHay.includes(k)){ kwBonus += CFG.keywordBonus.title; kwHitList.push(k); }
+        else if(hay.includes(k)){ kwBonus += CFG.keywordBonus.body; kwHitList.push(k); }
       });
       const lc = lifecycleOf(md.title);
       const base = m.score * (LW[lvl]||1) * lc.weight;
@@ -220,7 +294,7 @@ export async function onRequestPost(context){
     });
     matches.sort((a,b)=>b.score-a.score);
 
-    const rerankN = Math.min(matches.length, 20);
+    const rerankN = Math.min(matches.length, CFG.rerankN);
     const useRerank = opts.rerank !== false && rerankN > 1;
     if(useRerank){
       try{
@@ -244,19 +318,19 @@ export async function onRequestPost(context){
         }
       }catch(e){}
     }
-    return { all: matches, top: matches.slice(0, topK), category: wantCat };
+    return { all: matches, top: matches.slice(0, topK), category: wantCat, tier: CFG.tier };
   }
 
   if(body.action === "query"){
     const q = String(body.query||"").trim().slice(0, 500);
     if(!q) return json({ok:false, error:"查询为空"}, 400);
-    const { top: matches, category: wantCat } = await runRetrieval(q, body);
+    const { top: matches, category: wantCat, tier } = await runRetrieval(q, body);
     try{
       const titles = matches.map(m=>m.title).filter(Boolean).slice(0,5).join("；");
       await env.DB.prepare("INSERT INTO rag_logs(user_id, query, category, hit_titles, hit_count, top_score, created_at) VALUES(?,?,?,?,?,?,?)")
         .bind(user.userId, q.slice(0,200), wantCat||"", titles, matches.length, matches[0]?matches[0].score:0, Date.now()).run();
     }catch(e){}
-    return json({ok:true, matches});
+    return json({ok:true, matches, tier});
   }
 
   if(body.action === "stats"){
