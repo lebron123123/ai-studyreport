@@ -457,12 +457,20 @@ function provConfidence(p){
 }
 
 // 相似度分层策略（参考行业实践：不同匹配度的资料，可信程度不同，应区别使用）
+// 分层阈值：默认值如下，实际以后端返回的配置为准（后台"⚖️检索调优"可调）
 const RAG_TIER = {
   HIGH: 0.85,    // 高匹配：内容高度相关，可直接借鉴论述结构
   MID:  0.70,    // 中匹配：主题相关，需甄别后借鉴
   LOW:  0.55,    // 低匹配：仅作思路启发，不宜照搬
   MIN:  0.55,    // 低于此值不返回（避免噪音干扰生成）
 };
+// 后端每次检索会返回当前生效的阈值配置，同步过来保证前后端判定一致
+function syncRagTier(tier){
+  if(!tier) return;
+  if(typeof tier.high === "number") RAG_TIER.HIGH = tier.high;
+  if(typeof tier.mid  === "number") RAG_TIER.MID  = tier.mid;
+  if(typeof tier.min  === "number"){ RAG_TIER.MIN = tier.min; RAG_TIER.LOW = tier.min; }
+}
 function ragTierOf(score){
   const s = Number(score) || 0;
   if(s >= RAG_TIER.HIGH) return { key:"high", label:"高匹配" };
@@ -479,6 +487,7 @@ async function ragRetrieve(chapterName, secTitle){
     const d = await r.json();
     if(!d.ok){ if(/未绑定|不可用/.test(d.error||"")) ragAvailable = false; return ""; }
     ragAvailable = true;
+    syncRagTier(d.tier);   // 同步后台配置的分层阈值，保证前后端判定一致
     // 相似度分层：不同置信度的参考资料，给AI的使用指引不同（避免把勉强沾边的当权威用）
     const hits = (d.matches||[]).filter(m=>m.text && m.score >= RAG_TIER.MIN);
     if(!hits.length) return "";
