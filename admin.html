@@ -372,7 +372,7 @@ async function openRag(){
   const box = document.getElementById("editBox");
   box.style.display="block";
   box.innerHTML = '<h1 style="font-size:18px;">RAG知识库</h1>'
-    +'<div class="sub">批量上传存量可研报告（docx/pdf/txt），按章节切块、向量化后存入语义检索库。生成报告时自动检索最相关的段落注入AI。<b>需先按部署说明创建 Vectorize 索引并绑定 VECTORIZE 与 AI。</b></div>'
+    +'<div class="sub">批量上传单位知识资料（docx/pdf/txt/图片/xlsx/csv/html等），按分类定制切块策略（可研报告按章节、政策文件按条款、会议纪要按议题），向量化后存入语义检索库；支持15类知识分类、密级权限隔离、时效管理、相似度分层。生成报告与AI问答时自动检索最相关内容并按可信度标注注入。<b>需先按部署说明创建 Vectorize 索引并绑定 VECTORIZE 与 AI。</b></div>'
     +'<div id="ragStats" style="font-size:12px; color:var(--soft); margin:8px 0;">读取库规模…</div>'
     +'<div style="display:flex; gap:12px; margin-bottom:10px; flex-wrap:wrap; align-items:center;">'
     +'<label style="font-size:13px;">分类：<select id="ragCat" style="padding:5px 8px;">'+ragCatOptionsHtml(false)+'</select></label>'
