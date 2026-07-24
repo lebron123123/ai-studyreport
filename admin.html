@@ -205,11 +205,42 @@ async function ragParseFile(f){
     const pdf = await window.pdfjsLib.getDocument({data: await f.arrayBuffer()}).promise;
     const parts = [];
     for(let p=1; p<=pdf.numPages; p++){ const tc = await (await pdf.getPage(p)).getTextContent(); parts.push(tc.items.map(it=>it.str).join("")); }
-    return parts.join("\n");
+    const text = parts.join("\n");
+    // 文字层为空 → 大概率是扫描件；PDF扫描件本系统无法自动识别，明确提示而不是静默入库空内容
+    if(text.replace(/\s/g,"").length < 20){
+      throw new Error("这份PDF提取不到文字，应为扫描件。请先用OCR工具（如WPS、Adobe的识别文字功能）转成可复制文字的PDF或Word后再上传；或将页面导出为图片(png/jpg)上传，系统可对图片做文字识别");
+    }
+    return text;
   }
-  throw new Error("不支持 ."+ext);
+  // 其余格式交给后端 Workers AI 解析：图片走视觉模型（≈OCR）、Office/网页/表格等
+  const SERVER_PARSE = ["png","jpg","jpeg","webp","svg","xlsx","xls","xlsm","csv","html","htm","xml","ods","odt","numbers"];
+  if(SERVER_PARSE.includes(ext)){
+    if(f.size > 8*1024*1024) throw new Error("文件超过8MB，请压缩或拆分后再上传");
+    const buf = await f.arrayBuffer();
+    // ArrayBuffer → base64（分片处理，避免大文件时调用栈溢出）
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    const CH = 0x8000;
+    for(let i=0;i<bytes.length;i+=CH) binary += String.fromCharCode.apply(null, bytes.subarray(i, i+CH));
+    const b64 = btoa(binary);
+    const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),
+      body:JSON.stringify({action:"parseFile", name:f.name, dataBase64:b64})});
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error||"解析失败");
+    return d.text||"";
+  }
+  throw new Error("不支持 ."+ext+"（支持：txt/docx/pdf/图片(png,jpg,webp)/xlsx/csv/html/xml 等）");
 }
 // 语义切块:按标题分节 → 节内按句子边界+重叠切块 → 每块带上下文锚点
+// 内容哈希：用于识别"改了文件名但内容相同"的真重复
+async function ragContentHash(text){
+  try{
+    const buf = new TextEncoder().encode(String(text||""));
+    const digest = await crypto.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("");
+  }catch(e){ return ""; }   // 不支持时降级为空，仅按文件名判断
+}
+
 // ===== 知识库文档分类：单一数据源 =====
 // 所有下拉框、切块参数、图谱配色都从这里生成，新增分类只需在此处加一行
 // group=界面分组  size=块大小  overlap=重叠  splitBy=结构切分点  color=图谱配色
@@ -354,7 +385,7 @@ async function openRag(){
     +'<span id="ragChunkHint" style="font-size:11px; color:var(--bp,#2C6CA6); width:100%;"></span></div>'
     +'<div style="border:2px dashed var(--line); background:#fff; padding:26px; text-align:center;">'
     +'<button class="btn" id="ragPick">选择文件（可多选）</button>'
-    +'<input type="file" id="ragFiles" accept=".docx,.pdf,.txt" multiple style="display:none;">'
+    +'<input type="file" id="ragFiles" accept=".docx,.pdf,.txt,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.html,.htm,.xml" multiple style="display:none;">'
     +'<div id="ragProg" style="font-size:12px; color:var(--soft); margin-top:12px;">未开始</div></div>'
     +'<div style="margin-top:18px; display:flex; justify-content:space-between; align-items:center;"><b style="font-weight:600;">已入库文件</b>'
     +'<label style="font-size:12px;">筛选分类：<select id="ragFilter" style="padding:4px 8px;">'+ragCatOptionsHtml(true,"全部")+'</select></label></div>'
@@ -411,10 +442,27 @@ async function ragIngest(files){
   for(let fi=0; fi<files.length; fi++){
     const f = files[fi];
     prog.textContent = "解析 "+(fi+1)+"/"+files.length+"：《"+f.name+"》（"+ingestCat+"："+prof.note+"）…";
-    let chunks;
+    let chunks, contentHash = "", replaceMode = false;
     try{
       const text = await ragParseFile(f);
-      chunks = ragSplit(text, f.name.replace(/\.[^.]+$/,""), ingestCat);
+      const fileTitle = f.name.replace(/\.[^.]+$/,"");
+      contentHash = await ragContentHash(text);
+      // 上传预检：识别重复 / 同名旧版
+      try{
+        const pr = await fetch("/api/rag",{method:"POST",headers:authHeaders(),
+          body:JSON.stringify({action:"precheck", title:fileTitle, contentHash})});
+        const pd = await pr.json();
+        if(pd.ok && pd.verdict === "duplicate"){
+          const when = pd.at ? new Date(pd.at).toLocaleDateString("zh-CN") : "";
+          if(!confirm("《"+f.name+"》的内容与知识库中已有文件《"+pd.existingTitle+"》完全相同"+(when?"（"+when+"入库）":"")+"。\n\n重复入库会浪费存储、干扰检索排序。\n\n点【确定】仍然入库，点【取消】跳过此文件。")){
+            failed.push(f.name+"（内容重复，已跳过）"); continue;
+          }
+        }else if(pd.ok && pd.verdict === "newVersion"){
+          const when = pd.at ? new Date(pd.at).toLocaleDateString("zh-CN") : "";
+          replaceMode = confirm("知识库中已存在同名文件《"+pd.existingTitle+"》（第"+(pd.version||1)+"版，"+(pd.chunks||0)+"块"+(when?"，"+when+"入库":"")+"）。\n\n点【确定】＝替换旧版本（删除旧内容，版本号+1，推荐）\n点【取消】＝保留旧版本并追加（可能导致新旧内容同时被检索到、互相矛盾）");
+        }
+      }catch(e){ /* 预检失败不阻断上传 */ }
+      chunks = ragSplit(text, fileTitle, ingestCat);
       if(!chunks.length){ failed.push(f.name+"（无有效块）"); continue; }
     }catch(e){ failed.push(f.name+"（"+e.message+"）"); continue; }
     totalChunks += chunks.length;
@@ -427,7 +475,8 @@ async function ragIngest(files){
         const dept = document.getElementById("ragDept") && document.getElementById("ragDept").value.trim() ? document.getElementById("ragDept").value.trim() : "全部门";
         const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),
           body:JSON.stringify({action:"upsert", chunks:chunks.slice(i,i+10), category:cat, level:lvl, security:sec, deptScope:dept,
-                               effectiveDate:ingestEffD, expiryDate:ingestExpD})});
+                               effectiveDate:ingestEffD, expiryDate:ingestExpD,
+                               contentHash, replaceMode, isFirstBatch: i===0})});
         const d = await r.json();
         if(d.ok) okChunks += d.count; else{ failed.push(f.name+"批次"+i+"："+d.error); break; }
       }catch(e){ failed.push(f.name+"批次"+i+"：网络错误"); break; }
@@ -482,6 +531,7 @@ async function refreshRagFiles(){
       +'<span style="font-size:11px; color:'+LVC[lvl]+';">'+LVN[lvl]+'</span>'
       +'<span style="font-size:11px; color:'+(f.security==3?"#B7302B":f.security==2?"#8A6D1B":"#1F7A3D")+';">'+SECN[parseInt(f.security)||1]+'</span>'
       +(f.dept_scope && f.dept_scope!=="全部门" ? '<span style="font-size:11px; padding:1px 6px; background:#EEF; color:#33a;">'+esc(f.dept_scope)+'</span>' : '')
+      +((parseInt(f.version)||1) > 1 ? '<span title="'+(f.updated_at?"最近更新 "+new Date(f.updated_at).toLocaleDateString("zh-CN"):"")+'" style="font-size:11px; padding:1px 6px; border-radius:3px; background:#EEF3FA; color:#2C6CA6;">v'+f.version+'</span>' : '')
       +ragLifeBadge(f.effective_date, f.expiry_date)
       +'<span style="color:var(--soft);">'+f.chunks+'块</span>'
       +'<button class="btn sm" data-raglife="'+esc(f.title)+'" data-eff="'+esc(f.effective_date||"")+'" data-exp="'+esc(f.expiry_date||"")+'">时效</button>'
