@@ -1,5 +1,5 @@
 /* ============================================================ 
-   office.js —— AI办公助手（第四大功能模块）  
+   office.js —— AI办公助手（第四大功能模块）
    定位：日常办公文稿撰写、业务分析对话、导出Word/Excel
    依赖：agent-core.js（引擎）、export.js（ensureDocxLib/XLSX加载）、docxgen相关工具函数
 
@@ -89,7 +89,7 @@ function stepOffice(){
     +'<div id="officeActions" style="margin-top:10px; display:none;">'
     +'<button class="btn ghost" id="officeExportWord" style="padding:7px 16px; font-size:12.5px;">📄 导出为 Word</button>'
     +'<button class="btn ghost" id="officeExportExcel" style="padding:7px 16px; font-size:12.5px; margin-left:8px;">📊 导出为 Excel</button>'
-    +'<span style="font-size:11.5px; color:var(--ink-soft); margin-left:10px;">导出最近一条AI回复的内容</span>'
+    +'<span style="font-size:11.5px; color:var(--ink-soft); margin-left:10px;">导出前可先预览效果</span>'
     +'</div>'
     +'<div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">'
     +'<span id="officeHistTip" style="font-size:11.5px; color:var(--ink-soft);"></span>'
@@ -103,8 +103,8 @@ function bindOfficeEvents(){
   const s = id=>document.getElementById(id);
   if(s("officeSend")) s("officeSend").onclick = officeSend;
   if(s("officeInput")) s("officeInput").addEventListener("keydown", e=>{ if(e.key==="Enter") officeSend(); });
-  if(s("officeExportWord")) s("officeExportWord").onclick = ()=>officeExport("word");
-  if(s("officeExportExcel")) s("officeExportExcel").onclick = ()=>officeExport("excel");
+  if(s("officeExportWord")) s("officeExportWord").onclick = ()=>officeOpenPreview("word");
+  if(s("officeExportExcel")) s("officeExportExcel").onclick = ()=>officeOpenPreview("excel");
   if(s("officeClearChat")) s("officeClearChat").onclick = officeClearHistory;
   renderOfficeMsgs();
   // 已有历史回复时（如切走再切回、或云端历史刚恢复），恢复导出按钮的显示状态
@@ -293,25 +293,85 @@ function officeLastAnswer(){
   for(let i=officeChat.length-1; i>=0; i--){ if(officeChat[i].role==="assistant") return officeChat[i].content; }
   return "";
 }
-// 解析 [[TABLE]]...[[/TABLE]] 块，返回 {textBefore, table:[[...]], textAfter} 的数组片段
+// 解析待导出内容 → 结构块。统一走 md.js，这样"界面看到的"和"导出得到的"就是同一份解析结果，
+// 不会出现界面渲染正常、导出却丢结构的情况
 function officeParseBlocks(text){
+  if(window.MD && typeof window.MD.parseBlocks === "function"){
+    return window.MD.parseBlocks(text);
+  }
+  // 降级：md.js 未加载时仍支持旧的 [[TABLE]] 语法
   const parts = [];
   const re = /\[\[TABLE\]\]([\s\S]*?)\[\[\/TABLE\]\]/g;
   let last = 0, m;
   while((m = re.exec(text))){
-    if(m.index > last) parts.push({type:"text", content:text.slice(last, m.index).trim()});
+    if(m.index > last) parts.push({type:"para", text:text.slice(last, m.index).trim()});
     const rows = m[1].trim().split("\n").map(r=>r.split("|").map(c=>c.trim())).filter(r=>r.length>1);
     if(rows.length) parts.push({type:"table", rows});
     last = re.lastIndex;
   }
-  if(last < text.length) parts.push({type:"text", content:text.slice(last).trim()});
-  return parts.filter(p=> p.type==="table" || (p.content && p.content.length));
+  if(last < text.length) parts.push({type:"para", text:text.slice(last).trim()});
+  return parts.filter(p=> p.type==="table" || (p.text && p.text.length));
+}
+
+/* ===== 导出前预览 =====
+   为什么要有：导出Word/Excel是"黑盒"操作——点下去直接下载一个文件，
+   用户要打开Word才知道排版对不对、表格有没有丢。预览让他在下载前先看一眼，
+   有问题可以直接改需求重新生成，省掉"导出→打开→不对→回来重生成"的来回。 */
+function officeOpenPreview(kind){
+  const text = officeLastAnswer();
+  if(!text){ officeNotify("还没有可导出的内容，请先让AI生成内容"); return; }
+  const blocks = officeParseBlocks(text);
+  const tableCount = blocks.filter(b=>b.type==="table").length;
+
+  let inner = "";
+  if(kind === "excel"){
+    // Excel预览：明确告诉用户会导出成几张表；没有表格时说明会按文本逐行导出
+    if(tableCount){
+      inner = '<div style="font-size:12px; color:var(--ink-soft,#66707A); margin-bottom:10px;">'
+        + '将导出 ' + tableCount + ' 张工作表（表1…表' + tableCount + '），仅包含下列表格内容，正文文字不会进入Excel。</div>'
+        + blocks.filter(b=>b.type==="table").map((b,i)=>{
+            let t = '<div style="font-size:12px; font-weight:600; margin:10px 0 4px;">表'+(i+1)+'</div><table class="rpt">';
+            b.rows.forEach((r,ri)=>{ const tg = ri===0?"th":"td";
+              t += "<tr>" + r.map(c=>'<'+tg+'>'+escapeHtml(c)+'</'+tg+'>').join("") + "</tr>"; });
+            return t + "</table>";
+          }).join("");
+    }else{
+      inner = '<div style="font-size:12px; color:var(--seal-red,#C24A42); margin-bottom:10px;">'
+        + '这段内容里没有表格，导出的Excel会把正文按行放进单列。如果你要的是数据表，'
+        + '可以让AI「把上面的内容整理成表格」后再导出。</div>'
+        + '<div style="font-size:12.5px; line-height:1.8;">' + (window.MD ? window.MD.renderHtml(text) : escapeHtml(text)) + '</div>';
+    }
+  }else{
+    inner = '<div style="font-size:12px; color:var(--ink-soft,#66707A); margin-bottom:10px;">'
+      + '下面是Word文档的大致效果（正文含 ' + tableCount + ' 个表格）。文档会带"AI辅助起草草稿"标注。</div>'
+      + '<div style="font-size:13px; line-height:1.9;">' + (window.MD ? window.MD.renderHtml(text) : escapeHtml(text)) + '</div>';
+  }
+
+  const old = document.getElementById("officePrevWrap"); if(old) old.remove();
+  document.body.insertAdjacentHTML("beforeend",
+    '<div id="officePrevWrap" style="position:fixed; inset:0; background:rgba(14,28,44,.55); display:flex; align-items:center; justify-content:center; z-index:998;">'
+    + '<div style="background:#fff; width:min(760px,92vw); max-height:84vh; display:flex; flex-direction:column; border-radius:8px; box-shadow:0 24px 60px -18px rgba(0,0,0,.5);">'
+    + '<div style="padding:14px 20px; border-bottom:1px solid var(--line,#DCE6F0); display:flex; justify-content:space-between; align-items:center;">'
+    + '<b style="font-size:14px;">导出预览 · ' + (kind==="excel" ? "Excel" : "Word") + '</b>'
+    + '<button id="opClose" style="border:none; background:none; font-size:20px; cursor:pointer; color:var(--ink-soft,#66707A);">×</button></div>'
+    + '<div style="padding:18px 22px; overflow:auto; flex:1;">' + inner + '</div>'
+    + '<div style="padding:12px 20px; border-top:1px solid var(--line,#DCE6F0); display:flex; justify-content:flex-end; gap:10px;">'
+    + '<button class="btn ghost" id="opCancel" style="padding:7px 18px; font-size:12.5px;">返回修改</button>'
+    + '<button class="btn" id="opConfirm" style="padding:7px 18px; font-size:12.5px;">确认导出</button>'
+    + '</div></div></div>');
+
+  const close = ()=>{ const w = document.getElementById("officePrevWrap"); if(w) w.remove(); };
+  document.getElementById("opClose").onclick = close;
+  document.getElementById("opCancel").onclick = close;
+  document.getElementById("officePrevWrap").onclick = e=>{ if(e.target.id==="officePrevWrap") close(); };
+  document.getElementById("opConfirm").onclick = ()=>{ close(); officeExport(kind); };
 }
 
 async function officeExport(kind){
   const text = officeLastAnswer();
   if(!text){ officeNotify("还没有可导出的内容，请先让AI生成内容"); return; }
   const blocks = officeParseBlocks(text);
+  const plain = (s)=> (window.MD ? window.MD.stripInline(s) : String(s||""));
   try{
     if(kind === "word"){
       await ensureDocxLib();
@@ -321,10 +381,19 @@ async function officeExport(kind){
       children.push(new D.Paragraph({ children:[run("办公文稿草稿",{size:32,bold:true})], alignment:D.AlignmentType.CENTER, spacing:{after:200} }));
       children.push(new D.Paragraph({ children:[run("生成时间："+new Date().toLocaleString("zh-CN")+"　｜　本文为AI辅助起草草稿，非正式签发文件",{size:18,color:"888888"})], spacing:{after:300} }));
       blocks.forEach(b=>{
-        if(b.type === "text"){
-          b.content.split("\n").filter(l=>l.trim()).forEach(line=>{
-            children.push(new D.Paragraph({ children:[run(line)], spacing:{after:160} }));
+        if(b.type === "heading"){
+          children.push(new D.Paragraph({ children:[run(plain(b.text), {size: b.level<=2 ? 26 : 24, bold:true})],
+            spacing:{before:180, after:100} }));
+        }else if(b.type === "list"){
+          b.items.forEach((it,i)=>{
+            children.push(new D.Paragraph({ children:[run((b.ordered ? (i+1)+". " : "· ") + plain(it))],
+              indent:{left:360}, spacing:{after:100} }));
           });
+        }else if(b.type === "quote"){
+          children.push(new D.Paragraph({ children:[run(plain(b.text), {italics:true, color:"666666"})],
+            indent:{left:360}, spacing:{after:140} }));
+        }else if(b.type === "hr"){
+          children.push(new D.Paragraph({ children:[run("　")], spacing:{after:120} }));
         }else if(b.type === "table"){
           const table = new D.Table({
             width:{ size:100, type:D.WidthType.PERCENTAGE },
@@ -337,6 +406,10 @@ async function officeExport(kind){
           });
           children.push(table);
           children.push(new D.Paragraph({ text:"", spacing:{after:200} }));
+        }else{
+          String(b.text||"").split("\n").filter(l=>l.trim()).forEach(line=>{
+            children.push(new D.Paragraph({ children:[run(plain(line))], spacing:{after:160} }));
+          });
         }
       });
       const doc = new D.Document({ sections:[{ children }] });
@@ -356,7 +429,7 @@ async function officeExport(kind){
         });
       }else{
         // 没有表格结构时，把文本按行放入单列，仍导出为可用的Excel
-        const rows = text.split("\n").filter(l=>l.trim()).map(l=>[l]);
+        const rows = text.split("\n").filter(l=>l.trim()).map(l=>[plain(l)]);
         const ws = XLSX.utils.aoa_to_sheet([["内容"], ...rows]);
         XLSX.utils.book_append_sheet(wb, ws, "内容");
       }
