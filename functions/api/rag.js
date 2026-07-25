@@ -333,6 +333,50 @@ export async function onRequestPost(context){
     return json({ok:true, matches, tier});
   }
 
+  // 知识库目录概览：回答"知识库里有什么/有多少"这类元问题用。
+  // 与检索走同一套权限与时效规则——用户看不到的资料不计入，失效资料单独标注，
+  // 避免AI告诉用户"有5份政策文件"但其中3份他根本无权检索、或早已过期。
+  if(body.action === "catalog"){
+    const wantCat = body.category ? String(body.category).slice(0,30) : null;
+    let myDept = "", myClearance = 1;
+    try{
+      const u = await env.DB.prepare("SELECT department, clearance FROM users WHERE id=?").bind(user.userId).first();
+      if(u){ myDept = u.department||""; myClearance = parseInt(u.clearance)||1; }
+    }catch(e){}
+    const iAmAdmin = isAdmin(env, user);
+    const todayStr = new Date().toISOString().slice(0,10);
+    const normDate = (s)=>{ s = String(s||"").trim(); return /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s)) ? s : ""; };
+
+    let rows = [];
+    try{
+      const dr = await env.DB.prepare(
+        "SELECT title, category, level, enabled, security, dept_scope, effective_date, expiry_date FROM rag_files_v2").all();
+      rows = dr.results || [];
+    }catch(e){ return json({ok:true, total:0, categories:[], note:"知识库台账暂不可用"}); }
+
+    const byCat = {};
+    let total = 0, expiredTotal = 0;
+    rows.forEach(x=>{
+      if(x.enabled === 0) return;                                   // 已停用：不参与检索，也不该报给用户
+      if(!iAmAdmin){
+        if((parseInt(x.security)||1) > myClearance) return;          // 超出本人密级
+        const ds = x.dept_scope || "全部门";
+        if(ds !== "全部门" && ds !== myDept) return;                  // 不在可见部门
+      }
+      const cat = x.category || "未分类";
+      if(wantCat && cat !== wantCat) return;
+      const exp = normDate(x.expiry_date), eff = normDate(x.effective_date);
+      const isExpired = (exp && exp < todayStr) || (eff && eff > todayStr);
+      if(!byCat[cat]) byCat[cat] = { category:cat, count:0, expired:0, titles:[] };
+      byCat[cat].count++;
+      if(isExpired){ byCat[cat].expired++; expiredTotal++; }
+      if(byCat[cat].titles.length < 8) byCat[cat].titles.push(x.title);
+      total++;
+    });
+    const categories = Object.values(byCat).sort((a,b)=>b.count-a.count);
+    return json({ok:true, total, expired:expiredTotal, categories});
+  }
+
   if(body.action === "stats"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
   if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
