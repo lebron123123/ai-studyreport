@@ -1,4 +1,4 @@
-// 报告生成相关模块 —— 从 index.html 内联脚本拆分而来（领域/项目信息/章节生成/知识库检索/草稿存档等）  
+// 报告生成相关模块 —— 从 index.html 内联脚本拆分而来（领域/项目信息/章节生成/知识库检索/草稿存档等）
 let domainKey = null;
 let chapters = [];
 let signed = false;
@@ -626,11 +626,13 @@ async function generateSection(c, s, onChunk){
   return text;
 }
 
+// 报告逐节生成与逐节AI评审属于"批量"负载（一篇报告约40次调用），
+// 走独立的 batch 额度，不占用日常AI问答的额度
 async function callGen(sys, user, onChunk){
   const resp = await fetch("/api/generate", {
     method:"POST",
     headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
-    body: JSON.stringify({ system: sys, messages:[{role:"user", content:user}], stream: !!onChunk })
+    body: JSON.stringify({ system: sys, messages:[{role:"user", content:user}], stream: !!onChunk, kind:"batch" })
   });
   if(resp.status===401){ clearAuth(); showLoginModal("登录已过期，请重新登录后继续生成"); throw new Error("登录已过期"); }
 
