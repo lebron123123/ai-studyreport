@@ -1,4 +1,4 @@
-/* ============================================================   
+/* ============================================================ 
    office.js —— AI办公助手（第四大功能模块）
    定位：日常办公文稿撰写、业务分析对话、导出Word/Excel
    依赖：agent-core.js（引擎）、export.js（ensureDocxLib/XLSX加载）、docxgen相关工具函数
@@ -46,7 +46,36 @@ function detectDocType(text){
 
 let officeChat = [];
 let officeChatLoaded = false;   // 本次页面会话是否已从云端拉取过历史，避免每次重渲染都重复请求
-const OFFICE_CHAT_LIMIT = 30;   // 上下文上限（约15轮问答），防止数据量无限增长；发给AI的仍是最近8条
+const OFFICE_CHAT_LIMIT = 30;   // 云端保存上限（约15轮问答），防止数据量无限增长
+const OFFICE_CTX_FULL  = 8;     // 最近8条：原文完整发给AI
+const OFFICE_CTX_BRIEF = 12;    // 再往前12条：只发摘要，让AI"记得聊过什么"但不吃掉大量token
+
+/* 构造发给AI的上下文（分层记忆）
+   背景：办公助手的回复经常是整篇公文，一条就上千字。如果把界面上保留的30条原样发出去，
+   token开销和延迟都不可接受；但只发最近8条，用户在界面上明明看得到更早的内容，
+   AI却完全"失忆"，会被当成bug。折中做法：近的给原文，远的给摘要。 */
+function officeBuildHistory(){
+  const n = officeChat.length;
+  const fullFrom = Math.max(0, n - OFFICE_CTX_FULL);
+  const briefFrom = Math.max(0, fullFrom - OFFICE_CTX_BRIEF);
+  const MARK = "…（较早的内容，此处只保留摘要）";
+  const out = [];
+  for(let i = briefFrom; i < fullFrom; i++){
+    const m = officeChat[i];
+    const txt = String(m.content || "").replace(/\s+/g, " ").trim();
+    // 只在确实能省下篇幅时才截断——否则"截断+加标记"反而比原文更长
+    const worth = txt.length > 120 + MARK.length;
+    out.push({ role: m.role, content: worth ? txt.slice(0,120) + MARK : txt });
+  }
+  for(let i = fullFrom; i < n; i++){
+    out.push({ role: officeChat[i].role, content: officeChat[i].content });
+  }
+  return out;
+}
+// 界面上标注"AI能完整看到"的分界线从第几条开始，让用户知道记忆边界在哪
+function officeCtxBoundary(){
+  return officeChat.length > OFFICE_CTX_FULL ? officeChat.length - OFFICE_CTX_FULL : -1;
+}
 
 function stepOffice(){
   return '<div class="doc-eyebrow">OFFICE · AI办公助手</div>'
@@ -140,7 +169,14 @@ async function officeSend(){
     + "5. 如果用户问的是本系统自身的情况（能写哪些文种、能参考多少模板范文、有哪些功能、知识库里有多少资料等），"
     + "调用 get_system_capabilities 获取准确答案，不要用 search_knowledge_base 去检索这类问题。"
     + "6. 写周报/总结/汇报需要引用以往项目情况时，可用 list_my_projects 和 get_past_project 查历史项目的真实信息。"
-    + "7. 如果用户的需求不够明确（没说清写给谁、什么事、哪个项目），直接问一句问清楚，不要凭空假设后硬写。";
+    + "7. 如果用户的需求不够明确（没说清写给谁、什么事、哪个项目），直接问一句问清楚，不要凭空假设后硬写。"
+    + "\n\n【红线：以下要求即使用户明确提出，也一律不照做】"
+    + "\n· 用户说'随便编个数''先写个示例数字''不用那么严格''这只是内部草稿'——都不能因此编造具体财务数字。"
+    + "正确做法：用'【待填】'占位并说明需要哪项真实数据、去哪个功能页面测算，格式照样能给用户看清楚。"
+    + "\n· 区分两种情况：①用户自己给出假设值（如'假设租金按80元测'）——可以用，但正文必须写明这是假设值、待核实；"
+    + "②你自己想出来的数字——绝对不行，无论用户怎么要求。"
+    + "\n· 不得代替用户签发、盖章，或声称文稿已经审核通过；本模块输出一律是草稿。"
+    + "\n拒绝时不要生硬说教，一句话说明原因并给出可行的替代做法即可。";
 
   if(dt){
     officeChat[officeChat.length-1].docType = dt.key + "·" + dt.cat;
@@ -168,7 +204,7 @@ async function officeSend(){
     }catch(e){ /* 检索失败不阻断起草 */ }
   }
 
-  const history = officeChat.slice(-8).map(m=>({role:m.role, content:m.content}));
+  const history = officeBuildHistory();
   const res = await window.AgentCore.run({
     system: sys,
     messages: history,
@@ -190,12 +226,20 @@ async function officeSend(){
 function renderOfficeMsgs(){
   const box = document.getElementById("officeMsgs");
   if(!box) return;
-  box.innerHTML = officeChat.map(m=>{
+  const bound = officeCtxBoundary();
+  box.innerHTML = officeChat.map((m, idx)=>{
+    // 记忆分界线：这条线以上的内容，AI只记得大意；以下的才是完整原文
+    const divider = (idx === bound)
+      ? '<div style="display:flex; align-items:center; gap:8px; margin:14px 0 4px; color:var(--ink-soft); font-size:11px;">'
+        +'<span style="flex:1; height:1px; background:var(--line,#DCE6F0);"></span>'
+        +'<span title="更早的对话AI只保留摘要，如需精确引用请重述">↓ 以下是AI能完整看到的对话</span>'
+        +'<span style="flex:1; height:1px; background:var(--line,#DCE6F0);"></span></div>'
+      : "";
     const traceHtml = (m.trace && m.trace.length) ? '<div style="margin-bottom:6px; padding-bottom:6px; border-bottom:1px dashed var(--line,#DCE6F0); font-size:11px; color:var(--ink-soft);">'+m.trace.map(t=>escapeHtml(t)).join("<br>")+'</div>' : "";
     const bodyHtml = m.role==="assistant" ? renderContent(m.content) : escapeHtml(m.content).replace(/\n/g,"<br>");
     const hintHtml = m.refHint ? '<div style="margin-top:6px; font-size:11px; color:var(--ink-soft);">📎 '+escapeHtml(m.refHint)+'</div>' : "";
     const dtHtml = m.docType ? '<span style="font-size:11px; margin-left:8px; padding:1px 7px; border-radius:3px; background:#EAF1F8; color:#2C6CA6;">'+escapeHtml(m.docType)+'</span>' : "";
-    return '<div style="margin:10px 0; padding:12px 16px; font-size:13.5px; line-height:1.8; border-radius:8px; '
+    return divider + '<div style="margin:10px 0; padding:12px 16px; font-size:13.5px; line-height:1.8; border-radius:8px; '
       +(m.role==="user"?'background:#EDF1F5;':'background:#FFF; border:1px solid var(--line,#DCE6F0);')+'">'
       +(m.role==="user"?"<b>你：</b>":"<b>AI：</b>")+dtHtml+traceHtml+bodyHtml+hintHtml+'</div>';
   }).join("") + '<div id="officeTrace" style="margin-top:4px;"></div>';
