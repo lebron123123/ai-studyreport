@@ -39,6 +39,103 @@
 
   /* ---------- 阶段三：扩充工具箱（跨模块只读工具） ---------- */
 
+  /* 工具：系统自身能力自述（元问题专用）
+     背景：用户经常问"你能参考多少模板""这网站有哪些功能""知识库里有什么资料"这类
+     关于系统自身的问题。这类问题的答案是系统内置配置 + 知识库台账，不是需要去文档里
+     语义检索的事实。以前没有这个工具时，AI 只能拿 search_knowledge_base 硬查，
+     查询词再怎么换也文不对题，最后绕到"多次查询后仍未能得出确定结论"，体验很差。 */
+  AC.registerTool("get_system_capabilities", {
+    schema: {
+      type: "function",
+      function: {
+        name: "get_system_capabilities",
+        description: "获取本系统自身的功能、配置与知识库存量情况。当用户问的是关于'这个系统/你自己'的问题时调用，例如：你能写哪些类型的公文、能参考多少模板范文、这个网站有哪些功能、知识库里有多少资料/哪类资料最多、你能做什么/不能做什么。注意：这类问题不要用 search_knowledge_base 去检索，用本工具直接获取准确答案。",
+        parameters: {
+          type:"object",
+          properties:{
+            aspect:{type:"string", description:"想了解的方面(可选)：functions=网站功能模块；doctypes=公文文种规范；knowledge=知识库存量分布；tools=AI助手可用的查询能力。不传则返回全部。"},
+          },
+          required:[],
+        },
+      },
+    },
+    validate: (args)=> AC.V.optionalEnum(args, "aspect", ["functions","doctypes","knowledge","tools"], "aspect"),
+    label: (args)=>"📖 查询系统自身能力" + (args && args.aspect ? "（"+args.aspect+"）" : ""),
+    run: async (args)=>{
+      const aspect = (args && args.aspect) || "";
+      const want = (k)=> !aspect || aspect === k;
+      const out = [];
+
+      if(want("functions")){
+        out.push("【本系统的功能模块】\n"
+          + "1. 可研报告生成：选择领域→录入项目信息→自动财务测算→逐章AI撰写→人工复核签发→导出Word\n"
+          + "2. 独立财务测算：非居改保/出租类/出售类三套测算引擎，数字由确定性代码算出，非AI估算\n"
+          + "3. 可研智能审查：硬规则秒查 + AI深度评审，可定位问题并定向修改后重审\n"
+          + "4. AI办公助手：日常公文起草、数据整理成表、业务分析，可导出Word/Excel\n"
+          + "另有：选址调研(周边配套/竞品POI)、云端项目库、知识库检索。");
+      }
+
+      if(want("doctypes")){
+        let dts = [];
+        try{ if(typeof DOC_TYPES !== "undefined" && Array.isArray(DOC_TYPES)) dts = DOC_TYPES; }catch(e){}
+        if(dts.length){
+          const byCat = {};
+          dts.forEach(d=>{ (byCat[d.cat] = byCat[d.cat] || []).push(d.key); });
+          out.push("【AI办公助手内置的公文文种规范，共 " + dts.length + " 种】\n"
+            + Object.keys(byCat).map(c=>"· "+c+"："+byCat[c].join("、")).join("\n")
+            + "\n说明：这是系统内置的写作规范（结构、用语、格式要求），起草时会自动识别文种并套用；"
+            + "它与知识库里的『模板范文』是两回事——前者是规范，后者是本单位历史真实范文。");
+        }else{
+          out.push("【公文文种规范】当前页面未加载办公助手模块，无法读取文种清单；请到「AI办公助手」页面再问。");
+        }
+      }
+
+      if(want("knowledge")){
+        try{
+          const r = await fetch("/api/rag", {method:"POST",
+            headers: Object.assign({"Content-Type":"application/json"}, (window.authHeaders ? window.authHeaders() : {})),
+            body: JSON.stringify({action:"catalog"})});
+          const d = await r.json();
+          if(d && d.ok && (d.categories||[]).length){
+            out.push("【知识库存量（仅统计你有权限查看、且已启用的资料）】\n"
+              + "合计 " + d.total + " 份文件"
+              + (d.expired ? "（其中 " + d.expired + " 份已失效或尚未生效，检索时会降权并标注）" : "")
+              + "\n" + d.categories.map(c=>"· "+c.category+"："+c.count+"份"
+                  + (c.expired ? "(含"+c.expired+"份失效)" : "")
+                  + (c.titles && c.titles.length ? "，例如：" + c.titles.slice(0,3).join("、") : "")).join("\n"));
+          }else if(d && d.ok){
+            out.push("【知识库存量】你当前有权限查看的知识库文件为 0 份。可能是尚未上传资料，或现有资料的密级/部门范围超出你的权限。");
+          }else{
+            out.push("【知识库存量】读取失败：" + ((d && d.error) || "未知原因"));
+          }
+        }catch(e){
+          out.push("【知识库存量】读取失败：" + e.message);
+        }
+      }
+
+      if(want("tools")){
+        const names = Object.keys(AC._tools || {});
+        const CN = {
+          get_calc_summary:"读取本次财务测算的真实结果",
+          search_knowledge_base:"语义检索单位知识库文档内容",
+          get_current_context:"感知你当前在哪个页面/步骤",
+          get_project_info:"读取当前正在编辑的项目信息",
+          get_review_issues:"读取智能审查发现的问题清单",
+          suggest_navigation:"建议你去哪个功能页面操作",
+          remember_preference:"记住你的偏好，供以后对话参考",
+          forget_preference:"删除已记住的某条偏好",
+          get_system_capabilities:"查询系统自身的功能与配置（本工具）",
+        };
+        out.push("【我能查的东西】\n" + names.map(n=>"· "+(CN[n]||n)).join("\n")
+          + "\n【我不能做的】不联网查实时信息；不代你填写参数、不代你点击执行、不代改数据；"
+          + "财务数字一律来自内置测算引擎，我不会自己算或改写。");
+      }
+
+      return out.join("\n\n") || "（未获取到相应信息）";
+    },
+  });
+
+
   // 工具：读取当前项目信息(仅在"可研生成"流程中有效)
   AC.registerTool("get_project_info", {
     schema: {
@@ -306,7 +403,9 @@
       + "\n3. 涉及'我现在在哪''这是什么''当前项目情况'等场景感知问题 → 优先调用 get_current_context 或 get_project_info"
       + "\n4. 涉及审查结果的问题 → 优先调用 get_review_issues"
       + "\n5. 用户想去某个功能模块 → 调用 suggest_navigation，不要自己编造跳转"
-      + "\n6. 每一轮只调用最匹配的那一个工具，拿到足够信息后直接作答，不要重复查询已掌握的信息";
+      + "\n6. 问的是本系统自身的功能/能力/配置，或知识库里有多少资料 → 调用 get_system_capabilities，"
+      + "不要用 search_knowledge_base 去查这类问题（那是检索文档内容的，查不到系统自身信息）"
+      + "\n7. 每一轮只调用最匹配的那一个工具，拿到足够信息后直接作答，不要重复查询已掌握的信息";
     const history = awChat.slice(-6).map(m=>({role:m.role, content:m.content}));
 
     const res = await AC.run({
