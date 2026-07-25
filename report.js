@@ -316,7 +316,12 @@ async function runGeneration(){
   bindEvents();
 }
 
+// 界面渲染：统一走 md.js（支持标题/列表/表格/引用/分隔线/行内样式，并兼容旧的[[TABLE]]语法）
+// 保留降级分支：万一 md.js 未加载，仍能按老逻辑显示，不至于整页空白
 function renderContent(text){
+  if(window.MD && typeof window.MD.renderHtml === "function"){
+    return window.MD.renderHtml(text);
+  }
   const tableRe = /\[\[TABLE\]\]([\s\S]*?)\[\[\/TABLE\]\]/g;
   let html = text.replace(tableRe, function(m, inner){
     const rows = inner.trim().split("\n").filter(r=>r.trim());
