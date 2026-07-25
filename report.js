@@ -1,4 +1,4 @@
-// 报告生成相关模块 —— 从 index.html 内联脚本拆分而来（领域/项目信息/章节生成/知识库检索/草稿存档等）
+// 报告生成相关模块 —— 从 index.html 内联脚本拆分而来（领域/项目信息/章节生成/知识库检索/草稿存档等）  
 let domainKey = null;
 let chapters = [];
 let signed = false;
