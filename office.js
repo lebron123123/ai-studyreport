@@ -1,5 +1,5 @@
 /* ============================================================ 
-   office.js —— AI办公助手（第四大功能模块）  
+   office.js —— AI办公助手（第四大功能模块）
    定位：日常办公文稿撰写、业务分析对话、导出Word/Excel
    依赖：agent-core.js（引擎）、export.js（ensureDocxLib/XLSX加载）、docxgen相关工具函数
 
@@ -138,7 +138,9 @@ async function officeSend(){
     + "3. 直接给内容，不要'以下是'之类的开场白。"
     + "4. 这是草稿性质的办公输出，不是正式签发文件。"
     + "5. 如果用户问的是本系统自身的情况（能写哪些文种、能参考多少模板范文、有哪些功能、知识库里有多少资料等），"
-    + "调用 get_system_capabilities 获取准确答案，不要用 search_knowledge_base 去检索这类问题。";
+    + "调用 get_system_capabilities 获取准确答案，不要用 search_knowledge_base 去检索这类问题。"
+    + "6. 写周报/总结/汇报需要引用以往项目情况时，可用 list_my_projects 和 get_past_project 查历史项目的真实信息。"
+    + "7. 如果用户的需求不够明确（没说清写给谁、什么事、哪个项目），直接问一句问清楚，不要凭空假设后硬写。";
 
   if(dt){
     officeChat[officeChat.length-1].docType = dt.key + "·" + dt.cat;
