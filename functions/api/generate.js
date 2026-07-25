@@ -29,12 +29,18 @@ export async function onRequestPost(context) {
   const wantStream = !!body.stream;
 
   // 工具调用(function calling)透传:仅在非流式的Agent问答场景使用,普通生成不受影响
+  // 2026-07-24：DeepSeek 官方下线了 deepseek-chat 这个旧别名(过渡期内它指向 deepseek-v4-flash 的"非思考模式")，
+  // 改成显式的新模型名。V4系列默认开启"思考模式"——如果只改模型名不管这个，会带来两个问题：
+  // ①思考模式会多吐大量推理token，拖慢速度、拉高成本；②本站Agent多轮工具调用在思考模式下容易触发
+  // "reasoning_content must be passed back"报错。显式关闭thinking，行为和之前的deepseek-chat完全一致。
+  const dsModel = env.DEEPSEEK_MODEL || "deepseek-v4-flash";
   const dsPayload = {
-    model: "deepseek-chat",
+    model: dsModel,
     messages: dsMessages,
     max_tokens: 1200,
     temperature: 0.3,
     stream: wantStream,
+    thinking: { type: "disabled" },
   };
   if(Array.isArray(body.tools) && body.tools.length){
     dsPayload.tools = body.tools;
