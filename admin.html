@@ -643,11 +643,46 @@ async function refreshRagFiles(){
       +((parseInt(f.version)||1) > 1 ? '<span title="'+(f.updated_at?"最近更新 "+new Date(f.updated_at).toLocaleDateString("zh-CN"):"")+'" style="font-size:11px; padding:1px 6px; border-radius:3px; background:#EEF3FA; color:#2C6CA6;">v'+f.version+'</span>' : '')
       +ragLifeBadge(f.effective_date, f.expiry_date)
       +'<span style="color:var(--soft);">'+f.chunks+'块</span>'
+      +'<button class="btn sm" data-ragcat="'+esc(f.title)+'" data-cat="'+esc(f.category||"未分类")+'" data-lvl="'+lvl+'">改分类</button>'
       +'<button class="btn sm" data-raglife="'+esc(f.title)+'" data-eff="'+esc(f.effective_date||"")+'" data-exp="'+esc(f.expiry_date||"")+'">时效</button>'
       +'<button class="btn sm" data-ragscope="'+esc(f.title)+'" data-sec="'+(parseInt(f.security)||1)+'" data-dept="'+esc(f.dept_scope||"全部门")+'">权限</button>'
       +'<button class="btn sm" data-ragtoggle="'+esc(f.title)+'" data-en="'+(en?1:0)+'">'+(en?"停用":"启用")+'</button>'
       +'<button class="btn sm red" data-ragdel="'+esc(f.title)+'">删除</button></div>';
     }).join("");
+    box.querySelectorAll("[data-ragcat]").forEach(b=>{
+      b.onclick = ()=>{
+        const t = b.dataset.ragcat, cur = b.dataset.cat, lvl = b.dataset.lvl;
+        const sel = document.createElement("select");
+        sel.style.cssText = "padding:3px 6px; font-size:12px;";
+        sel.innerHTML = ragCatOptionsHtml(false);
+        sel.value = cur;
+        if(sel.value !== cur){
+          // 当前分类是历史遗留的"未分类"等不在标准列表里的值，插一个选项让管理员看清楚当前状态
+          const opt = document.createElement("option"); opt.textContent = cur; opt.value = cur;
+          sel.insertBefore(opt, sel.firstChild); sel.value = cur;
+        }
+        const ok = document.createElement("button"); ok.className="btn sm"; ok.textContent="确定";
+        const cancel = document.createElement("button"); cancel.className="btn sm"; cancel.textContent="取消";
+        const wrap = document.createElement("span");
+        wrap.style.cssText = "display:inline-flex; gap:4px; align-items:center;";
+        wrap.append(sel, ok, cancel);
+        b.replaceWith(wrap);
+        cancel.onclick = ()=>refreshRagFiles();
+        ok.onclick = async ()=>{
+          const newCat = sel.value;
+          if(newCat === cur){ refreshRagFiles(); return; }
+          ok.disabled = true; cancel.disabled = true;
+          try{
+            // level 原样传回，避免后端setMeta因未收到level而把权威等级悄悄重置成默认值
+            const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),
+              body:JSON.stringify({action:"setMeta", title:t, category:newCat, level: parseInt(lvl)||2})});
+            const d = await r.json();
+            if(d.ok) msg("分类已改为「"+newCat+"」","ok"); else msg(d.error||"更新失败","err");
+          }catch(e){ msg("网络错误","err"); }
+          refreshRagFiles();
+        };
+      };
+    });
     box.querySelectorAll("[data-raglife]").forEach(b=>{
       b.onclick = async ()=>{
         const t = b.dataset.raglife;
