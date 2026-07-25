@@ -179,6 +179,7 @@ window.AgentCore = (function(){
     let finalText = "";
     let errorMsg = "";
     let selfCheckCount = 0;
+    let lastCandidate = "";   // 自查未通过但仍可用的候选答案，用于兜底降级
     const maxSelfCheck = (opt.maxSelfCheck === undefined) ? 1 : opt.maxSelfCheck;   // 最多自查重答1次，避免无限打转与token浪费
     const selfCheckNotes = [];
 
@@ -245,10 +246,21 @@ window.AgentCore = (function(){
           selfCheckCount++;
           let verdict = null;
           try{
-            const checkSys = "你是严格的质量审核员。判断给出的【回答】是否合格，标准：(1)是否切题、直接回应了用户问题；"
-              + "(2)涉及具体数字/政策/事实时，是否有工具返回的真实依据支撑，而不是凭空编造；(3)是否存在明显缺漏导致用户无法据此行动。"
+            const checkSys = "你是严格的质量审核员。判断给出的【回答】是否合格。\n"
+              + "先判断问题类型，两类问题的标准不同：\n"
+              + "A. 元问题——问的是系统/AI自身的功能、配置、能力范围（如'你能写哪些文种''这网站有什么功能''你能参考多少模板''你能做什么'）。"
+              + "这类答案来自系统内置配置，不存在编造风险，【不要求】有外部资料佐证；只要回答清楚、具体，就算合格。\n"
+              + "B. 事实问题——问的是具体数字、政策、项目情况、历史资料等需要查证的内容。"
+              + "这类才要求有工具返回的真实依据支撑，不得凭空编造。\n"
+              + "通用标准：(1)是否切题、直接回应了用户问题；(2)是否存在明显缺漏导致用户无法据此行动。\n"
+              + "重要：判不合格前先想清楚'补充查询什么'是否真的有对应工具能查到。"
+              + "如果已经查过、或根本没有工具能提供这种依据，就不要再判不合格——"
+              + "让AI用已有信息给出带说明的回答，好过反复查询后拒答。"
               + "只输出JSON，不要任何其他文字：{\"ok\":true或false,\"reason\":\"不合格时说明原因(30字内)\",\"advice\":\"不合格时给出应补充查询什么(30字内)\"}";
             const checkUser = "【用户问题】" + (opt.traceQuery || "(未提供)")
+              + "\n\n【可用工具】" + (schemas.length
+                  ? schemas.map(s=>s && s.function ? s.function.name : "").filter(Boolean).join("、")
+                  : "无")
               + "\n\n【已调用的工具及结果摘要】" + (allToolCalls.length
                   ? allToolCalls.map(t=>t.name + (t.error ? "(失败:"+t.error+")" : "(成功)")).join("、")
                   : "未调用任何工具")
@@ -268,9 +280,12 @@ window.AgentCore = (function(){
           if(verdict && verdict.ok === false && rounds < maxRounds){
             selfCheckNotes.push(verdict.reason || "回答质量不足");
             pushTrace("🔎 自我核查未通过：" + (verdict.reason || "回答质量不足") + "，正在补充查询…");
+            lastCandidate = candidate;   // 留底：万一后续几轮都没能给出更好的答案，也好过完全不回答
             convo.push({ role:"assistant", content: candidate });
             convo.push({ role:"user", content: "你上面的回答经自查存在问题：" + (verdict.reason || "不够充分")
-              + "。请" + (verdict.advice || "补充调用工具获取真实依据") + "，然后重新给出完整回答。" });
+              + "。请" + (verdict.advice || "补充调用工具获取真实依据") + "，然后重新给出完整回答。"
+              + "注意：如果你已经查过、或确实没有工具能提供这类依据，就不要再反复查询——"
+              + "请直接用你已掌握的信息作答，并说明哪部分未能查证，让用户自行核实。" });
             continue;   // 回到循环，带着自评意见重新查询/作答
           }
         }
@@ -279,7 +294,41 @@ window.AgentCore = (function(){
         break;
       }
       if(!finalText && rounds >= maxRounds){
-        finalText = "多次查询后仍未能得出确定结论，请补充信息或换个问法。";
+        // 轮次用尽时，模型往往刚查完资料就被截断，等于白查了一轮。
+        // 这里补一次"只准作答、不准再调工具"的收尾调用，让它用已掌握的全部信息给出结论。
+        try{
+          pushTrace("✍️ 正在综合已查到的信息作答…");
+          const closeSys = (sysWithMem || "")
+            + "\n\n【收尾要求】现在必须直接给出最终回答，不要再调用任何工具。"
+            + "用你已经掌握的信息尽量回答用户的问题；"
+            + "确实无法确认的部分，明确说明哪里没查到、建议用户如何进一步核实，"
+            + "但不要因为存在不确定就整体拒绝回答。";
+          const closeConvo = convo.concat([{ role:"user",
+            content:"请基于以上全部信息，直接给出最终回答（不要再调用工具）。" }]);
+          const fr = await fetch("/api/generate", {
+            method: "POST",
+            headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+            body: JSON.stringify({ system: closeSys, messages: closeConvo }),   // 不传 tools，模型只能作答
+          });
+          const fd = await fr.json();
+          if(!fd.error){
+            const ftext = (fd.content || []).map(b=>b.text || "").join("").trim();
+            if(ftext) finalText = ftext;
+          }
+        }catch(e){ /* 收尾调用失败则继续走下面的降级兜底 */ }
+      }
+      if(!finalText){
+        // 降级兜底：宁可给一个标注了不确定性的答案，也不要什么都不回答。
+        // 完全拒答对用户来说是最差的结果——他既没得到信息，也不知道该怎么问才对。
+        if(lastCandidate){
+          finalText = lastCandidate
+            + "\n\n（说明：以上内容未能完全通过自动核查，其中涉及的具体数字或依据请你再核实一下。"
+            + "如果需要更确切的答案，可以把问题问得更具体一些。）";
+        }else{
+          finalText = "这个问题我暂时没能查到可靠依据。可能的原因：一是知识库里还没有相关资料，"
+            + "二是这超出了我能查询的范围（我不能联网查实时信息）。"
+            + "你可以换个更具体的问法，或者告诉我你想了解哪方面，我看看能不能从别的角度帮你。";
+        }
       }
     }catch(e){
       errorMsg = e.message;
