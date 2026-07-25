@@ -40,6 +40,11 @@
   }
   function blockToElems(b){
     if(b.type==="table" && b.rows && b.rows.length) return [makeTable(b.rows), new D.Paragraph({children:[], spacing:{after:60}})];
+    // 小标题：正文里的 ## 三级标题，加粗略大，与正文拉开层次
+    if(b.type==="h" && b.text) return [new D.Paragraph({
+      children:[run(b.text,{size:24, bold:true})],
+      spacing:{before:160, after:80, line:360, lineRule:D.LineRuleType.AUTO},
+    })];
     return [bodyPara(b.text||"")];
   }
 
