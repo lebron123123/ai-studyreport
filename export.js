@@ -87,7 +87,9 @@ async function ensureDocxLib(){
   await docxLibLoading;
 }
 
-// HTML → 结构块（段落/表格），供docx构建
+// HTML → 结构块（段落/表格/标题/列表），供docx构建
+// 注意：renderContent 现在会产出标题(div带font-weight)、ul/ol列表，
+// 若这里不认识就会被压成普通段落、层级全丢，所以要同步识别
 function htmlToBlocks(htmlStr){
   const blocks = [];
   const dom = new DOMParser().parseFromString("<div>"+htmlStr+"</div>", "text/html");
@@ -95,9 +97,28 @@ function htmlToBlocks(htmlStr){
   rootEl.childNodes.forEach(node=>{
     if(node.nodeType===3){ const t=node.textContent.trim(); if(t) blocks.push({type:"p", text:t}); return; }
     if(node.nodeType!==1) return;
-    if(node.tagName==="TABLE"){
+    const tag = node.tagName;
+    if(tag==="TABLE"){
       const rows = [...node.querySelectorAll("tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
       if(rows.length) blocks.push({type:"table", rows});
+    }else if(tag==="UL" || tag==="OL"){
+      const ordered = tag==="OL";
+      [...node.querySelectorAll("li")].forEach((li,idx)=>{
+        const t = li.textContent.trim();
+        if(t) blocks.push({type:"p", text:(ordered ? (idx+1)+". " : "· ") + t});
+      });
+    }else if(/^H[1-6]$/.test(tag)){
+      const t = node.textContent.trim();
+      if(t) blocks.push({type:"h", text:t});
+    }else if(tag==="HR"){
+      blocks.push({type:"p", text:""});
+    }else if(tag==="DIV" && /font-weight:\s*600/.test(node.getAttribute("style")||"")){
+      // md.js 产出的标题是带 font-weight:600 的 div
+      const t = node.textContent.trim();
+      if(t) blocks.push({type:"h", text:t});
+    }else if(tag==="BLOCKQUOTE"){
+      const t = node.textContent.trim();
+      if(t) blocks.push({type:"p", text:t});
     }else{
       // 段内<br>视为换行拆段
       node.innerHTML.split(/<br\s*\/?>/i).forEach(seg=>{
