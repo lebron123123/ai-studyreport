@@ -93,8 +93,10 @@ function stepOffice(){
     +'</div>'
     +'<div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">'
     +'<span id="officeHistTip" style="font-size:11.5px; color:var(--ink-soft);"></span>'
+    +'<span style="display:flex; align-items:center; gap:10px;">'
+    +'<span id="officeQuota" style="font-size:11.5px;"></span>'
     +'<button class="btn ghost" id="officeClearChat" style="padding:5px 12px; font-size:12px;">🗑 清空对话</button>'
-    +'</div>';
+    +'</span></div>';
 }
 
 function bindOfficeEvents(){
@@ -112,6 +114,7 @@ function bindOfficeEvents(){
     officeChatLoaded = true;
     officeLoadHistory();
   }
+  officeCheckQuota();
 }
 
 // ===== 云端对话记忆：加载 / 保存 / 清空（每人一份，覆盖式）=====
@@ -137,6 +140,28 @@ async function officeSaveHistory(){
       headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
       body: JSON.stringify({chat: officeChat})});
   }catch(e){ /* 保存失败不阻断当前对话，只是这次没同步到云端，下次发言会重试 */ }
+}
+
+/* 额度提醒：只在快用完时才提示，平时不占用户注意力。
+   撞上限时后端的报错已经说得很清楚，这里的作用是提前打个招呼，避免用户
+   正写着东西突然被拦住。 */
+async function officeCheckQuota(){
+  try{
+    const r = await fetch("/api/generate", {headers: authHeaders()});
+    const d = await r.json();
+    if(!d || !d.ok || !d.chat) return;
+    const tip = document.getElementById("officeQuota");
+    if(!tip) return;
+    if(d.chat.left <= 0){
+      tip.textContent = "今日AI问答额度已用完，明天恢复（报告生成有独立额度，不受影响）";
+      tip.style.color = "var(--seal-red,#C24A42)";
+    }else if(d.chat.left <= Math.round(d.chat.limit * 0.2)){
+      tip.textContent = "今日AI问答还剩 " + d.chat.left + " 次";
+      tip.style.color = "var(--seal-red,#C24A42)";
+    }else{
+      tip.textContent = "";
+    }
+  }catch(e){ /* 查不到额度不影响使用 */ }
 }
 async function officeClearHistory(){
   if(!confirm("确定清空办公助手的对话记录？此操作不可恢复。")) return;
@@ -221,6 +246,7 @@ async function officeSend(){
   document.getElementById("officeActions").style.display = "block";
   btn.disabled = false; btn.textContent = "发送";
   officeSaveHistory();   // 异步保存到云端，不阻塞界面
+  officeCheckQuota();    // 顺带刷新额度提醒
 }
 
 function renderOfficeMsgs(){
