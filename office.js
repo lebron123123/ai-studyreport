@@ -45,6 +45,8 @@ function detectDocType(text){
 }
 
 let officeChat = [];
+let officeChatLoaded = false;   // 本次页面会话是否已从云端拉取过历史，避免每次重渲染都重复请求
+const OFFICE_CHAT_LIMIT = 30;   // 上下文上限（约15轮问答），防止数据量无限增长；发给AI的仍是最近8条
 
 function stepOffice(){
   return '<div class="doc-eyebrow">OFFICE · AI办公助手</div>'
@@ -59,6 +61,10 @@ function stepOffice(){
     +'<button class="btn ghost" id="officeExportWord" style="padding:7px 16px; font-size:12.5px;">📄 导出为 Word</button>'
     +'<button class="btn ghost" id="officeExportExcel" style="padding:7px 16px; font-size:12.5px; margin-left:8px;">📊 导出为 Excel</button>'
     +'<span style="font-size:11.5px; color:var(--ink-soft); margin-left:10px;">导出最近一条AI回复的内容</span>'
+    +'</div>'
+    +'<div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">'
+    +'<span id="officeHistTip" style="font-size:11.5px; color:var(--ink-soft);"></span>'
+    +'<button class="btn ghost" id="officeClearChat" style="padding:5px 12px; font-size:12px;">🗑 清空对话</button>'
     +'</div>';
 }
 
@@ -68,9 +74,50 @@ function bindOfficeEvents(){
   if(s("officeInput")) s("officeInput").addEventListener("keydown", e=>{ if(e.key==="Enter") officeSend(); });
   if(s("officeExportWord")) s("officeExportWord").onclick = ()=>officeExport("word");
   if(s("officeExportExcel")) s("officeExportExcel").onclick = ()=>officeExport("excel");
+  if(s("officeClearChat")) s("officeClearChat").onclick = officeClearHistory;
   renderOfficeMsgs();
-  // 已有历史回复时（如切走再切回），恢复导出按钮的显示状态
+  // 已有历史回复时（如切走再切回、或云端历史刚恢复），恢复导出按钮的显示状态
   if(officeLastAnswer() && s("officeActions")) s("officeActions").style.display = "block";
+  // 第一次进入本模块（本次页面会话内）时，去云端拉一次上次的对话记录
+  if(!officeChatLoaded){
+    officeChatLoaded = true;
+    officeLoadHistory();
+  }
+}
+
+// ===== 云端对话记忆：加载 / 保存 / 清空（每人一份，覆盖式）=====
+async function officeLoadHistory(){
+  try{
+    const r = await fetch("/api/officechat", {headers: authHeaders()});
+    const d = await r.json();
+    if(d.ok && Array.isArray(d.chat) && d.chat.length && !officeChat.length){
+      officeChat = d.chat;
+      renderOfficeMsgs();
+      const tip = document.getElementById("officeHistTip");
+      if(tip) tip.textContent = "已恢复上次的对话记录（最多保留最近" + OFFICE_CHAT_LIMIT + "条）";
+      if(officeLastAnswer() && document.getElementById("officeActions")) document.getElementById("officeActions").style.display = "block";
+    }
+  }catch(e){ /* 拉取失败不影响正常使用，只是这次没有历史 */ }
+}
+function officeTrimChat(){
+  if(officeChat.length > OFFICE_CHAT_LIMIT) officeChat = officeChat.slice(-OFFICE_CHAT_LIMIT);
+}
+async function officeSaveHistory(){
+  try{
+    await fetch("/api/officechat", {method:"POST",
+      headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
+      body: JSON.stringify({chat: officeChat})});
+  }catch(e){ /* 保存失败不阻断当前对话，只是这次没同步到云端，下次发言会重试 */ }
+}
+async function officeClearHistory(){
+  if(!confirm("确定清空办公助手的对话记录？此操作不可恢复。")) return;
+  officeChat = [];
+  renderOfficeMsgs();
+  const tip = document.getElementById("officeHistTip");
+  if(tip) tip.textContent = "";
+  const actions = document.getElementById("officeActions");
+  if(actions) actions.style.display = "none";
+  try{ await fetch("/api/officechat", {method:"DELETE", headers: authHeaders()}); }catch(e){}
 }
 
 async function officeSend(){
@@ -129,9 +176,11 @@ async function officeSend(){
   });
 
   officeChat.push({role:"assistant", content: res.text || "（未返回内容）", trace: res.trace});
+  officeTrimChat();
   renderOfficeMsgs();
   document.getElementById("officeActions").style.display = "block";
   btn.disabled = false; btn.textContent = "发送";
+  officeSaveHistory();   // 异步保存到云端，不阻塞界面
 }
 
 function renderOfficeMsgs(){
