@@ -618,7 +618,7 @@ async function generateSection(c, s, onChunk){
   // 生成完成：把溯源档案挂到该小节上（含模型与时间，即L3模型溯源）
   const prov = provTake();
   if(prov){
-    prov.model = "deepseek-chat";
+    prov.model = "deepseek-v4-flash";
     prov.generatedAt = new Date().toISOString();
     prov.confidence = provConfidence(prov);
     s.prov = prov;
