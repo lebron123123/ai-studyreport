@@ -1,5 +1,5 @@
 /* ============================================================ 
-   office.js —— AI办公助手（第四大功能模块）
+   office.js —— AI办公助手（第四大功能模块）  
    定位：日常办公文稿撰写、业务分析对话、导出Word/Excel
    依赖：agent-core.js（引擎）、export.js（ensureDocxLib/XLSX加载）、docxgen相关工具函数
 
