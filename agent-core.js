@@ -180,6 +180,8 @@ window.AgentCore = (function(){
     let errorMsg = "";
     let selfCheckCount = 0;
     let lastCandidate = "";   // 自查未通过但仍可用的候选答案，用于兜底降级
+    let askedClarify = false; // 本次问答是否已经反问过用户（只反问一次）
+    let clarified = false;    // 本次最终输出是不是一个反问，供调用方标记样式
     const maxSelfCheck = (opt.maxSelfCheck === undefined) ? 1 : opt.maxSelfCheck;   // 最多自查重答1次，避免无限打转与token浪费
     const selfCheckNotes = [];
 
@@ -255,8 +257,12 @@ window.AgentCore = (function(){
               + "通用标准：(1)是否切题、直接回应了用户问题；(2)是否存在明显缺漏导致用户无法据此行动。\n"
               + "重要：判不合格前先想清楚'补充查询什么'是否真的有对应工具能查到。"
               + "如果已经查过、或根本没有工具能提供这种依据，就不要再判不合格——"
-              + "让AI用已有信息给出带说明的回答，好过反复查询后拒答。"
-              + "只输出JSON，不要任何其他文字：{\"ok\":true或false,\"reason\":\"不合格时说明原因(30字内)\",\"advice\":\"不合格时给出应补充查询什么(30字内)\"}";
+              + "让AI用已有信息给出带说明的回答，好过反复查询后拒答。\n"
+              + "另外：如果问题本身就含糊、有多种理解方式（例如没说清是哪个项目、哪一类资料、哪个时间范围），"
+              + "再怎么查也查不准，那就不要让AI继续瞎查——把该向用户问清楚的那个问题写进 clarify 字段。"
+              + "clarify 只写一个问题，口语化、具体，让用户一看就知道该怎么答。\n"
+              + "只输出JSON，不要任何其他文字："
+              + "{\"ok\":true或false,\"reason\":\"不合格时说明原因(30字内)\",\"advice\":\"不合格时给出应补充查询什么(30字内)\",\"clarify\":\"需要向用户澄清时写出该问题，否则留空\"}";
             const checkUser = "【用户问题】" + (opt.traceQuery || "(未提供)")
               + "\n\n【可用工具】" + (schemas.length
                   ? schemas.map(s=>s && s.function ? s.function.name : "").filter(Boolean).join("、")
@@ -278,6 +284,16 @@ window.AgentCore = (function(){
           }catch(e){ verdict = null; }   // 自检本身失败时不阻断，直接采用原答案
 
           if(verdict && verdict.ok === false && rounds < maxRounds){
+            // 主动澄清：问题本身含糊时，反问一句远好过闷头再查两轮然后拒答。
+            // 只反问一次，避免陷入"AI一直反问、用户一直答不到点上"的另一种打转。
+            const clarifyQ = String((verdict.clarify || "")).trim();
+            if(clarifyQ && !askedClarify){
+              askedClarify = true;
+              pushTrace("💬 需要先问清楚一件事");
+              finalText = clarifyQ;
+              clarified = true;
+              break;
+            }
             selfCheckNotes.push(verdict.reason || "回答质量不足");
             pushTrace("🔎 自我核查未通过：" + (verdict.reason || "回答质量不足") + "，正在补充查询…");
             lastCandidate = candidate;   // 留底：万一后续几轮都没能给出更好的答案，也好过完全不回答
@@ -352,7 +368,7 @@ window.AgentCore = (function(){
     }catch(e){}
 
     return { text: finalText, rounds, toolCalls: allToolCalls, trace, error: errorMsg,
-             selfChecked: selfCheckCount > 0, selfCheckNotes };
+             selfChecked: selfCheckCount > 0, selfCheckNotes, clarified };
   }
 
   return { registerTool, unregisterTool, toolSchemas, validateArgs, run, V, _tools: TOOLS,
