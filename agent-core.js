@@ -1,0 +1,376 @@
+/* ============================================================
+   agent-core.js —— 全站通用 Agent 引擎
+   职责：工具注册表 + ReAct 循环执行器 + 参数校验 + 链路日志
+   设计原则：
+     1. 引擎不关心具体业务，任何模块可注册自己的工具（AgentCore.registerTool）
+     2. 只读/检索类工具自由注册；写入类工具必须由业务侧自行加人工确认闸门
+     3. 财务数字永远来自确定性引擎，AI 无权计算或改写
+   依赖：全局 authHeaders()（auth.js 提供）
+   ============================================================ */
+window.AgentCore = (function(){
+
+  /* ---------- 工具注册表 ---------- */
+  // 每项：{ schema:{...OpenAI function schema}, validate(args)->{ok,error}, run(args)->string, label(args)->string }
+  const TOOLS = {};
+
+  /**
+   * 注册一个工具
+   * @param {string} name 工具名（与 schema.function.name 一致）
+   * @param {object} def  { schema, run, validate?, label? }
+   */
+  function registerTool(name, def){
+    if(!name || !def || typeof def.run !== "function"){
+      console.warn("[AgentCore] 注册工具失败：", name); return;
+    }
+    TOOLS[name] = {
+      schema: def.schema,
+      run: def.run,
+      validate: def.validate || (()=>({ok:true})),
+      label: def.label || (()=>"🔧 " + name),
+    };
+  }
+
+  function unregisterTool(name){ delete TOOLS[name]; }
+
+  /* ---------- 长期记忆 ---------- */
+  let MEM_CACHE = null;     // [{mkey,mvalue,source,updated_at}]
+  let MEM_LOADED_AT = 0;
+
+  let MEM_LAST_ERROR = null;   // 区分"确实没有记忆"与"加载失败"，避免误导用户
+  async function loadMemory(force){
+    // 60秒内复用缓存，避免每轮对话都打一次接口
+    if(!force && MEM_CACHE && (Date.now() - MEM_LOADED_AT) < 60000) return MEM_CACHE;
+    try{
+      const r = await fetch("/api/agent", {
+        method:"POST",
+        headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+        body: JSON.stringify({ action:"memGet" }),
+      });
+      const d = await r.json();
+      if(d && d.ok){
+        MEM_CACHE = d.memory || [];
+        MEM_LOADED_AT = Date.now();
+        MEM_LAST_ERROR = null;
+      }else{
+        MEM_LAST_ERROR = (d && d.error) || "记忆服务返回异常";
+        MEM_CACHE = MEM_CACHE || [];
+      }
+    }catch(e){
+      MEM_LAST_ERROR = e.message || "网络错误";
+      MEM_CACHE = MEM_CACHE || [];
+    }
+    return MEM_CACHE;
+  }
+  function memoryLoadError(){ return MEM_LAST_ERROR; }
+
+  async function saveMemory(key, value, source){
+    try{
+      const r = await fetch("/api/agent", {
+        method:"POST",
+        headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+        body: JSON.stringify({ action:"memSet", key, value, source: source||"auto" }),
+      });
+      const d = await r.json();
+      if(d && d.ok){ MEM_CACHE = null; MEM_LOADED_AT = 0; }   // 失效缓存，下次重新拉
+      return !!(d && d.ok);
+    }catch(e){ return false; }
+  }
+
+  async function deleteMemory(key){
+    try{
+      const r = await fetch("/api/agent", {
+        method:"POST",
+        headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+        body: JSON.stringify({ action:"memDelete", key }),
+      });
+      const d = await r.json();
+      if(d && d.ok){ MEM_CACHE = null; MEM_LOADED_AT = 0; }
+      return !!(d && d.ok);
+    }catch(e){ return false; }
+  }
+
+  function memoryToPrompt(mem){
+    if(!mem || !mem.length) return "";
+    return "\n\n【关于这位用户你已知道的信息(来自历史对话，仅供参考，如与本次对话内容冲突以本次为准)】\n"
+      + mem.map(m=>"- "+m.mkey+"："+m.mvalue).join("\n");
+  }
+
+  /** 取出可用工具的 schema 列表（可按名单过滤，供不同页面暴露不同工具集） */
+  function toolSchemas(allowNames){
+    return Object.keys(TOOLS)
+      .filter(n => !allowNames || allowNames.indexOf(n) >= 0)
+      .map(n => TOOLS[n].schema)
+      .filter(Boolean);
+  }
+
+  /* ---------- 参数校验（借鉴 Pydantic 思路的轻量实现） ---------- */
+  // 通用校验：先查工具是否存在，再调用工具自带的 validate
+  function validateArgs(name, args){
+    const t = TOOLS[name];
+    if(!t) return { ok:false, error:"未知工具：" + name };
+    try{
+      const r = t.validate(args || {});
+      return (r && typeof r.ok === "boolean") ? r : { ok:true };
+    }catch(e){
+      return { ok:false, error:"参数校验异常：" + e.message };
+    }
+  }
+
+  /* ---------- 通用校验助手（供各业务注册工具时复用） ---------- */
+  const V = {
+    /** 必填字符串，可选长度上限 */
+    requiredString(args, key, maxLen, cnLabel){
+      const v = args[key];
+      if(!v || typeof v !== "string" || !v.trim()){
+        return { ok:false, error:"参数错误：" + (cnLabel||key) + " 不能为空" };
+      }
+      if(maxLen && v.length > maxLen){
+        return { ok:false, error:"参数错误：" + (cnLabel||key) + " 过长(超过"+maxLen+"字)，请精简后重试" };
+      }
+      return { ok:true };
+    },
+    /** 可选枚举值 */
+    optionalEnum(args, key, allowed, cnLabel){
+      const v = args[key];
+      if(v === undefined || v === null || v === "") return { ok:true };
+      if(allowed.indexOf(v) < 0){
+        return { ok:false, error:"参数错误：" + (cnLabel||key) + " 必须是[" + allowed.join("/") + "]之一，或不传该参数" };
+      }
+      return { ok:true };
+    },
+    /** 串联多个校验，返回第一个失败 */
+    all(checks){
+      for(const c of checks){ if(c && !c.ok) return c; }
+      return { ok:true };
+    },
+  };
+
+  /* ---------- ReAct 循环执行器 ---------- */
+  /**
+   * 运行一次 Agent 问答
+   * @param {object} opt
+   *   - system   {string}   系统提示词
+   *   - messages {array}    历史对话 [{role,content}]
+   *   - tools    {string[]} 本次允许使用的工具名单（不传=全部已注册工具）
+   *   - maxRounds{number}   最大循环轮数，默认 3
+   *   - onTrace  {function} 每一步过程回调 (traceLines:string[]) => void
+   *   - traceQuery {string} 用于日志记录的用户原始问题
+   * @returns {Promise<{text, rounds, toolCalls, trace}>}
+   */
+  async function run(opt){
+    opt = opt || {};
+    const maxRounds = opt.maxRounds || 3;
+    const allow = opt.tools;
+    const schemas = toolSchemas(allow);
+    const startedAt = Date.now();
+
+    let convo = (opt.messages || []).slice();
+    // 长期记忆：自动加载并注入系统提示词(可用 opt.useMemory=false 关闭)
+    let sysWithMem = opt.system || "";
+    if(opt.useMemory !== false){
+      try{
+        const mem = await loadMemory();
+        sysWithMem += memoryToPrompt(mem);
+      }catch(e){}
+    }
+    const trace = [];
+    const allToolCalls = [];
+    let rounds = 0;
+    let finalText = "";
+    let errorMsg = "";
+    let selfCheckCount = 0;
+    let lastCandidate = "";   // 自查未通过但仍可用的候选答案，用于兜底降级
+    let askedClarify = false; // 本次问答是否已经反问过用户（只反问一次）
+    let clarified = false;    // 本次最终输出是不是一个反问，供调用方标记样式
+    const maxSelfCheck = (opt.maxSelfCheck === undefined) ? 1 : opt.maxSelfCheck;   // 最多自查重答1次，避免无限打转与token浪费
+    const selfCheckNotes = [];
+
+    const pushTrace = (line)=>{
+      trace.push(line);
+      if(typeof opt.onTrace === "function"){
+        try{ opt.onTrace(trace.slice()); }catch(e){}
+      }
+    };
+
+    try{
+      while(rounds < maxRounds){
+        rounds++;
+        const payload = { system: sysWithMem, messages: convo };
+        if(schemas.length) payload.tools = schemas;
+
+        const resp = await fetch("/api/generate", {
+          method: "POST",
+          headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if(data.error) throw new Error(data.error);
+
+        const calls = data.tool_calls;
+        const text = (data.content || []).map(b => b.text || "").join("").trim();
+
+        if(calls && calls.length){
+          convo.push({ role:"assistant", content: text || null, tool_calls: calls });
+          for(const c of calls){
+            let args = {};
+            try{ args = JSON.parse(c.function.arguments || "{}"); }catch(e){}
+            const name = c.function.name;
+
+            // 参数校验：不合规不执行，把错误回给模型自行纠正（自我纠错）
+            const v = validateArgs(name, args);
+            if(!v.ok){
+              pushTrace("⚠️ 参数校验未通过：" + v.error);
+              convo.push({ role:"tool", tool_call_id:c.id, content:"工具调用失败：" + v.error });
+              allToolCalls.push({ name, args, error: v.error });
+              continue;
+            }
+
+            const t = TOOLS[name];
+            let label = "🔧 " + name;
+            try{ label = t.label(args) || label; }catch(e){}
+            pushTrace(label);
+
+            let result;
+            try{
+              result = await t.run(args);
+            }catch(e){
+              result = "（工具执行失败：" + e.message + "）";
+            }
+            convo.push({ role:"tool", tool_call_id:c.id, content: String(result == null ? "" : result) });
+            allToolCalls.push({ name, args });
+          }
+          continue;   // 带着工具结果再问一轮
+        }
+
+        // ===== 回答自我核查：模型给出答案后，先让它自评是否合格，不合格则补查重答 =====
+        const candidate = text || "";
+        if(opt.selfCheck !== false && candidate && selfCheckCount < maxSelfCheck){
+          selfCheckCount++;
+          let verdict = null;
+          try{
+            const checkSys = "你是严格的质量审核员。判断给出的【回答】是否合格。\n"
+              + "先判断问题类型，两类问题的标准不同：\n"
+              + "A. 元问题——问的是系统/AI自身的功能、配置、能力范围（如'你能写哪些文种''这网站有什么功能''你能参考多少模板''你能做什么'）。"
+              + "这类答案来自系统内置配置，不存在编造风险，【不要求】有外部资料佐证；只要回答清楚、具体，就算合格。\n"
+              + "B. 事实问题——问的是具体数字、政策、项目情况、历史资料等需要查证的内容。"
+              + "这类才要求有工具返回的真实依据支撑，不得凭空编造。\n"
+              + "通用标准：(1)是否切题、直接回应了用户问题；(2)是否存在明显缺漏导致用户无法据此行动。\n"
+              + "重要：判不合格前先想清楚'补充查询什么'是否真的有对应工具能查到。"
+              + "如果已经查过、或根本没有工具能提供这种依据，就不要再判不合格——"
+              + "让AI用已有信息给出带说明的回答，好过反复查询后拒答。\n"
+              + "另外：如果问题本身就含糊、有多种理解方式（例如没说清是哪个项目、哪一类资料、哪个时间范围），"
+              + "再怎么查也查不准，那就不要让AI继续瞎查——把该向用户问清楚的那个问题写进 clarify 字段。"
+              + "clarify 只写一个问题，口语化、具体，让用户一看就知道该怎么答。\n"
+              + "只输出JSON，不要任何其他文字："
+              + "{\"ok\":true或false,\"reason\":\"不合格时说明原因(30字内)\",\"advice\":\"不合格时给出应补充查询什么(30字内)\",\"clarify\":\"需要向用户澄清时写出该问题，否则留空\"}";
+            const checkUser = "【用户问题】" + (opt.traceQuery || "(未提供)")
+              + "\n\n【可用工具】" + (schemas.length
+                  ? schemas.map(s=>s && s.function ? s.function.name : "").filter(Boolean).join("、")
+                  : "无")
+              + "\n\n【已调用的工具及结果摘要】" + (allToolCalls.length
+                  ? allToolCalls.map(t=>t.name + (t.error ? "(失败:"+t.error+")" : "(成功)")).join("、")
+                  : "未调用任何工具")
+              + "\n\n【回答】" + candidate;
+            const cr = await fetch("/api/generate", {
+              method: "POST",
+              headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+              body: JSON.stringify({ system: checkSys, messages: [{role:"user", content: checkUser}] }),
+            });
+            const cd = await cr.json();
+            const ctext = (cd.content || []).map(b=>b.text || "").join("").trim();
+            const cleaned = ctext.replace(/```json|```/g, "").trim();
+            const jStart = cleaned.indexOf("{"), jEnd = cleaned.lastIndexOf("}");
+            if(jStart >= 0 && jEnd > jStart) verdict = JSON.parse(cleaned.slice(jStart, jEnd+1));
+          }catch(e){ verdict = null; }   // 自检本身失败时不阻断，直接采用原答案
+
+          if(verdict && verdict.ok === false && rounds < maxRounds){
+            // 主动澄清：问题本身含糊时，反问一句远好过闷头再查两轮然后拒答。
+            // 只反问一次，避免陷入"AI一直反问、用户一直答不到点上"的另一种打转。
+            const clarifyQ = String((verdict.clarify || "")).trim();
+            if(clarifyQ && !askedClarify){
+              askedClarify = true;
+              pushTrace("💬 需要先问清楚一件事");
+              finalText = clarifyQ;
+              clarified = true;
+              break;
+            }
+            selfCheckNotes.push(verdict.reason || "回答质量不足");
+            pushTrace("🔎 自我核查未通过：" + (verdict.reason || "回答质量不足") + "，正在补充查询…");
+            lastCandidate = candidate;   // 留底：万一后续几轮都没能给出更好的答案，也好过完全不回答
+            convo.push({ role:"assistant", content: candidate });
+            convo.push({ role:"user", content: "你上面的回答经自查存在问题：" + (verdict.reason || "不够充分")
+              + "。请" + (verdict.advice || "补充调用工具获取真实依据") + "，然后重新给出完整回答。"
+              + "注意：如果你已经查过、或确实没有工具能提供这类依据，就不要再反复查询——"
+              + "请直接用你已掌握的信息作答，并说明哪部分未能查证，让用户自行核实。" });
+            continue;   // 回到循环，带着自评意见重新查询/作答
+          }
+        }
+
+        finalText = candidate;
+        break;
+      }
+      if(!finalText && rounds >= maxRounds){
+        // 轮次用尽时，模型往往刚查完资料就被截断，等于白查了一轮。
+        // 这里补一次"只准作答、不准再调工具"的收尾调用，让它用已掌握的全部信息给出结论。
+        try{
+          pushTrace("✍️ 正在综合已查到的信息作答…");
+          const closeSys = (sysWithMem || "")
+            + "\n\n【收尾要求】现在必须直接给出最终回答，不要再调用任何工具。"
+            + "用你已经掌握的信息尽量回答用户的问题；"
+            + "确实无法确认的部分，明确说明哪里没查到、建议用户如何进一步核实，"
+            + "但不要因为存在不确定就整体拒绝回答。";
+          const closeConvo = convo.concat([{ role:"user",
+            content:"请基于以上全部信息，直接给出最终回答（不要再调用工具）。" }]);
+          const fr = await fetch("/api/generate", {
+            method: "POST",
+            headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+            body: JSON.stringify({ system: closeSys, messages: closeConvo }),   // 不传 tools，模型只能作答
+          });
+          const fd = await fr.json();
+          if(!fd.error){
+            const ftext = (fd.content || []).map(b=>b.text || "").join("").trim();
+            if(ftext) finalText = ftext;
+          }
+        }catch(e){ /* 收尾调用失败则继续走下面的降级兜底 */ }
+      }
+      if(!finalText){
+        // 降级兜底：宁可给一个标注了不确定性的答案，也不要什么都不回答。
+        // 完全拒答对用户来说是最差的结果——他既没得到信息，也不知道该怎么问才对。
+        if(lastCandidate){
+          finalText = lastCandidate
+            + "\n\n（说明：以上内容未能完全通过自动核查，其中涉及的具体数字或依据请你再核实一下。"
+            + "如果需要更确切的答案，可以把问题问得更具体一些。）";
+        }else{
+          finalText = "这个问题我暂时没能查到可靠依据。可能的原因：一是知识库里还没有相关资料，"
+            + "二是这超出了我能查询的范围（我不能联网查实时信息）。"
+            + "你可以换个更具体的问法，或者告诉我你想了解哪方面，我看看能不能从别的角度帮你。";
+        }
+      }
+    }catch(e){
+      errorMsg = e.message;
+      finalText = "回答失败：" + e.message;
+    }
+
+    // 链路日志（自建，数据留在本账号内；失败不影响使用）
+    try{
+      await fetch("/api/agent", {
+        method:"POST",
+        headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
+        body: JSON.stringify({
+          action:"trace",
+          query: opt.traceQuery || "",
+          rounds,
+          toolCalls: allToolCalls,
+          finalAnswer: finalText,
+          durationMs: Date.now() - startedAt,
+        }),
+      });
+    }catch(e){}
+
+    return { text: finalText, rounds, toolCalls: allToolCalls, trace, error: errorMsg,
+             selfChecked: selfCheckCount > 0, selfCheckNotes, clarified };
+  }
+
+  return { registerTool, unregisterTool, toolSchemas, validateArgs, run, V, _tools: TOOLS,
+           loadMemory, saveMemory, deleteMemory, memoryToPrompt, memoryLoadError };
+})();

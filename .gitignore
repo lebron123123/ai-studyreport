@@ -1,0 +1,15 @@
+# 依赖目录，体积大且可通过 package-lock.json 重新安装
+node_modules/
+
+# 本地部署的真实密钥/数据库连接串——绝不能进公开仓库
+local-server/.env
+.env
+.env.*
+
+# Claude Code 本地会话配置（含权限缓存，可能带调试用的临时token），机器本地专用
+.claude/
+
+# 常见系统/编辑器噪音文件
+.DS_Store
+Thumbs.db
+*.log
