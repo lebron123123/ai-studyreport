@@ -9,14 +9,15 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-// 三个引擎文件用 `window.XxxCalc = (function(){...})()` 的写法挂到 window 上，
+// 四个引擎文件用 `window.XxxCalc = (function(){...})()` 的写法挂到 window 上，
 // 在 Node 里用一个全局对象顶替 window 即可直接 require（它们是普通脚本，非 ES module）。
 global.window = global;
 require("../nrcalc.js");
 require("../rentcalc.js");
 require("../salecalc.js");
+require("../investestimate.js");
 
-const { NRCalc, RentCalc, SaleCalc } = global.window;
+const { NRCalc, RentCalc, SaleCalc, InvestEstimate } = global.window;
 
 // ---------- 非居改保：复刻 index.html 的 assembleCalcInput() ----------
 function assembleGaibaoInput(p) {
@@ -122,6 +123,11 @@ test("出租类（RentCalc）默认参数基准数值回归", () => {
   // 用户确认的核心基准数值
   assert.equal(r.summary.totalIncome, 24358.56);
   // 完整汇总快照，防止其它字段悄悄跑偏
+  // 2026-08-07：保险费公式一度试改为"总投资×0.1%"对齐公司指引，但确认本项目实际就是按
+  // "总建面×0.3元/㎡/年"算，已改回原口径，基准值维持不变。
+  // 同一批还加了空置物业管理费按出租率分档打折（≤50%/50~85%/≥85%），但本组默认参数
+  // 全周期出租率都在85%以上（无折扣档位），所以这次改动对下面这组基准数值没有影响——
+  // 该逻辑的正确性已用单独脚本验证（低出租率场景下能正确算出88折/98折），不靠这个用例覆盖。
   assert.deepEqual(r.summary, {
     totalIncome: 24358.56,
     totalCost: 12338.99,
@@ -131,7 +137,19 @@ test("出租类（RentCalc）默认参数基准数值回归", () => {
     totalNpv: -3487.11,
     irr: 0.73,
     icr: 3.89,
-    payback: { year: 2045, index: 20 },
+    payback: { year: 2045, index: 19, period: 19.1652 },
+    paybackDynamic: null,
+    investReturnRate: 0.7114,
+    netInvestReturnRate: 0.5336,
+    opProfitMargin: 0.4381,
+    totalProfitAdj: 14062.27,
+    totalNetProfitAdj: 10546.7,
+    investReturnRateAdj: 0.9375,
+    netInvestReturnRateAdj: 0.7031,
+    opProfitMarginAdj: 0.5773,
+    capitalIrr: -13.72,
+    capitalPayback: null,
+    capitalPaybackDynamic: null,
   });
 });
 
@@ -159,4 +177,81 @@ test("边界：全周期现金流无正负号切换时 IRR 应为 null（三引�
   const allNegativeGaibao = assembleGaibaoInput(Object.assign({}, GAIBAO_DEFAULT_PARAMS, { rent: 0 }));
   const r = NRCalc.calc(allNegativeGaibao, {});
   assert.equal(r.summary.irr, null);
+});
+
+// ---------- 投资估算引擎（InvestEstimate）基准数值回归 ----------
+// 之前只有 nrcalc/rentcalc/salecalc 三个测算引擎有回归测试，InvestEstimate（出租类"一、技术指标/
+// 二、投资估算/三、工期进度"，1:1翻译自《出租类项目测算逻辑说明》）完全没有自动化测试兜底——
+// 这次一并补上，入参取自真实项目量级的代表值（非任意瞎填）。
+const INVEST_TEST_PARAMS = {
+  landArea: 8495.2, resiArea: 34330, areaKindergarten: 2200, areaPostOffice: 1500,
+  areaPropertyRoom: 145, areaPoliceRoom: 50, basementArea: 21000, commArea: 0,
+  landPriceResi: 8000, postOfficeLandPrice: 3000,
+  curbCutCount: 2, highVoltageBuryFee: 20, treeRelocFee: 10,
+  fenceArea: 1000, facilityArea: 500, facilityUnitPrice: 0.1, occupyArea: 800,
+  chargerCount: 20, displayArea: 300, buildYears: 4,
+};
+test("投资估算引擎（InvestEstimate）默认系数基准数值回归", () => {
+  const est = InvestEstimate.estimate(INVEST_TEST_PARAMS, {});
+  assert.deepEqual(est.summary, {
+    landCostTotal: 28765.377,
+    preConstructionCostTotal: 2008.2635,
+    constructionCostTotal: 37902.0012,
+    indirectCostTotal: 2898.3167,
+    contingency: 2140.4291,
+    developmentCost: 73714.3875,
+    buildInvestment: 73714.3875,
+    totalBuildArea: 61900.75,
+    capacityArea: 38225,
+    aboveIncrease: 2675.75,
+    farRatio: 4.4996,
+    unitCostWithDeco: 6123.0278,
+    unitCostWithoutDeco: 5523.89,
+  });
+});
+test("投资估算引擎：schedule()按季度权重把总投资摊到建设期各年份，年度合计应等于建设投资总额", () => {
+  const est = InvestEstimate.estimate(INVEST_TEST_PARAMS, {});
+  const sch = InvestEstimate.schedule(est, 2025, 4, {});
+  const years = Object.keys(sch.investPlan);
+  assert.equal(years.length, 4);   // buildYears=4，应展开到4个自然年
+  const sum = years.reduce((s, y) => s + sch.investPlan[y], 0);
+  assert.ok(Math.abs(sum - est.summary.buildInvestment) < 0.01, "各年投资计划之和应等于建设投资总额（允许四舍五入误差）");
+});
+
+// ---------- 空置物业管理费按出租率分档打折 ----------
+// 主回归测试用的那组默认参数全周期出租率都在85%以上（用不到折扣档位），所以下面单独测低出租率场景，
+// 覆盖公司《编制与审查指引》的三档标准：出租率≤50%打88折、50%~85%打98折、≥85%不打折。
+function runRentAtOcc(occ){
+  const p = {
+    buildStart:2025, buildYears:1, operateYears:2, firstMonths:12,
+    area:10000, rent:40, rentSpan:1, rentRate:5,
+    rampOcc:occ, stableOcc:occ, occRamp:[occ,occ],
+    parkCount:0, parkPrice:0, parkRatio:0,
+    rentDiscount:1, subsidyArea:0, subsidyPrice:0, subsidyDiscount:0, subsidyStableOcc:0,
+    areaPostOffice:0, postOfficePrice:0, areaKindergarten:0, areaPropertyRoom:0, areaPoliceRoom:0,
+    otherTotal:0, manageCoeff:1, decorationCost:0, houseType:"公租房",
+    totalInvestment:10000, landArea:5000, constructionCost:8000, loanAmount:0,
+    loanRate:3, firstRepayRatio:0, repayIncreaseRate:0, loanTotalYears:10, discountPct:3.5,
+    totalBuildArea:10000,
+  };
+  const r = RentCalc.calc(p, {});
+  const y = p.buildStart + p.buildYears;
+  const rawVac = 10000 * (1 - occ) * 12 * 3.9 / 10000;   // 未打折的原始空置费
+  return { vac: r.cost[y].vac, rawVac };
+}
+test("空置物业管理费分档：出租率≤50%打88折", () => {
+  const { vac, rawVac } = runRentAtOcc(0.3);
+  assert.ok(Math.abs(vac - rawVac * 0.88) < 0.01);
+});
+test("空置物业管理费分档：50%边界值本身也算入≤50%档，打88折", () => {
+  const { vac, rawVac } = runRentAtOcc(0.5);
+  assert.ok(Math.abs(vac - rawVac * 0.88) < 0.01);
+});
+test("空置物业管理费分档：50%~85%打98折", () => {
+  const { vac, rawVac } = runRentAtOcc(0.7);
+  assert.ok(Math.abs(vac - rawVac * 0.98) < 0.01);
+});
+test("空置物业管理费分档：≥85%不打折", () => {
+  const { vac, rawVac } = runRentAtOcc(0.9);
+  assert.ok(Math.abs(vac - rawVac * 1.0) < 0.01);
 });

@@ -3,7 +3,8 @@ window.RentCalc = (function(){
 const RENT_DEFAULTS = {
   mgHouseUnit: 1.92,     // 管理费(住房) 元/㎡/月系数
   mgParkRatio: 0.4,      // 管理费(车位)=车位收入×此比率
-  insPerSqm: 0.3,        // 保险费 元/㎡(总建面,年)
+  insPerSqm: 0.3,        // 保险费 元/㎡(总建面,年)——公司《编制与审查指引》写的是"重置价格×0.1%"，
+                          // 但本项目确认实际就是按总建面这个口径算，不跟着改，维持原样
   repairRate: 0.02,      // 维修费=住宅租金收入×此比率
   fundPerSqm: 0.25,      // 维修基金 元/㎡/月
   vacPerSqm: 3.9,        // 空置物业费 元/㎡/月
@@ -30,6 +31,46 @@ const RENT_DEFAULTS = {
 };
 
 function r4(x){ return Math.round(x*10000)/10000; }
+
+/** 五年弥补亏损通用序列：ptByYear为逐年"利润总额"输入，返回逐年{total,makeup,taxable,incomeTax,net}。
+ *  提取成公用函数是因为损益表(六)和调整损益表(八)要各自独立跑一遍五年弥补亏损规则——
+ *  两张表的利润总额基数不同(是否扣运营期财务费用)，弥补亏损、应纳税所得额、所得税因此也各自独立。 */
+function profitSeries(allYears, ptByYear, lossCarry, incomeTaxRate){
+  const result={};
+  let lossHist=[], firstProfitYear=null, lastNeg=0, lossUsed=0;
+  allYears.forEach((y,idx)=>{
+    const pt = ptByYear[y];
+    lossHist.push(pt);
+    if(firstProfitYear===null && pt>0) firstProfitYear=y;
+    let makeup=0;
+    if(firstProfitYear!==null){
+      if(lossUsed>=lossCarry) makeup=0;
+      else if(y===firstProfitYear) makeup=lossHist.slice(Math.max(0,idx-lossCarry),idx).reduce((s,v)=>s+v,0);
+      else makeup = lastNeg<0? lastNeg:0;
+    }
+    const taxable=pt+makeup;
+    if(firstProfitYear!==null && makeup!==0) lossUsed++;
+    lastNeg = taxable<0? taxable:0;
+    const incomeTax = taxable>0? r4(taxable*incomeTaxRate):0;
+    result[y]={total:pt, makeup:r4(makeup), taxable:r4(taxable), incomeTax, net:r4(pt-incomeTax)};
+  });
+  return result;
+}
+
+/** 静态/动态投资回收期通用公式（doc九、43.2/43.3）：
+ *  从左到右遍历累计序列，找最后一个"≤0"的位置记作第N年(1-based)，取该年累计负值的绝对值，
+ *  除以下一年的对比序列值(静态用年度现金流入、动态用当年净现值)得到小数部分，回收期=N+小数部分。 */
+function paybackPeriod(allYears, cumByYear, flowByYear){
+  let idx=-1;
+  for(let i=0;i<allYears.length;i++){ if(cumByYear[allYears[i]]<=0) idx=i; }
+  if(idx===-1) return {year:allYears[0], index:0, period:0};      // 首年累计已为正，视为立即回正
+  if(idx>=allYears.length-1) return null;                          // 到最后一年仍未转正，全周期未回正
+  const N=idx+1;
+  const negAbs=Math.abs(cumByYear[allYears[idx]]);
+  const nextFlow=flowByYear[allYears[idx+1]];
+  if(!(nextFlow>0)) return null;
+  return { year:allYears[idx+1], index:N, period: Math.round((N+negAbs/nextFlow)*10000)/10000 };
+}
 
 /** p: buildStart, buildYears, operateYears, firstMonths,
  *  area, rent, rentSpan, rentRate, rampOcc, stableOcc,
@@ -146,7 +187,11 @@ function calc(p, cfgIn){
     const ins = p.totalBuildArea*K.insPerSqm/10000;
     const rep = income[y].resi*K.repairRate;          // 维修费=住宅租金收入×2%
     const fund = aOcc*m*K.fundPerSqm/10000;
-    const vac = aVac*m*K.vacPerSqm/10000;
+    // 空置物业服务费按当年出租率分档打折：出租率≤50%按88折，50%~85%按98折，≥85%按全额计收
+    // （公司《编制与审查指引》标准，此前只实现了"空置面积×单价"这一层，没有按出租率打折这一层）
+    const occRate = (aOcc+aVac)>0? aOcc/(aOcc+aVac) : 0;
+    const vacDiscount = occRate<=0.5? 0.88 : occRate<0.85? 0.98 : 1;
+    const vac = aVac*m*K.vacPerSqm/10000*vacDiscount;
     const reset = resetDict[y];
     const dep = opIndex[y]<=K.depYears? p.totalInvestment*(1-K.depResidual)/K.depYears : 0;
     cost[y]={mgH:r4(mgH),mgP:r4(mgP),ins:r4(ins),rep:r4(rep),fund:r4(fund),vac:r4(vac),reset:r4(reset),dep:r4(dep),
@@ -225,23 +270,31 @@ function calc(p, cfgIn){
   });
 
   // ===== 6. 损益（五年弥补亏损） =====
-  const profit={};
-  let lossHist=[], firstProfitYear=null, lastNeg=0, lossUsed=0;
-  allYears.forEach((y,idx)=>{
-    const pt = r4(income[y].total - totalCost[y].total - tax[y].total);
-    lossHist.push(pt);
-    if(firstProfitYear===null && pt>0) firstProfitYear=y;
-    let makeup=0;
-    if(firstProfitYear!==null){
-      if(lossUsed>=K.lossCarry) makeup=0;
-      else if(y===firstProfitYear) makeup=lossHist.slice(Math.max(0,idx-K.lossCarry),idx).reduce((s,v)=>s+v,0);
-      else makeup = lastNeg<0? lastNeg:0;
-    }
-    const taxable=pt+makeup;
-    if(firstProfitYear!==null && makeup!==0) lossUsed++;
-    lastNeg = taxable<0? taxable:0;
-    const incomeTax = taxable>0? r4(taxable*K.incomeTax):0;
-    profit[y]={total:pt, makeup:r4(makeup), taxable:r4(taxable), incomeTax, net:r4(pt-incomeTax)};
+  const ptMain={}; allYears.forEach(y=>{ ptMain[y]=r4(income[y].total - totalCost[y].total - tax[y].total); });
+  const profit = profitSeries(allYears, ptMain, K.lossCarry, K.incomeTax);
+
+  // ===== 6b. 调整损益表（八、全投资口径：总成本费用不含任何财务费用，含建设期与经营期）=====
+  /* cost[y].operating 本就不含财务费用（建设期计息进总投资、经营期计息单独放totalCost.finOp），
+     所以"调整总成本费用"直接等于 cost[y].operating，不需要另算。
+     但弥补亏损/应纳税所得额/所得税必须在这套"调整利润总额"上独立跑一遍五年规则——
+     两张表哪年盈利、哪年亏损可能不是同一年，不能共用同一套弥补亏损状态。 */
+  const ptAdj={}; allYears.forEach(y=>{ ptAdj[y]=r4(income[y].total - cost[y].operating - tax[y].total); });
+  const profitAdj = profitSeries(allYears, ptAdj, K.lossCarry, K.incomeTax);
+
+  // ===== 6c. 资金来源与运用（五）=====
+  /* 自有资金：引擎未建模独立的资本金投入计划，筹资活动现金来源目前仅计入银行借款；
+     余值回收：出租类项目长期持有运营，不设定期末资产处置，固定为0。 */
+  const funds={};
+  allYears.forEach(y=>{
+    const c=cost[y];
+    const opSource = income[y].total;
+    const financeSource = loan[y].borrow;
+    const recover = 0;
+    const source = r4(opSource + financeSource + recover);
+    const use = r4((p.investPlan&&p.investPlan[y]||0) + tax[y].total + c.mgH+c.mgP+c.ins+c.rep+c.fund+c.vac+c.reset
+      + profit[y].incomeTax + loan[y].repay + loan[y].payInt);
+    funds[y]={opSource:r4(opSource), financeSource:r4(financeSource), recover:r4(recover), source,
+      use, surplus:r4(source-use)};
   });
 
   // ===== 7. 现金流（流出=建设投资+税金+6项现金成本+所得税；不含折旧/财务费用） =====
@@ -259,7 +312,26 @@ function calc(p, cfgIn){
     cf[y]={inflow:r4(inflow), invest:r4(invest), outflow, net, cumNet:r4(cum), npv:r4(npv), cumNpv:r4(cumNpv)};
   });
 
-  // ===== 8. IRR + 利息保障倍数 =====
+  // ===== 10. 资本金现金流量表 =====
+  /* (一)现金流入、(三)净现金流量、(四)累计净现金流量、(五)净现值、(六)累计净现值：doc明确"同全投资现金流量表"，
+     即计算方法与九完全一致，只是(二)现金流出多算了本期还款/本期付息——两张表数值因此不同，方法相同。
+     "总投资"沿用与九、38"建设投资"相同的按年度投资计划取值口径（现金流量表逐年展开，不会把总投资一次性计入单一年份）。 */
+  const capitalCf={}; let cumCap=0, cumNpvCap=0;
+  const discount2=p.discountPct/100;
+  allYears.forEach((y,idx)=>{
+    const inflow=income[y].total;
+    const invest=(p.investPlan&&p.investPlan[y])||0;
+    const c=cost[y];
+    const outflow=r4(invest + loan[y].repay + loan[y].payInt + tax[y].total
+      + c.mgH+c.mgP+c.ins+c.rep+c.fund+c.vac+c.reset + profit[y].incomeTax);
+    const net=r4(inflow-outflow);
+    cumCap+=net;
+    const npv=net/Math.pow(1+discount2, idx+0.5);
+    cumNpvCap+=npv;
+    capitalCf[y]={inflow:r4(inflow), invest:r4(invest), outflow, net, cumNet:r4(cumCap), npv:r4(npv), cumNpv:r4(cumNpvCap)};
+  });
+
+  // ===== 9. IRR + 利息保障倍数 =====
   const cfList=allYears.map(y=>cf[y].net);
   const irr=excelIrr(cfList);
   const loanYears=allYears.filter(y=>y>=firstLoanYear&&y<=lastLoanYear);
@@ -269,19 +341,43 @@ function calc(p, cfgIn){
   const icr=(bF+oF)!==0? Math.round((loanProfit+oF)/(bF+oF)*100)/100 : 0;
 
   const sum=f=>allYears.reduce((s,y)=>s+f(y),0);
-  let payback=null;
-  for(let i=0;i<allYears.length;i++){ if(cf[allYears[i]].cumNet>=0){ payback={year:allYears[i], index:i+1}; break; } }
+  const seriesOf=(obj,key)=>{ const o={}; allYears.forEach(y=>o[y]=obj[y][key]); return o; };
+  // 43.2/43.3：全投资现金流量表口径
+  const payback = paybackPeriod(allYears, seriesOf(cf,"cumNet"), seriesOf(cf,"inflow"));
+  const paybackDynamic = paybackPeriod(allYears, seriesOf(cf,"cumNpv"), seriesOf(cf,"npv"));
+  // 45.1-45.3：资本金现金流量表口径（doc标注"同全投资现金流量表"，指计算方法相同，基于本表自身序列另算）
+  const capitalIrrRaw = excelIrr(allYears.map(y=>capitalCf[y].net));
+  const capitalPayback = paybackPeriod(allYears, seriesOf(capitalCf,"cumNet"), seriesOf(capitalCf,"inflow"));
+  const capitalPaybackDynamic = paybackPeriod(allYears, seriesOf(capitalCf,"cumNpv"), seriesOf(capitalCf,"npv"));
 
-  return { allYears, operateArr, income, cost, loan, tax, totalCost, profit, cf, resiOcc, resiRent,
+  const totalIncomeSum = sum(y=>income[y].total);
+  const totalProfitSum = sum(y=>profit[y].total);
+  const totalNetProfitSum = sum(y=>profit[y].net);
+  const totalProfitAdjSum = sum(y=>profitAdj[y].total);
+  const totalNetProfitAdjSum = sum(y=>profitAdj[y].net);
+  // 六、32 与 八、36 的四个核心指标：投资回报率=利润总额/总投资；净投资回报率=净利润/总投资；经营收入利润率=利润总额/总经营收入
+  const ratioOf=(num,den)=> den? Math.round(num/den*10000)/10000 : null;
+
+  return { allYears, operateArr, income, cost, loan, tax, totalCost, profit, profitAdj, funds, cf, capitalCf, resiOcc, resiRent,
     summary:{
-      totalIncome: Math.round(sum(y=>income[y].total)*100)/100,
+      totalIncome: Math.round(totalIncomeSum*100)/100,
       totalCost: Math.round(sum(y=>totalCost[y].total)*100)/100,
       totalTax: Math.round(sum(y=>tax[y].total)*100)/100,
-      totalNetProfit: Math.round(sum(y=>profit[y].net)*100)/100,
+      totalNetProfit: Math.round(totalNetProfitSum*100)/100,
       totalInterest: Math.round(sum(y=>loan[y].payInt)*100)/100,
       totalNpv: Math.round(cumNpv*100)/100,
       irr: irr!==null? Math.round(irr*10000)/100 : null,
-      icr, payback,
+      icr, payback, paybackDynamic,
+      investReturnRate: ratioOf(totalProfitSum, p.totalInvestment),
+      netInvestReturnRate: ratioOf(totalNetProfitSum, p.totalInvestment),
+      opProfitMargin: ratioOf(totalProfitSum, totalIncomeSum),
+      totalProfitAdj: Math.round(totalProfitAdjSum*100)/100,
+      totalNetProfitAdj: Math.round(totalNetProfitAdjSum*100)/100,
+      investReturnRateAdj: ratioOf(totalProfitAdjSum, p.totalInvestment),
+      netInvestReturnRateAdj: ratioOf(totalNetProfitAdjSum, p.totalInvestment),
+      opProfitMarginAdj: ratioOf(totalProfitAdjSum, totalIncomeSum),
+      capitalIrr: capitalIrrRaw!==null? Math.round(capitalIrrRaw*10000)/100 : null,
+      capitalPayback, capitalPaybackDynamic,
     }};
 }
 function npvAt(r,fl){ let s=0; fl.forEach((f,i)=>{ s+=f/Math.pow(1+r,i); }); return s; }
