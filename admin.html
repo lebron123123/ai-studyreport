@@ -53,6 +53,33 @@
   /* 通用小组件复用的表格样式 */
   .tbl{border-collapse:collapse;} .tbl th,.tbl td{padding:6px 8px;border-bottom:1px solid var(--line-soft);}
   .tbl th{color:var(--soft);font-weight:600;}
+  /* ===== 运维看板 stat卡片 —— 参考开源Tabler dashboard(github.com/tabler/tabler)的间距/层级比例，
+     配色换成本站既有变量，不引入外部CSS依赖。此前误把行内flex的.card当成通用容器用，
+     标题文字被挤成竖排，这里改用专门的块级容器规避同样的问题。 */
+  .stat-page{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px 22px;box-shadow:0 1px 3px rgba(30,75,114,.05);}
+  .stat-page-title{font-weight:700;font-size:15px;color:var(--bp-deep);}
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;}
+  .stat-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px 18px;}
+  .stat-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--soft);font-weight:600;display:flex;align-items:center;gap:6px;}
+  .stat-num{font-size:26px;font-weight:700;color:var(--ink);margin-top:8px;line-height:1.1;}
+  .stat-num .unit{font-size:13px;font-weight:400;color:var(--soft);margin-left:4px;}
+  .stat-bar-track{height:6px;background:var(--line-soft);border-radius:99px;margin-top:10px;overflow:hidden;}
+  .stat-bar-fill{height:100%;border-radius:99px;transition:width .3s ease-out;}
+  .stat-badge{display:inline-block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:2px 8px;border-radius:99px;margin-top:9px;}
+  .stat-badge.ok{background:#EAF6EE;color:var(--ok);}
+  .stat-badge.warn{background:#FFF3E0;color:#B26A00;}
+  .stat-badge.err{background:#FCEEEC;color:var(--red);}
+  .stat-mini-row{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px dashed var(--line-soft);}
+  .stat-mini-row:last-child{border-bottom:none;}
+  .stat-mini-label{color:var(--soft);}
+  .stat-mini-val{font-weight:600;font-family:var(--mono);}
+  .stat-mini-head{font-size:11px;color:var(--soft);font-weight:600;margin:12px 0 2px;}
+  .stat-mini-head:first-child{margin-top:2px;}
+  .stat-foot{font-size:11px;color:var(--soft);margin-top:12px;}
+  .stat-kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:6px;}
+  .stat-kpi .stat-label{font-size:10.5px;}
+  .stat-kpi .stat-num{font-size:20px;margin-top:6px;}
+
   /* RAG等子页面的二级标签导航(替代原来容易换行的文字链接行) */
   .subnav{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 4px;}
   .subnav a{font-size:12.5px;padding:6px 13px;border-radius:20px;background:var(--line-soft);color:var(--bp-deep);
@@ -2048,51 +2075,67 @@ else{
     const box=document.getElementById("listBox");
     document.getElementById("editBox").style.display="none";
     box.style.display="block";
-    box.innerHTML='<div class="card"><b>运维看板</b><div class="hint">今日AI调用量、本地部署RAG向量化缓存命中率与Ollama响应耗时——排查"是不是快到额度上限了/缓存有没有在起作用/响应是不是变慢了"用。</div>'
-      +'<div id="statsBox" style="margin-top:12px;">加载中…</div>'
-      +'<div class="bar" style="margin-top:14px;"><button class="btn sm ghost" id="statsRefresh">↻ 刷新</button></div></div>';
+    box.innerHTML='<div class="stat-page"><div style="display:flex; justify-content:space-between; align-items:center;">'
+      +'<div><div class="stat-page-title">📊 运维看板</div>'
+      +'<div class="sub" style="margin-bottom:0; margin-top:4px;">今日AI调用量、本地部署RAG向量化缓存命中率与Ollama响应耗时——排查"是不是快到额度上限了/缓存有没有在起作用/响应是不是变慢了"用。</div></div>'
+      +'<button class="btn sm ghost" id="statsRefresh" style="flex-shrink:0; margin-left:16px;">↻ 刷新</button></div>'
+      +'<div id="statsBox" style="margin-top:16px;">加载中…</div></div>';
     document.getElementById("statsRefresh").onclick = refreshStats;
     await refreshStats();
   };
   async function refreshStats(){
     const el = document.getElementById("statsBox"); if(!el) return;
-    el.innerHTML = "加载中…";
+    el.innerHTML = '<div class="empty">加载中…</div>';
     try{
       const r = await fetch("/api/stats", {headers: authHeaders()});
       const d = await r.json();
-      if(!d.ok){ el.innerHTML = '<div class="hint" style="color:var(--red);">'+esc(d.error||"读取失败")+'</div>'; return; }
+      if(!d.ok){ el.innerHTML = '<div class="msg err">'+esc(d.error||"读取失败")+'</div>'; return; }
+
       const pct = d.limits.global? Math.min(100, Math.round(d.globalToday/d.limits.global*1000)/10) : 0;
-      const barColor = pct>=90? "var(--red)" : pct>=70? "#C99A2E" : "var(--ok,#2E7D46)";
-      let h = '<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">';
-      h += '<div style="border:1px solid var(--line); padding:12px 14px;"><b style="font-size:13px;">今日AI调用量（'+esc(d.today)+'）</b>'
-        +'<div style="margin-top:8px; font-size:22px; font-weight:700;">'+d.globalToday+' <span style="font-size:13px; color:var(--soft); font-weight:400;">/ 全站上限 '+d.limits.global+'</span></div>'
-        +'<div style="margin-top:6px; height:8px; background:var(--line-soft); border-radius:4px; overflow:hidden;"><div style="width:'+pct+'%; height:100%; background:'+barColor+';"></div></div>'
-        +'<div style="margin-top:4px; font-size:12px; color:var(--soft);">'+pct+'%'+(pct>=90?"（接近上限，注意）":"")+'</div>'
-        +'<div style="margin-top:10px; font-size:12px; color:var(--soft);">单用户每日额度：日常问答'+d.limits.chat+'次　·　报告生成/批量评审'+d.limits.batch+'次</div>'
-        +'</div>';
-      const topList = (title,list)=> '<div style="margin-top:8px;"><b style="font-size:12px;">'+title+'</b>'
-        + (list&&list.length? list.map(u=>'<div style="font-size:12px; display:flex; justify-content:space-between; padding:2px 0;"><span>用户#'+esc(u.userId)+'</span><span>'+u.cnt+'次</span></div>').join("")
-          : '<div class="hint" style="font-size:12px;">（今日暂无）</div>')+'</div>';
-      h += '<div style="border:1px solid var(--line); padding:12px 14px;"><b style="font-size:13px;">今日调用量前十用户</b>'
-        + topList("日常问答", d.topChatUsers) + topList("报告生成/批量评审", d.topBatchUsers) + '</div>';
+      const level = pct>=90? "err" : pct>=70? "warn" : "ok";
+      const levelText = pct>=90? "接近上限" : pct>=70? "偏高" : "正常";
+      const barColor = level==="err"? "var(--red)" : level==="warn"? "#C99A2E" : "var(--ok)";
+
+      let h = '<div class="stat-grid">';
+      // ---- 卡片1：今日AI调用量 ----
+      h += '<div class="stat-card">'
+        + '<div class="stat-label">📈 今日AI调用量 · '+esc(d.today)+'</div>'
+        + '<div class="stat-num">'+d.globalToday+'<span class="unit">/ 全站上限 '+d.limits.global+'</span></div>'
+        + '<div class="stat-bar-track"><div class="stat-bar-fill" style="width:'+pct+'%; background:'+barColor+';"></div></div>'
+        + '<div><span class="stat-badge '+level+'">'+pct+'% · '+levelText+'</span></div>'
+        + '<div class="stat-foot">单用户每日额度：日常问答 '+d.limits.chat+' 次　·　报告生成/批量评审 '+d.limits.batch+' 次</div>'
+        + '</div>';
+      // ---- 卡片2：今日调用量前十用户 ----
+      const topRows = (list)=> (list&&list.length)
+        ? list.map(u=>'<div class="stat-mini-row"><span class="stat-mini-label">用户 #'+esc(u.userId)+'</span><span class="stat-mini-val">'+u.cnt+' 次</span></div>').join("")
+        : '<div class="stat-mini-row"><span class="stat-mini-label">（今日暂无）</span></div>';
+      h += '<div class="stat-card">'
+        + '<div class="stat-label">👥 今日调用量前十用户</div>'
+        + '<div class="stat-mini-head">日常问答</div>' + topRows(d.topChatUsers)
+        + '<div class="stat-mini-head">报告生成/批量评审</div>' + topRows(d.topBatchUsers)
+        + '</div>';
       h += '</div>';
-      if(d.usageError) h += '<div class="hint" style="color:var(--red); margin-top:10px;">'+esc(d.usageError)+'</div>';
-      h += '<div style="margin-top:16px; border:1px solid var(--line); padding:12px 14px;"><b style="font-size:13px;">本地部署 · RAG向量化缓存与Ollama耗时</b>';
+      if(d.usageError) h += '<div class="msg err" style="margin-top:14px;">'+esc(d.usageError)+'</div>';
+
+      // ---- 卡片3：本地部署向量化缓存与Ollama耗时（整行宽度） ----
+      h += '<div class="stat-card" style="margin-top:16px;"><div class="stat-label">⚡ 本地部署 · RAG向量化缓存与Ollama耗时</div>';
       if(!d.vectorCache){
-        h += '<div class="hint" style="margin-top:6px;">云端环境不适用（Cloudflare Workers AI原生绑定没有这个统计）。</div>';
+        h += '<div class="stat-foot" style="margin-top:8px;">云端环境不适用（Cloudflare Workers AI原生绑定没有这个统计）。</div>';
       }else{
         const vc = d.vectorCache;
-        h += '<div style="margin-top:8px; display:grid; grid-template-columns:repeat(4,1fr); gap:10px; font-size:12.5px;">'
-          +'<div><div style="color:var(--soft);">缓存命中率</div><div style="font-size:18px; font-weight:700;">'+(vc.hitRate!=null?vc.hitRate+"%":"—")+'</div></div>'
-          +'<div><div style="color:var(--soft);">命中/未命中</div><div style="font-size:18px; font-weight:700;">'+vc.hits+' / '+vc.misses+'</div></div>'
-          +'<div><div style="color:var(--soft);">缓存条目数</div><div style="font-size:18px; font-weight:700;">'+vc.cacheSize+' / '+vc.cacheMax+'</div></div>'
-          +'<div><div style="color:var(--soft);">Ollama平均耗时</div><div style="font-size:18px; font-weight:700;">'+(vc.avgLatencyMs!=null?vc.avgLatencyMs+"ms":"—")+'</div></div>'
-          +'</div><div class="hint" style="margin-top:8px; font-size:11.5px;">以上是本地服务器进程启动以来的累计值，重启后清零；不是持久化的历史趋势数据。</div>';
+        const hrLevel = vc.hitRate==null? null : vc.hitRate>=50? "ok" : vc.hitRate>=20? "warn" : null;
+        h += '<div class="stat-kpi-row">'
+          + '<div class="stat-kpi"><div class="stat-label">缓存命中率</div><div class="stat-num">'+(vc.hitRate!=null?vc.hitRate+"%":"—")+'</div>'
+            + (hrLevel? '<span class="stat-badge '+hrLevel+'">'+(hrLevel==="ok"?"起作用了":"逐步生效")+'</span>' : '')+'</div>'
+          + '<div class="stat-kpi"><div class="stat-label">命中 / 未命中</div><div class="stat-num" style="font-size:18px;">'+vc.hits+' / '+vc.misses+'</div></div>'
+          + '<div class="stat-kpi"><div class="stat-label">缓存条目数</div><div class="stat-num" style="font-size:18px;">'+vc.cacheSize+'<span class="unit">/ '+vc.cacheMax+'</span></div></div>'
+          + '<div class="stat-kpi"><div class="stat-label">Ollama平均耗时</div><div class="stat-num">'+(vc.avgLatencyMs!=null?vc.avgLatencyMs:"—")+'<span class="unit">'+(vc.avgLatencyMs!=null?"ms":"")+'</span></div></div>'
+          + '</div><div class="stat-foot">以上是本地服务器进程启动以来的累计值，重启后清零；不是持久化的历史趋势数据。</div>';
       }
       h += '</div>';
       el.innerHTML = h;
     }catch(e){
-      el.innerHTML = '<div class="hint" style="color:var(--red);">网络错误：'+esc(e.message)+'</div>';
+      el.innerHTML = '<div class="msg err">网络错误：'+esc(e.message)+'</div>';
     }
   }
 
