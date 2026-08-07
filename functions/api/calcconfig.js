@@ -4,7 +4,7 @@
 import { verifyAuth, json } from "./_auth.js";
 
 import { adaptEnv } from "./_adapters.js";
-const KEYS = ["gaibao","rent","sale","metrics","score","examples","airules"];
+const KEYS = ["gaibao","rent","sale","invest","metrics","score","examples","airules","calclogic","sensitivity","calcstd"];
 function isAdmin(env, user){
   const admins = (env.ADMIN_USERS || "").split(",").map(s=>s.trim()).filter(Boolean);
   return admins.includes(user.username) || admins.includes(String(user.userId));
@@ -24,7 +24,7 @@ export async function onRequestGet(context){
   const out = {};
   for(const k of KEYS){
     const row = await env.DB.prepare("SELECT data FROM configs WHERE key=?").bind("calc_"+k).first();
-    out[k] = row? JSON.parse(row.data) : ((k==="metrics"||k==="score"||k==="examples"||k==="airules")? [] : {});
+    out[k] = row? JSON.parse(row.data) : ((k==="metrics"||k==="score"||k==="examples"||k==="airules"||k==="calcstd")? [] : {});
   }
   return json({ok:true, config: out});
 }
@@ -41,7 +41,7 @@ export async function onRequestPost(context){
   const key = String(body.key||"");
   if(!KEYS.includes(key)) return json({ok:false, error:"未知配置项"}, 400);
   const dataStr = JSON.stringify(body.data ?? (key==="metrics"? []:{}));
-  const maxLen = key==="examples"? 400000 : 50000;
+  const maxLen = key==="examples"? 400000 : key==="calclogic"? 150000 : 50000;
   if(dataStr.length > maxLen) return json({ok:false, error:"配置过大"}, 413);
   const exist = await env.DB.prepare("SELECT key FROM configs WHERE key=?").bind("calc_"+key).first();
   if(exist){
