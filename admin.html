@@ -68,7 +68,7 @@
     <div class="nav-sep"></div>
     <div class="nav-item" id="btnCalcCfg"><span class="ic">🧮</span>测算参数管理</div>
     <div class="nav-item" id="btnExamples"><span class="ic">📖</span>黄金范例库</div>
-    <div class="nav-item" id="btnAiRules"><span class="ic">🛡</span>AI审核规则</div>
+    <div class="nav-item" id="btnAiRules"><span class="ic">🛡</span>AI审核规则、逻辑</div>
     <div class="nav-item" id="btnRag"><span class="ic">🗂</span>RAG知识库</div>
     <div class="nav-item" id="btnAgent"><span class="ic">🤖</span>Agent调用记录</div>
     <div class="nav-item" id="btnCases"><span class="ic">📁</span>历史项目案例库</div>
@@ -85,6 +85,16 @@
     </div>
   </div>
 </div>
+<script src="calcschema.js"></script>
+<!-- 「可研测算逻辑」页要能直接生成示例Word/Excel，复用主应用同一套测算引擎与导出逻辑（不是另起一套） -->
+<script src="nrcalc.js"></script>
+<script src="rentcalc.js"></script>
+<script src="investestimate.js"></script>
+<script src="salecalc.js"></script>
+<script src="calc.js"></script>
+<script src="export.js"></script>
+<!-- 敏感性分析(Sobol/Saltelli)核心逻辑，和命令行 scripts/sensitivity.js 共用同一份代码 -->
+<script src="sensitivity-core.js"></script>
 <script>
 function getToken(){ return localStorage.getItem("fs_token"); }
 function getUser(){ return localStorage.getItem("fs_user"); }
@@ -1127,8 +1137,26 @@ async function openAgentTraces(){
 
 
 
-/* ================= AI审核规则 ================= */
+/* ================= AI审核规则、逻辑 ================= */
 let arList = [];
+let csList = [];   // 测算审核标准(calcstd)：文本部分之外，测算假设/成本/收入/财务结果的结构化数值型审核标准
+let clLogic = {gaibao:{}, rent:{}, sale:{}};
+let arTab = "rules";   // "rules" | "logic" | "sensitivity" | "std"
+let clType = "rent";   // 可研测算逻辑页当前查看的测算类型
+// AI审核规则/测算审核标准默认只读，防止手滑增删——每次进入本页都重新锁定，
+// 要编辑须重新输入一次管理员密码解锁；保存成功后自动重新锁定，逼着下一轮编辑也走一次确认。
+let stdEditUnlocked = false;
+function unlockStdEdit(reRender){
+  const pass = prompt("请再次输入管理员密码以解锁编辑（仅本次会话有效，保存后自动重新锁定）：");
+  if(pass===null) return;
+  if(pass === sessionStorage.getItem("adminPass")){ stdEditUnlocked = true; reRender(); }
+  else alert("密码不正确，未解锁");
+}
+function lockBannerHtml(hint){
+  return '<div style="background:#FFF6E5; border:1px solid #F0D89B; padding:10px 12px; margin-top:12px; font-size:12.5px; display:flex; align-items:center; gap:10px;">'
+    +'<span>🔒 当前为只读模式，防止误增删。'+esc(hint||"")+'</span>'
+    +'<button class="btn sm" id="unlockStdBtn" style="margin-left:auto;">🔓 解锁编辑</button></div>';
+}
 async function openAiRules(){
   document.getElementById("listBox").style.display="none";
   const box = document.getElementById("editBox");
@@ -1138,24 +1166,361 @@ async function openAiRules(){
     const r = await fetch("/api/calcconfig",{headers:authHeaders()});
     const d = await r.json();
     arList = (d.ok && d.config && d.config.airules)? d.config.airules : [];
+    csList = (d.ok && d.config && d.config.calcstd)? d.config.calcstd : [];
+    clLogic = Object.assign({gaibao:{},rent:{},sale:{}}, (d.ok && d.config && d.config.calclogic)||{});
+    // 敏感性分析要用"测算参数管理"里已保存的系数覆盖(不是永远只测代码内置默认值)，这里一并取一份
+    if(d.ok && d.config) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},invest:{},metrics:[],score:[],sensitivity:{}}, d.config);
   }catch(e){ arList = []; }
-  renderAiRules();
+  arTab = "rules";
+  renderAiRulesTab();
+}
+function renderAiRulesTab(){
+  if(arTab==="logic") renderCalcLogic();
+  else if(arTab==="sensitivity") renderSensitivity();
+  else if(arTab==="std") renderCalcStd();
+  else renderAiRules();
+}
+function arSubnavHtml(){
+  return '<div class="subnav">'
+    +'<a href="javascript:void(0)" id="arTabRules" style="'+(arTab==="rules"?"background:#DCEBF7;":"")+'">🛡 AI可研审核规则与业务逻辑</a>'
+    +'<a href="javascript:void(0)" id="arTabLogic" style="'+(arTab==="logic"?"background:#DCEBF7;":"")+'">🧮 可研测算逻辑</a>'
+    +'<a href="javascript:void(0)" id="arTabSensitivity" style="'+(arTab==="sensitivity"?"background:#DCEBF7;":"")+'">📈 敏感性分析</a>'
+    +'<a href="javascript:void(0)" id="arTabStd" style="'+(arTab==="std"?"background:#DCEBF7;":"")+'">📐 测算审核标准</a>'
+    +'</div>';
 }
 function renderAiRules(){
   const box = document.getElementById("editBox");
-  box.innerHTML = '<h1 style="font-size:18px;">AI审核规则</h1>'
+  const locked = !stdEditUnlocked;
+  box.innerHTML = '<h1 style="font-size:18px;">AI审核规则、逻辑</h1>'
+    + arSubnavHtml()
+    +'<h2 style="font-size:15px; margin-top:16px;">AI可研审核规则与业务逻辑</h2>'
     +'<div class="sub">复核页"AI深度审核"按这些要点逐节评审。<b>匹配关键词</b>命中章节标题即适用（多个用逗号分隔；填 <b>*</b> 表示适用所有小节）。要点写给AI看，例如："必须引用具体政策文件名；须包含供需两侧数据；每项风险须有对应对策"。未配置任何规则时使用内置通用规则。</div>'
-    +'<div id="arList">'+arList.map((e,i)=>arRowHtml(e,i)).join("")+'</div>'
-    +'<span class="add-link" id="addAr" style="margin-left:0;">+ 添加规则</span>'
-    +'<span class="add-link" id="evolveAr" style="margin-left:18px; color:var(--red);">⟳ 从修改意见生成规则建议</span>'
-    +'<div id="evolveBox"></div>'
-    +'<div class="bar" style="margin-top:18px;"><button class="btn" id="saveAr">保存规则</button>'
-    +'<button class="btn ghost" id="arBack">返回列表</button></div>';
-  document.getElementById("addAr").onclick = ()=>{ readArForm(); arList.push({match:"",rule:""}); renderAiRules(); };
-  document.getElementById("saveAr").onclick = saveAiRules;
+    +'<div style="margin-top:10px;"><span class="add-link" id="exportArWord">📄 导出Word（含未保存的编辑）</span></div>'
+    + (locked? lockBannerHtml("增/删/改规则前需先解锁。") : "")
+    +'<div id="arList">'+arList.map((e,i)=>arRowHtml(e,i,locked)).join("")+'</div>'
+    + (locked? "" :
+      '<span class="add-link" id="addAr" style="margin-left:0;">+ 添加规则</span>'
+      +'<span class="add-link" id="evolveAr" style="margin-left:18px; color:var(--red);">⟳ 从修改意见生成规则建议</span>'
+      +'<div id="evolveBox"></div>'
+      +'<div class="bar" style="margin-top:18px;"><button class="btn" id="saveAr">保存规则</button>'
+      +'<button class="btn ghost" id="lockArBtn">🔒 重新锁定</button></div>')
+    +'<div class="bar" style="margin-top:'+(locked?'12px':'8px')+';"><button class="btn ghost" id="arBack">返回列表</button></div>';
+  document.getElementById("arTabRules").onclick = ()=>{ arTab="rules"; renderAiRulesTab(); };
+  document.getElementById("arTabLogic").onclick = ()=>{ readArForm(); arTab="logic"; renderAiRulesTab(); };
+  document.getElementById("arTabSensitivity").onclick = ()=>{ readArForm(); arTab="sensitivity"; renderAiRulesTab(); };
+  document.getElementById("arTabStd").onclick = ()=>{ readArForm(); arTab="std"; renderAiRulesTab(); };
   document.getElementById("arBack").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
-  document.querySelectorAll("[data-ardel]").forEach(b=>b.onclick=()=>{ readArForm(); arList.splice(+b.dataset.ardel,1); renderAiRules(); });
-  document.getElementById("evolveAr").onclick = evolveRules;
+  document.getElementById("exportArWord").onclick = ()=>{ readArForm(); exportAiRulesWord(arList); };
+  if(locked){
+    document.getElementById("unlockStdBtn").onclick = ()=>unlockStdEdit(renderAiRules);
+  }else{
+    document.getElementById("addAr").onclick = ()=>{ readArForm(); arList.push({match:"",rule:""}); renderAiRules(); };
+    document.getElementById("saveAr").onclick = saveAiRules;
+    document.getElementById("lockArBtn").onclick = ()=>{ readArForm(); stdEditUnlocked=false; renderAiRules(); };
+    document.querySelectorAll("[data-ardel]").forEach(b=>b.onclick=()=>{
+      if(!confirm("确定删除这条规则？删除后需点「保存规则」才会真正生效。")) return;
+      readArForm(); arList.splice(+b.dataset.ardel,1); renderAiRules();
+    });
+    document.getElementById("evolveAr").onclick = evolveRules;
+  }
+}
+
+/* ---- 可研测算逻辑：展示Excel明细表结构 + 可编辑的Word测算说明书解释文字 ---- */
+function readClForm(){
+  if(!clLogic[clType]) clLogic[clType] = {};
+  document.querySelectorAll("[data-cldesc]").forEach(ta=>{
+    const id = ta.dataset.cldesc, v = ta.value.trim();
+    if(v) clLogic[clType][id] = v; else delete clLogic[clType][id];
+  });
+  document.querySelectorAll("[data-clestdesc]").forEach(ta=>{
+    const key = "est:"+ta.dataset.clestdesc, v = ta.value.trim();
+    if(v) clLogic[clType][key] = v; else delete clLogic[clType][key];
+  });
+}
+/* 一/二/三(doc 1-18号)是一次性算出的数，按no前缀（如"5.1"是"5"的子项）建一棵可折叠的树；
+   目前只在测算结果页的"投资估算大纲"里真正参与展示，这里仅供后台浏览/编写参考说明，不写入Excel/Word导出 */
+function estimateOutlineHtml(){
+  const rows = window.CALC_ESTIMATE_OUTLINE || [];
+  if(!rows.length) return "";
+  const map = {}; const roots = [];
+  rows.forEach(r=>{ map[r.no] = Object.assign({}, r, {level:(r.no.match(/\./g)||[]).length, children:[]}); });
+  rows.forEach(r=>{
+    const parts = r.no.split(".");
+    if(parts.length===1){ roots.push(map[r.no]); return; }
+    const parentNo = parts.slice(0,-1).join(".");
+    if(map[parentNo]) map[parentNo].children.push(map[r.no]); else roots.push(map[r.no]);
+  });
+  const renderNode = node=>{
+    const head = '<span style="font-family:var(--mono); color:var(--soft); font-size:11px;">'+node.no+'.</span> '
+      +'<b style="font-size:12.5px;">'+esc(node.label)+'</b>'
+      +(node.hint? '　<span style="font-size:11.5px; color:var(--soft);">'+esc(node.hint)+'</span>' : "");
+    const textarea = '<textarea data-clestdesc="'+node.no+'" placeholder="补充说明（可选）" style="display:block; margin-top:4px; min-height:32px; width:100%; box-sizing:border-box; font-size:12px;">'+esc((clLogic[clType]&&clLogic[clType]["est:"+node.no])||"")+'</textarea>';
+    if(!node.children.length){
+      return '<div style="padding:6px 0 6px '+(node.level*16)+'px; border-bottom:1px dashed var(--line);">'+head+textarea+'</div>';
+    }
+    return '<details style="margin-left:'+(node.level*16)+'px;"><summary style="padding:6px 0; border-bottom:1px dashed var(--line); cursor:pointer;">'+head+'</summary>'
+      + '<div style="padding:2px 0 6px 0;">'+textarea+'</div>'
+      + '<div>'+node.children.map(renderNode).join("")+'</div></details>';
+  };
+  return '<div class="sub" style="margin-top:18px;">一、技术指标 + 二、投资估算 + 三、工期进度（doc 1-18号）——这部分是一次性算出的数，不按年份分列，<b>目前只在测算结果页的"投资估算大纲"里展示，还没有计入Excel/Word文件导出</b>。这里仅供浏览与预留说明文字。</div>'
+    + '<div style="margin-top:8px;">' + roots.map(renderNode).join("") + '</div>';
+}
+function renderCalcLogic(){
+  const box = document.getElementById("editBox");
+  const TYPE_CN = {gaibao:"非居改保", rent:"出租类", sale:"出售类"};
+  const schema = (window.CALC_ROW_SCHEMA && window.CALC_ROW_SCHEMA[clType]) || [];
+  const typeTabs = Object.keys(TYPE_CN).map(t=>
+    '<button class="btn sm'+(t===clType?"":" ghost")+'" data-cltype="'+t+'" style="margin-right:6px;">'+TYPE_CN[t]+'</button>').join("");
+  const wordHtml = schema.length? schema.map(sheet=>
+    '<div style="margin-top:14px;"><b style="font-size:13px;">'+esc(sheet.sheet)+'</b>'
+    + sheet.rows.map(r=>
+        '<div style="margin-top:8px; padding:8px 10px; border:1px solid var(--line); background:#fff;">'
+        +'<div style="font-size:12.5px; font-weight:600;">'+esc(r.label)+'　<span style="font-weight:400; color:var(--soft); font-family:var(--mono); font-size:11px;">'+r.id+'</span></div>'
+        +'<textarea data-cldesc="'+r.id+'" placeholder="'+esc(r.desc||"（内置默认文案为空，如需在Word说明书中显示解释请在此填写）")+'" style="margin-top:4px; min-height:44px; width:100%; box-sizing:border-box; font-size:12.5px;">'+esc((clLogic[clType]&&clLogic[clType][r.id])||"")+'</textarea>'
+        +'</div>').join("")
+    + '</div>').join("") : '<div class="empty">科目参照表未加载（calcschema.js）</div>';
+  const excelHtml = '<table class="tbl" style="width:100%; margin-top:10px;">'
+    +'<tr><th>Sheet</th><th>行标识</th><th>科目名称</th></tr>'
+    + schema.map(sheet=>sheet.rows.map((r,i)=>
+        '<tr><td>'+(i===0?esc(sheet.sheet):"")+'</td><td style="font-family:var(--mono); font-size:11px; color:var(--soft);">'+r.id+'</td><td>'+esc(r.label)+'</td></tr>'
+      ).join("")).join("")
+    +'</table>';
+  box.innerHTML = '<h1 style="font-size:18px;">AI审核规则、逻辑</h1>'
+    + arSubnavHtml()
+    +'<h2 style="font-size:15px; margin-top:16px;">可研测算逻辑</h2>'
+    +'<div class="sub">这里的科目结构与说明文字，就是「导出Excel明细表」和「导出测算说明书（Word）」实际会用到的内容——科目名称/Excel公式结构由测算引擎代码决定（只读参考，改代码才会变）；每条说明文字可在此编辑，保存后Word测算说明书导出时优先用这里的文字，留空则退回内置默认文案。</div>'
+    +'<div style="margin-top:12px;">'+typeTabs+'</div>'
+    +'<div style="margin-top:14px; padding:12px 14px; background:var(--line-soft); border:1px solid var(--line); display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
+    +'<b style="font-size:12.5px;">用默认参数直接生成示例文件，所见即所得地核对当前（含未保存）的说明文字：</b>'
+    +'<button class="btn sm" id="genSampleWord">📄 生成示例 Word</button>'
+    +'<button class="btn sm ghost" id="genSampleExcel">📊 生成示例 Excel</button>'
+    +'<span id="genSampleMsg" style="font-size:12px; color:var(--soft);"></span>'
+    +'</div>'
+    +'<div style="display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:14px;">'
+    +'<div><h3 style="font-size:13.5px;">📄 Word测算说明书 · 说明文字（可编辑）</h3>'+wordHtml+'</div>'
+    +'<div><h3 style="font-size:13.5px;">📊 Excel明细表 · 科目结构（只读参考）</h3>'+excelHtml+'</div>'
+    +'</div>'
+    + (clType==="rent"? ('<h3 style="font-size:13.5px; margin-top:18px;">📐 投资估算大纲（一/二/三，doc 1-18号）</h3>'+estimateOutlineHtml()) : "")
+    +'<div class="bar" style="margin-top:18px;"><button class="btn" id="saveCl">保存说明文字</button>'
+    +'<button class="btn ghost" id="clBack">返回列表</button></div>';
+  document.getElementById("arTabRules").onclick = ()=>{ readClForm(); arTab="rules"; renderAiRulesTab(); };
+  document.getElementById("arTabLogic").onclick = ()=>{ arTab="logic"; renderAiRulesTab(); };
+  document.getElementById("arTabSensitivity").onclick = ()=>{ readClForm(); arTab="sensitivity"; renderAiRulesTab(); };
+  document.getElementById("arTabStd").onclick = ()=>{ readClForm(); arTab="std"; renderAiRulesTab(); };
+  document.querySelectorAll("[data-cltype]").forEach(b=>b.onclick=()=>{ readClForm(); clType=b.dataset.cltype; renderCalcLogic(); });
+  document.getElementById("saveCl").onclick = saveCalcLogic;
+  document.getElementById("clBack").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
+  document.getElementById("genSampleWord").onclick = ()=>generateSampleExport("word");
+  document.getElementById("genSampleExcel").onclick = ()=>generateSampleExport("excel");
+}
+
+/* 用「测算参数管理」页已配置的系数(CALC_CFG.gaibao/rent/sale) + 各表单默认值跑一次示例测算，
+   直接复用主应用同一套 runCalcEngine + exportCalcExcel/exportCalcWord，
+   保证这里点出来的文件和用户在主应用里点"导出"看到的结构、公式完全一致——不是另外拼一份假数据。 */
+async function generateSampleExport(kind){
+  const type = clType;
+  readClForm();
+  const btnId = kind==="word"? "genSampleWord" : "genSampleExcel";
+  const btn = document.getElementById(btnId);
+  const tip = document.getElementById("genSampleMsg");
+  if(btn){ btn.disabled = true; }
+  if(tip){ tip.textContent = "生成中…"; tip.style.color = "var(--soft)"; }
+  try{
+    if(typeof CALC_CFG === "undefined" || !window.RentCalc || !window.NRCalc || !window.SaleCalc || typeof runCalcEngine !== "function"){
+      throw new Error("测算引擎脚本未加载");
+    }
+    // 拉一次后台已保存的测算参数系数(gaibao/rent/sale)，示例文件的系数跟"测算参数管理"页保持一致
+    let baseCfg = {gaibao:{}, rent:{}, sale:{}, metrics:[], score:[], examples:[], airules:[], calclogic:{}};
+    try{
+      const r = await fetch("/api/calcconfig", {headers:authHeaders()});
+      const d = await r.json();
+      if(d.ok && d.config) baseCfg = Object.assign(baseCfg, d.config);
+    }catch(e){}
+    // calclogic用当前页面正在编辑的内容覆盖（含未保存的），其余系数用后台已保存值
+    baseCfg.calclogic = clLogic;
+    CALC_CFG = baseCfg;
+
+    calcType = type;
+    scParams = null;
+    const off = document.createElement("div");
+    off.style.cssText = "position:absolute; left:-99999px; top:0; width:0; height:0; overflow:hidden;";
+    off.innerHTML = type==="gaibao"? calcFormHtml() : type==="sale"? saleFormHtml() : rentFormHtml();
+    document.body.appendChild(off);
+    let params;
+    try{
+      params = type==="gaibao"? readCalcForm() : type==="sale"? readSaleForm() : readRentForm();
+    }finally{
+      document.body.removeChild(off);
+    }
+    scParams = params;
+    scResult = runCalcEngine(type, params);
+
+    if(kind==="excel") await exportCalcExcel(); else await exportCalcWord();
+    if(tip){ tip.textContent = "已生成，请在浏览器下载中查看"; tip.style.color = "var(--ok)"; }
+  }catch(e){
+    if(tip){ tip.textContent = "生成失败："+e.message; tip.style.color = "var(--red)"; }
+  }
+  if(btn){ btn.disabled = false; }
+}
+
+async function saveCalcLogic(){
+  readClForm();
+  const btn = document.getElementById("saveCl");
+  btn.disabled=true; btn.textContent="保存中…";
+  try{
+    const r = await fetch("/api/calcconfig",{method:"POST",headers:authHeaders(),
+      body:JSON.stringify({key:"calclogic", data:clLogic})});
+    const d = await r.json();
+    if(d.ok) msg("测算逻辑说明已保存","ok"); else msg(d.error||"保存失败","err");
+  }catch(e){ msg("网络错误","err"); }
+  btn.disabled=false; btn.textContent="保存说明文字";
+}
+
+/* ---- 敏感性分析(蒙特卡洛/Sobol)：用真实引擎+当前已保存系数，找出哪些填空参数真正决定IRR ----
+   核心算法在 sensitivity-core.js，和命令行 scripts/sensitivity.js 共用同一份逻辑，结果保证一致。
+   每次运行会和"上一次跑这个类型"的结果(存localStorage)自动对比排名变化，方便改完系数后核对影响。 */
+const SENS_METHOD_DEFS = [
+  {v:"sobol", label:"Sobol方差分解", hint:"能识别参数间交互效应，成本最高"},
+  {v:"spearman", label:"Spearman秩相关", hint:"只看该参数和IRR的单调关系，成本最低"},
+  {v:"src", label:"标准化回归系数", hint:"控制其他参数后的线性贡献，成本低"},
+];
+// 结果对象结构每改一次(比如这次新增methods字段)，之前存在localStorage里的旧格式缓存就读不出来了——
+// 靠这个版本号识别，版本不对的缓存直接当作没有，不强行渲染旧数据去崩页面
+const SENS_CACHE_VERSION = 2;
+function loadSensCache(type){
+  let prev=null;
+  try{ prev = JSON.parse(localStorage.getItem("sens_"+type)||"null"); }catch(e){ prev=null; }
+  if(!prev || prev.cacheVersion!==SENS_CACHE_VERSION || !Array.isArray(prev.methods) || !Array.isArray(prev.table)){
+    if(prev) localStorage.removeItem("sens_"+type); // 清掉认不出的旧缓存，下次不用再判断
+    return null;
+  }
+  return prev;
+}
+function saveSensCache(type, result){
+  result.cacheVersion = SENS_CACHE_VERSION;
+  localStorage.setItem("sens_"+type, JSON.stringify(result));
+}
+function renderSensitivity(){
+  const box = document.getElementById("editBox");
+  const TYPE_CN = {gaibao:"非居改保", rent:"出租类", sale:"出售类"};
+  const typeTabs = Object.keys(TYPE_CN).map(t=>
+    '<button class="btn sm'+(t===clType?"":" ghost")+'" data-senstype="'+t+'" style="margin-right:6px;">'+TYPE_CN[t]+'</button>').join("");
+  const prev = loadSensCache(clType);
+  const methodChecks = SENS_METHOD_DEFS.map(m=>
+    '<label style="font-size:12.5px; margin-right:14px;" title="'+esc(m.hint)+'">'
+    +'<input type="checkbox" class="sensMethod" value="'+m.v+'" checked> '+m.label+'</label>').join("");
+  box.innerHTML = '<h1 style="font-size:18px;">AI审核规则、逻辑</h1>'
+    + arSubnavHtml()
+    +'<h2 style="font-size:15px; margin-top:16px;">敏感性分析</h2>'
+    +'<div class="sub">用真实测算引擎、按"测算参数管理"里已保存的系数，跑一遍全局敏感性分析，找出这56~22个填空参数里哪些真正决定IRR。'
+    +'下面3个方法互相独立，勾选1~3个同时跑，选多个时自动按"平均名次"综合成一个排序（Sobol能测出参数间的交互效应但最慢；Spearman/标准化回归系数只测简单的单调/线性关系但很快，且和Sobol共用同一批抽样、不额外耗时）。'
+    +'N越大越稳定但越慢：N=300约十几秒，N=1500约一分钟以上(出租类参数最多、最慢)。每次运行自动和你上一次跑这个类型的结果对比综合排名变化，方便改完系数、看有没有影响。</div>'
+    +'<div style="margin-top:12px;">'+typeTabs+'</div>'
+    +'<div style="margin-top:10px;">'+methodChecks+'</div>'
+    +'<div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
+    +'<label style="font-size:12.5px;">抽样次数N：<select id="sensN">'
+    +'<option value="100">100(几秒，粗略)</option><option value="300" selected>300(十几秒，推荐)</option>'
+    +'<option value="800">800(半分钟)</option><option value="1500">1500(一分钟+，最稳定)</option></select></label>'
+    +'<button class="btn sm" id="runSens">▶ 运行分析</button>'
+    +'<span id="sensStatus" style="font-size:12px; color:var(--soft);"></span>'
+    +'</div>'
+    +'<div id="sensResult" style="margin-top:14px;">' + (prev? sensTableHtml(prev, null) : '<div class="empty">还没跑过，点上面"运行分析"</div>') + '</div>'
+    +'<div class="bar" style="margin-top:18px;"><button class="btn ghost" id="clBack2">返回列表</button></div>';
+  document.getElementById("arTabRules").onclick = ()=>{ arTab="rules"; renderAiRulesTab(); };
+  document.getElementById("arTabLogic").onclick = ()=>{ arTab="logic"; renderAiRulesTab(); };
+  document.getElementById("arTabSensitivity").onclick = ()=>{ arTab="sensitivity"; renderAiRulesTab(); };
+  document.getElementById("arTabStd").onclick = ()=>{ arTab="std"; renderAiRulesTab(); };
+  document.querySelectorAll("[data-senstype]").forEach(b=>b.onclick=()=>{ clType=b.dataset.senstype; renderSensitivity(); });
+  document.getElementById("runSens").onclick = runSensitivity;
+  document.getElementById("clBack2").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
+}
+function sensTableHtml(result, prevForDiff){
+  if(!result || !Array.isArray(result.methods) || !Array.isArray(result.table)){
+    return '<div class="empty">这条结果的数据格式对不上(可能是旧版本缓存)，请重新点"运行分析"</div>';
+  }
+  if(prevForDiff && (!Array.isArray(prevForDiff.methods) || !Array.isArray(prevForDiff.table))) prevForDiff = null;
+  const hasMulti = result.methods.length>1;
+  const rows = result.table.map((r,i)=>{
+    let deltaHtml = "";
+    if(prevForDiff){
+      const prevIdx = prevForDiff.table.findIndex(x=>x.key===r.key);
+      if(prevIdx<0) deltaHtml = '<span style="color:var(--bp);">新增</span>';
+      else{
+        const d = prevIdx - i;
+        deltaHtml = d===0? '<span style="color:var(--soft);">–</span>'
+          : (d>0? '<span style="color:var(--ok,#2E7D46);">↑'+d+'</span>' : '<span style="color:var(--red);">↓'+(-d)+'</span>');
+      }
+    }
+    let cells = '<td>'+(i+1)+'</td><td>'+esc(r.key)+'</td><td style="text-align:left;">'+esc(r.label||"")+'</td><td>'+esc(r.group)+'</td>';
+    if(result.methods.includes("sobol")) cells += '<td>'+(r.Si!==null?r.Si.toFixed(4):"—")+'</td><td>'+(r.STi!==null?r.STi.toFixed(4):"—")+'</td>';
+    if(result.methods.includes("spearman")) cells += '<td>'+(r.spearmanRho!==null&&r.spearmanRho!==undefined?r.spearmanRho.toFixed(4):"—")+'</td>';
+    if(result.methods.includes("src")) cells += '<td>'+(r.src!==null&&r.src!==undefined?r.src.toFixed(4):"—")+'</td>';
+    if(hasMulti) cells += '<td><b>'+(r.combinedRank!==null?r.combinedRank:"—")+'</b></td>';
+    if(prevForDiff) cells += '<td>'+deltaHtml+'</td>';
+    return '<tr>'+cells+'</tr>';
+  }).join("");
+  let head = '<th>排名</th><th>参数</th><th>具体指标</th><th>分组</th>';
+  if(result.methods.includes("sobol")) head += '<th>Si(一阶)</th><th>STi(总效应)</th>';
+  if(result.methods.includes("spearman")) head += '<th>Spearman秩相关</th>';
+  if(result.methods.includes("src")) head += '<th>标准化回归系数</th>';
+  if(hasMulti) head += '<th>综合名次</th>';
+  if(prevForDiff) head += '<th>较上次综合排名变化</th>';
+  const methodsStr = result.methods.map(m=>(SENS_METHOD_DEFS.find(x=>x.v===m)||{}).label||m).join(" + ");
+  return '<div style="font-size:12px; color:var(--soft); margin-bottom:6px;">'+result.label+' · N='+result.N+' · '+result.K+'个参数 · 方法：'+esc(methodsStr)+' · 耗时'+result.elapsedSec.toFixed(1)+'s'
+    + (result.savedAt? ' · 运行于 '+new Date(result.savedAt).toLocaleString("zh-CN") : "") + '</div>'
+    +'<table class="tbl" style="width:100%;"><tr>'+head+'</tr>' + rows + '</table>';
+}
+/* 用analyzeAsync而不是analyze：出租类51个参数、N=1500、3个方法全选时约8万次模型评估，
+   同步跑会把主线程堵住一分钟以上，标签页在这期间对任何点击都没反应(看起来像"点不动"，其实是在算，
+   之前反馈的"出租类点不动"根源就在这)。异步版每约100次评估让出一次主线程，全程能响应点击、能看到进度。 */
+let sensRunning = false;
+function setSensControlsDisabled(disabled){
+  const ids = ["sensN"];
+  ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled = disabled; });
+  document.querySelectorAll(".sensMethod, [data-senstype]").forEach(el=>{ el.disabled = disabled; });
+}
+async function runSensitivity(){
+  if(sensRunning) return;
+  const btn = document.getElementById("runSens");
+  const status = document.getElementById("sensStatus");
+  const N = parseInt(document.getElementById("sensN").value, 10);
+  const methods = [...document.querySelectorAll(".sensMethod:checked")].map(el=>el.value);
+  if(!window.SensitivityCore || !SensitivityCore.analyzeAsync){ status.textContent = "敏感性分析脚本未加载或版本过旧(sensitivity-core.js)，请强制刷新页面(Ctrl+Shift+R)后重试"; return; }
+  if(!methods.length){ status.textContent = "请至少勾选一个方法"; return; }
+  sensRunning = true;
+  btn.disabled = true; btn.textContent = "■ 运行中，点击停止无效，请等待…";
+  setSensControlsDisabled(true);
+  status.textContent = "运行中…(N="+N+"，方法："+methods.length+"个)";
+  try{
+    const cfg = {gaibao:calcCfg.gaibao||{}, rent:calcCfg.rent||{}, sale:calcCfg.sale||{}, invest:calcCfg.invest||{}};
+    const result = await SensitivityCore.analyzeAsync(clType, methods, N, cfg, undefined, (p)=>{
+      status.textContent = p.stage==="sobol参数"
+        ? "运行中…Sobol 参数 "+p.index+"/"+p.total+"："+(p.label||p.key)
+        : "运行中…"+p.stage+" "+p.done+"/"+p.total;
+    });
+    const prev = loadSensCache(clType);
+    result.savedAt = Date.now();
+    document.getElementById("sensResult").innerHTML = sensTableHtml(result, prev);
+    saveSensCache(clType, result);
+    status.textContent = "完成，同步到服务端…";
+    // 同步一份到服务端(configs表)：本地localStorage只有跑分析的这台浏览器能看到，
+    // 但/api/aireport的参数推荐(doSuggest)跑在Worker里，要用这份结果替换手工维护的关键参数短名单，
+    // 必须能从服务端读到——失败不影响本地这次分析结果的展示，只是没同步成功，下次跑成功了自然会补上。
+    try{
+      calcCfg.sensitivity = Object.assign({}, calcCfg.sensitivity, { [clType]: result });
+      const sr = await fetch("/api/calcconfig",{method:"POST",headers:authHeaders(),
+        body:JSON.stringify({key:"sensitivity", data:calcCfg.sensitivity})});
+      const sd = await sr.json();
+      status.textContent = sd.ok ? "完成，已同步到服务端" : "完成，但同步服务端失败："+(sd.error||"未知错误");
+    }catch(e){
+      status.textContent = "完成，但同步服务端失败（网络错误）";
+    }
+  }catch(e){
+    status.textContent = "失败："+e.message;
+  }
+  sensRunning = false;
+  btn.disabled = false; btn.textContent = "▶ 运行分析";
+  setSensControlsDisabled(false);
 }
 
 async function evolveRules(){
@@ -1193,12 +1558,13 @@ async function evolveRules(){
   }catch(e){ box.innerHTML = '<div style="padding:14px 0; color:var(--red); font-size:13px;">失败：'+esc(e.message)+'</div>'; }
 }
 
-function arRowHtml(e,i){
-  return '<div style="border:1px solid var(--line); background:#fff; padding:10px 12px; margin-top:10px;">'
+function arRowHtml(e,i,locked){
+  const ro = locked? " readonly" : "";
+  return '<div style="border:1px solid var(--line); background:'+(locked?"#FAFAFA":"#fff")+'; padding:10px 12px; margin-top:10px;">'
     +'<div style="display:flex; gap:8px; align-items:center;">'
-    +'<input class="ar-match" placeholder="匹配关键词（如：市场分析,供需 或 *）" value="'+esc(e.match||"")+'" style="width:260px;">'
-    +'<button class="btn sm red" data-ardel="'+i+'" style="margin-left:auto;">删除</button></div>'
-    +'<textarea class="ar-rule" placeholder="审核要点（写给AI）…" style="margin-top:8px; min-height:60px;">'+esc(e.rule||"")+'</textarea></div>';
+    +'<input class="ar-match" placeholder="匹配关键词（如：市场分析,供需 或 *）" value="'+esc(e.match||"")+'" style="width:260px;"'+ro+'>'
+    + (locked? "" : '<button class="btn sm red" data-ardel="'+i+'" style="margin-left:auto;">删除</button>')+'</div>'
+    +'<textarea class="ar-rule" placeholder="审核要点（写给AI）…" style="margin-top:8px; min-height:60px;"'+ro+'>'+esc(e.rule||"")+'</textarea></div>';
 }
 function readArForm(){
   const ms=[...document.querySelectorAll(".ar-match")], rs=[...document.querySelectorAll(".ar-rule")];
@@ -1212,9 +1578,110 @@ async function saveAiRules(){
     const r = await fetch("/api/calcconfig",{method:"POST",headers:authHeaders(),
       body:JSON.stringify({key:"airules", data:arList})});
     const d = await r.json();
-    if(d.ok) msg("AI审核规则已保存","ok"); else msg(d.error||"保存失败","err");
+    if(d.ok){ msg("AI审核规则已保存","ok"); stdEditUnlocked=false; renderAiRules(); return; }
+    else msg(d.error||"保存失败","err");
   }catch(e){ msg("网络错误","err"); }
   btn.disabled=false; btn.textContent="保存规则";
+}
+
+/* ================= 测算审核标准(calcstd) —— 来自公司《可研报告编制与审查指引》的测算部分逐条数字化，
+   与「AI可研审核规则」的区别：那边是给AI看的文本要点(自由文风)，这边是结构化的数值/公式标准，
+   checkType标注了这条能不能被硬规则程序化核对(exact/max/min/tier/formula)还是只能交给AI/人工参考(info)。
+   同一份数据在两处生效：①生成阶段(report.js的stdRetrieve)按小节匹配注入写作提示；
+   ②核查阶段(review.js的runAudit)对能程序化核对的条目做真实数值比对，其余连同AI深度审核一起走文本提示。
+   保留id/paramKey/tiers等结构化字段是为了将来硬规则检查能精确取用，编辑表单里未展示的字段保存时原样透传，不会丢。 ================= */
+const CS_CHECK_TYPES = [
+  {v:"exact", label:"精确匹配(exact)"}, {v:"max", label:"不超过(max)"}, {v:"min", label:"不低于(min)"},
+  {v:"tier", label:"分档(tier，按项目属性选档)"}, {v:"formula", label:"公式核对(formula)"}, {v:"info", label:"仅供参考(info，非硬规则)"},
+];
+function csCategoryOrder(){
+  const seen = []; csList.forEach(e=>{ if(!seen.includes(e.category)) seen.push(e.category||"未分类"); }); return seen;
+}
+function csRowHtml(e,i,locked){
+  const ro = locked? " readonly" : "", dis = locked? " disabled" : "";
+  const typeOpts = CS_CHECK_TYPES.map(t=>'<option value="'+t.v+'"'+(e.checkType===t.v?" selected":"")+'>'+t.label+'</option>').join("");
+  return '<div class="cs-row" style="border:1px solid var(--line); background:'+(locked?"#FAFAFA":"#fff")+'; padding:10px 12px; margin-top:8px;" data-csi="'+i+'">'
+    +'<div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">'
+    +'<input class="cs-category" placeholder="分类(如：出租假设-运营成本)" value="'+esc(e.category||"")+'" style="width:190px;"'+ro+'>'
+    +'<input class="cs-item" placeholder="标准项名称(如：管理费用)" value="'+esc(e.item||"")+'" style="width:170px;"'+ro+'>'
+    +'<select class="cs-checktype" style="width:190px;"'+dis+'>'+typeOpts+'</select>'
+    +'<input class="cs-calctype" placeholder="适用测算类型(rent,gaibao,sale,all)" value="'+esc(e.calcType||"all")+'" style="width:170px;"'+ro+'>'
+    +'<input class="cs-value" placeholder="阈值/取值(可留空)" value="'+esc(e.value==null?"":String(e.value))+'" style="width:150px;"'+ro+'>'
+    + (locked? "" : '<button class="btn sm red" data-csdel="'+i+'" style="margin-left:auto;">删除</button>')+'</div>'
+    +'<textarea class="cs-standard" placeholder="标准原文（尽量保留指引原表述，供AI审核与生成引用）…" style="margin-top:8px; min-height:52px;"'+ro+'>'+esc(e.standard||"")+'</textarea>'
+    +'<textarea class="cs-note" placeholder="备注（如：与现有引擎口径的对照、未覆盖字段说明）…" style="margin-top:6px; min-height:34px;"'+ro+'>'+esc(e.note||"")+'</textarea>'
+    +'</div>';
+}
+function renderCalcStd(){
+  const box = document.getElementById("editBox");
+  const locked = !stdEditUnlocked;
+  const cats = csCategoryOrder();
+  const body = cats.length
+    ? cats.map(cat=>{
+        const idxs = csList.map((e,i)=>({e,i})).filter(x=>(x.e.category||"未分类")===cat);
+        return '<details open style="margin-top:12px;"><summary style="cursor:pointer; font-size:13.5px; font-weight:600; padding:6px 0; border-bottom:1px dashed var(--line);">'
+          +esc(cat)+'　<span style="font-weight:400; color:var(--soft); font-size:12px;">('+idxs.length+'条)</span></summary>'
+          +'<div>'+idxs.map(x=>csRowHtml(x.e,x.i,locked)).join("")+'</div></details>';
+      }).join("")
+    : '<div class="empty">还没有测算审核标准，点下面"+ 添加标准"开始录入，或联系管理员导入公司编制审查指引。</div>';
+  box.innerHTML = '<h1 style="font-size:18px;">AI审核规则、逻辑</h1>'
+    + arSubnavHtml()
+    +'<h2 style="font-size:15px; margin-top:16px;">测算审核标准</h2>'
+    +'<div class="sub">来自公司《可研报告编制与审查指引》测算部分的结构化标准，逐条落库、持续可维护。<b>checkType=exact/max/min</b>的条目"运行审核检查"时会拿真实测算结果做硬性数值核对；<b>tier/formula</b>需结合项目属性判断，"AI深度审核"会参考；<b>info</b>仅作为AI审核与生成时的提示，不做硬性判定。生成报告涉及数字的小节，也会按同样的标准引导撰写——生成和核查用的是同一份标准，不是两套口径。</div>'
+    +'<div style="margin-top:10px;"><span class="add-link" id="exportCsWord">📄 导出Word（含未保存的编辑）</span></div>'
+    + (locked? lockBannerHtml("增/删/改标准前需先解锁。") : "")
+    +'<div id="csBody">'+body+'</div>'
+    + (locked? "" :
+      '<span class="add-link" id="addCs" style="margin-left:0; margin-top:12px; display:inline-block;">+ 添加标准</span>'
+      +'<div class="bar" style="margin-top:18px;"><button class="btn" id="saveCs">保存标准</button>'
+      +'<button class="btn ghost" id="lockCsBtn">🔒 重新锁定</button></div>')
+    +'<div class="bar" style="margin-top:'+(locked?'12px':'8px')+';"><button class="btn ghost" id="csBack">返回列表</button></div>';
+  document.getElementById("arTabRules").onclick = ()=>{ readCsForm(); arTab="rules"; renderAiRulesTab(); };
+  document.getElementById("arTabLogic").onclick = ()=>{ readCsForm(); arTab="logic"; renderAiRulesTab(); };
+  document.getElementById("arTabSensitivity").onclick = ()=>{ readCsForm(); arTab="sensitivity"; renderAiRulesTab(); };
+  document.getElementById("arTabStd").onclick = ()=>{ arTab="std"; renderAiRulesTab(); };
+  document.getElementById("csBack").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
+  document.getElementById("exportCsWord").onclick = ()=>{ readCsForm(); exportCalcStdWord(csList); };
+  if(locked){
+    document.getElementById("unlockStdBtn").onclick = ()=>unlockStdEdit(renderCalcStd);
+  }else{
+    document.getElementById("addCs").onclick = ()=>{ readCsForm(); csList.push({category:"", item:"", standard:"", checkType:"info", calcType:"all"}); renderCalcStd(); };
+    document.getElementById("saveCs").onclick = saveCalcStd;
+    document.getElementById("lockCsBtn").onclick = ()=>{ readCsForm(); stdEditUnlocked=false; renderCalcStd(); };
+    document.querySelectorAll("[data-csdel]").forEach(b=>b.onclick=()=>{
+      if(!confirm("确定删除这条测算审核标准？删除后需点「保存标准」才会真正生效。")) return;
+      readCsForm(); csList.splice(+b.dataset.csdel,1); renderCalcStd();
+    });
+  }
+}
+function readCsForm(){
+  const rows = [...document.querySelectorAll(".cs-row")];
+  csList = rows.map(row=>{
+    const i = +row.dataset.csi;
+    const orig = csList[i] || {};   // 保留未在表单里展示的字段(id/paramKey/tiers等)，不因编辑其他字段而丢失
+    const category = row.querySelector(".cs-category").value.trim();
+    const item = row.querySelector(".cs-item").value.trim();
+    const standard = row.querySelector(".cs-standard").value.trim();
+    const checkType = row.querySelector(".cs-checktype").value;
+    const calcType = row.querySelector(".cs-calctype").value.trim() || "all";
+    const rawValue = row.querySelector(".cs-value").value.trim();
+    const note = row.querySelector(".cs-note").value.trim();
+    const value = rawValue==="" ? undefined : (isNaN(Number(rawValue)) ? rawValue : Number(rawValue));
+    return Object.assign({}, orig, {category, item, standard, checkType, calcType, value, note});
+  }).filter(e=>e.category || e.item || e.standard);
+}
+async function saveCalcStd(){
+  readCsForm();
+  const btn = document.getElementById("saveCs");
+  btn.disabled=true; btn.textContent="保存中…";
+  try{
+    const r = await fetch("/api/calcconfig",{method:"POST",headers:authHeaders(),
+      body:JSON.stringify({key:"calcstd", data:csList})});
+    const d = await r.json();
+    if(d.ok){ msg("测算审核标准已保存","ok"); stdEditUnlocked=false; renderCalcStd(); return; }
+    else msg(d.error||"保存失败","err");
+  }catch(e){ msg("网络错误","err"); }
+  btn.disabled=false; btn.textContent="保存标准";
 }
 
 /* ================= 测算参数管理 ================= */
@@ -1253,9 +1720,44 @@ const PARAM_DEFS = {
     ["incomeTax","所得税率",0.25],["lossCarry","亏损弥补年限(年)",5],
     ["stampSaleRate","销售印花税率",0],
   ]},
+  invest: {label:"投资估算（出租类·doc 1-18号单方造价系数）", params:[
+    ["aboveIncreaseRate","1.2 地面核增面积系数",0.07],["landTaxRate","5.2 土地税费率",0.0305],
+    ["surveyPerSqm","6.1.1 工程勘察 元/㎡",25],["pileTestRate","6.1.2 桩基质量检测(×建安工程费)",0.01],["thirdPartyPerSqm","6.1.3 第三方监测 元/㎡",25],
+    ["designPerSqm","6.2.1 工程设计费 元/㎡",95],["designReviewPerSqm","6.2.2 施工图审查费 元/㎡",5],
+    ["tempWaterPerSqm","6.3.1 临时用水工程 元/㎡",5],["tempPowerPerSqm","6.3.2 临时用电工程 元/㎡",10],
+    ["pipeRelocPerSqm","6.3.3 管线迁改 元/㎡",30],["gradingPerSqm","6.3.4 场地平整 元/㎡",5],
+    ["curbCutPricePerUnit","6.3.5 路口开设费 万元/个",50],
+    ["fencePerSqm","6.4.1 临时围挡 万元/㎡",0.15],["occupyPerSqm","6.4.3 临时场地占用 万元/㎡",0.02],
+    ["soilConservCoeff","6.5.3 水土保持服务费系数",0.6],["trafficAssessCoeff","6.5.4 交通影响评估费系数",1.15],
+    ["pitEarthFactor1","7.1.2 基坑土方石工程系数1",0.9],["pitEarthFactor2","7.1.2 基坑土方石工程系数2",13.5],["pitEarthFactor3","7.1.2 基坑土方石工程系数3",160],
+    ["pitSupportPerSqm","7.1.3 基坑支护 元/㎡",300],["pilePerSqm","7.1.4 桩基 元/㎡",300],
+    ["basementPerSqm","7.1.5 地下室建筑工程 元/㎡",2950],
+    ["commBuildPerSqm","7.2.1 商业建筑 元/㎡",3500],["resiBuildPerSqm","7.2.2 住宅建筑 元/㎡",2750],
+    ["increasePerSqm","7.2.3 地上核增 元/㎡",2400],["supportBuildPerSqm","7.2.4 公共配套 元/㎡",2750],
+    ["greenBuildPerSqm","7.2.5/7.5.3 绿色建筑 元/㎡",55],
+    ["waterPerSqm","7.3.1 给排水 元/㎡",150],["elecPerSqm","7.3.2 电气 元/㎡",300],["smartPerSqm","7.3.3 智能化 元/㎡",100],
+    ["firePerSqm","7.3.4 消防 元/㎡",140],["gasPerSqm","7.3.5 燃气 元/㎡",40],["elevatorPerSqm","7.3.6 电梯 元/㎡",110],
+    ["hvacPerSqm","7.3.7 通风空调 元/㎡",37],["lightingPerSqm","7.3.8 泛光照明 元/㎡",37],["seismicPerSqm","7.3.9 抗震支架 元/㎡",20],
+    ["chargerPerUnit","7.3.10 充电桩 元/个",2500],
+    ["interiorDecoPerSqm","7.4.1 室内装修 元/㎡",900],["publicAreaDecoRatio","7.4.2 公区装修面积占比",0.25],["publicAreaDecoPerSqm","7.4.2 公区装修 元/㎡",1800],
+    ["kindergartenDecoPerSqm","7.4.3 幼儿园装修 元/㎡",1800],["propertyRoomDecoPerSqm","7.4.3 物业用房装修 元/㎡",900],["otherSupportDecoPerSqm","7.4.4 其他公配装修 元/㎡",700],
+    ["outdoorPipePerSqm","7.5.1 室外管网 元/㎡",200],["landscapeCoeff","7.5.2 园林景观面积系数",1.2],["landscapePerSqm","7.5.2 园林景观 元/㎡",600],
+    ["floorHeightPerSqm","7.6.1 层高调整 元/㎡",45],["acPlatformPerSqm","7.6.2 增加空调机平台 元/㎡",80],
+    ["soundproofWindowPerSqm","7.6.3 隔声对门窗 元/㎡",300],["soundproofFloorPerSqm","7.6.4 隔声对地面隔音 元/㎡",10],["railingPerSqm","7.6.5 临空栏杆高度调整 元/㎡",65],
+    ["constructMgmtPerSqm","8.1 建设管理费 元/㎡",165],["supervisionPerSqm","8.2 工程监理费 元/㎡",62],
+    ["biddingAgentPerSqm","8.3.1 招标代理费 元/㎡",6],["biddingServicePerSqm","8.3.2 招标服务费 元/㎡",9],
+    ["costConsultBasePerSqm","8.4.1 造价咨询基本收费 元/㎡",25],["onSitePerYear","8.4.2 驻场服务费 万元/年",20.4],["costConsultReviewPerSqm","8.4.3 复审咨询费 元/㎡",5],
+    ["engInsuranceRate","8.5 工程保险费率(×建安工程费)",0.001],["propMaintFundRate","8.6.1 物业维修基金率(×建安工程费)",0.02],
+    ["propPrepPerSqm","8.6.2 物业前置费 元/㎡",3.5],["propStartupPerSqm","8.6.3 物业开办费 元/㎡",4],
+    ["siteCheckPerSqm","8.6.4 现场查验服务费 元/㎡",1.5],["cleaningPerSqm","8.6.5 开荒保洁费 元/㎡",10],
+    ["generalContractMgmtPerSqm","8.7 总承包管理费 元/㎡",30],["areaMeasurePerSqm","8.8 建面测量查仗费 元/㎡",4],["showAreaRenovPerSqm","8.9 样板展示环境改造费 元/㎡",300],
+    ["contingencyRate","9 不可遇见费率",0.05],
+    ["scheduleQ1","15 土地成本→前期工程 季度数",2],["scheduleQ2","16 地下建筑部分 季度数",6],
+    ["scheduleQ3","17 地上建筑→安装→精装修 季度数",6],["scheduleQ4","18 室外工程→竣工验收 季度数",2],
+  ]},
 };
 const METRIC_VARS = "totalIncome(总收入) totalCost(总成本) totalTax(税金) totalNetProfit(净利润) totalNpv(净现值) irr(IRR) icr(利息保障倍数) totalSaleIncome(销售收入合计) rentalPvTotal(出租净收益现值) totalInterest(利息合计)";
-let calcCfg = {gaibao:{}, rent:{}, sale:{}, metrics:[], score:[]};
+let calcCfg = {gaibao:{}, rent:{}, sale:{}, invest:{}, metrics:[], score:[], sensitivity:{}};
 
 async function openCalcCfg(){
   document.getElementById("listBox").style.display="none";
@@ -1265,7 +1767,7 @@ async function openCalcCfg(){
   try{
     const r = await fetch("/api/calcconfig",{headers:authHeaders()});
     const d = await r.json();
-    if(d.ok) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},metrics:[],score:[]}, d.config);
+    if(d.ok) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},invest:{},metrics:[],score:[],sensitivity:{}}, d.config);
   }catch(e){}
   renderCalcCfg();
 }
@@ -1361,7 +1863,7 @@ async function saveCalcCfg(){
   const btn = document.getElementById("saveCalcCfg");
   btn.disabled=true; btn.textContent="保存中…";
   try{
-    for(const key of ["gaibao","rent","sale","metrics","score"]){
+    for(const key of ["gaibao","rent","sale","invest","metrics","score"]){
       const r = await fetch("/api/calcconfig",{method:"POST",headers:authHeaders(),
         body:JSON.stringify({key, data:calcCfg[key]})});
       const d = await r.json();

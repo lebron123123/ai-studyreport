@@ -105,12 +105,43 @@ function aiRulesFor(chName, secTitle){
   const q = String(chName||"")+String(secTitle||"");
   return rules.filter(r=> r.match==="*" || String(r.match||"").split(/[,，、\s]+/).filter(Boolean).some(k=>q.includes(k)));
 }
+// calcstd(测算审核标准)按大类关键词粗匹配到章节标题——和 report.js 的 stdCalcRetrieve 逻辑一致但独立维护
+// （report.js/review.js 都用<script>标签直接注入、共享同一个全局作用域，不是各自的模块作用域，
+// 所以这里必须换个变量名，不能和 report.js 里同名的 CS_CATEGORY_KEYWORDS 撞——撞了会在浏览器里报
+// "Identifier已声明"的SyntaxError，直接让report.js之后加载的review.js整个脚本执行中断）
+const RV_CS_CATEGORY_KEYWORDS = {
+  "通用假设":"测算假设,折现率,贷款利率,财务评价,融资",
+  "出租假设-运营成本":"运营成本,运营费用,经营成本,费用假设,测算假设",
+  "收入假设-销售":"收入假设,销售价格,去化,售价",
+  "收入假设-出租(住宅)":"收入假设,租金,出租率,住宅",
+  "收入假设-出租(商业)":"收入假设,租金,出租率,商业",
+  "收入假设-车位":"收入假设,车位,停车",
+  "总控计划":"工期,进度计划,总控",
+  "成本假设-建安费":"投资估算,建安,成本假设",
+  "成本假设-期间费":"投资估算,期间费,成本假设",
+  "规划指标核对":"投资估算,规划指标",
+  "资金筹措核对":"资金筹措,融资方案",
+  "地价核对":"投资估算,土地成本,地价",
+  "财务结果核对":"财务评价,财务指标,财务测算结果",
+  "敏感性分析/附表":"敏感性分析,附表",
+};
+function calcStdFor(chName, secTitle){
+  const items = CALC_CFG.calcstd||[];
+  if(!items.length) return [];
+  const q = String(chName||"")+String(secTitle||"");
+  return items.filter(e=>{
+    const kw = RV_CS_CATEGORY_KEYWORDS[e.category||""] || "";
+    return kw.split(",").some(k=>k && q.includes(k));
+  }).slice(0,8);
+}
 async function aiAuditOne(c, s){
   const rules = aiRulesFor(c.name, s.t);
+  const calcStds = s.numeric ? calcStdFor(c.name, s.t) : [];
   const src = s.editedHtml? blocksToSource(s.editedHtml) : (s.content||"");
-  const sys = '你是政府投资项目可研报告评审专家。请依据【审核要点】评审给定小节，只输出一个JSON对象（不要markdown代码块、不要任何其他文字），格式：{"score":0到100整数,"issues":[{"point":"问题(15字内)","suggestion":"具体修改建议(40字内)"}]}。达标项不要列入issues；最多列3条最重要的问题；写得好就给高分、issues可为空数组。';
+  const sys = '你是政府投资项目可研报告评审专家。请依据【审核要点】'+(calcStds.length?'与【测算取值标准】':'')+'评审给定小节，只输出一个JSON对象（不要markdown代码块、不要任何其他文字），格式：{"score":0到100整数,"issues":[{"point":"问题(15字内)","suggestion":"具体修改建议(40字内)"}]}。测算取值标准里带"分档"性质的条目，若小节内容未写清楚适用哪一档或未说明依据，应视为问题；达标项不要列入issues；最多列3条最重要的问题；写得好就给高分、issues可为空数组。';
   const user = '【小节】第'+c.cn+'章 '+c.name+' — '+s.t
     +'\n【审核要点】\n'+rules.map((r,i)=>(i+1)+'. '+r.rule).join('\n')
+    +(calcStds.length? '\n【测算取值标准】\n'+calcStds.map((e,i)=>(i+1)+'. '+(e.item?e.item+'：':'')+(e.standard||'')).join('\n') : '')
     +'\n【小节内容】\n'+src.slice(0,3000);
   const text = await callGen(sys, user);
   const clean = text.replace(/```json|```/g,"").trim();
@@ -180,6 +211,46 @@ function locateSection(key){
   return el;
 }
 
+/* 编制标准核查的判断逻辑：只做口径确定的检查——折现率/IRR达标要求这类依赖"项目性质
+   (政府指令类/政府组织配租/社会主体/市场化)"分类的条目，系统目前不采集该字段，无法自动判档，
+   留给"AI深度审核"结合上下文判断(见 calcStdFor 注入的【测算取值标准】)，不在这里冒充硬规则判定，
+   避免把猜的档位当成确定结论误报给用户。写成不读任何全局变量的纯函数，便于在Node里单独写单元测试，
+   不用整个review.js(依赖document/window等浏览器环境)才能测。 */
+function calcStdHardChecks(calcParams, investCfg){
+  const out = [];
+  if(!calcParams) return out;
+  const addStd = (sev,msg)=>out.push({sev,msg});
+  if(typeof calcParams.loanRate==="number" && Math.abs(calcParams.loanRate-3)>0.3){
+    addStd("warn","银行贷款利率填的是"+calcParams.loanRate+"%，公司标准是按现阶段贷款利率3%测算，如非最新利率变化请核实");
+  }
+  if(typeof calcParams.buildYears==="number" && calcParams.buildYears>4){
+    addStd("warn","建设期填的是"+calcParams.buildYears+"年，超过公司标准「新建住宅项目4年内竣工」的要求");
+  }
+  if(typeof calcParams.rampOcc==="number" && calcParams.rampOcc>0.75+0.001){
+    addStd("warn","首年出租率填的是"+(calcParams.rampOcc*100).toFixed(1)+"%，超过公司标准首年不超过75%的上限");
+  }
+  if(typeof calcParams.stableOcc==="number" && calcParams.stableOcc>0.95+0.001){
+    addStd("warn","稳定期出租率填的是"+(calcParams.stableOcc*100).toFixed(1)+"%，超过公司标准第三年及以后不超过95%的上限");
+  }
+  if(typeof calcParams.manageCoeff==="number"){
+    const validTiers = [1.0,0.95,0.9,0.85,0.8,0.75,0.5];
+    if(!validTiers.some(v=>Math.abs(v-calcParams.manageCoeff)<0.01)){
+      addStd("warn","管理费区域系数填的是"+calcParams.manageCoeff+"，公司标准的7档区域系数为{1.0,0.95,0.9,0.85,0.8,0.75,0.5}(南山福田→深汕由高到低)，当前取值不在标准档位内，请核实项目所在区域");
+    }
+  }
+  const contingencyRate = (investCfg && typeof investCfg.contingencyRate==="number")? investCfg.contingencyRate : 0.05;
+  if(contingencyRate>0.08+0.001){
+    addStd("warn","不可预见费率当前配置为"+(contingencyRate*100).toFixed(1)+"%，超过公司标准上限8%（前期费用+建安费用+开发间接费之和）");
+  }
+  if(typeof calcParams.loanAmount==="number" && typeof calcParams.totalInvestment==="number" && calcParams.totalInvestment>0){
+    const equityRatio = 1 - calcParams.loanAmount/calcParams.totalInvestment;
+    if(equityRatio>0.30+0.005){
+      addStd("info","按当前贷款额倒算，自有资金比例约"+(equityRatio*100).toFixed(1)+"%，超过公司标准「原则上不超过30%」，如有特殊情况请说明依据");
+    }
+  }
+  return out;
+}
+
 /* ================= 可研审核 · 硬规则检查（零AI成本，确定性） ================= */
 function runAudit(){
   const issues = [];  // {sev:"err"|"warn"|"info", cn, si, secTitle, msg}
@@ -235,6 +306,15 @@ function runAudit(){
       }
     });
   }
+
+  // 编制标准核查：拿真实测算参数比对公司《可研报告编制与审查指引》里能确认字段口径、可编程核对的条目。
+  // 核心判断逻辑抽成了纯函数 calcStdHardChecks()（不读任何全局变量，方便脱离浏览器环境单独写单元测试），
+  // 这里只负责把结果套上 review.js 自己的 issue 格式。
+  if(appMode!=="review" && calcParams){
+    calcStdHardChecks(calcParams, CALC_CFG.invest).forEach(({sev,msg})=>{
+      issues.push({sev, cn:"—", si:null, secTitle:"", chName:"测算参数核查(编制标准)", msg});
+    });
+  }
   return issues;
 }
 function auditPanelHtml(issues){
@@ -281,3 +361,8 @@ function findChapterSection(cn, si){
   return {chapter:c, section:c.sections[si]};
 }
 function findSection(cn, si){ const r = findChapterSection(cn, si); return r? r.section : null; }
+
+// 浏览器里这个文件是普通<script>（非CommonJS），顶层函数声明本来就会挂到window上，不需要这段；
+// 只有在Node测试环境里require()本文件时（被CommonJS包一层函数作用域）才需要显式导出，
+// 否则calcStdHardChecks这类纯函数在测试文件里require()不到。不影响浏览器端任何行为。
+if(typeof module==="object" && module.exports){ module.exports = { calcStdHardChecks }; }

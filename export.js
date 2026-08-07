@@ -265,6 +265,103 @@ async function exportWord(){
    只出全周期合计，不逐年铺开——逐年数据看Excel即可，此处重在讲清算法。
 */
 const CALC_FORMULA_TEXT = {
+  gaibao: {
+    i_rent : "住宅租金收入 = 收楼后按当年出租率对外出租取得的月租金收入之和",
+    i_rat  : "租金收入（不含税）= 住宅租金收入 ÷ (1+销项税率)",
+    c_col  : "收楼成本 = 收楼单价 × 面积 × 出租率 × 计租月数 ÷ 10000",
+    c_eng  : "工程费用（装修摊销）= 首次装修与历次重装造价之和，按运营期总月数摊销到当年",
+    c_op   : "运营费用 = 单套月运营成本 × 总套数 × 计租月数 ÷ 10000（首年另加开办费）",
+    c_fin  : "财务费用 = 还本付息表当年本期利息",
+    c_shr  : "合作分成支出 = 住宅租金收入 × 业主分成比例（仅「减租金合作分成」模式适用，整租模式为0）",
+    c_tot  : "总成本费用 = 收楼成本 + 工程费用 + 运营费用 + 财务费用 + 合作分成支出",
+    c_totAT: "总成本费用（不含税）= (收楼成本+工程费用)÷(1+销项税率) + 运营费用÷(1+运营税率) + 财务费用÷(1+运营税率，financeCost>0时)",
+    l_beg  : "期初借款余额 = 上年期末借款余额",
+    l_bor  : "本期借款 = 用户设定的当年借款投放额（默认全额计入建设期首年）",
+    l_int  : "本期利息 = MAX((期初借款+本期借款÷2)×年利率÷100×利率折扣×计息本金÷总借款,0)〔计息本金/总借款用于按比例缩放实际计息基数〕",
+    l_rep  : "本期还本 = 年均还款额（运营第2年起，用户设定的固定还款计划）",
+    l_pay  : "还本付息合计 = 本期还本 + 本期利息",
+    l_end  : "期末借款余额 = MAX(期初借款+本期借款−本期还本,0)",
+    t_out  : "销项税额 = 住宅租金收入÷(1+销项税率)×销项税率",
+    t_in   : "进项税额 = 工程费用×销项税率÷(1+销项税率) + (运营费用+财务费用)×运营税率÷(1+运营税率)",
+    t_vat  : "增值税 = MAX(销项税额−进项税额,0)",
+    t_sur  : "增值税附加 = 增值税 × 附加税率",
+    t_stp  : "印花税",
+    t_tot  : "税金及附加总和 = 增值税 + 增值税附加 + 印花税",
+    p_iat  : "营业收入（不含税）= 租金收入（不含税）",
+    p_cat  : "营业成本（不含税）= 总成本费用（不含税）",
+    p_tot  : "利润总额 = 营业收入（不含税）− 营业成本（不含税）− 税金及附加",
+    p_mk   : "弥补亏损：首次盈利年弥补此前5年亏损，其后按剩余亏损顺延，最长5年",
+    p_tx   : "应纳税所得额 = 利润总额 + 弥补亏损",
+    p_it   : "所得税 = 应纳税所得额 × 25%（应纳税所得额为负则取0）",
+    p_net  : "净利润 = 利润总额 − 所得税",
+    f_in   : "现金流入 = 住宅租金收入",
+    f_out  : "现金流出 = 总成本费用 + 税金及附加 + 所得税",
+    f_net  : "净现金流量 = 现金流入 − 现金流出",
+    f_cum  : "累计净现金流量（由负转正之年即为静态投资回收期）",
+    f_npv  : "净现值 = Σ 净现金流量 ÷ (1+折现率)^(n+0.5)",
+    f_cnpv : "累计净现值",
+  },
+  sale: {
+    i_sale : "配保房销售收入 = Σ 配保房销售面积 × 平均售价 × 当年销售率 ÷ 10000",
+    i_pv   : "出租净收益现值（计入运营首年）= 全周期商业出租净收入逐年折现后的合计",
+    i_oth  : "其他收入",
+    i_tot  : "总收入 = 配保房销售收入 + 出租净收益现值 + 其他收入",
+    i_comm : "商业出租收入（参考口径，不计入总收入，已体现在出租净收益现值中）",
+    l_beg  : "期初借款余额 = 上年期末借款余额",
+    l_bor  : "本期借款 = 用户设定的当年借款投放额",
+    l_int  : "本期利息 = (期初借款+本期借款÷2) × 年利率 ÷ 100",
+    l_rep  : "本期还本 = 用户设定的还款计划（还款开始年起，逐年固定还款额）",
+    l_pay  : "还本付息合计 = 本期还本 + 本期利息",
+    l_end  : "期末借款余额 = 期初借款 + 本期借款 − 本期还本",
+    r_inc  : "商业出租收入 = Σ 商业面积 × 出租率 × 租金单价 × 12 ÷ 10000 + 车位个数×月租金×12÷10000",
+    r_t1   : "房产税（从租）= 商业出租收入 × 从租税率 ÷ (1+销售增值税率)",
+    r_t2   : "房产税（从价·空置）= (土地成本+建安工程费+基础设施费+工程建设其他费用+建安工程费×2%×商业占比)×70%×1.2%×(1-出租率)",
+    r_mgC  : "管理费用（商业）= 商业出租收入 × 运营管理费率",
+    r_mgP  : "管理费用（停车）= 车位个数 × 80 × 12 ÷ 10000",
+    r_fund : "维修金 = 商业面积 × 出租率 × 租赁月数 × 0.25 ÷ 10000",
+    r_rep  : "维修费 = 商业出租收入 × 维修费率",
+    r_vac  : "空置服务费 = 出租面积 × (1−出租率) × 8% × 12 × 0.88 ÷ 10000",
+    r_ins  : "保险费 = 出租面积 × 1.86 ÷ 10000",
+    r_lnd  : "土地使用税 = 项目用地面积 × 商业出租面积占比 × 3 ÷ 10000",
+    r_ct   : "出租营运成本合计 = 上列各项之和",
+    r_out  : "销项税额 = 商业出租收入 × 9% ÷ (1+9%)",
+    r_vat  : "增值税（一般计税）= 销项税额−进项税额>0 时取差额，否则为0",
+    r_sur  : "增值税附加 = 增值税 × 附加税率",
+    r_stp  : "印花税 = 商业出租收入 × 0.05%",
+    r_tt   : "出租经营税金合计 = 增值税 + 增值税附加 + 印花税",
+    r_net  : "出租净收入 = 商业出租收入 − 出租营运成本合计 − 出租经营税金合计",
+    r_pv   : "出租净收益现值 = 各年出租净收入按折现规则折现后汇总",
+    s_ds   : "累计开发成本（销售部分）= 总投资 − 建设期财务费用×配保房销售面积占比 − 配保房销售收入×1.5%，按销售率分摊",
+    s_dd   : "累计开发成本（折旧摊销部分）= [非配售开发成本(含地价) − 建设期财务费用×商业占比] × 80%",
+    s_dd2  : "折旧摊销 = 累计开发成本（折旧摊销部分）÷ 折旧年限（默认50年，用于现金流口径）",
+    s_fee  : "销售费用 = 当年配保房销售收入 × 1.5%",
+    s_ov   : "销项税额 = (当期销售款−地价抵减款×销售率) × 9% ÷ (1+9%)",
+    s_iv   : "进项税额 = (工程建设其他费用+销售费用)×销售率×6%÷(1+6%) + (建安工程费+基础设施费)×销售率×9%÷(1+9%)",
+    s_vat  : "增值税 = MAX(累计销项税额−累计进项税额,0)",
+    s_sur  : "增值税附加 = 增值税 × 附加税率",
+    s_tax  : "销售税金合计 = 增值税 + 增值税附加 + 印花税（印花税=当期销售款×税率÷(1+9%)）",
+    s_fb   : "财务费用（建设期）= 建设期各年还本付息表本期利息，计入总投资口径",
+    s_fo   : "财务费用（运营期）= 运营期各年还本付息表本期利息",
+    s_tot  : "总成本费用 = 累计开发成本（销售部分）+ 累计开发成本（折旧摊销部分）+ 销售费用 + 销售税金合计 + 财务费用（建设期+运营期）",
+    p_tot  : "利润总额 = 总收入 − 总成本费用（出售类不再单独扣税金及附加，已含在总成本费用内）",
+    p_mk   : "弥补亏损：与出租类同规则，首次盈利年弥补此前5年亏损，最长顺延5年",
+    p_tx   : "应纳税所得额 = 利润总额 + 弥补亏损",
+    p_it   : "所得税 = 应纳税所得额 × 25%（应纳税所得额为负则取0）",
+    p_net  : "净利润 = 利润总额 − 所得税",
+    f_in   : "现金流入 = 配保房销售收入 + 其他收入 + 商业出租收入（参考） + 回收固定资产余值",
+    f_rec  : "其中：回收固定资产余值 = [土地成本+开发成本−建设期财务费用×商业占比] × 20%，计入运营首年",
+    f_inv  : "开发成本投资 = 总投资×配保房面积占比 − 建设期财务费用 − 销售费用",
+    f_fee  : "销售费用（同出售成本表）",
+    f_stx  : "销售税金（同出售成本表）",
+    f_rtx  : "出租经营税金（同商业出租表）",
+    f_rct  : "出租营运成本（同商业出租表）",
+    f_adj  : "调整所得税 = MAX[(现金流入−回收固定资产余值−(累计开发成本销售部分+折旧摊销+销售费用+销售税金+出租营运成本+出租经营税金))×25%,0]",
+    f_out  : "现金流出合计 = 开发成本投资 + 销售费用 + 销售税金 + 出租经营税金 + 出租营运成本 + 调整所得税",
+    f_net  : "净现金流量 = 现金流入 − 现金流出合计",
+    f_cum  : "累计净现金流量",
+    f_npv  : "净现值 = 从首个非零现金流年起，按折现率逐年折现（该年记为第0期）",
+    f_cnpv : "累计净现值（由负转正之年即为静态投资回收期）",
+  },
   rent: {
     i_resi : "Σ各年（租赁面积 × 租金单价 × 出租率 × 计租月数 ÷ 10000）",
     i_resi1: "住宅租金收入 = 面积 × 单价 × 出租率 × 计租月数 ÷ 10000",
@@ -277,7 +374,7 @@ const CALC_FORMULA_TEXT = {
     c_ins  : "保险费 = 总建筑面积 × 单位保险费 ÷ 10000（每年一致，不随租赁月数变动）",
     c_rep  : "维修费用 = 住宅租金收入 × 维修费率",
     c_fund : "日常物业维修基金 = Σ(各档面积×该档出租率) × 计租月数 × 单位标准 ÷ 10000",
-    c_vac  : "空置期物业管理费 = Σ(各档面积×该档空置率) × 计租月数 × 单位标准 ÷ 10000",
+    c_vac  : "空置期物业管理费 = Σ(各档面积×该档空置率) × 计租月数 × 单位标准 ÷ 10000 × 分档折扣（当年出租率≤50%打88折，50%~85%打98折，≥85%不打折）",
     c_rst  : "装修重置费 = 住宅装修造价 × 重置比率；公租房每20年、保租房每10年重置一次，按分摊年数摊入",
     c_dep  : "折旧摊销 = 总投资 ×(1 − 残值率) ÷ 折旧年限",
     c_op   : "经营成本合计 = 上列各项之和",
@@ -286,21 +383,50 @@ const CALC_FORMULA_TEXT = {
     l_rep  : "本期还本 = 总借款 × 首次还本比例，其后逐年按(1+递增率)^n 递增；最后一年还清余额",
     l_end  : "期末借款余额 = 期初 + 本期借款 + 本期计息 − 本期还本 − 本期付息",
     t_vat  : "增值税 = 住宅租金 × 1.5%÷(1+5%) + 车位租金 × 9%÷(1+9%)〔住宅按简易计税〕",
-    t_stamp: "印花税 = 总收入 × 0.05% ÷ (1+9%)",
-    t_city : "城镇维护建设税 = 增值税 × 7%",
+    t_stp  : "印花税 = 总收入 × 0.05% ÷ (1+9%)",
+    t_cty  : "城镇维护建设税 = 增值税 × 7%",
     t_edu  : "教育附加及地方教育附加 = 增值税 × 5%",
-    t_prop : "房产税 = 从租〔Σ(各档租金×该档出租率)×4%÷(1+5%) + 车位×12%÷(1+9%)〕+ 从价〔建安费×70%×1.2%÷(1+9%)×空置率×月数÷12〕；前3年免征",
-    t_land : "城镇土地使用税 = 用地面积 × 单位税额 ÷ 10000",
+    t_prp  : "房产税 = 从租〔Σ(各档租金×该档出租率)×4%÷(1+5%) + 车位×12%÷(1+9%)〕+ 从价〔建安费×70%×1.2%÷(1+9%)×空置率×月数÷12〕；前3年免征",
+    t_lnd  : "城镇土地使用税 = 用地面积 × 单位税额 ÷ 10000",
     t_tot  : "税金及附加合计 = 上列各项之和",
+    l_bor  : "本期借款 = 当年借款投放额（按借款分年计划取值，未分年则全额计入建设期首年）",
+    l_pin  : "本期付息 = 本期计息（利息当期全额偿还，不滚入本金）",
+    l_pay  : "还本付息合计 = 本期还本 + 本期付息",
+    tc_op  : "经营成本 = 经营成本合计（不含折旧摊销以外的财务费用）",
+    tc_fb  : "财务费用（建设期）= 建设期各年本期付息，计入总投资、不计入总成本费用",
+    tc_fo  : "财务费用（运营期）= 运营期各年本期付息，计入总成本费用",
+    tc_tot : "总成本费用（不含建设期财务费用、不含税金）= 经营成本 + 财务费用（运营期）",
     p_tot  : "利润总额 = 总收入 − 总成本费用 − 税金及附加",
     p_mk   : "弥补亏损：首次盈利年弥补此前5年亏损，其后按剩余亏损顺延，最长5年",
-    p_tax  : "所得税 = 应纳税所得额 × 25%（应纳税所得额 = 利润总额 + 弥补亏损，为负则取0）",
+    p_tx   : "应纳税所得额 = 利润总额 + 弥补亏损",
+    p_it   : "所得税 = 应纳税所得额 × 25%（应纳税所得额 = 利润总额 + 弥补亏损，为负则取0）",
     p_net  : "净利润 = 利润总额 − 所得税",
     f_in   : "现金流入 = 总收入",
+    f_inv  : "其中：建设投资，按投资年度计划分年计入（未分年则全额计入建设期首年）",
     f_out  : "现金流出 = 建设投资 + 税金及附加 + 各项现金经营成本 + 所得税〔不含折旧与财务费用〕",
     f_net  : "净现金流量 = 现金流入 − 现金流出",
     f_npv  : "净现值 = Σ 净现金流量 ÷ (1+折现率)^(n+0.5)",
     f_cum  : "累计净现金流量（由负转正之年即为静态投资回收期）",
+    f_cnpv : "累计净现值（由负转正之年即为动态投资回收期）",
+    fu_op  : "经营活动现金来源 = 总收入",
+    fu_fin : "筹资活动现金来源 = 银行借款（本期借款）",
+    fu_rec : "余值回收：出租类项目长期持有运营，不设定期末资产处置，固定为0",
+    fu_src : "资金来源合计 = 经营活动现金来源 + 筹资活动现金来源 + 余值回收",
+    fu_inv : "其中：建设投资，与现金流量表口径一致",
+    fu_use : "资金运用合计 = 建设投资 + 税金及附加 + 各项现金经营成本 + 所得税 + 借款本金偿还 + 借款利息支付",
+    fu_sur : "盈余资金 = 资金来源合计 − 资金运用合计",
+    pa_tot : "利润总额（调整）= 总收入 − 经营成本合计（全投资口径，不含任何财务费用）− 税金及附加",
+    pa_mk  : "弥补亏损（调整）：与损益表同规则，但基于调整口径利润总额单独滚算，不与损益表共用状态",
+    pa_tx  : "应纳税所得额（调整）= 利润总额（调整）+ 弥补亏损（调整）",
+    pa_it  : "所得税（调整）= 应纳税所得额（调整）× 25%",
+    pa_net : "净利润（调整）= 利润总额（调整）− 所得税（调整）",
+    cc_in  : "现金流入 = 总收入（同全投资现金流量表）",
+    cc_inv : "其中：总投资，按投资年度计划分年计入",
+    cc_out : "现金流出（资本金）= 总投资 + 本期还款 + 本期付息 + 税金及附加 + 各项现金经营成本 + 所得税〔比全投资口径多算本期还本付息〕",
+    cc_net : "净现金流量 = 现金流入 − 现金流出（资本金）",
+    cc_npv : "净现值 = Σ 净现金流量 ÷ (1+折现率)^(n+0.5)〔同全投资口径的年中折现〕",
+    cc_cum : "累计净现金流量（由负转正之年即为资本金静态投资回收期）",
+    cc_cnpv: "累计净现值（由负转正之年即为资本金动态投资回收期）",
   },
 };
 
@@ -311,7 +437,8 @@ async function exportCalcWord(){
   await ensureDocxLib();
   const D = window.docx, R = scResult, P = scParams||{}, type = calcType;
   const specs = calcSpecs(type, R);
-  const FT = CALC_FORMULA_TEXT[type] || {};
+  // 管理员在后台「AI审核规则、逻辑 → 可研测算逻辑」编辑过的说明文字优先生效，未编辑的科目退回代码内置默认文案
+  const FT = Object.assign({}, CALC_FORMULA_TEXT[type]||{}, (CALC_CFG&&CALC_CFG.calclogic&&CALC_CFG.calclogic[type])||{});
   const TYPE_CN = {rent:"出租类", gaibao:"非居改保", sale:"出售类"}[type] || type;
 
   const run=(t,o)=>new D.TextRun(Object.assign({text:String(t), font:"仿宋_GB2312", size:22}, o||{}));
@@ -408,5 +535,67 @@ async function exportCalcWord(){
   const url=URL.createObjectURL(blob);
   const a=document.createElement("a"); a.href=url;
   a.download=TYPE_CN+"测算说明书-"+Date.now()+".docx"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ---- 导出「AI审核规则、逻辑」两份标准的Word版，供不打开网页也能看/存档 ----
+   刻意从传入的当前内存态列表(可能含未保存的编辑)实时生成，不是转换某份静态原始文件的快照——
+   这样每次下载都和后台当前实际生效的规则一致，改了不保存也能预览效果，保存后下载自然跟着更新。
+   两个导出函数结构高度相似，没有抽公共函数是因为字段结构不同(match/rule vs category/item/standard/...)，
+   硬抽反而让每个函数都要塞一堆条件分支，不如各自保持直白。 */
+async function exportAiRulesWord(list){
+  if(!list || !list.length){ alert("当前没有可导出的规则"); return; }
+  await ensureDocxLib();
+  const D = window.docx;
+  const run=(t,o)=>new D.TextRun(Object.assign({text:String(t), font:"仿宋_GB2312", size:22}, o||{}));
+  const para=(t,o,po)=>new D.Paragraph(Object.assign({children:[run(t,o)], spacing:{line:340,lineRule:"exact"}}, po||{}));
+  const kids=[];
+  kids.push(new D.Paragraph({children:[run("AI可研审核规则与业务逻辑",{font:"方正小标宋简体", size:36})],
+    alignment:D.AlignmentType.CENTER, spacing:{line:520,lineRule:"exact", after:120}}));
+  kids.push(new D.Paragraph({children:[run("导出时间："+new Date().toLocaleString("zh-CN")+"　｜　共"+list.length+"条　｜　与后台「AI审核规则、逻辑」页面当前状态一致（含未保存的编辑）",
+    {font:"楷体_GB2312", size:19, color:"808080"})], alignment:D.AlignmentType.CENTER, spacing:{line:340,lineRule:"exact", after:240}}));
+  list.forEach((e,i)=>{
+    kids.push(new D.Paragraph({children:[run((i+1)+". 匹配关键词："+(e.match||"*"),{bold:true})],
+      spacing:{line:340,lineRule:"exact", before:180}}));
+    kids.push(para("　　"+(e.rule||""), null, {spacing:{line:320,lineRule:"exact"}}));
+  });
+  const doc=new D.Document({sections:[{properties:{page:{size:{width:11906,height:16838},
+    margin:{top:1500,right:1400,bottom:1500,left:1400}}}, children:kids}]});
+  const blob=await D.Packer.toBlob(doc);
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url;
+  a.download="AI可研审核规则与业务逻辑-"+Date.now()+".docx"; a.click();
+  URL.revokeObjectURL(url);
+}
+const CS_CHECK_TYPE_LABELS = {exact:"精确匹配", max:"不超过", min:"不低于", tier:"分档(按项目属性选档)", formula:"公式核对", info:"仅供参考(非硬规则)"};
+async function exportCalcStdWord(list){
+  if(!list || !list.length){ alert("当前没有可导出的标准"); return; }
+  await ensureDocxLib();
+  const D = window.docx;
+  const run=(t,o)=>new D.TextRun(Object.assign({text:String(t), font:"仿宋_GB2312", size:22}, o||{}));
+  const para=(t,o,po)=>new D.Paragraph(Object.assign({children:[run(t,o)], spacing:{line:340,lineRule:"exact"}}, po||{}));
+  const kids=[];
+  kids.push(new D.Paragraph({children:[run("测算审核标准",{font:"方正小标宋简体", size:36})],
+    alignment:D.AlignmentType.CENTER, spacing:{line:520,lineRule:"exact", after:120}}));
+  kids.push(new D.Paragraph({children:[run("导出时间："+new Date().toLocaleString("zh-CN")+"　｜　共"+list.length+"条　｜　与后台「测算审核标准」页面当前状态一致（含未保存的编辑）",
+    {font:"楷体_GB2312", size:19, color:"808080"})], alignment:D.AlignmentType.CENTER, spacing:{line:340,lineRule:"exact", after:240}}));
+  const cats = []; list.forEach(e=>{ const c=e.category||"未分类"; if(!cats.includes(c)) cats.push(c); });
+  cats.forEach(cat=>{
+    kids.push(para(cat, {font:"黑体",size:24}, {spacing:{line:380,lineRule:"exact", before:200, after:60}}));
+    list.filter(e=>(e.category||"未分类")===cat).forEach(e=>{
+      kids.push(new D.Paragraph({children:[
+        run("● "+(e.item||"（未命名）"), {bold:true}),
+        run("　["+(CS_CHECK_TYPE_LABELS[e.checkType]||e.checkType||"info")+"　适用："+(e.calcType||"all")+(e.value!=null&&e.value!==""?"　参考值："+e.value:"")+"]", {bold:true, color:"1F4E79", size:19}),
+      ], spacing:{line:340,lineRule:"exact", before:80}}));
+      if(e.standard) kids.push(para("　　"+e.standard, {font:"楷体_GB2312", size:21, color:"262626"}, {spacing:{line:320,lineRule:"exact"}}));
+      if(e.note) kids.push(para("　　备注："+e.note, {font:"楷体_GB2312", size:19, color:"808080"}, {spacing:{line:300,lineRule:"exact"}}));
+    });
+  });
+  const doc=new D.Document({sections:[{properties:{page:{size:{width:11906,height:16838},
+    margin:{top:1500,right:1400,bottom:1500,left:1400}}}, children:kids}]});
+  const blob=await D.Packer.toBlob(doc);
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url;
+  a.download="测算审核标准-"+Date.now()+".docx"; a.click();
   URL.revokeObjectURL(url);
 }

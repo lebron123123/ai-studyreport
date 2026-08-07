@@ -536,6 +536,59 @@ function exampleRetrieve(chapterName, secTitle){
   return out;
 }
 
+// 编制审查标准：生成阶段就按签发前"AI深度审核"用的同一份标准写，而不是等审核环节才发现不达标。
+// 文本部分复用 CALC_CFG.airules（和 review.js 的 aiRulesFor 完全同一套匹配逻辑，两处代码分别维护是因为
+// report.js/review.js 是各自独立注入 <script> 的模块，没有共享的工具文件，保持逻辑一致比硬合并两个文件更重要）。
+function stdTextRetrieve(chapterName, secTitle){
+  const rules = CALC_CFG.airules||[];
+  if(!rules.length) return [];
+  const q = String(chapterName||"") + String(secTitle||"");
+  return rules.filter(r=> r.match==="*" || String(r.match||"").split(/[,，、\s]+/).filter(Boolean).some(k=>q.includes(k)));
+}
+// 测算部分（calcstd）按大类关键词映射到章节标题做粗匹配——calcstd条目本身没有存match字段，
+// 因为它是结构化标准（供硬规则核对用），匹配关键词维护在代码里，后台改标准内容不用连带改匹配规则。
+const CS_CATEGORY_KEYWORDS = {
+  "通用假设":"测算假设,折现率,贷款利率,财务评价,融资",
+  "出租假设-运营成本":"运营成本,运营费用,经营成本,费用假设,测算假设",
+  "收入假设-销售":"收入假设,销售价格,去化,售价",
+  "收入假设-出租(住宅)":"收入假设,租金,出租率,住宅",
+  "收入假设-出租(商业)":"收入假设,租金,出租率,商业",
+  "收入假设-车位":"收入假设,车位,停车",
+  "总控计划":"工期,进度计划,总控",
+  "成本假设-建安费":"投资估算,建安,成本假设",
+  "成本假设-期间费":"投资估算,期间费,成本假设",
+  "规划指标核对":"投资估算,规划指标",
+  "资金筹措核对":"资金筹措,融资方案",
+  "地价核对":"投资估算,土地成本,地价",
+  "财务结果核对":"财务评价,财务指标,财务测算结果",
+  "敏感性分析/附表":"敏感性分析,附表",
+};
+function stdCalcRetrieve(chapterName, secTitle){
+  const items = CALC_CFG.calcstd||[];
+  if(!items.length) return [];
+  const q = String(chapterName||"") + String(secTitle||"");
+  return items.filter(e=>{
+    const kw = CS_CATEGORY_KEYWORDS[e.category||""] || "";
+    return kw.split(",").some(k=>k && q.includes(k));
+  }).slice(0,8);   // 数字类小节prompt本来就大，标准最多取8条，太多会挤占测算结果本身的篇幅
+}
+function stdRetrieve(chapterName, secTitle, numeric){
+  const textHits = stdTextRetrieve(chapterName, secTitle);
+  let out = "";
+  if(textHits.length){
+    out += '\n\n【审查标准】（签发前"AI深度审核"会按同一份公司编制审查标准逐条复核本节，请撰写时直接满足，不要等审核环节再补）\n'
+      + textHits.map((r,i)=>(i+1)+". "+r.rule).join("\n");
+  }
+  if(numeric){
+    const calcHits = stdCalcRetrieve(chapterName, secTitle);
+    if(calcHits.length){
+      out += '\n\n【测算取值标准】（以下为公司《可研报告编制与审查指引》里本节涉及的取值标准，须优先遵循；缺项目属性信息（如项目性质分类/所在区域）无法判断具体应适用哪一档时，须在正文标注"以下按XX档估算，具体以主管部门/相关部门意见为准"，不得凭空选一个档次冒充确定结论）\n'
+        + calcHits.map((e,i)=>(i+1)+". "+(e.item?e.item+"：":"")+(e.standard||"")).join("\n");
+    }
+  }
+  return out;
+}
+
 // 按章节标题匹配最相关的参考资料（关键词2元组打分，无需向量库）
 function kbRetrieve(chapterName, secTitle){
   if(!kbEntries.length) return "";
@@ -618,7 +671,7 @@ async function generateSection(c, s, onChunk){
    ["投资规模",project.scale],["项目概况",project.desc]].forEach(([k,v])=>{
     if(v && String(v).trim() && provCollector) provCollector.projectFields.push(k);
   });
-  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + exampleRetrieve(c.name, s.t) + kbRetrieve(c.name, s.t) + await ragRetrieve(c.name, s.t);
+  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t) + kbRetrieve(c.name, s.t) + await ragRetrieve(c.name, s.t);
 
   const text = await callGen(sys, user, onChunk);
   // 生成完成：把溯源档案挂到该小节上（含模型与时间，即L3模型溯源）
