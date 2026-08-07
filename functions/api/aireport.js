@@ -84,6 +84,29 @@ function median(nums){
   const mid = Math.floor(arr.length/2);
   return arr.length%2 ? arr[mid] : (arr[mid-1]+arr[mid])/2;
 }
+/* KEY_FIELDS 是手工挑的短名单，早于敏感性分析(sensitivity-core.js的Sobol/Spearman/SRC排序)存在，
+   两者可能对不上（比如rentRate/rentDiscount/rentSpan/buildYears排名很靠前但不在手工名单里）。
+   这里优先用管理员在后台「敏感性分析」页跑过、同步到configs表(calc_sensitivity)的真实排序结果替换掉
+   手工名单——只挑排名靠前、且这套AI推荐参数的数据模型(DEFAULTS[calcType]的字段)里真的有的那些键
+   （敏感性分析里一些ie_前缀的投资估算细项，AI推荐这条链路目前并不单独采集，排进来也匹配不到案例数据，
+   直接过滤掉，不然会挑出一个案例库永远填不上的"关键参数"）。没有可用的敏感性结果，或匹配数不足3个时，
+   回退到原来手工维护的短名单，行为不变。 */
+function resolveKeyFields(calcType, sensAll){
+  const fallback = KEY_FIELDS[calcType];
+  const sens = sensAll && sensAll[calcType];
+  if(!sens || !Array.isArray(sens.table) || !sens.table.length) return fallback;
+  const eligibleKeys = new Set(Object.keys(DEFAULTS[calcType]));
+  const rankOf = (row) => {
+    if(row.combinedRank!=null) return row.combinedRank;
+    if(row.STi!=null) return -row.STi;
+    if(row.spearmanRho!=null) return -Math.abs(row.spearmanRho);
+    if(row.src!=null) return -Math.abs(row.src);
+    return Infinity;
+  };
+  const ranked = sens.table.filter(row=>eligibleKeys.has(row.key)).sort((a,b)=>rankOf(a)-rankOf(b));
+  if(ranked.length < 3) return fallback;
+  return ranked.slice(0, fallback.length).map(row=>({ key: row.key, label: row.label||row.key }));
+}
 // 粗略的"同区域"判断：字符串互相包含即可（如"深圳市坪山区龙田街道"包含"坪山区龙田街道"）
 function sameRegion(a, b){
   a = String(a||"").trim(); b = String(b||"").trim();
@@ -230,7 +253,16 @@ async function doSuggest(context, body){
   const calcType = String(body.calcType||"");
   if(!DEFAULTS[calcType]) return json({ok:false, error:"测算类型不合法"}, 400);
   const location = String(body.location||"").trim();
-  const keyFields = KEY_FIELDS[calcType];
+
+  let sensAll = null;
+  try{
+    const sensRow = await env.DB.prepare("SELECT data FROM configs WHERE key=?").bind("calc_sensitivity").first();
+    if(sensRow) sensAll = JSON.parse(sensRow.data||"null");
+  }catch(e){
+    // 敏感性结果读取失败(没同步过/表还没建/JSON坏了)不阻断——退化为原来手工维护的关键参数短名单
+    sensAll = null;
+  }
+  const keyFields = resolveKeyFields(calcType, sensAll);
 
   let cases = [];
   try{
@@ -269,5 +301,6 @@ async function doSuggest(context, body){
     sources[f.key] = src;
   });
 
-  return json({ok:true, params, sources, keyFields, caseCount:cases.length, regionCaseCount:regionCases.length});
+  return json({ok:true, params, sources, keyFields, caseCount:cases.length, regionCaseCount:regionCases.length,
+    keyFieldsSource: keyFields===KEY_FIELDS[calcType] ? "manual" : "sensitivity"});
 }
