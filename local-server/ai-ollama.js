@@ -21,8 +21,16 @@ export function createAIAdapter(opts = {}) {
   const base = (opts.ollamaUrl || "http://127.0.0.1:11434").replace(/\/+$/, "");
   const embedModel = opts.embedModel || "bge-m3";
 
-  async function embed(texts) {
-    const list = Array.isArray(texts) ? texts : [texts];
+  /* 向量缓存：同一段文字用同一个模型算出来的向量是确定性的、不会变，所以按"文本原文"缓存不存在过期问题，
+     只需要控制内存上限。加这个是因为多用户并发生成报告时，report.js 的 ragRetrieve() 每写一个小节都会
+     查询一次 /api/rag，查询文本＝"领域名+章节名+小节标题"——这几项都来自固定大纲模板，
+     不同用户同时生成同一领域的报告，查询文本经常逐字相同，本来要重复打给本地 Ollama 的向量化请求，
+     命中缓存后直接省掉。Ollama 默认并发数按内存自动选 1 或 4（见其官方 FAQ），本地部署给 50 人同时用时，
+     这一步不加缓存很容易在向量化这一环排队，且这个瓶颈和 Postgres/限流那两层都没关系，是本地推理算力的问题。 */
+  const embedCache = new Map();   // text -> vector；Map 保留插入顺序，用来做简单的"先进先出"淘汰
+  const EMBED_CACHE_MAX = 3000;
+
+  async function embedUncached(list) {
     const r = await fetch(base + "/api/embed", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -40,6 +48,25 @@ export function createAIAdapter(opts = {}) {
     const vecs = d.embeddings || (d.embedding ? [d.embedding] : []);
     if (!vecs.length) throw new Error("[本地向量化] Ollama 未返回向量，请检查模型名是否正确：" + embedModel);
     return vecs;
+  }
+
+  async function embed(texts) {
+    const list = Array.isArray(texts) ? texts : [texts];
+    // 先查缓存，剩下没命中的（去重后）打包成一次请求，比逐条单独请求更省往返次数
+    const missSet = new Set();
+    list.forEach((t) => { if (!embedCache.has(t)) missSet.add(t); });
+    if (missSet.size) {
+      const missList = [...missSet];
+      const vecs = await embedUncached(missList);
+      missList.forEach((t, i) => {
+        if (embedCache.size >= EMBED_CACHE_MAX) {
+          const oldest = embedCache.keys().next().value;
+          embedCache.delete(oldest);
+        }
+        embedCache.set(t, vecs[i]);
+      });
+    }
+    return list.map((t) => embedCache.get(t));
   }
 
   return {
