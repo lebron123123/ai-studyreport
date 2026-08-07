@@ -30,12 +30,20 @@ export function createAIAdapter(opts = {}) {
   const embedCache = new Map();   // text -> vector；Map 保留插入顺序，用来做简单的"先进先出"淘汰
   const EMBED_CACHE_MAX = 3000;
 
+  // 运维可观测性用的进程内计数器：只是"这个Node进程启动以来"的累计值，重启会清零——
+  // 这对"现在缓存有没有在起作用、Ollama响应快不快"这种当场排查已经够用，
+  // 真要看历史趋势得落库，那是更大的活，这里先给最低成本能用上的这一版。
+  const stats = { hits: 0, misses: 0, totalLatencyMs: 0, callCount: 0 };
+
   async function embedUncached(list) {
+    const t0 = Date.now();
     const r = await fetch(base + "/api/embed", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: embedModel, input: list }),
     });
+    stats.totalLatencyMs += (Date.now() - t0);
+    stats.callCount++;
     if (!r.ok) {
       const t = await r.text().catch(() => "");
       throw new Error(
@@ -54,7 +62,9 @@ export function createAIAdapter(opts = {}) {
     const list = Array.isArray(texts) ? texts : [texts];
     // 先查缓存，剩下没命中的（去重后）打包成一次请求，比逐条单独请求更省往返次数
     const missSet = new Set();
-    list.forEach((t) => { if (!embedCache.has(t)) missSet.add(t); });
+    list.forEach((t) => {
+      if (embedCache.has(t)) stats.hits++; else { stats.misses++; missSet.add(t); }
+    });
     if (missSet.size) {
       const missList = [...missSet];
       const vecs = await embedUncached(missList);
@@ -100,6 +110,17 @@ export function createAIAdapter(opts = {}) {
       const d = await r.json();
       const names = (d.models || []).map((m) => m.name);
       return { ok: true, models: names };
+    },
+    /** 供后台运维看板用：向量缓存命中率与Ollama真实调用的平均耗时（本进程启动以来累计） */
+    _cacheStats() {
+      const total = stats.hits + stats.misses;
+      return {
+        hits: stats.hits, misses: stats.misses,
+        hitRate: total ? Math.round(stats.hits / total * 1000) / 10 : null,   // 百分比，保留1位小数
+        cacheSize: embedCache.size, cacheMax: EMBED_CACHE_MAX,
+        avgLatencyMs: stats.callCount ? Math.round(stats.totalLatencyMs / stats.callCount) : null,
+        ollamaCallCount: stats.callCount,
+      };
     },
     _embedModel: embedModel,
   };

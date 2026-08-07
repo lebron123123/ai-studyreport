@@ -73,6 +73,7 @@
     <div class="nav-item" id="btnAgent"><span class="ic">🤖</span>Agent调用记录</div>
     <div class="nav-item" id="btnCases"><span class="ic">📁</span>历史项目案例库</div>
     <div class="nav-item" id="btnPopulation"><span class="ic">👥</span>人口参考表</div>
+    <div class="nav-item" id="btnStats"><span class="ic">📊</span>运维看板</div>
     <div class="side-foot" id="loginInfo"></div>
   </nav>
   <div class="main">
@@ -2036,7 +2037,64 @@ else{
   document.getElementById("btnAgent").onclick = ()=>{ setActiveNav("btnAgent"); openAgentTraces(); };
   document.getElementById("btnCases").onclick = ()=>{ setActiveNav("btnCases"); openCalcCases(); };
   document.getElementById("btnPopulation").onclick = ()=>{ setActiveNav("btnPopulation"); openPopulation(); };
+  document.getElementById("btnStats").onclick = ()=>{ setActiveNav("btnStats"); openStats(); };
   (async ()=>{ if(await adminGate()) loadList(); })();
+
+  /* ===== 运维看板：今日AI调用量占全站上限比例 + 本地部署向量化缓存命中率/Ollama耗时 =====
+     数据全部来自真实统计（usage_counters表原子计数、ai-ollama.js进程内累计），不是摆设面板；
+     向量化缓存那块只有本地部署才有意义，云端环境用的是Cloudflare Workers AI原生绑定，
+     没有_cacheStats()这个自定义方法，接口会如实返回null，这里显示"云端环境不适用"而不是报错。 */
+  window.openStats = async function(){
+    const box=document.getElementById("listBox");
+    document.getElementById("editBox").style.display="none";
+    box.style.display="block";
+    box.innerHTML='<div class="card"><b>运维看板</b><div class="hint">今日AI调用量、本地部署RAG向量化缓存命中率与Ollama响应耗时——排查"是不是快到额度上限了/缓存有没有在起作用/响应是不是变慢了"用。</div>'
+      +'<div id="statsBox" style="margin-top:12px;">加载中…</div>'
+      +'<div class="bar" style="margin-top:14px;"><button class="btn sm ghost" id="statsRefresh">↻ 刷新</button></div></div>';
+    document.getElementById("statsRefresh").onclick = refreshStats;
+    await refreshStats();
+  };
+  async function refreshStats(){
+    const el = document.getElementById("statsBox"); if(!el) return;
+    el.innerHTML = "加载中…";
+    try{
+      const r = await fetch("/api/stats", {headers: authHeaders()});
+      const d = await r.json();
+      if(!d.ok){ el.innerHTML = '<div class="hint" style="color:var(--red);">'+esc(d.error||"读取失败")+'</div>'; return; }
+      const pct = d.limits.global? Math.min(100, Math.round(d.globalToday/d.limits.global*1000)/10) : 0;
+      const barColor = pct>=90? "var(--red)" : pct>=70? "#C99A2E" : "var(--ok,#2E7D46)";
+      let h = '<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">';
+      h += '<div style="border:1px solid var(--line); padding:12px 14px;"><b style="font-size:13px;">今日AI调用量（'+esc(d.today)+'）</b>'
+        +'<div style="margin-top:8px; font-size:22px; font-weight:700;">'+d.globalToday+' <span style="font-size:13px; color:var(--soft); font-weight:400;">/ 全站上限 '+d.limits.global+'</span></div>'
+        +'<div style="margin-top:6px; height:8px; background:var(--line-soft); border-radius:4px; overflow:hidden;"><div style="width:'+pct+'%; height:100%; background:'+barColor+';"></div></div>'
+        +'<div style="margin-top:4px; font-size:12px; color:var(--soft);">'+pct+'%'+(pct>=90?"（接近上限，注意）":"")+'</div>'
+        +'<div style="margin-top:10px; font-size:12px; color:var(--soft);">单用户每日额度：日常问答'+d.limits.chat+'次　·　报告生成/批量评审'+d.limits.batch+'次</div>'
+        +'</div>';
+      const topList = (title,list)=> '<div style="margin-top:8px;"><b style="font-size:12px;">'+title+'</b>'
+        + (list&&list.length? list.map(u=>'<div style="font-size:12px; display:flex; justify-content:space-between; padding:2px 0;"><span>用户#'+esc(u.userId)+'</span><span>'+u.cnt+'次</span></div>').join("")
+          : '<div class="hint" style="font-size:12px;">（今日暂无）</div>')+'</div>';
+      h += '<div style="border:1px solid var(--line); padding:12px 14px;"><b style="font-size:13px;">今日调用量前十用户</b>'
+        + topList("日常问答", d.topChatUsers) + topList("报告生成/批量评审", d.topBatchUsers) + '</div>';
+      h += '</div>';
+      if(d.usageError) h += '<div class="hint" style="color:var(--red); margin-top:10px;">'+esc(d.usageError)+'</div>';
+      h += '<div style="margin-top:16px; border:1px solid var(--line); padding:12px 14px;"><b style="font-size:13px;">本地部署 · RAG向量化缓存与Ollama耗时</b>';
+      if(!d.vectorCache){
+        h += '<div class="hint" style="margin-top:6px;">云端环境不适用（Cloudflare Workers AI原生绑定没有这个统计）。</div>';
+      }else{
+        const vc = d.vectorCache;
+        h += '<div style="margin-top:8px; display:grid; grid-template-columns:repeat(4,1fr); gap:10px; font-size:12.5px;">'
+          +'<div><div style="color:var(--soft);">缓存命中率</div><div style="font-size:18px; font-weight:700;">'+(vc.hitRate!=null?vc.hitRate+"%":"—")+'</div></div>'
+          +'<div><div style="color:var(--soft);">命中/未命中</div><div style="font-size:18px; font-weight:700;">'+vc.hits+' / '+vc.misses+'</div></div>'
+          +'<div><div style="color:var(--soft);">缓存条目数</div><div style="font-size:18px; font-weight:700;">'+vc.cacheSize+' / '+vc.cacheMax+'</div></div>'
+          +'<div><div style="color:var(--soft);">Ollama平均耗时</div><div style="font-size:18px; font-weight:700;">'+(vc.avgLatencyMs!=null?vc.avgLatencyMs+"ms":"—")+'</div></div>'
+          +'</div><div class="hint" style="margin-top:8px; font-size:11.5px;">以上是本地服务器进程启动以来的累计值，重启后清零；不是持久化的历史趋势数据。</div>';
+      }
+      h += '</div>';
+      el.innerHTML = h;
+    }catch(e){
+      el.innerHTML = '<div class="hint" style="color:var(--red);">网络错误：'+esc(e.message)+'</div>';
+    }
+  }
 
   /* ===== 历史项目案例库：审核用户提交的测算案例 ===== */
   window.openCalcCases = async function(){
