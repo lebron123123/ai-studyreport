@@ -235,6 +235,7 @@
 
   /* ---- 交付卡按钮 / 子节重试按钮：统一尺寸，别在JS里逐个重复内联样式 ---- */
   .air-act-btn{ padding:7px 16px; font-size:12.5px; }
+  .air-deliver-card{padding:0;overflow:hidden}.air-deliver-guide{padding:18px 20px;background:linear-gradient(135deg,#F1F7FD,#F7FBF8);border-bottom:1px solid var(--line)}.air-deliver-title{font-size:17px;font-weight:700;color:var(--bp-navy);margin-bottom:7px}.air-deliver-copy{font-size:12.5px;line-height:1.8;color:var(--ink-soft);max-width:760px}.air-deliver-prompts{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.air-prompt{padding:7px 12px;border:1px solid #AFC7DD;border-radius:16px;background:#fff;color:var(--bp-navy);font-size:11.5px;cursor:pointer}.air-prompt:hover{background:#E8F2FB;border-color:var(--bp-navy)}.air-deliver-actions{display:flex;flex-wrap:wrap;gap:9px;padding:15px 20px 8px}.air-review-primary{background:var(--bp-navy);border-color:var(--bp-navy);font-weight:700}.air-deliver-tip{padding:2px 20px 15px;font-size:11.5px;color:var(--ink-faint,#8A97A8)}
   .air-retry-btn{
     padding:3px 12px; font-size:11px; margin-left:8px; border:1px solid var(--line);
     border-radius:5px; background:#fff; cursor:pointer; color:var(--ink);
@@ -265,6 +266,9 @@
     background:var(--paper,#F7FAFD); border-radius:6px; line-height:1.7;
   }
   .air-kf-src{ grid-column:1/2; font-size:11px; color:var(--ink-faint,#8A97A8); }
+  .air-bulk-confirm{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0 6px;padding:13px 14px;background:#FFF4D8;border:2px solid #D89A24;box-shadow:0 4px 12px rgba(170,112,12,.12)}
+  .air-bulk-confirm>div{display:flex;flex-direction:column;gap:2px;flex:1;min-width:230px}.air-bulk-confirm b{font-size:13px;color:#704600}.air-bulk-confirm span{font-size:11px;color:#8B6B31}.air-bulk-confirm .btn{background:#C77A08;border-color:#C77A08;font-weight:700;padding:9px 17px}.air-bulk-confirm .btn:hover{background:#A86100;border-color:#A86100}.air-bulk-confirm .btn.done{background:var(--ok-green);border-color:var(--ok-green)}#airConfirmAllState{width:100%;color:var(--ok-green);font-weight:600;text-align:right}
+  .air-step-done{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:11px 13px;background:#EDF8F2;border:1px solid #A9D9BF;color:#236443}.air-step-done b{font-size:13px}.air-step-done span{font-size:11.5px;color:#537262}.air-complete-pill{display:inline-flex;padding:6px 11px;background:#E7F5ED;color:#236443;border:1px solid #A9D9BF;font-size:11.5px;font-weight:700}
 
   /* ---- 输入区：多行、自适应高度 + 示例chip ---- */
   .air-composer{ display:flex; gap:8px; margin-top:14px; align-items:flex-end; }
@@ -670,6 +674,12 @@
   .revise-bar .rev-input{flex:1; font-size:12.5px; padding:7px 10px;}
   .rev-toggle{margin-left:6px;}
 
+  .wf-section-tools{display:flex;gap:7px;align-items:center;margin-top:7px}.wf-status{font:600 10px/1.4 var(--sans);padding:2px 7px;border-radius:10px;background:#E8F3EC;color:#2F7550}.wf-status.stale{background:#FFF1D8;color:#9A6412}.wf-status.locked-stale{background:#FCE8E6;color:#A33D37}
+  .wf-stale-note{font-size:11.5px;color:#9A6412;background:#FFF8E8;border-left:3px solid #D69B33;padding:7px 10px;margin-top:6px}.wf-sync-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#FFF8E8;border:1px solid #E8C77D;padding:12px 14px;margin:12px 0}.wf-sync-banner span{font-size:12px;color:var(--ink-soft);flex:1}
+  .wf-candidate{margin:10px 0;padding:12px;border:1px solid #AFC4D8;background:#F7FAFD}.wf-diff-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}.wf-diff-cols>div{min-width:0}.wf-diff-old,.wf-diff-new{white-space:pre-wrap;max-height:240px;overflow:auto;padding:9px;margin-top:5px;font-size:12px;line-height:1.65}.wf-diff-old{background:#FFF0EF;border-left:3px solid #C95B54}.wf-diff-new{background:#ECF7F0;border-left:3px solid #3A8A5B}.wf-candidate-actions{display:flex;gap:8px;margin-top:10px}@media(max-width:800px){.wf-diff-cols{grid-template-columns:1fr}}
+  .wf-preview-warn{color:#A33D37;background:#FCE8E6;padding:8px 10px;margin:8px 0;font-size:12px}.air-card td.pos{color:#2F7550}.air-card td.neg{color:#A33D37}
+  .wf-version-card{display:flex;justify-content:space-between;gap:15px;align-items:center;padding:11px 14px;margin:0 0 12px;background:#F5F7FA;border:1px solid var(--line);font-size:11.5px;color:var(--ink-soft)}.wf-version-card b{color:var(--ink);font-size:13px}.wf-version-restore{display:flex;gap:7px;align-items:center}.wf-version-restore select{max-width:340px;padding:6px 8px;font-size:11.5px}
+
 
   .ch-tools{display:flex; align-items:center; gap:10px; margin-top:16px; flex-wrap:wrap;
     padding:10px 12px; background:#F3F1E8; border:1px dashed var(--line-strong); border-radius:2px; font-size:12.5px;}
@@ -696,6 +706,9 @@
 <script src="investestimate.js"></script>
 <script src="salecalc.js"></script>
 <script src="agent-core.js"></script>
+<script src="project-workflow.js"></script>
+<script src="sensitivity-core.js"></script>
+<script src="paramgovernance.js"></script>
 <script src="calc.js"></script>
 <script src="report.js"></script>
 <script src="review.js"></script>

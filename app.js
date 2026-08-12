@@ -13,7 +13,8 @@ const SELF_CHECK_FUNCTIONS = [
   "readRentForm", "readSaleForm", "readCalcForm", "assembleCalcInput",
   "renderSheet", "renderTOC", "bindEvents", "bindCalcEvents",
   "exportWord", "exportCalcExcel", "exportCalcWord",
-  "renderAiReportModule", "bindAiReportEvents", "aiReportConfirmParams", "airRunSurvey",
+  "renderAiReportModule", "bindAiReportEvents", "aiReportConfirmParams", "airRunSurvey", "airSwitchProjectSession",
+  "updateStaleSections", "restoreReportVersion",
 ];
 const SELF_CHECK_ENGINES = { "window.NRCalc.calc":()=>window.NRCalc, "window.RentCalc.calc":()=>window.RentCalc, "window.SaleCalc.calc":()=>window.SaleCalc };
 function selfCheckCriticalFunctions(){
@@ -248,10 +249,14 @@ function bindEvents(){
   if(document.querySelector(".cnum")) animateCountUps();
   // 复核页：编辑实时写回数据层（修复"返回再进来编辑丢失"）
   document.querySelectorAll('#sheet .section-block[data-cn] .body[contenteditable]').forEach(el=>{
+    el.addEventListener("focus",()=>{ el.__wfBefore=el.innerHTML; });
     el.addEventListener("blur", ()=>{
       const blk = el.closest(".section-block");
       const sec = findSection(blk.dataset.cn, +blk.dataset.si);
-      if(sec){ sec.editedHtml = el.innerHTML; saveDraft(); }
+      if(sec){
+        if(el.__wfBefore!==undefined&&el.__wfBefore!==el.innerHTML){ sec.undoStack=Array.isArray(sec.undoStack)?sec.undoStack:[]; sec.undoStack.push({at:new Date().toISOString(),content:sec.content||"",editedHtml:el.__wfBefore}); }
+        sec.editedHtml=el.innerHTML;if(window.ProjectWorkflow){window.ProjectWorkflow.clearSectionStale(sec);window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"人工编辑章节"});}saveDraft();
+      }
     });
   });
   // 复核页：单节AI重写
@@ -278,12 +283,10 @@ function bindEvents(){
         const text = await reviseSection(info.chapter, info.section, instruction, (partial)=>{
           bodyEl.textContent = partial;
         });
-        info.section.content = text;
-        info.section.editedHtml = null;
-        bodyEl.innerHTML = renderContent(text);
+        window.ProjectWorkflow.setCandidate(info.section,text,instruction);
         inp.value = "";
         blk.querySelector(".revise-bar").style.display = "none";
-        saveDraft();
+        saveDraft(); renderSheet();
         try{ fetch("/api/revlog",{method:"POST", headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
           body:JSON.stringify({chapter:info.chapter.name, section:info.section.t, instruction})}); }catch(e){}
       }catch(e){
@@ -309,15 +312,19 @@ function bindEvents(){
       btn.disabled = true; btn.textContent = "重写中…"; blk.classList.add("gen");
       try{
         const text = await generateSection(info.chapter, info.section);
-        info.section.content = text;
-        info.section.editedHtml = null;
-        bodyEl.innerHTML = renderContent(text);
-        saveDraft();
+        window.ProjectWorkflow.setCandidate(info.section,text,"重写本节");
+        saveDraft(); renderSheet();
       }catch(err){ bodyEl.insertAdjacentHTML("afterbegin", '<p style="color:var(--seal-red);">重写失败：'+err.message+'</p>'); }
       blk.classList.remove("gen");
       btn.disabled = false; btn.textContent = "↻ 重写";
     };
   });
+  document.querySelectorAll(".wf-lock").forEach(btn=>{btn.onclick=()=>{const sec=findSection(btn.dataset.cn,+btn.dataset.si);if(!sec)return;sec.locked=!sec.locked;if(sec.syncStatus==="stale"&&sec.locked)sec.syncStatus="locked-stale";else if(sec.syncStatus==="locked-stale"&&!sec.locked)sec.syncStatus="stale";saveDraft();renderSheet();};});
+  document.querySelectorAll(".wf-accept").forEach(btn=>{btn.onclick=()=>{const sec=findSection(btn.dataset.cn,+btn.dataset.si);if(!sec)return;window.ProjectWorkflow.acceptCandidate(sec);window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"接受AI修改"});saveDraft();renderSheet();};});
+  document.querySelectorAll(".wf-reject").forEach(btn=>{btn.onclick=()=>{const sec=findSection(btn.dataset.cn,+btn.dataset.si);window.ProjectWorkflow.rejectCandidate(sec);saveDraft();renderSheet();};});
+  document.querySelectorAll(".wf-undo").forEach(btn=>{btn.onclick=()=>{const sec=findSection(btn.dataset.cn,+btn.dataset.si);if(window.ProjectWorkflow.undoSection(sec)){window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"撤销章节修改"});saveDraft();renderSheet();}};});
+  if(s("wfUpdateStale"))s("wfUpdateStale").onclick=updateStaleSections;
+  if(s("wfRestoreVersion"))s("wfRestoreVersion").onclick=()=>{const id=s("wfReportVersion").value;if(!confirm("恢复所选报告版本及其绑定的测算快照？当前内容会先自动保存为一个可恢复版本。"))return;ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"恢复前自动保存"});if(restoreReportVersion(id)){saveDraft();renderSheet();}};
   // 生成页：失败重试
   document.querySelectorAll(".retry-btn").forEach(btn=>{
     btn.onclick = async ()=>{

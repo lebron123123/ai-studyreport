@@ -62,6 +62,8 @@ function showLoginModal(msg){
 /* ================= 云端项目库 ================= */
 let currentProjectId = null;
 let cloudTimer = null;
+function rememberActiveProjectId(id){try{id?localStorage.setItem("fs_active_project_id",id):localStorage.removeItem("fs_active_project_id");}catch(e){}}
+function recalledActiveProjectId(){try{return localStorage.getItem("fs_active_project_id")||null;}catch(e){return null;}}
 function genProjectId(){
   try{ return crypto.randomUUID(); }catch(e){
     return "p-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10);
@@ -74,7 +76,7 @@ function scheduleCloudSave(){
 }
 async function cloudSaveNow(){
   if(!getToken()) return;
-  if(!currentProjectId) currentProjectId = genProjectId();
+  if(!currentProjectId){ currentProjectId = genProjectId(); rememberActiveProjectId(currentProjectId); }
   setSaveState("saving");
   try{
     const resp = await fetch("/api/projects", {method:"POST",
@@ -111,8 +113,11 @@ function mountUserBar(){
   document.getElementById("ubProjects").onclick = openProjectsPanel;
 }
 function newProject(){
+  if(typeof airSwitchProjectSession==="function")airSwitchProjectSession();
   currentProjectId = null; domainKey = null; chapters = []; signed = false;
+  rememberActiveProjectId(null);
   calcParams = null; calcResult = null; docNo = null;
+  projectWorkflow = window.ProjectWorkflow ? window.ProjectWorkflow.ensureState({}) : {calcSnapshots:[],reportVersions:[]};
   Object.keys(project).forEach(k=>project[k]="");
   kbEntries = [];
   currentStep = 0; clearDraft();
@@ -154,7 +159,9 @@ async function openProject(id){
     const resp = await fetch("/api/projects?id="+encodeURIComponent(id), {headers:authHeaders()});
     const d = await resp.json();
     if(!d.ok){ alert(d.error||"打开失败"); return; }
+    if(id!==currentProjectId&&typeof airSwitchProjectSession==="function")airSwitchProjectSession();
     currentProjectId = id;
+    rememberActiveProjectId(id);
     const panel = document.getElementById("projPanel"); if(panel) panel.remove();
     const bar = document.getElementById("draftBar"); if(bar) bar.remove();
     restoreDraft(d.project.data);
@@ -162,9 +169,17 @@ async function openProject(id){
 }
 
 async function startApp(){
+  if(!currentProjectId) currentProjectId=recalledActiveProjectId();
   mountUserBar();
   renderTOC(); renderSheet();
   await Promise.all([fetchOutlines(), fetchCalcConfig()]);
+  if(currentProjectId){
+    try{
+      const pr=await fetch("/api/projects?id="+encodeURIComponent(currentProjectId),{headers:authHeaders()});
+      const pd=await pr.json();if(pd.ok&&pd.project&&pd.project.data)restoreDraft(pd.project.data);
+      else{currentProjectId=null;rememberActiveProjectId(null);}
+    }catch(e){ /* 网络失败时仍保留本地草稿兜底，不主动遗忘项目 */ }
+  }
   renderTOC(); renderSheet();
   const d = loadDraft();
   if(d && d.ts && !currentProjectId && (d.project&&d.project.name || (d.chapters||[]).some(c=>c.sections.some(s=>s.content)))){

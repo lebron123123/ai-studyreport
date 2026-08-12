@@ -4,13 +4,15 @@ let calcType = null;         // 'gaibao' | 'rent' | 'sale'
 let scStep = 0;              // 测算模块步骤 0选类型 1参数 2结果
 let scResult = null;         // 测算结果
 let scParams = null;
+let pgSelectedKey = null;    // 白箱IRR滑块/单参数曲线当前参数
+let pgJointCache = null;
 let aiChat = [];             // AI问答历史 [{role, content}]
-let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, invest:{}, metrics:[], score:[], examples:[], airules:[], calclogic:{}};   // 后台测算参数配置
+let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, invest:{}, metrics:[], score:[], examples:[], airules:[], calclogic:{}, sensitivity:{}, paramrules:{}, paramdefaults:{}};   // 后台测算参数配置
 async function fetchCalcConfig(){
   try{
     const r = await fetch("/api/calcconfig", {headers:authHeaders()});
     const d = await r.json();
-    if(d.ok && d.config) CALC_CFG = Object.assign({gaibao:{},rent:{},sale:{},invest:{},metrics:[],score:[],examples:[],airules:[],calclogic:{}}, d.config);
+    if(d.ok && d.config) CALC_CFG = Object.assign({gaibao:{},rent:{},sale:{},invest:{},metrics:[],score:[],examples:[],airules:[],calclogic:{},sensitivity:{},paramrules:{},paramdefaults:{}}, d.config);
   }catch(e){}
 }
 let calcResult = null;   // 财务测算结果（null表示跳过测算，走"待填"模式）
@@ -48,7 +50,8 @@ function syncOperateYears(buildId, termId, opId){
   if(opEl) opEl.value = Math.max(0, t - b);
 }
 function saleFormHtml(){
-  const v = scParams||{}; const g=(k,d)=>v[k]!==undefined?v[k]:d;
+  const v = scParams||{}; const expert=(CALC_CFG.paramdefaults&&CALC_CFG.paramdefaults.sale)||{};
+  const g=(k,d)=>v[k]!==undefined?v[k]:(expert[k]!==undefined?expert[k]:d);
   const F=(label,id,val,step)=>'<div><label>'+label+'</label><input id="'+id+'" type="number" step="'+(step||"any")+'" value="'+val+'"></div>';
   const sBuildYears = g("buildYears",5), sLandTerm = g("landTerm",70);
   return '<div class="step-desc" style="margin-top:14px;"><b>期限与销售</b></div><div class="grid2">'
@@ -114,7 +117,8 @@ function readSaleForm(){
 }
 
 function rentFormHtml(){
-  const v = scParams||{}; const g=(k,d)=>v[k]!==undefined?v[k]:d;
+  const v = scParams||{}; const expert=(CALC_CFG.paramdefaults&&CALC_CFG.paramdefaults.rent)||{};
+  const g=(k,d)=>v[k]!==undefined?v[k]:(expert[k]!==undefined?expert[k]:d);
   const F=(label,id,val,step)=>'<div><label>'+label+'</label><input id="'+id+'" type="number" step="'+(step||"any")+'" value="'+val+'"></div>';
   const rBuildYears = g("buildYears",4), rLandTerm = g("landTerm",70);
   return '<div class="grid2">'
@@ -141,7 +145,7 @@ function rentFormHtml(){
     +F("幼儿园面积（㎡）","r_areaKindergarten",g("areaKindergarten",0))
     +F("物业服务用房面积（㎡，doc未拆分四项公配明细，暂计入本项以凑计容总建面38225）","r_areaPropertyRoom",g("areaPropertyRoom",3895))
     +F("社区警务室面积（㎡）","r_areaPoliceRoom",g("areaPoliceRoom",0))
-    +F("总建筑面积（㎡，勾选下方自动测算后将被覆盖）","r_totalBuildArea",g("totalBuildArea",61900.75))+F("管理系数","r_manageCoeff",g("manageCoeff",3))
+    +F("总建筑面积（㎡，勾选下方自动测算后将被覆盖）","r_totalBuildArea",g("totalBuildArea",61900.75))+F("管理系数","r_manageCoeff",g("manageCoeff",0.9))
     +F("住宅装修造价（万元）","r_decorationCost",g("decorationCost",800))
     +'<div><label>房源类型</label><select id="r_houseType"><option '+(g("houseType","公租房")==="公租房"?"selected":"")+'>公租房</option><option '+(g("houseType","公租房")==="保租房"?"selected":"")+'>保租房</option></select></div>'
     +F("总投资（万元，折旧基数，勾选下方自动测算后将被覆盖）","r_totalInvestment",g("totalInvestment",15000))+F("用地面积（㎡）","r_landArea",g("landArea",8495.2))
@@ -629,6 +633,7 @@ function scStepResult(){
     + extra
     +'</div>'
     + scoreCardHtml()
+    + parameterGovernanceHtml()
     + (calcType==="rent" && scParams && scParams.investEstimate ? investEstimateHtml(scParams.investEstimate, scParams.investSchedule) : "")
     + detailTablesHtml()
     + aiChatHtml()
@@ -796,6 +801,76 @@ function runCalcEngine(type, params){
   }
 }
 
+function pgParamDefs(type){
+  return (window.SensitivityCore&&SensitivityCore.REGISTRY&&SensitivityCore.REGISTRY[type]) ? SensitivityCore.REGISTRY[type].params : [];
+}
+function pgImpactRows(type){
+  if(!window.ParamGovernance) return [];
+  const sens=CALC_CFG.sensitivity&&CALC_CFG.sensitivity[type];
+  if(sens&&Array.isArray(sens.table)&&sens.table.length) return ParamGovernance.classifyParameters(sens.table);
+  const defs=pgParamDefs(type), rules=ParamGovernance.fallbackRuleTable(type,(CALC_CFG.paramrules&&CALC_CFG.paramrules[type])||[]);
+  const priority=new Map(rules.map((r,i)=>[r.key,i+1]));
+  return ParamGovernance.classifyParameters(defs.map((d,i)=>({key:d.k,label:d.label,group:d.group,combinedRank:priority.has(d.k)?priority.get(d.k):rules.length+i+1})));
+}
+function pgFmtNum(v,d){ return Number.isFinite(v)?Number(v).toLocaleString("zh-CN",{maximumFractionDigits:d==null?3:d}):"—"; }
+function pgCurveHtml(curve,def){
+  if(!curve.length) return '<div style="font-size:12px;color:var(--ink-soft);">当前参数无法生成曲线</div>';
+  const vals=curve.map(x=>x.irr).filter(Number.isFinite), min=vals.length?Math.min(...vals):0, max=vals.length?Math.max(...vals):1, span=max-min||1;
+  return '<div style="display:grid;grid-template-columns:repeat('+curve.length+',1fr);gap:5px;align-items:end;height:130px;margin-top:12px;">'
+    +curve.map(x=>{const h=Number.isFinite(x.irr)?18+82*(x.irr-min)/span:4;return '<div style="text-align:center;min-width:0;"><div style="font-size:10px;color:var(--ink-soft);">'+pgFmtNum(x.irr,2)+'%</div><div style="height:'+h+'px;background:var(--bp);border-radius:4px 4px 1px 1px;margin:3px auto;width:72%;opacity:.82;"></div><div style="font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="'+x.value+'">'+pgFmtNum(x.value,2)+'</div></div>';}).join("")
+    +'</div><div style="font-size:10.5px;color:var(--ink-soft);text-align:center;margin-top:5px;">横轴：'+escapeHtml((def&&def.label)||"")+'　纵轴：白箱引擎IRR（不是模型预测）</div>';
+}
+function parameterGovernanceHtml(){
+  if(!scParams||!scResult||!window.ParamGovernance) return "";
+  const defs=pgParamDefs(calcType), rows=pgImpactRows(calcType), defMap=Object.fromEntries(defs.map(d=>[d.k,d]));
+  const eligible=rows.filter(x=>["core","important"].includes(x.impactLevel)&&Number.isFinite(scParams[x.key])&&defMap[x.key]);
+  if(!pgSelectedKey||!eligible.some(x=>x.key===pgSelectedKey)) pgSelectedKey=(eligible[0]||{}).key||null;
+  const selected=rows.find(x=>x.key===pgSelectedKey), def=defMap[pgSelectedKey];
+  const overrides=(CALC_CFG.paramrules&&CALC_CFG.paramrules[calcType])||[];
+  const issues=ParamGovernance.explainAnomalyImpacts(scParams,ParamGovernance.anomalyChecks(calcType,scParams,defs,overrides),p=>runCalcEngine(calcType,p));
+  const issueHtml=issues.length?issues.map(x=>'<div style="padding:7px 9px;border-left:3px solid '+(x.severity==="error"?'var(--seal-red)':'#D99A24')+';background:'+(x.severity==="error"?'#FFF3F1':'#FFF8E8')+';margin-top:6px;font-size:12px;"><b>'+escapeHtml(x.label)+'：</b>'+escapeHtml(x.message)+(x.rule?'　<span style="color:var(--ink-soft);">依据：'+escapeHtml(x.rule)+'</span>':'')+(x.impactAvailable?'<div style="margin-top:4px;color:#38546B;">白箱影响说明：'+escapeHtml(x.explanation)+'</div>':'')+'</div>').join("")
+    :'<div style="font-size:12px;color:var(--ok-green);">✓ 未发现类型、范围、档位或参数关系硬异常</div>';
+  const layerRows=ParamGovernance.anomalyLayerStatus((CALC_CFG.caseCount&&CALC_CFG.caseCount[calcType])||0,false);
+  const layerHtml='<div style="display:grid;grid-template-columns:repeat(3,minmax(145px,1fr));gap:6px;margin:9px 0 12px;">'+layerRows.map(x=>'<div style="padding:7px 8px;border:1px solid var(--line);border-radius:5px;font-size:11px;background:'+(x.status==="active"||x.status==="ready"?'#F1F8F4':'#F7F7F7')+';"><b>'+x.level+'. '+escapeHtml(x.label)+'</b><div style="color:'+(x.status==="active"||x.status==="ready"?'var(--ok-green)':'var(--ink-soft)')+';margin-top:2px;">'+(x.status==="active"?'已启用':x.status==="ready"?'数据条件已满足':'等待真实案例')+(x.reason?'｜'+escapeHtml(x.reason):'')+'</div></div>').join('')+'</div>';
+  let slider="";
+  if(selected&&def){
+    const base=Number(scParams[selected.key]), step=Math.max((def.hi-def.lo)/100,0.0001);
+    const curve=ParamGovernance.singleParameterCurve(scParams,selected.key,def,p=>runCalcEngine(calcType,p),7);
+    slider='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;"><select id="pgParamSelect">'
+      +eligible.map(x=>'<option value="'+x.key+'" '+(x.key===selected.key?'selected':'')+'>'+escapeHtml(x.impactLabel+'｜'+x.label)+'</option>').join("")+'</select>'
+      +'<span style="font-size:11px;color:var(--ink-soft);">有效域 '+pgFmtNum(def.lo,3)+' ~ '+pgFmtNum(def.hi,3)+'</span></div>'
+      +'<div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;margin-top:10px;"><input id="pgIrrSlider" type="range" min="'+def.lo+'" max="'+def.hi+'" step="'+step+'" value="'+Math.min(def.hi,Math.max(def.lo,base))+'"><div style="min-width:180px;font-size:12px;"><b id="pgSliderValue">'+pgFmtNum(base,3)+'</b> → IRR <b id="pgSliderIrr">'+pgFmtNum(scResult.summary.irr,2)+'%</b>（Δ <span id="pgSliderDelta">0.00 pp</span>）</div></div>'
+      +'<button class="btn sm ghost" id="pgApplyScenario" style="margin-top:8px;">将滑块值应用为正式参数并重算</button>'
+      +'<div style="font-weight:700;font-size:12.5px;margin-top:16px;">单参数场景曲线</div>'+pgCurveHtml(curve,def);
+  }
+  const cacheKey=calcType+"|"+JSON.stringify(scParams)+"|"+rows.map(x=>x.key+":"+x.impactLevel).join(",");
+  if(!pgJointCache||pgJointCache.key!==cacheKey) pgJointCache={key:cacheKey,value:ParamGovernance.jointLowSensitivityValidation(scParams,rows,defs,p=>runCalcEngine(calcType,p),{samples:48,perturb:0.1,maxIrrDeltaPp:0.5})};
+  const j=pgJointCache.value;
+  const joint=j.available?'<div style="font-size:12px;line-height:1.8;"><b>'+(j.pass?'✓ 验证通过':'⚠ 验证未通过')+'</b>：'+j.parameterCount+'个低影响参数同时做±'+Math.round(j.perturb*100)+'%扰动，'+j.samples+'组白箱复算；IRR绝对变化 P50='+pgFmtNum(j.p50,3)+' pp，P95='+pgFmtNum(j.p95,3)+' pp，最大='+pgFmtNum(j.max,3)+' pp；验收线 P95≤'+j.threshold+' pp。<details><summary>查看参与参数</summary>'+escapeHtml(j.parameters.join('、'))+'</details></div>'
+    :'<div style="font-size:12px;color:var(--ink-soft);">'+escapeHtml(j.reason||"暂不可验证")+'</div>';
+  const count=l=>rows.filter(x=>x.impactLevel===l).length;
+  return '<div class="cf-chart" style="margin-top:16px;"><div class="cf-head"><span>白箱参数治理与IRR场景验证</span><span class="cf-legend">核心 '+count("core")+'｜重要 '+count("important")+'｜一般 '+count("general")+'｜低影响 '+count("low")+'</span></div>'
+    +'<div style="font-size:11.5px;color:var(--ink-soft);margin:8px 0 12px;">这里只改变输入后调用原测算公式重新计算；RF/统计模型不参与正式IRR。影响等级来自后台敏感性结果；尚未实测时按兜底规则优先级临时分级。</div>'
+    +'<details open><summary style="font-weight:700;cursor:pointer;">六层异常检测（当前发现 '+issues.length+' 项）</summary>'+layerHtml+issueHtml+'</details>'
+    +'<details open style="margin-top:14px;"><summary style="font-weight:700;cursor:pointer;">白箱IRR滑块与单参数曲线</summary>'+slider+'</details>'
+    +'<details open style="margin-top:14px;"><summary style="font-weight:700;cursor:pointer;">低敏感参数联合扰动验证</summary>'+joint+'</details></div>';
+}
+function bindParameterGovernanceEvents(){
+  const sel=document.getElementById("pgParamSelect"), slider=document.getElementById("pgIrrSlider"), apply=document.getElementById("pgApplyScenario");
+  if(sel) sel.onchange=()=>{ pgSelectedKey=sel.value; renderSheet(); };
+  if(slider) slider.oninput=()=>{
+    const v=Number(slider.value), p=Object.assign({},scParams,{[pgSelectedKey]:v}), r=runCalcEngine(calcType,p);
+    const irr=r&&r.summary?r.summary.irr:null, base=scResult.summary.irr, d=Number.isFinite(irr)&&Number.isFinite(base)?irr-base:null;
+    document.getElementById("pgSliderValue").textContent=pgFmtNum(v,3);
+    document.getElementById("pgSliderIrr").textContent=pgFmtNum(irr,2)+"%";
+    document.getElementById("pgSliderDelta").textContent=d==null?"—":(d>=0?"+":"")+d.toFixed(2)+" pp";
+  };
+  if(apply) apply.onclick=()=>{
+    scParams=Object.assign({},scParams,{[pgSelectedKey]:Number(document.getElementById("pgIrrSlider").value)});
+    scResult=runCalcEngine(calcType,scParams); pgJointCache=null; renderSheet();
+  };
+}
+
 function bindCalcEvents(){
   const s=id=>document.getElementById(id);
   document.querySelectorAll("[data-sct]").forEach(c=>{ c.onclick=()=>{ if(calcType!==c.dataset.sct){ scParams=null; scResult=null; aiChat=[]; } calcType=c.dataset.sct; renderSheet(); }; });
@@ -807,12 +882,14 @@ function bindCalcEvents(){
     else if(calcType==="sale") scParams = readSaleForm();
     else scParams = readRentForm();
     scResult = runCalcEngine(calcType, scParams);
+    pgSelectedKey=null; pgJointCache=null;
     aiChat = [];
     scStep=2; renderTOC(); renderSheet();
   };
   if(s("scExcel")) s("scExcel").onclick = exportCalcExcel;
   if(s("scWord")) s("scWord").onclick = exportCalcWord;
   if(s("aiAsk")) s("aiAsk").onclick = askAI;
+  bindParameterGovernanceEvents();
   if(s("aiQ")) s("aiQ").addEventListener("keydown", e=>{ if(e.key==="Enter") askAI(); });
   if(s("homeAiReport")) s("homeAiReport").onclick=()=>{ appMode="aireport"; renderTOC(); renderSheet(); };
   if(s("homeCalc")) s("homeCalc").onclick=()=>{ appMode="calc"; scStep=0; renderTOC(); renderSheet(); };
@@ -823,7 +900,8 @@ function bindCalcEvents(){
 
 function calcFormHtml(){
   const v = calcParams || {};
-  const g = (k,d)=> v[k]!==undefined? v[k]: d;
+  const expert=(CALC_CFG.paramdefaults&&CALC_CFG.paramdefaults.gaibao)||{};
+  const g = (k,d)=> v[k]!==undefined? v[k]:(expert[k]!==undefined?expert[k]:d);
   return ''
   +'<div class="grid2">'
   +'<div><label>建设期起始年</label><input id="c_buildStart" type="number" value="'+g("buildStart",2026)+'"></div>'

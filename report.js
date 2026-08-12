@@ -8,16 +8,19 @@ let rptCtype = "rent";   // 报告流程·非改保领域的测算类型
 const PRICE_IN_PER_M = 2, PRICE_OUT_PER_M = 8;   // 元/百万tokens，按DeepSeek价目表估算，可调整
 const EST_IN_PER_SEC = 1200, EST_OUT_PER_SEC = 700; // 每子节预估token
 const project = { name:"", owner:"", industry:"", location:"", type:"", scale:"", desc:"" };
+let projectWorkflow = window.ProjectWorkflow ? window.ProjectWorkflow.ensureState({}) : {calcSnapshots:[],reportVersions:[]};
 
 
 /* ---------- 草稿自动存档（浏览器本地，防刷新丢失） ---------- */
 const DRAFT_KEY = "fs_draft_v1";
 function buildDraftData(){
   return {
-    ts: Date.now(), domainKey, currentStep, signed, docNo,
-    project: project, calcParams: calcParams, kb: kbEntries,
+    ts: Date.now(), appMode, aiReportSession:typeof aiReportExtracted!=="undefined"&&!!aiReportExtracted, domainKey, currentStep, signed, docNo,
+    project: project, calcParams: calcParams, kb: kbEntries, workflow: projectWorkflow,
     chapters: chapters.map(c=>({cn:c.cn, name:c.name, checked:c.checked,
-      sections:c.sections.map(s=>({t:s.t, numeric:s.numeric, content:s.content, editedHtml:s.editedHtml||null}))}))
+      sections:c.sections.map(s=>({t:s.t, numeric:s.numeric, content:s.content, editedHtml:s.editedHtml||null,
+        locked:!!s.locked,syncStatus:s.syncStatus||"current",staleReason:s.staleReason||"",staleKeys:s.staleKeys||[],
+        pendingRevision:s.pendingRevision||null,undoStack:s.undoStack||[],prov:s.prov||null}))}))
   };
 }
 function saveDraft(){
@@ -29,10 +32,11 @@ function loadDraft(){
 }
 function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
 function restoreDraft(d){
-  appMode = "report";
+  appMode = window.ProjectWorkflow?ProjectWorkflow.resumeAppMode(d.appMode,!!d.aiReportSession):(d.aiReportSession?"aireport":"report");
   domainKey = d.domainKey; signed = !!d.signed; docNo = d.docNo||null;
   Object.assign(project, d.project||{});
   calcParams = d.calcParams||null;
+  projectWorkflow = window.ProjectWorkflow ? window.ProjectWorkflow.ensureState(d.workflow||{}) : (d.workflow||{calcSnapshots:[],reportVersions:[]});
   kbEntries = d.kb||[];
   if(domainKey){ loadDomain(domainKey); Object.assign(project, d.project||{}); }
   if(d.chapters && chapters.length){
@@ -40,13 +44,20 @@ function restoreDraft(d){
       if(!chapters[i]) return;
       chapters[i].checked = dc.checked;
       dc.sections.forEach((ds,j)=>{
-        if(chapters[i].sections[j]){ chapters[i].sections[j].content = ds.content||""; chapters[i].sections[j].editedHtml = ds.editedHtml||null; }
+        if(chapters[i].sections[j]){ Object.assign(chapters[i].sections[j],{
+          content:ds.content||"",editedHtml:ds.editedHtml||null,locked:!!ds.locked,syncStatus:ds.syncStatus||"current",
+          staleReason:ds.staleReason||"",staleKeys:ds.staleKeys||[],pendingRevision:ds.pendingRevision||null,
+          undoStack:ds.undoStack||[],prov:ds.prov||null}); }
       });
     });
   }
-  if(calcParams && window.NRCalc && domainKey==="baozhang_gaibao"){
-    calcResult = window.NRCalc.calc(assembleCalcInput(calcParams), CALC_CFG.gaibao);
-    calcResult.sens = computeSensitivity(calcParams);
+  if(calcParams){
+    try{
+      const t=(projectWorkflow.calcSnapshots||[]).find(x=>x.id===projectWorkflow.currentCalcSnapshotId)?.calcType
+        ||(domainKey==="baozhang_gaibao"?"gaibao":rptCtype||"rent");
+      calcType=t;rptCtype=t==="sale"?"sale":"rent";calcResult=runCalcEngine(t,calcParams);calcResult.__ctype=t;scParams=calcParams;scResult=calcResult;
+      if(t==="gaibao")calcResult.sens=computeSensitivity(calcParams);
+    }catch(e){calcResult=null;}
   }
   currentStep = Math.min(d.currentStep||0, STEPS.length-1);
   renderTOC(); renderSheet();
@@ -207,6 +218,7 @@ function runRptCalcOther(){
     calcResult = runCalcEngine(rptCtype, calcParams);
     calcResult.__ctype = rptCtype;
     scParams = calcParams; scResult = calcResult;   // 供共享部件读取
+    if(window.ProjectWorkflow) window.ProjectWorkflow.createCalcSnapshot(projectWorkflow,rptCtype,calcParams,calcResult,{reason:"财务测算确认",confirmedBy:typeof getUser==="function"?getUser():""});
     saveDraft();
     document.getElementById("calcResultBox").innerHTML = calcResultHtml() + modeCompareHtml();
     animateCountUps();
@@ -219,6 +231,7 @@ function runCalc(){
   calcParams = readCalcForm();
   calcResult = runCalcEngine("gaibao", calcParams);
   calcResult.__ctype = "gaibao";
+  if(window.ProjectWorkflow) window.ProjectWorkflow.createCalcSnapshot(projectWorkflow,"gaibao",calcParams,calcResult,{reason:"财务测算确认",confirmedBy:typeof getUser==="function"?getUser():""});
   calcResult.sens = computeSensitivity(calcParams);
   try{ calcResult.modeCompare = computeModeCompare(calcParams); }catch(e){ calcResult.modeCompare = null; }
   document.getElementById("calcResultBox").innerHTML = calcResultHtml() + modeCompareHtml();
@@ -313,8 +326,18 @@ async function runGeneration(){
   progressEl.textContent = tail;
   genBtn.style.display = "none";
   document.getElementById("toStep5r").style.display = "inline-block";
+  if(window.ProjectWorkflow)window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"完成初稿生成"});
   saveDraft();
   bindEvents();
+}
+
+async function updateStaleSections(){
+  const tasks=[]; chapters.filter(c=>c.checked).forEach(c=>c.sections.forEach((s,si)=>{if(s.syncStatus==="stale"&&!s.locked)tasks.push({c,s,si});}));
+  if(!tasks.length){alert("没有可自动更新的小节；锁定小节需要先解除锁定。");return;}
+  const btn=document.getElementById("wfUpdateStale");if(btn){btn.disabled=true;btn.textContent="正在生成候选稿…";}
+  let failed=0;
+  await runWorkerPool(tasks,async t=>{try{const text=await reviseSection(t.c,t.s,"测算参数已经更新。请严格依据最新真实测算结果，只修改受影响的数字、判断和分析，其他内容尽量保留。");window.ProjectWorkflow.setCandidate(t.s,text,"同步最新测算");}catch(e){failed++;}},3);
+  saveDraft();renderSheet();if(failed)alert(failed+"个小节候选稿生成失败，可单独重试。");
 }
 
 // 界面渲染：统一走 md.js（支持标题/列表/表格/引用/分隔线/行内样式，并兼容旧的[[TABLE]]语法）
@@ -437,7 +460,23 @@ function bindProvToggle(scope){
    置信度：按素材构成加权，让人一眼看出"这节有多少真凭实据"
 */
 let provCollector = null;   // 生成单节期间的临时采集器
-function provStart(){ provCollector = { rag:[], examples:[], kbDocs:[], hasCalcData:false, projectFields:[] }; }
+function projectExcelSources(){ try{return JSON.parse(sessionStorage.getItem("projectExcelSources")||"[]")||[];}catch(e){return [];} }
+function excelSourceRetrieve(){
+  const xs=projectExcelSources(); if(!xs.length) return "";
+  if(provCollector) provCollector.excelSources.push(...xs);
+  return "\n\n【已确认的 Excel 数字来源】\n"+xs.map((x,i)=>(i+1)+". "+x.label+" = "+x.displayValue+(x.formula?"（公式："+x.formula+"）":"")+(x.sourceRef?"；原始依据："+x.sourceRef:"")).join("\n")+"\n只能引用与当前章节直接相关的数字；不确定时不要使用。";
+}
+async function mappedExcelSourceRetrieve(){
+  try{
+    const ct=(typeof calcType!=="undefined"?calcType:"")||"";
+    const r=await fetch("/api/materials",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"resolveMappings",projectType:(project&&project.type)||"",calcType:ct})});
+    const d=await r.json(), xs=d.values||[]; if(!d.ok||!xs.length){ try{sessionStorage.removeItem("resolvedExcelMappings");}catch(e){} return ""; }
+    try{sessionStorage.setItem("resolvedExcelMappings",JSON.stringify(xs));}catch(e){}
+    if(provCollector) provCollector.excelSources.push(...xs.map(x=>({label:"《"+x.workbook_title+"》→"+x.sheet_name+"!"+x.cell_address,displayValue:x.display_value,formula:x.formula||"",sourceRef:x.source_ref||""})));
+    return "\n\n【项目字段自动映射（Excel 原始单元格）】\n"+xs.map(x=>"- "+(x.field_label||x.field_key)+"："+x.display_value+"［《"+x.workbook_title+"》→"+x.sheet_name+"!"+x.cell_address+"］").join("\n")+"\n仅在字段含义明确匹配时引用；不得自行换算或编造。";
+  }catch(e){return "";}
+}
+function provStart(){ provCollector = { rag:[], examples:[], kbDocs:[], excelSources:[], hasCalcData:false, projectFields:[] }; }
 function provTake(){ const p = provCollector; provCollector = null; return p; }
 
 // 置信度：有真实测算数据 > 有高匹配知识库依据 > 仅项目信息 > 纯AI发挥
@@ -446,6 +485,7 @@ function provConfidence(p){
   const basis = [];
   let score = 0.55;   // 基线：仅凭项目信息与模型常识生成
   if(p.hasCalcData){ score = Math.max(score, 0.95); basis.push("引用了内置公式计算的真实测算数据"); }
+  if((p.excelSources||[]).length){ score = Math.max(score, 0.92); basis.push("引用了"+(p.excelSources||[]).length+"项可定位到单元格的 Excel 数据"); }
   const hiRag = p.rag.filter(r=>r.score >= 0.85);
   const midRag = p.rag.filter(r=>r.score >= 0.70 && r.score < 0.85);
   if(hiRag.length){ score = Math.max(score, 0.85); basis.push("有"+hiRag.length+"条高匹配知识库依据"); }
@@ -497,18 +537,23 @@ async function ragRetrieve(chapterName, secTitle){
     // 相似度分层：不同置信度的参考资料，给AI的使用指引不同（避免把勉强沾边的当权威用）
     const hits = (d.matches||[]).filter(m=>m.text && m.score >= RAG_TIER.MIN);
     if(!hits.length) return "";
-    let out = "\n\n【历史报告参考】（语义检索自本单位存量优秀报告，供借鉴结构与论证方式；其中项目名称与数据不得照抄）\n";
-    out += "注：每条参考标注了匹配度等级，请按等级区别对待——高匹配可直接借鉴其论述结构；中匹配需甄别后借鉴；低匹配仅作思路启发，不要照搬其具体表述。\n\n";
+    const hasWiki = hits.some(m=>String(m.title||"").startsWith("【Wiki】"));
+    let out = hasWiki
+      ? "\n\n【公司知识 Wiki 与资料依据】（其中标有“公司 Wiki”的内容已经人工审核发布，可作为内部编制/审核口径；仍须遵守其原始依据、适用范围与时效限制。历史报告只可借鉴结构和论证方式，项目名称与数据不得照抄）\n"
+      : "\n\n【历史报告参考】（语义检索自本单位存量优秀报告，供借鉴结构与论证方式；其中项目名称与数据不得照抄）\n";
+    out += "注：每条参考标注了匹配度等级。高匹配的已发布 Wiki 可按其适用范围执行；其他资料仍需甄别，低匹配仅作思路启发。\n\n";
     let budget = 2200;
     hits.forEach(m=>{
       if(budget<=200) return;
       const tier = ragTierOf(m.score);
       if(provCollector) provCollector.rag.push({ title:m.title||"历史报告", section:m.section||m.chapter||"",
-        score:m.score, tier:tier.label, lifecycle:m.lifecycle||"valid", lifecycleNote:m.lifecycleNote||"" });
+        score:m.score, tier:tier.label, lifecycle:m.lifecycle||"valid", lifecycleNote:m.lifecycleNote||"",
+        docNo:m.docNo||"", issuer:m.issuer||"", sourceRef:m.sourceRef||"", exact:!!m.exact, exactReason:m.exactReason||"" });
       const c = String(m.text).slice(0, Math.min(1400, budget));
       budget -= c.length;
       const lifeTag = (m.lifecycle && m.lifecycle !== "valid") ? "⚠该文件"+(m.lifecycleNote||"时效异常")+"，不得作为现行依据引用；" : "";
-      out += "《"+(m.title||"历史报告")+"·"+(m.section||m.chapter||"")+"》【"+lifeTag+tier.label+"·匹配度"+m.score+"】\n"+c+"\n\n";
+      const precise = (m.docNo?"文号："+m.docNo+"；":"")+(m.issuer?"发布机关："+m.issuer+"；":"")+(m.sourceRef?"原始定位："+m.sourceRef+"；":"")+(m.exact?"“"+(m.exactReason||"精确命中")+"”；":"");
+      out += "《"+(m.title||"历史报告")+"·"+(m.section||m.chapter||"")+"》【"+lifeTag+(precise||"")+tier.label+"·匹配度"+m.score+"】\n"+c+"\n\n";
     });
     return out;
   }catch(e){ return ""; }
@@ -671,7 +716,8 @@ async function generateSection(c, s, onChunk){
    ["投资规模",project.scale],["项目概况",project.desc]].forEach(([k,v])=>{
     if(v && String(v).trim() && provCollector) provCollector.projectFields.push(k);
   });
-  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t) + kbRetrieve(c.name, s.t) + await ragRetrieve(c.name, s.t);
+  const excelContext=s.numeric?(excelSourceRetrieve()+await mappedExcelSourceRetrieve()):"";
+  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t) + kbRetrieve(c.name, s.t) + excelContext + await ragRetrieve(c.name, s.t);
 
   const text = await callGen(sys, user, onChunk);
   // 生成完成：把溯源档案挂到该小节上（含模型与时间，即L3模型溯源）

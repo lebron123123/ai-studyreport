@@ -80,6 +80,23 @@
   .stat-kpi .stat-label{font-size:10.5px;}
   .stat-kpi .stat-num{font-size:20px;margin-top:6px;}
 
+  /* 参数治理中心：中文主标签、草稿/发布状态、知识依据选择器 */
+  .pg-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;}
+  .pg-toolbar input{max-width:260px;}
+  .pg-summary{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:8px;margin-top:12px;}
+  .pg-summary>div{background:#fff;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:11px;color:var(--soft);}
+  .pg-summary b{display:block;font-size:18px;color:var(--bp-deep);margin-top:2px;}
+  .pg-param-cn{font-weight:700;color:var(--ink);white-space:nowrap;}.pg-param-key{font:10px var(--mono);color:var(--soft);margin-top:2px;}
+  .pg-tag{display:inline-block;padding:2px 7px;border-radius:99px;background:var(--line-soft);font-size:10px;color:var(--bp-deep);white-space:nowrap;}
+  .pg-evidence-btn{white-space:nowrap;max-width:170px;overflow:hidden;text-overflow:ellipsis;}
+  .pg-draft{color:#B26A00}.pg-published{color:var(--ok)}
+  .pg-modal{position:fixed;inset:0;background:rgba(20,30,48,.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .pg-modal-box{background:#fff;width:min(760px,94vw);max-height:82vh;border-radius:10px;box-shadow:0 14px 45px rgba(0,0,0,.2);padding:20px;display:flex;flex-direction:column;}
+  .pg-ref-list{overflow:auto;border:1px solid var(--line);margin-top:10px;max-height:430px;}
+  .pg-ref-item{display:flex;gap:9px;padding:9px 10px;border-bottom:1px solid var(--line-soft);align-items:flex-start;font-size:12px;}
+  .pg-ref-item input{width:auto;margin-top:2px}.pg-ref-item small{display:block;color:var(--soft);margin-top:2px;}
+  @media(max-width:760px){.pg-summary{grid-template-columns:1fr 1fr;}}
+
   /* RAG等子页面的二级标签导航(替代原来容易换行的文字链接行) */
   .subnav{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 4px;}
   .subnav a{font-size:12.5px;padding:6px 13px;border-radius:20px;background:var(--line-soft);color:var(--bp-deep);
@@ -101,6 +118,7 @@
     <div class="nav-item" id="btnCases"><span class="ic">📁</span>历史项目案例库</div>
     <div class="nav-item" id="btnPopulation"><span class="ic">👥</span>人口参考表</div>
     <div class="nav-item" id="btnStats"><span class="ic">📊</span>运维看板</div>
+    <div class="nav-item" id="btnWiki"><span class="ic">📖</span>知识 Wiki</div>
     <div class="side-foot" id="loginInfo"></div>
   </nav>
   <div class="main">
@@ -123,6 +141,7 @@
 <script src="export.js"></script>
 <!-- 敏感性分析(Sobol/Saltelli)核心逻辑，和命令行 scripts/sensitivity.js 共用同一份代码 -->
 <script src="sensitivity-core.js"></script>
+<script src="paramgovernance.js"></script>
 <script>
 function getToken(){ return localStorage.getItem("fs_token"); }
 function getUser(){ return localStorage.getItem("fs_user"); }
@@ -230,6 +249,36 @@ async function saveExamples(){
 
 
 
+/* ================= 公司知识 Wiki（经审核发布后才进入 RAG） ================= */
+const WIKI_KIND_LABEL = {policy:"政策要点",report:"报告编制",rule:"业务规则",case:"案例经验"};
+const WIKI_STATUS_LABEL = {draft:"草稿",published:"已发布",archived:"已归档"};
+async function wikiApi(body){ const r=await fetch("/api/wiki",{method:"POST",headers:authHeaders(),body:JSON.stringify(body)}); return await r.json(); }
+function wikiDate(ts){ if(!ts)return "—"; const d=new Date(Number(ts)); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+async function openWiki(){
+  document.getElementById("listBox").style.display="none"; const box=document.getElementById("editBox"); box.style.display="block";
+  box.innerHTML='<h1>知识 Wiki</h1><div class="sub">把原始资料沉淀成经人工确认的公司知识页：政策要点、报告写法、业务规则与案例经验。<b>只有点击发布的版本才会同步进入 RAG</b>；编辑已发布页会先生成草稿，不会污染线上报告引用。</div><div class="bar"><button class="btn" id="wikiNew">新建 Wiki 页面</button><button class="btn ghost" id="wikiReload">刷新列表</button></div><div id="wikiList" class="empty">读取中…</div>';
+  document.getElementById("wikiNew").onclick=()=>openWikiEdit(null); document.getElementById("wikiReload").onclick=openWiki;
+  try{
+    const d=await wikiApi({action:"list"}); if(!d.ok)throw new Error(d.error||"读取失败"); const pages=d.pages||[],stat={draft:0,published:0,archived:0}; pages.forEach(p=>stat[p.status]=(stat[p.status]||0)+1);
+    let html='<div style="display:flex;gap:16px;font-size:12px;color:var(--soft);margin-bottom:10px;"><span>共 <b>'+pages.length+'</b> 页</span><span>已发布 <b style="color:var(--ok);">'+(stat.published||0)+'</b></span><span>草稿 <b>'+(stat.draft||0)+'</b></span><span>已归档 <b>'+(stat.archived||0)+'</b></span></div>';
+    html+=pages.length?pages.map(p=>{ const tags=(p.tags||[]).slice(0,4).map(x=>'<span style="font-size:11px;padding:2px 6px;border-radius:10px;background:var(--line-soft);margin-right:4px;">'+esc(x)+'</span>').join(""); const color=p.status==="published"?"var(--ok)":p.status==="archived"?"var(--soft)":"#8A6D1B"; return '<div class="card" style="align-items:flex-start;"><div style="min-width:0;"><div class="name">'+esc(p.title)+'</div><div style="font-size:12px;color:var(--soft);margin:5px 0;">'+esc(WIKI_KIND_LABEL[p.kind]||p.kind)+'　<span style="color:'+color+';font-weight:600;">'+esc(WIKI_STATUS_LABEL[p.status]||p.status)+'</span>　v'+(p.version||0)+'　更新于 '+wikiDate(p.updated_at)+'</div><div>'+tags+'</div>'+(p.source_ref?'<div style="font-size:11px;color:var(--soft);margin-top:6px;">原始依据：'+esc(p.source_ref)+'</div>':'')+'</div><div class="ops"><button class="btn ghost sm" data-wiki-edit="'+esc(p.id)+'">查看/编辑</button></div></div>'; }).join(""):'<div class="empty">暂无 Wiki 页面。先把最常用的政策口径、报告编制要求或审核规则沉淀进来。</div>';
+    document.getElementById("wikiList").innerHTML=html; box.querySelectorAll("[data-wiki-edit]").forEach(b=>b.onclick=()=>openWikiEdit(b.dataset.wikiEdit));
+  }catch(e){ document.getElementById("wikiList").innerHTML='<div class="empty">读取失败：'+esc(e.message)+'</div>'; }
+}
+function wikiField(label,id,value,placeholder){ return '<label>'+label+'<input id="'+id+'" value="'+esc(value||"")+'" placeholder="'+esc(placeholder||"")+'"></label>'; }
+async function openWikiEdit(id){
+  document.getElementById("listBox").style.display="none"; const box=document.getElementById("editBox"); box.style.display="block";
+  let p={id:"",title:"",kind:"report",tags:[],region:"",project_type:"",doc_no:"",issuer:"",source_ref:"",security:1,dept_scope:"全部门",effective_date:"",expiry_date:"",content:"",status:"draft",version:0};
+  if(id){ box.innerHTML='<div class="empty">读取 Wiki 页面…</div>'; try{const d=await wikiApi({action:"get",id});if(!d.ok)throw new Error(d.error||"读取失败");p=d.page;}catch(e){box.innerHTML='<div class="empty">读取失败：'+esc(e.message)+'</div>';return;} }
+  const kindOpts=Object.entries(WIKI_KIND_LABEL).map(([k,v])=>'<option value="'+k+'"'+(p.kind===k?' selected':'')+'>'+v+'</option>').join(""); const secOpts=[[1,"公开（全员可见）"],[2,"内部（需内部权限）"],[3,"涉密（需涉密权限）"]].map(([k,v])=>'<option value="'+k+'"'+(Number(p.security)===k?' selected':'')+'>'+v+'</option>').join("");
+  const status=p.status==="published"?'<span style="color:var(--ok);font-size:12px;">当前已发布 v'+(p.version||0)+'；保存后会转为新草稿，需再次发布才替换 RAG 版本。</span>':'<span style="color:var(--soft);font-size:12px;">'+(WIKI_STATUS_LABEL[p.status]||"草稿")+'；不会进入 RAG。</span>';
+  box.innerHTML='<div class="bar"><button class="btn ghost sm" id="wikiBack">返回 Wiki 列表</button></div><h1>'+(id?'编辑':'新建')+' Wiki 页面</h1><div class="sub">'+status+'</div><div style="background:#fff;border:1px solid var(--line);padding:18px 20px;border-radius:10px;">'+wikiField('标题 *','wikiTitle',p.title,'例如：保障性租赁住房租金定价与审核口径')+'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"><label>页面类型<select id="wikiKind">'+kindOpts+'</select></label>'+wikiField('标签（逗号分隔）','wikiTags',(p.tags||[]).join('、'),'保障房、租金、深圳')+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">'+wikiField('适用区域','wikiRegion',p.region,'深圳市 / 龙华区')+wikiField('适用项目类型','wikiProjectType',p.project_type,'保租房 / 公租房')+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">'+wikiField('文号/内部编号','wikiDocNo',p.doc_no,'深建规〔2025〕XX号')+wikiField('发布或确认主体','wikiIssuer',p.issuer,'深圳市住房建设局 / 投资管理部')+'</div>'+wikiField('原始依据（文件名＋条款/页码，必填）','wikiSource',p.source_ref,'《XX办法》第12条；《XX报告》第3章第2节')+'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">'+wikiField('生效日期','wikiEff',p.effective_date,'YYYY-MM-DD')+wikiField('失效/复核日期','wikiExp',p.expiry_date,'YYYY-MM-DD')+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"><label>密级<select id="wikiSec">'+secOpts+'</select></label>'+wikiField('可见部门','wikiDept',p.dept_scope||'全部门','全部门')+'</div><label>Wiki 正文 *<textarea id="wikiContent" rows="18" placeholder="写清规则/结论、适用范围、例外情况、引用依据和人工判断边界。">'+esc(p.content||"")+'</textarea></label><div class="bar" style="margin:18px 0 0;"><button class="btn" id="wikiSave">保存草稿</button>'+(id?'<button class="btn ghost" id="wikiPublish">发布并同步 RAG</button><button class="btn ghost" id="wikiArchive">归档</button><button class="btn red" id="wikiDelete">删除</button>':'')+'</div></div>';
+  document.getElementById("wikiBack").onclick=openWiki;
+  const read=()=>({id:p.id,title:document.getElementById("wikiTitle").value,kind:document.getElementById("wikiKind").value,tags:document.getElementById("wikiTags").value,region:document.getElementById("wikiRegion").value,project_type:document.getElementById("wikiProjectType").value,doc_no:document.getElementById("wikiDocNo").value,issuer:document.getElementById("wikiIssuer").value,source_ref:document.getElementById("wikiSource").value,security:Number(document.getElementById("wikiSec").value),dept_scope:document.getElementById("wikiDept").value,effective_date:document.getElementById("wikiEff").value,expiry_date:document.getElementById("wikiExp").value,content:document.getElementById("wikiContent").value});
+  document.getElementById("wikiSave").onclick=async()=>{const b=document.getElementById("wikiSave");b.disabled=true;try{const d=await wikiApi({action:"save",page:read()});if(!d.ok)throw new Error(d.error||"保存失败");msg(d.message||"草稿已保存","ok");openWikiEdit(d.page.id);}catch(e){msg(e.message,"err");b.disabled=false;}};
+  if(id){ document.getElementById("wikiPublish").onclick=async()=>{if(!confirm("发布后，该页面将立即参与 RAG 检索与报告生成。确认内容、原始依据和适用范围均已审核？"))return;try{const d=await wikiApi({action:"publish",id});if(!d.ok)throw new Error(d.error||"发布失败");msg(d.message+"（"+d.chunks+"个检索块）","ok");openWikiEdit(id);}catch(e){msg(e.message,"err");}}; document.getElementById("wikiArchive").onclick=async()=>{if(!confirm("归档后将不再参与 RAG 检索，是否继续？"))return;try{const d=await wikiApi({action:"archive",id});if(!d.ok)throw new Error(d.error||"归档失败");msg(d.message,"ok");openWiki();}catch(e){msg(e.message,"err");}}; document.getElementById("wikiDelete").onclick=async()=>{if(!confirm("删除将移除该 Wiki 页面及其向量索引，不可恢复。是否继续？"))return;try{const d=await wikiApi({action:"delete",id});if(!d.ok)throw new Error(d.error||"删除失败");msg(d.message,"ok");openWiki();}catch(e){msg(e.message,"err");}}; }
+}
+
 /* ================= RAG知识库（全量报告向量入库） ================= */
 function loadScript(src){ return new Promise((ok,err)=>{ const s=document.createElement("script"); s.src=src; s.onload=ok; s.onerror=()=>err(new Error("加载失败:"+src)); document.head.appendChild(s); }); }
 
@@ -277,6 +326,19 @@ function htmlToStructuredText(html){
 async function ragParseFile(f){
   const ext = (f.name.split(".").pop()||"").toLowerCase();
   if(ext==="txt") return await f.text();
+  if(ext==="csv") return await f.text();
+  if(["xlsx","xls","xlsm"].includes(ext)){
+    // 本地部署没有云端 toMarkdown；Excel 在浏览器端解析成“表用途摘要”供 RAG 检索。
+    // 原始数值、公式及单元格坐标由 indexExcelWorkbook 单独写入结构化台账，绝不依赖此摘要取数。
+    if(!window.XLSX) await loadScript("xlsx.full.min.js");
+    const wb = XLSX.read(await f.arrayBuffer(), {cellFormula:true, cellText:true});
+    return wb.SheetNames.map(name=>{
+      const ws=wb.Sheets[name], range=ws["!ref"]; if(!range) return "工作表："+name+"（空表）";
+      const r=XLSX.utils.decode_range(range), heads=[];
+      for(let c=r.s.c;c<=Math.min(r.e.c,r.s.c+19);c++){const cell=ws[XLSX.utils.encode_cell({r:r.s.r,c})]; if(cell) heads.push(String(cell.w??cell.v??"").slice(0,80));}
+      return "工作表："+name+"\n使用范围："+range+"\n首行字段："+heads.filter(Boolean).join("｜")+"\n该工作表已建立结构化单元格索引，精确数字请通过资料台账读取。";
+    }).join("\n\n");
+  }
   if(ext==="docx"){
     if(!window.mammoth) await loadScript("mammoth.min.js");
     // 用 convertToHtml 而非 extractRawText：后者会把表格拍平成一串无结构文字，
@@ -289,14 +351,13 @@ async function ragParseFile(f){
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = "pdf.worker.min.js";
     const pdf = await window.pdfjsLib.getDocument({data: await f.arrayBuffer()}).promise;
     const parts = [];
-    for(let p=1; p<=pdf.numPages; p++){ const tc = await (await pdf.getPage(p)).getTextContent(); parts.push(tc.items.map(it=>it.str).join("")); }
+    for(let p=1; p<=pdf.numPages; p++){ const tc = await (await pdf.getPage(p)).getTextContent(); parts.push("【第"+p+"页】\n"+pdfPageStructuredText(tc)); }
     const text = parts.join("\n");
     // 文字层为空 → 大概率是扫描件；PDF扫描件本系统无法自动识别，明确提示而不是静默入库空内容
-    if(text.replace(/\s/g,"").length < 20){
-      throw new Error("这份PDF提取不到文字，应为扫描件。请先用OCR工具（如WPS、Adobe的识别文字功能）转成可复制文字的PDF或Word后再上传；或将页面导出为图片(png/jpg)上传，系统可对图片做文字识别");
-    }
+    if(text.replace(/\s/g,"").length < 20) return await localOcrPdf(pdf);
     return text;
   }
+  if(["png","jpg","jpeg","webp"].includes(ext)) return await localOcrBlob(f);
   // 其余格式交给后端 Workers AI 解析：图片走视觉模型（≈OCR）、Office/网页/表格等
   const SERVER_PARSE = ["png","jpg","jpeg","webp","svg","xlsx","xls","xlsm","csv","html","htm","xml","ods","odt","numbers"];
   if(SERVER_PARSE.includes(ext)){
@@ -315,6 +376,21 @@ async function ragParseFile(f){
     return d.text||"";
   }
   throw new Error("不支持 ."+ext+"（支持：txt/docx/pdf/图片(png,jpg,webp)/xlsx/csv/html/xml 等）");
+}
+async function localOcrBlob(blob){
+  const buf=await blob.arrayBuffer(),bytes=new Uint8Array(buf);let binary="";for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));
+  const r=await fetch("/api/local-ocr",{method:"POST",headers:authHeaders(),body:JSON.stringify({dataBase64:btoa(binary)})}),d=await r.json();if(!d.ok)throw new Error(d.error||"本地OCR失败");return d.text||"";
+}
+async function localOcrPdf(pdf){
+  const parts=[];for(let p=1;p<=pdf.numPages;p++){
+    const page=await pdf.getPage(p),vp=page.getViewport({scale:2}),canvas=document.createElement("canvas");canvas.width=Math.ceil(vp.width);canvas.height=Math.ceil(vp.height);await page.render({canvasContext:canvas.getContext("2d"),viewport:vp}).promise;
+    const blob=await new Promise(ok=>canvas.toBlob(ok,"image/jpeg",0.9));const t=await localOcrBlob(blob);parts.push("【第"+p+"页】\n"+t);
+  }const text=parts.join("\n\n");if(text.replace(/\s/g,"").length<20)throw new Error("扫描PDF完成OCR，但未识别到足够文字，请检查清晰度");return text;
+}
+function pdfPageStructuredText(tc){
+  const items=(tc.items||[]).filter(x=>String(x.str||"").trim()).map(x=>({s:String(x.str),x:Number(x.transform&&x.transform[4]||0),y:Number(x.transform&&x.transform[5]||0),w:Number(x.width||0)})).sort((a,b)=>Math.abs(b.y-a.y)>2?b.y-a.y:a.x-b.x);
+  const lines=[];for(const it of items){let line=lines.find(l=>Math.abs(l.y-it.y)<=2);if(!line){line={y:it.y,a:[]};lines.push(line);}line.a.push(it);}
+  return lines.sort((a,b)=>b.y-a.y).map(l=>{l.a.sort((a,b)=>a.x-b.x);let out="",end=0,gaps=0;for(const it of l.a){const gap=it.x-end;if(out&&gap>18){out+=" | ";gaps++;}else if(out&&gap>3)out+=" ";out+=it.s;end=it.x+it.w;}return gaps>=2?"| "+out+" |":out;}).join("\n");
 }
 // 语义切块:按标题分节 → 节内按句子边界+重叠切块 → 每块带上下文锚点
 // 内容哈希：用于识别"改了文件名但内容相同"的真重复
@@ -528,6 +604,17 @@ async function openRag(){
     +'<label style="font-size:13px;">可见部门：<input id="ragDept" placeholder="全部门" style="padding:5px 8px; width:110px;"></label>'
     +'<label style="font-size:13px;">生效日期：<input id="ragEffDate" type="date" style="padding:4px 6px; width:150px;"></label>'
     +'<label style="font-size:13px;">失效日期：<input id="ragExpDate" type="date" style="padding:4px 6px; width:150px;"></label>'
+    +'<label style="font-size:13px;">文号：<input id="ragDocNo" placeholder="如：深建规〔2025〕12号" style="padding:5px 8px; width:180px;"></label>'
+    +'<label style="font-size:13px;">发布机关：<input id="ragIssuer" placeholder="如：深圳市住建局" style="padding:5px 8px; width:145px;"></label>'
+    +'<label style="font-size:13px;">原始定位：<input id="ragSourceRef" placeholder="文件页码/条款说明" style="padding:5px 8px; width:180px;"></label>'
+    +'<label style="font-size:13px;">资料类型：<select id="ragDocType" style="padding:5px 8px;"><option value="policy">政策文件</option><option value="due_diligence">项目尽调材料</option><option value="excel">Excel测算表</option><option value="template">模板文件</option><option value="report">历史报告</option><option value="rule">内部制度</option><option value="other" selected>其他</option></select></label>'
+    +'<label style="font-size:13px;">效力/状态：<select id="ragEffectStatus" style="padding:5px 8px;"><option value="current">现行/有效</option><option value="revised">已修订</option><option value="expired">已失效</option><option value="unknown" selected>待核验</option></select></label>'
+    +'<label style="font-size:13px;">项目编号：<input id="ragProjectNo" placeholder="项目唯一编号" style="padding:5px 8px; width:130px;"></label>'
+    +'<label style="font-size:13px;">项目类型：<input id="ragProjectType" placeholder="保租房/公租房" style="padding:5px 8px; width:120px;"></label>'
+    +'<label style="font-size:13px;">适用区域：<input id="ragRegion" placeholder="深圳市/龙华区" style="padding:5px 8px; width:125px;"></label>'
+    +'<label style="font-size:13px;">版本号：<input id="ragVersionNo" placeholder="如 v2026.08" style="padding:5px 8px; width:100px;"></label>'
+    +'<label style="font-size:13px;">关联旧文号：<input id="ragReplacesDocNo" placeholder="被替代/修订的文号" style="padding:5px 8px; width:160px;"></label>'
+    +'<label style="font-size:13px;">政策关系：<select id="ragRelationType" style="padding:5px 8px;"><option value="">无</option><option value="replaces">替代</option><option value="revises">修订</option><option value="abolishes">废止</option><option value="cites">引用</option></select></label>'
     +'<span style="font-size:11px; color:var(--soft); width:100%;">上传的这批文件统一按以上分类/等级/密级/部门归档；可见部门留空=全部门可见；<b>日期留空=长期有效</b>（政策类文件建议填失效日期，过期后自动降权并标注，避免旧政策被当作现行依据）</span>'
     +'<span id="ragChunkHint" style="font-size:11px; color:var(--bp,#2C6CA6); width:100%;"></span></div>'
     +'<div style="border:2px dashed var(--line); background:#fff; padding:26px; text-align:center;">'
@@ -588,13 +675,18 @@ async function ragIngest(files){
   // 时效日期同样在入库开始时锁定，避免上传过程中被改动导致批次内不一致
   const ingestEffD = document.getElementById("ragEffDate") ? document.getElementById("ragEffDate").value : "";
   const ingestExpD = document.getElementById("ragExpDate") ? document.getElementById("ragExpDate").value : "";
+  // 政策类文件的三项精确元数据：按本次上传锁定，后续“文号/第X条”检索直接用它们定位。
+  const ingestDocNo = document.getElementById("ragDocNo") ? document.getElementById("ragDocNo").value.trim() : "";
+  const ingestIssuer = document.getElementById("ragIssuer") ? document.getElementById("ragIssuer").value.trim() : "";
+  const ingestSourceRef = document.getElementById("ragSourceRef") ? document.getElementById("ragSourceRef").value.trim() : "";
+  const ingestAssetMeta = {document_type:document.getElementById("ragDocType")?.value||"other",effect_status:document.getElementById("ragEffectStatus")?.value||"unknown",project_no:document.getElementById("ragProjectNo")?.value.trim()||"",project_type:document.getElementById("ragProjectType")?.value.trim()||"",region:document.getElementById("ragRegion")?.value.trim()||"",version_no:document.getElementById("ragVersionNo")?.value.trim()||"",replaces_doc_no:document.getElementById("ragReplacesDocNo")?.value.trim()||"",relation_type:document.getElementById("ragRelationType")?.value||""};
   for(let fi=0; fi<files.length; fi++){
     const f = files[fi];
     prog.textContent = "解析 "+(fi+1)+"/"+files.length+"：《"+f.name+"》（"+ingestCat+"："+prof.note+"）…";
-    let chunks, contentHash = "", replaceMode = false;
+    let chunks, contentHash = "", replaceMode = false, parsedText = "";
+    const fileTitle = f.name.replace(/\.[^.]+$/,"");
     try{
-      const text = await ragParseFile(f);
-      const fileTitle = f.name.replace(/\.[^.]+$/,"");
+      const text = await ragParseFile(f); parsedText = text;
       contentHash = await ragContentHash(text);
       // 上传预检：识别重复 / 同名旧版
       try{
@@ -615,6 +707,11 @@ async function ragIngest(files){
       if(!chunks.length){ failed.push(f.name+"（无有效块）"); continue; }
     }catch(e){ failed.push(f.name+"（"+e.message+"）"); continue; }
     totalChunks += chunks.length;
+    let assetId = "";
+    try{
+      const ar = await fetch("/api/materials",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"saveAsset",asset:{title:fileTitle,category:ingestCat,lifecycle:"active",doc_no:ingestDocNo,issuer:ingestIssuer,effective_date:ingestEffD,expiry_date:ingestExpD,source_ref:ingestSourceRef,content_hash:contentHash,content_text:parsedText,rag_title:fileTitle,...ingestAssetMeta}})});
+      const ad = await ar.json(); if(ad.ok) assetId = ad.asset.id;
+    }catch(e){ failed.push(f.name+"（资料台账登记失败）"); }
     for(let i=0; i<chunks.length; i+=10){
       prog.textContent = "《"+f.name+"》向量化入库 "+Math.min(i+10,chunks.length)+"/"+chunks.length+"（文件"+(fi+1)+"/"+files.length+"）";
       try{
@@ -625,15 +722,83 @@ async function ragIngest(files){
         const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),
           body:JSON.stringify({action:"upsert", chunks:chunks.slice(i,i+10), category:cat, level:lvl, security:sec, deptScope:dept,
                                effectiveDate:ingestEffD, expiryDate:ingestExpD,
+                               docNo:ingestDocNo, issuer:ingestIssuer, sourceRef:ingestSourceRef,
                                contentHash, replaceMode, isFirstBatch: i===0})});
         const d = await r.json();
         if(d.ok) okChunks += d.count; else{ failed.push(f.name+"批次"+i+"："+d.error); break; }
       }catch(e){ failed.push(f.name+"批次"+i+"：网络错误"); break; }
     }
+    if(!failed.some(x=>x.startsWith(f.name+"批次")) && /\.(xlsx|xls|xlsm|csv)$/i.test(f.name)){
+      try{ await indexExcelWorkbook(f, assetId, fileTitle, contentHash, prog); }
+      catch(e){ failed.push(f.name+"（Excel结构化索引失败："+(e.message||"未知错误")+"）"); }
+    }
   }
   prog.innerHTML = "完成：入库 "+okChunks+"/"+totalChunks+" 块" + (failed.length? '<br><span style="color:var(--red);">失败：'+esc(failed.slice(0,5).join("；"))+'</span>':'');
   refreshRagStats();
   refreshRagFiles();
+}
+
+// Excel 只把工作簿用途摘要交给 RAG；真实数字、公式和坐标写入资料台账，供精确读取和报告溯源。
+async function indexExcelWorkbook(file, assetId, title, contentHash, prog){
+  if(!window.XLSX) await loadScript("xlsx.full.min.js");
+  const wb = XLSX.read(await file.arrayBuffer(), {cellFormula:true, cellNF:true, cellText:true, cellDates:true});
+  const cr = await fetch("/api/materials",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"createWorkbook",title,filename:file.name,assetId,contentHash})});
+  const cd = await cr.json(); if(!cd.ok) throw new Error(cd.error||"无法创建工作簿索引");
+  for(let si=0;si<wb.SheetNames.length;si++){
+    const name=wb.SheetNames[si], ws=wb.Sheets[name], range=ws["!ref"]; if(!range) continue;
+    const r=XLSX.utils.decode_range(range), headers=[];
+    for(let c=r.s.c;c<=r.e.c;c++){ const h=ws[XLSX.utils.encode_cell({r:r.s.r,c})]; headers.push(h?String(h.w??h.v??"").slice(0,100):""); }
+    const cells=[];
+    for(let row=r.s.r;row<=r.e.r;row++) for(let col=r.s.c;col<=r.e.c;col++){
+      const addr=XLSX.utils.encode_cell({r:row,c:col}), cell=ws[addr]; if(!cell || (cell.v===undefined&&!cell.f)) continue;
+      cells.push({address:addr,row_idx:row+1,col_idx:col+1,raw_value:String(cell.v??""),display_value:String(cell.w??cell.v??""),formula:String(cell.f||""),data_type:String(cell.t||"")});
+    }
+    if(cells.length>30000) throw new Error("单个 Sheet 非空单元格超过30000，请拆分工作簿后再入库");
+    prog.textContent="《"+file.name+"》结构化索引："+name+"（"+cells.length+"个非空单元格）…";
+    const sr=await fetch("/api/materials",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"saveSheet",workbookId:cd.workbookId,sheet:{name,sheet_index:si,used_range:range,headers,row_count:r.e.r-r.s.r+1,col_count:r.e.c-r.s.c+1}})});
+    const sd=await sr.json(); if(!sd.ok) throw new Error(sd.error||"无法保存 Sheet");
+    for(let i=0;i<cells.length;i+=500){ const rr=await fetch("/api/materials",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"saveCells",sheetId:sd.sheetId,cells:cells.slice(i,i+500)})}); const rd=await rr.json(); if(!rd.ok) throw new Error(rd.error||"无法保存单元格"); }
+  }
+}
+
+/* ================= 正式资料台账 / Excel 精确读取 ================= */
+async function materialsApi(body){
+  const r=await fetch("/api/materials",{method:"POST",headers:authHeaders(),body:JSON.stringify(body)});
+  return r.json();
+}
+async function openMaterials(){
+  document.getElementById("listBox").style.display="none";
+  const box=document.getElementById("editBox"); box.style.display="block";
+  box.innerHTML='<h1 style="font-size:18px;">正式资料台账</h1><div class="sub">所有正式资料先在 RAG 知识库上传区入库；这里集中查看资料属性、适用范围和 Excel 的 Sheet/单元格来源。Excel 数字不会靠语义猜测，必须回到原始工作簿单元格。</div><div style="margin-top:10px;"><button class="btn sm" id="materialManifestPick">批量导入资料清单（CSV/XLSX）</button> <button class="btn sm ghost" id="materialManifestTpl">下载清单模板</button><input type="file" id="materialManifestFile" accept=".csv,.xlsx,.xls" style="display:none;"><span style="font-size:11px;color:var(--soft);margin-left:8px;">支持列：标题、资料类型、文号、发布机关、效力状态、项目编号、项目类型、区域、版本、原始定位</span></div><div id="materialBody" style="margin-top:14px;color:var(--soft);">读取中…</div>';
+  document.getElementById("materialManifestPick").onclick=()=>document.getElementById("materialManifestFile").click();
+  document.getElementById("materialManifestTpl").onclick=()=>{const csv='标题,资料类型,文号,发布机关,效力状态,项目编号,项目类型,区域,版本,原始定位,备注\n示例政策,policy,深建规〔2026〕1号,深圳市住房建设局,current,,,深圳市,v1,原文件第12条,请删除示例行后填写';const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='正式资料批量接入清单模板.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
+  document.getElementById("materialManifestFile").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{if(!window.XLSX)await loadScript("xlsx.full.min.js");const wb=XLSX.read(await f.arrayBuffer(),{type:"array"}),rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:""});const pick=(r,...ks)=>{for(const k of ks)if(r[k]!==undefined&&r[k]!=="")return r[k];return "";};const assets=rows.map(r=>({title:pick(r,"标题","title","文件名"),document_type:pick(r,"资料类型","document_type")||"other",doc_no:pick(r,"文号","doc_no"),issuer:pick(r,"发布机关","issuer"),effect_status:pick(r,"效力状态","effect_status")||"unknown",project_no:pick(r,"项目编号","project_no"),project_type:pick(r,"项目类型","project_type"),region:pick(r,"区域","region"),version_no:pick(r,"版本","version_no"),source_ref:pick(r,"原始定位","source_ref"),note:pick(r,"备注","note")}));const d=await materialsApi({action:"bulkSaveAssets",assets});if(!d.ok)throw new Error(d.error||"导入失败");msg("批量登记完成：成功 "+d.accepted+"，失败 "+d.rejected,"ok");openMaterials();}catch(err){msg("批量导入失败："+err.message,"err");}};
+  try{
+    const [ad,wd,md]=await Promise.all([materialsApi({action:"listAssets"}),materialsApi({action:"listWorkbooks"}),materialsApi({action:"listMappings"})]);
+    const assets=ad.assets||[], wbs=wd.workbooks||[],maps=md.mappings||[]; const esc2=esc;
+    const effect={current:"现行/有效",revised:"已修订",expired:"已失效",unknown:"待核验"};
+    document.getElementById("materialBody").innerHTML='<div class="card" style="display:block;padding:14px 16px;"><b>资料台账</b><span style="color:var(--soft);font-size:12px;margin-left:8px;">'+assets.length+' 项</span><div style="margin-top:8px;">'+(assets.map(a=>'<div style="border-top:1px solid var(--line);padding:8px 0;"><b>'+esc2(a.title)+'</b><span style="font-size:11px;margin-left:7px;color:var(--bp);">'+esc2(a.document_type||"other")+'</span><span style="font-size:11px;margin-left:7px;color:var(--soft);">'+esc2(effect[a.effect_status]||"待核验")+'</span><span style="float:right;display:inline-flex;gap:5px;"><button class="btn sm ghost" data-asset-ver="'+esc2(a.id)+'">版本/效力</button><button class="btn sm red" data-asset-del="'+esc2(a.id)+'" data-rag-title="'+esc2(a.rag_title||'')+'">删除台账</button></span><div style="font-size:12px;color:var(--soft);margin-top:3px;">'+(a.doc_no?'文号：'+esc2(a.doc_no)+'　':'')+(a.project_no?'项目：'+esc2(a.project_no)+'　':'')+(a.region?'区域：'+esc2(a.region)+'　':'')+(a.source_ref?'来源：'+esc2(a.source_ref):'')+'</div></div>').join("")||'<span style="color:var(--soft);">尚未登记。请从 RAG 知识库上传区入库正式文件。</span>')+'</div></div>'
+      +'<div class="card" style="display:block;padding:14px 16px;margin-top:12px;"><b>Excel 精确来源库</b><span style="color:var(--soft);font-size:12px;margin-left:8px;">'+wbs.length+' 个工作簿</span><div style="margin-top:8px;">'+(wbs.map(w=>'<div style="border-top:1px solid var(--line);padding:8px 0;display:flex;gap:10px;align-items:center;"><div style="flex:1;"><b>'+esc2(w.title)+'</b><div style="font-size:12px;color:var(--soft);margin-top:3px;">'+(w.filename?esc2(w.filename)+'　':'')+(w.project_no?'项目：'+esc2(w.project_no)+'　':'')+'共 '+(w.sheet_count||0)+' 个 Sheet</div></div><button class="btn sm" data-wb="'+esc2(w.id)+'">查看/取数</button><button class="btn sm red" data-purge-wb="'+esc2(w.id)+'" data-asset="'+esc2(w.asset_id||'')+'" data-title="'+esc2(w.title)+'">删除资料</button></div>').join("")||'<span style="color:var(--soft);">暂无 Excel 工作簿。上传 xlsx/xls/xlsm 后会自动建立结构化索引。</span>')+'</div></div>'
+      +'<div class="card" style="display:block;padding:14px 16px;margin-top:12px;"><b>自动字段映射</b><span style="color:var(--soft);font-size:12px;margin-left:8px;">'+maps.length+' 项</span><div style="margin-top:8px;">'+(maps.map(m=>'<div style="border-top:1px solid var(--line);padding:7px 0;display:flex;gap:8px;align-items:center;"><b style="flex:1;">'+esc2(m.field_label||m.field_key)+'</b><span>'+esc2(m.project_type||'全部项目')+' / '+esc2(m.calc_type||'全部测算')+'</span><code>'+esc2(m.workbook_title)+'→'+esc2(m.sheet_name)+'!'+esc2(m.cell_address)+'</code><button class="btn sm red" data-del-map="'+esc2(m.id)+'">删除</button></div>').join("")||'<span style="color:var(--soft);">暂无映射；进入工作簿读取某个单元格后即可建立。</span>')+'</div></div>';
+    document.querySelectorAll("[data-wb]").forEach(b=>b.onclick=()=>openMaterialWorkbook(b.dataset.wb));
+    document.querySelectorAll("[data-asset-ver]").forEach(b=>b.onclick=()=>openAssetVersions(b.dataset.assetVer));
+    document.querySelectorAll("[data-asset-del]").forEach(b=>b.onclick=async()=>{if(!confirm("确定删除这条正式资料台账？其版本快照、Excel索引和字段映射也会一并删除；如已进入RAG，相关向量也会清理。此操作不可恢复。"))return;try{const d=await materialsApi({action:"deleteAsset",assetId:b.dataset.assetDel});if(!d.ok)throw new Error(d.error||"台账删除失败");if(b.dataset.ragTitle){const rr=await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"deleteByTitle",title:b.dataset.ragTitle})}),rd=await rr.json();if(!rd.ok)throw new Error(rd.error||"RAG清理失败");}msg("资料台账及关联索引已删除","ok");openMaterials();}catch(e){msg("删除失败："+e.message,"err");}});
+    document.querySelectorAll("[data-del-map]").forEach(b=>b.onclick=async()=>{if(!confirm("确定删除这条字段映射？"))return;const d=await materialsApi({action:"deleteMapping",id:b.dataset.delMap});msg(d.ok?"映射已删除":(d.error||"删除失败"),d.ok?"ok":"err");if(d.ok)openMaterials();});
+    document.querySelectorAll("[data-purge-wb]").forEach(b=>b.onclick=async()=>{if(!confirm("删除将移除该 Excel 的结构化索引、资料台账和 RAG 摘要，且不可恢复。是否继续？"))return; try{await materialsApi({action:"deleteWorkbook",workbookId:b.dataset.purgeWb}); if(b.dataset.asset)await materialsApi({action:"deleteAsset",assetId:b.dataset.asset}); const rr=await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"deleteByTitle",title:b.dataset.title})}),rd=await rr.json();if(!rd.ok)throw new Error(rd.error||"RAG清理失败"); try{const xs=JSON.parse(sessionStorage.getItem("projectExcelSources")||"[]").filter(x=>x.workbookId!==b.dataset.purgeWb);sessionStorage.setItem("projectExcelSources",JSON.stringify(xs));}catch(e){} msg("资料已删除","ok");openMaterials();}catch(e){msg("删除失败："+e.message,"err");}});
+  }catch(e){document.getElementById("materialBody").textContent="读取失败："+e.message;}
+}
+async function openMaterialWorkbook(id){
+  const box=document.getElementById("editBox"); box.innerHTML='<button class="btn ghost sm" id="materialsBack">返回资料台账</button><div id="workbookBody" style="margin-top:12px;color:var(--soft);">读取工作簿…</div>';
+  document.getElementById("materialsBack").onclick=openMaterials;
+  const d=await materialsApi({action:"getWorkbook",workbookId:id}); if(!d.ok){document.getElementById("workbookBody").textContent=d.error;return;}
+  const w=d.workbook,sheets=d.sheets||[]; document.getElementById("workbookBody").innerHTML='<h1 style="font-size:18px;">'+esc(w.title)+'</h1><div class="sub">选择 Sheet 后可按单元格坐标精确取数；返回值包含显示值、原始值、公式与可直接写入报告的来源定位。</div><div style="margin-top:14px;display:flex;gap:8px;align-items:center;"><select id="excelSheetPick">'+sheets.map(s=>'<option value="'+esc(s.name)+'">'+esc(s.name)+'（'+s.row_count+'行 × '+s.col_count+'列）</option>').join("")+'</select><input id="excelCellPick" placeholder="如 B15" style="padding:6px 8px;width:120px;"><button class="btn sm" id="excelReadCell">读取单元格</button></div><div id="excelCellResult" style="margin-top:12px;"></div><div style="margin-top:16px;"><b>Sheet 结构</b>'+sheets.map(s=>'<div style="border-top:1px solid var(--line);padding:8px 0;font-size:12px;"><b>'+esc(s.name)+'</b>　范围 '+esc(s.used_range)+'<div style="color:var(--soft);margin-top:3px;">表头：'+esc((JSON.parse(s.headers||"[]")||[]).filter(Boolean).join("｜").slice(0,300)||"未识别")+'</div></div>').join("")+'</div>';
+  document.getElementById("excelReadCell").onclick=async()=>{const sheetName=document.getElementById("excelSheetPick").value, address=document.getElementById("excelCellPick").value.trim().toUpperCase(),out=document.getElementById("excelCellResult"); if(!address){out.textContent="请输入单元格坐标，例如 B15";return;} const x=await materialsApi({action:"readExcelCell",workbookId:id,sheetName,address}); if(!x.ok){out.textContent=x.error;return;} const c=x.cell; out.innerHTML='<div class="msg ok"><b>'+esc(c.provenance.label)+'</b><br>显示值：'+esc(c.display_value)+'　原始值：'+esc(c.raw_value||"—")+(c.formula?'<br>公式：<code>'+esc(c.formula)+'</code>':'')+'<br><button class="btn sm" id="useExcelSource">加入本项目数字来源</button> <span style="font-size:12px;color:var(--soft);">加入后会随数值章节生成记录到报告溯源。</span></div><div style="border:1px solid var(--line);padding:10px;margin-top:8px;font-size:12px;"><b>建立自动字段映射</b><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><input id="mapFieldKey" placeholder="字段键，如 totalInvestment" style="padding:5px 7px;width:180px;"><input id="mapFieldLabel" placeholder="显示名，如 总投资" style="padding:5px 7px;width:130px;"><input id="mapProjectType" placeholder="项目类型，可留空" style="padding:5px 7px;width:120px;"><select id="mapCalcType" style="padding:5px 7px;"><option value="">全部测算</option><option value="rent">出租类</option><option value="gaibao">非居改保</option><option value="sale">出售类</option></select><button class="btn sm" id="saveExcelMap">保存映射</button></div></div>'; document.getElementById("useExcelSource").onclick=()=>{let xs=[];try{xs=JSON.parse(sessionStorage.getItem("projectExcelSources")||"[]");}catch(e){} const item={label:c.provenance.label,displayValue:c.display_value,formula:c.formula||"",sourceRef:c.provenance.sourceRef||"",workbookId:id,sheetName,address}; if(!xs.some(v=>v.label===item.label)){xs.push(item);sessionStorage.setItem("projectExcelSources",JSON.stringify(xs));} msg("已加入本项目数字来源（当前 "+xs.length+" 项）","ok");}; document.getElementById("saveExcelMap").onclick=async()=>{const field_key=document.getElementById("mapFieldKey").value.trim(),field_label=document.getElementById("mapFieldLabel").value.trim(); if(!field_key){msg("请填写字段键","err");return;} const d=await materialsApi({action:"saveMapping",mapping:{field_key,field_label,project_type:document.getElementById("mapProjectType").value.trim(),calc_type:document.getElementById("mapCalcType").value,workbook_id:id,sheet_name:sheetName,cell_address:address}}); msg(d.ok?"字段映射已保存":(d.error||"保存失败"),d.ok?"ok":"err");};};
+}
+async function openAssetVersions(id){
+  const box=document.getElementById("editBox");box.innerHTML='<button class="btn ghost sm" id="assetVerBack">返回资料台账</button><div id="assetVerBody" style="margin-top:12px;color:var(--soft);">读取版本…</div>';document.getElementById("assetVerBack").onclick=openMaterials;
+  const d=await materialsApi({action:"assetVersions",assetId:id});if(!d.ok){document.getElementById("assetVerBody").textContent=d.error;return;}const vs=d.versions||[],rels=d.relations||[];
+  document.getElementById("assetVerBody").innerHTML='<h1 style="font-size:18px;">版本与效力治理</h1><div class="sub">同一文号或同名资料再次入库会归入同一资产；每次不同内容保存为独立版本。</div><div style="margin-top:12px;">'+(vs.map(v=>'<div style="border-top:1px solid var(--line);padding:7px 0;"><b>'+esc(v.version_no||"未标版本")+'</b>　'+esc(v.effect_status||"unknown")+'　<span style="color:var(--soft);">'+new Date(Number(v.created_at)).toLocaleString("zh-CN")+'</span></div>').join("")||'暂无版本快照')+'</div>'+(vs.length>=2?'<div style="margin-top:12px;"><select id="verFrom">'+vs.map(v=>'<option value="'+esc(v.id)+'">'+esc(v.version_no)+'</option>').join("")+'</select> → <select id="verTo">'+vs.map(v=>'<option value="'+esc(v.id)+'">'+esc(v.version_no)+'</option>').join("")+'</select> <button class="btn sm" id="compareAssetVer">比较差异</button><div id="assetDiff" style="margin-top:8px;"></div></div>':'')+'<div style="margin-top:14px;"><b>政策关系</b>'+(rels.map(r=>'<div>'+esc(r.relation_type)+' → '+esc(r.target_doc_no)+'</div>').join("")||'<div style="color:var(--soft);">暂无替代/修订/废止关系</div>')+'</div>';
+  if(vs.length>=2)document.getElementById("compareAssetVer").onclick=async()=>{const x=await materialsApi({action:"compareVersions",fromVersionId:document.getElementById("verFrom").value,toVersionId:document.getElementById("verTo").value}),out=document.getElementById("assetDiff");out.innerHTML=x.ok?'<div class="msg ok"><b>新增 '+x.added.length+' 行；删除 '+x.removed.length+' 行</b><br><span style="color:var(--ok);">新增：</span><pre>'+esc(x.added.slice(0,30).join("\n")||"无")+'</pre><span style="color:var(--red);">删除：</span><pre>'+esc(x.removed.slice(0,30).join("\n")||"无")+'</pre></div>':'<div class="msg err">'+esc(x.error||"比较失败")+'</div>';};
 }
 
 
@@ -679,6 +844,7 @@ async function refreshRagFiles(){
       +'<span style="font-size:11px; padding:1px 7px; border:1px solid var(--line); border-radius:2px; color:var(--soft);">'+esc(f.category||"未分类")+'</span>'
       +'<span style="font-size:11px; color:'+LVC[lvl]+';">'+LVN[lvl]+'</span>'
       +'<span style="font-size:11px; color:'+(f.security==3?"#B7302B":f.security==2?"#8A6D1B":"#1F7A3D")+';">'+SECN[parseInt(f.security)||1]+'</span>'
+      +(f.doc_no?'<span title="'+esc((f.issuer?f.issuer+'｜':'')+(f.source_ref||''))+'" style="font-size:11px; padding:1px 6px; background:#EEF3FA; color:#2C6CA6;">'+esc(f.doc_no)+'</span>':'')
       +(f.dept_scope && f.dept_scope!=="全部门" ? '<span style="font-size:11px; padding:1px 6px; background:#EEF; color:#33a;">'+esc(f.dept_scope)+'</span>' : '')
       +((parseInt(f.version)||1) > 1 ? '<span title="'+(f.updated_at?"最近更新 "+new Date(f.updated_at).toLocaleDateString("zh-CN"):"")+'" style="font-size:11px; padding:1px 6px; border-radius:3px; background:#EEF3FA; color:#2C6CA6;">v'+f.version+'</span>' : '')
       +ragLifeBadge(f.effective_date, f.expiry_date)
@@ -807,7 +973,9 @@ async function ragTest(){
     if(!d.ok){ box.textContent = d.error; return; }
     box.innerHTML = (d.matches||[]).map(m=>'<div style="border:1px solid var(--line); background:#fff; padding:8px 10px; margin-top:8px;">'
       +'<b>'+esc(m.title||"")+'</b>'+(m.category?' <span style="font-size:11px; padding:0 6px; border:1px solid var(--line); color:var(--soft);">'+esc(m.category)+'</span>':'')+(m.level==1?' <span style="font-size:11px; color:#1F7A3D;">权威</span>':m.level==3?' <span style="font-size:11px; color:#888;">存档</span>':'')+' ｜ '+esc(m.chapter||"")+' / '+esc(m.section||"")+' ｜ 相似度 '+m.score+ragTierBadge(m.score)+(m.lifecycle && m.lifecycle!=="valid" ? ' <span style="font-size:11px; padding:0 6px; border-radius:3px; background:#FDECEA; color:#B7302B;">⚠'+esc(m.lifecycleNote||m.lifecycle)+'</span>' : '')+(m.rerankScore!==undefined?' <span style="color:#B7302B; font-weight:600;">｜重排 '+m.rerankScore+'</span>':'')
+      +(m.exact?' <span style="font-size:11px; padding:0 6px; border-radius:3px; background:#E8F1FB; color:#1A5FB4;">◎'+esc(m.exactReason||"精确命中")+'</span>':'')
       +(m.kwHits&&m.kwHits.length?' <span style="font-size:11px; color:#1a5fb4;">🔍命中词：'+esc(m.kwHits.join("、"))+'</span>':'')
+      +((m.docNo||m.issuer||m.sourceRef)?'<div style="font-size:11px; color:var(--soft); margin-top:4px;">'+(m.docNo?'文号：'+esc(m.docNo)+'　':'')+(m.issuer?'发布机关：'+esc(m.issuer)+'　':'')+(m.sourceRef?'原始定位：'+esc(m.sourceRef):'')+'</div>':'')
       +'<div style="color:var(--soft); margin-top:4px;">'+esc((m.text||"").slice(0,160))+'…</div>'
       +'<div style="margin-top:6px; font-size:11px;">这条结果对检索\''+esc(q)+'\'：<a href="javascript:void(0)" class="fb-good" data-q="'+esc(q)+'" data-t="'+esc(m.title||"")+'" style="margin:0 8px;">👍有用</a><a href="javascript:void(0)" class="fb-bad" data-q="'+esc(q)+'" data-t="'+esc(m.title||"")+'">👎无关</a></div>'
       +'</div>').join("") || "无结果";
@@ -1197,7 +1365,7 @@ async function openAiRules(){
     csList = (d.ok && d.config && d.config.calcstd)? d.config.calcstd : [];
     clLogic = Object.assign({gaibao:{},rent:{},sale:{}}, (d.ok && d.config && d.config.calclogic)||{});
     // 敏感性分析要用"测算参数管理"里已保存的系数覆盖(不是永远只测代码内置默认值)，这里一并取一份
-    if(d.ok && d.config) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},invest:{},metrics:[],score:[],sensitivity:{}}, d.config);
+    if(d.ok && d.config) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},invest:{},metrics:[],score:[],sensitivity:{},paramrules:{},paramdefaults:{}}, d.config);
   }catch(e){ arList = []; }
   arTab = "rules";
   renderAiRulesTab();
@@ -1414,7 +1582,7 @@ const SENS_METHOD_DEFS = [
 ];
 // 结果对象结构每改一次(比如这次新增methods字段)，之前存在localStorage里的旧格式缓存就读不出来了——
 // 靠这个版本号识别，版本不对的缓存直接当作没有，不强行渲染旧数据去崩页面
-const SENS_CACHE_VERSION = 2;
+const SENS_CACHE_VERSION = 3;
 function loadSensCache(type){
   let prev=null;
   try{ prev = JSON.parse(localStorage.getItem("sens_"+type)||"null"); }catch(e){ prev=null; }
@@ -1453,6 +1621,7 @@ function renderSensitivity(){
     +'<span id="sensStatus" style="font-size:12px; color:var(--soft);"></span>'
     +'</div>'
     +'<div id="sensResult" style="margin-top:14px;">' + (prev? sensTableHtml(prev, null) : '<div class="empty">还没跑过，点上面"运行分析"</div>') + '</div>'
+    +'<div style="margin-top:16px;padding:11px 13px;background:var(--line-soft);border:1px solid var(--line);font-size:12px;">专家默认值、行业规则兜底、上下限和人工确认要求已统一迁移到“测算参数管理 → 参数初值与来源治理”。<button class="btn sm ghost" id="goParamGov" style="margin-left:8px;">前往维护</button></div>'
     +'<div class="bar" style="margin-top:18px;"><button class="btn ghost" id="clBack2">返回列表</button></div>';
   document.getElementById("arTabRules").onclick = ()=>{ arTab="rules"; renderAiRulesTab(); };
   document.getElementById("arTabLogic").onclick = ()=>{ arTab="logic"; renderAiRulesTab(); };
@@ -1460,6 +1629,7 @@ function renderSensitivity(){
   document.getElementById("arTabStd").onclick = ()=>{ arTab="std"; renderAiRulesTab(); };
   document.querySelectorAll("[data-senstype]").forEach(b=>b.onclick=()=>{ clType=b.dataset.senstype; renderSensitivity(); });
   document.getElementById("runSens").onclick = runSensitivity;
+  document.getElementById("goParamGov").onclick = ()=>{ calcCfgTab="governance"; pgCfgType=clType; setActiveNav("btnCalcCfg"); openCalcCfg(); };
   document.getElementById("clBack2").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
 }
 function sensTableHtml(result, prevForDiff){
@@ -1479,7 +1649,7 @@ function sensTableHtml(result, prevForDiff){
           : (d>0? '<span style="color:var(--ok,#2E7D46);">↑'+d+'</span>' : '<span style="color:var(--red);">↓'+(-d)+'</span>');
       }
     }
-    let cells = '<td>'+(i+1)+'</td><td>'+esc(r.key)+'</td><td style="text-align:left;">'+esc(r.label||"")+'</td><td>'+esc(r.group)+'</td>';
+    let cells = '<td>'+(i+1)+'</td><td>'+esc(r.key)+'</td><td style="text-align:left;">'+esc(r.label||"")+'</td><td>'+esc(r.group)+'</td><td><b>'+esc(r.impactLabel||"未分级")+'</b></td>';
     if(result.methods.includes("sobol")) cells += '<td>'+(r.Si!==null?r.Si.toFixed(4):"—")+'</td><td>'+(r.STi!==null?r.STi.toFixed(4):"—")+'</td>';
     if(result.methods.includes("spearman")) cells += '<td>'+(r.spearmanRho!==null&&r.spearmanRho!==undefined?r.spearmanRho.toFixed(4):"—")+'</td>';
     if(result.methods.includes("src")) cells += '<td>'+(r.src!==null&&r.src!==undefined?r.src.toFixed(4):"—")+'</td>';
@@ -1487,7 +1657,7 @@ function sensTableHtml(result, prevForDiff){
     if(prevForDiff) cells += '<td>'+deltaHtml+'</td>';
     return '<tr>'+cells+'</tr>';
   }).join("");
-  let head = '<th>排名</th><th>参数</th><th>具体指标</th><th>分组</th>';
+  let head = '<th>排名</th><th>参数</th><th>具体指标</th><th>分组</th><th>影响等级</th>';
   if(result.methods.includes("sobol")) head += '<th>Si(一阶)</th><th>STi(总效应)</th>';
   if(result.methods.includes("spearman")) head += '<th>Spearman秩相关</th>';
   if(result.methods.includes("src")) head += '<th>标准化回归系数</th>';
@@ -1526,6 +1696,7 @@ async function runSensitivity(){
         ? "运行中…Sobol 参数 "+p.index+"/"+p.total+"："+(p.label||p.key)
         : "运行中…"+p.stage+" "+p.done+"/"+p.total;
     });
+    result.table = ParamGovernance.classifyParameters(result.table);
     const prev = loadSensCache(clType);
     result.savedAt = Date.now();
     document.getElementById("sensResult").innerHTML = sensTableHtml(result, prev);
@@ -1785,7 +1956,14 @@ const PARAM_DEFS = {
   ]},
 };
 const METRIC_VARS = "totalIncome(总收入) totalCost(总成本) totalTax(税金) totalNetProfit(净利润) totalNpv(净现值) irr(IRR) icr(利息保障倍数) totalSaleIncome(销售收入合计) rentalPvTotal(出租净收益现值) totalInterest(利息合计)";
-let calcCfg = {gaibao:{}, rent:{}, sale:{}, invest:{}, metrics:[], score:[], sensitivity:{}};
+let calcCfg = {gaibao:{}, rent:{}, sale:{}, invest:{}, metrics:[], score:[], sensitivity:{}, paramrules:{}, paramdefaults:{}};
+let calcCfgTab = "coeff";       // coeff | governance | metrics
+let pgCfgType = "rent";
+let paramCatalog = {defaults:{rent:{},sale:{},gaibao:{}},rules:{rent:[],sale:[],gaibao:[]},keyFields:{rent:[],sale:[],gaibao:[]},meta:{rent:{},sale:{},gaibao:{}}};
+let paramGovState = {rent:null,sale:null,gaibao:null};
+let paramGovWorking = {rent:null,sale:null,gaibao:null};
+let paramEvidenceRefs = [];
+let pgFilterText = "";
 
 async function openCalcCfg(){
   document.getElementById("listBox").style.display="none";
@@ -1793,29 +1971,139 @@ async function openCalcCfg(){
   box.style.display="block";
   box.innerHTML = '<div style="padding:30px 0; color:var(--soft);">加载配置中…</div>';
   try{
-    const r = await fetch("/api/calcconfig",{headers:authHeaders()});
-    const d = await r.json();
-    if(d.ok) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},invest:{},metrics:[],score:[],sensitivity:{}}, d.config);
+    const [cfgRes,catRes,govRes] = await Promise.all([
+      fetch("/api/calcconfig",{headers:authHeaders()}).then(r=>r.json()),
+      fetch("/api/aireport?catalog=1",{headers:authHeaders()}).then(r=>r.json()),
+      fetch("/api/paramgovernance?type="+encodeURIComponent(pgCfgType)+"&history=1",{headers:authHeaders()}).then(r=>r.json()),
+    ]);
+    if(cfgRes.ok) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},invest:{},metrics:[],score:[],sensitivity:{},paramrules:{},paramdefaults:{}}, cfgRes.config);
+    if(catRes.ok){paramCatalog = catRes;installCoeffCatalog();}
+    if(govRes.ok){paramGovState[pgCfgType]=govRes;paramEvidenceRefs=govRes.references||[];}
   }catch(e){}
   renderCalcCfg();
 }
+function installCoeffCatalog(){
+  paramCatalog.defaults=paramCatalog.defaults||{};paramCatalog.meta=paramCatalog.meta||{};paramCatalog.rules=paramCatalog.rules||{};
+  for(const [type,def] of Object.entries(PARAM_DEFS)){
+    const ct="coeff_"+type;paramCatalog.defaults[ct]={};paramCatalog.meta[ct]={};paramCatalog.rules[ct]=[];
+    for(const [key,label,dv] of def.params){paramCatalog.defaults[ct][key]=dv;paramCatalog.meta[ct][key]={label,unit:"公式标准",role:"policy_constant",sourcePolicy:"binding_rule",volatility:"low_frequency",confirmation:"recommended",impactLevel:"一般",input:true,derived:false};}
+  }
+}
+async function loadParamGovType(type){
+  if(paramGovState[type]) return;
+  const r=await fetch("/api/paramgovernance?type="+encodeURIComponent(type)+"&history=1",{headers:authHeaders()});
+  const d=await r.json(); if(!d.ok) throw new Error(d.error||"参数治理数据加载失败");
+  paramGovState[type]=d; if(!paramEvidenceRefs.length) paramEvidenceRefs=d.references||[];
+}
 function renderCalcCfg(){
   const box = document.getElementById("editBox");
+  const tabBtn=(key,label)=>'<button class="btn sm '+(calcCfgTab===key?'':'ghost')+'" data-cfgtab="'+key+'">'+label+'</button>';
   let html = '<h1 style="font-size:18px;">测算参数管理</h1>'
-    +'<div class="sub">修改后所有用户下次执行测算时生效。留空或恢复默认值即使用引擎内置口径。<b>改动会直接影响测算结果与"逐位一致"承诺，请确保有政策/口径依据后再改。</b></div>';
+    +'<div class="sub">统一管理计算公式系数、参数初值与来源、结果指标和评分。三类数据用途不同，已分子页展示，保存后所有用户下次测算或AI参数推荐时生效。</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;padding-bottom:12px;border-bottom:1px solid var(--line);">'
+    +tabBtn("coeff","① 公式与计算系数")+tabBtn("governance","② 参数初值与来源治理")+tabBtn("metrics","③ 结果指标与评分")+'</div>';
+  if(calcCfgTab==="coeff") html += calcCoeffConfigHtml();
+  else if(calcCfgTab==="governance") html += paramGovernanceConfigHtml(pgCfgType);
+  else html += calcMetricConfigHtml();
+  if(calcCfgTab==="governance") html += '<div class="bar" style="margin-top:18px;"><button class="btn ghost" id="suggestPgDraft">按现有规则生成待审核草稿</button><button class="btn ghost" id="savePgDraft">保存治理草稿</button><button class="btn" id="publishPg">审核并发布</button><button class="btn ghost" id="cfgBack">返回列表</button></div>';
+  else if(calcCfgTab==="metrics") html += '<div class="bar" style="margin-top:18px;"><button class="btn" id="saveCalcCfg">保存指标与评分</button><button class="btn ghost" id="cfgBack">返回列表</button></div>';
+  else html += '<div class="bar" style="margin-top:18px;"><button class="btn ghost" id="cfgBack">返回列表</button></div>';
+  box.innerHTML = html;
+  document.querySelectorAll("[data-cfgtab]").forEach(b=>b.onclick=()=>{readCfgForm();calcCfgTab=b.dataset.cfgtab;renderCalcCfg();});
+  document.querySelectorAll("[data-pgtype]").forEach(b=>b.onclick=async()=>{readCfgForm();pgCfgType=b.dataset.pgtype;try{await loadParamGovType(pgCfgType);}catch(e){msg(e.message,"err");}renderCalcCfg();});
+  const saveBtn=document.getElementById("saveCalcCfg"); if(saveBtn) saveBtn.onclick = saveCalcCfg;
+  const draftBtn=document.getElementById("savePgDraft"); if(draftBtn) draftBtn.onclick=saveParamGovernanceDraft;
+  const suggestBtn=document.getElementById("suggestPgDraft"); if(suggestBtn) suggestBtn.onclick=applyParamDraftSuggestions;
+  const publishBtn=document.getElementById("publishPg"); if(publishBtn) publishBtn.onclick=publishParamGovernance;
+  document.getElementById("cfgBack").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
+  const filter=document.getElementById("pgFilter");if(filter)filter.oninput=()=>{pgFilterText=filter.value.trim().toLowerCase();document.querySelectorAll(".pg-cfg-row").forEach(tr=>tr.style.display=!pgFilterText||tr.dataset.search.includes(pgFilterText)?"":"none");};
+  document.querySelectorAll("[data-pgevidence]").forEach(b=>b.onclick=()=>openPgEvidence(b.dataset.pgevidence));
+  document.querySelectorAll("[data-pgrestore]").forEach(b=>b.onclick=()=>restoreParamVersion(b.dataset.pgrestore,+b.dataset.version));
+  document.querySelectorAll("[data-pgack]").forEach(b=>b.onclick=()=>ackParamReview(b.dataset.pgack));
+  const addM=document.getElementById("addMetric"); if(addM) addM.onclick=()=>{readCfgForm();calcCfg.metrics.push({name:"",expr:"",scope:"all"});renderCalcCfg();};
+  document.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=()=>{readCfgForm();calcCfg.metrics.splice(+b.dataset.mdel,1);renderCalcCfg();});
+  const addS=document.getElementById("addScore"); if(addS) addS.onclick=()=>{readCfgForm();calcCfg.score.push({name:"",expr:"",dir:">=",goodV:"",midV:"",weight:10,scope:"all"});renderCalcCfg();};
+  document.querySelectorAll("[data-sdel]").forEach(b=>b.onclick=()=>{readCfgForm();calcCfg.score.splice(+b.dataset.sdel,1);renderCalcCfg();});
+  document.querySelectorAll("[data-gocoeff]").forEach(b=>b.onclick=async()=>{pgCfgType="coeff_"+b.dataset.gocoeff;calcCfgTab="governance";try{await loadParamGovType(pgCfgType);}catch(e){msg(e.message,"err");}renderCalcCfg();});
+}
+
+function calcCoeffConfigHtml(){
+  let html='<div class="sub" style="margin-top:14px;">这里展示当前已经发布、直接进入白箱公式的税率、单位成本和计算系数。为避免绕过依据和审核流程，本页改为只读；修改请进入对应的“公式常量治理”，先保存草稿再审核发布。</div>';
   for(const [type,def] of Object.entries(PARAM_DEFS)){
-    html += '<div style="margin-top:18px; font-weight:600;">'+def.label+'</div>'
-      +'<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:8px 14px; margin-top:8px;">'
-      + def.params.map(([k,label,dv])=>{
-          const cur = (calcCfg[type]&&calcCfg[type][k]!==undefined)? calcCfg[type][k] : "";
-          const changed = cur!=="" && parseFloat(cur)!==dv;
-          return '<div><label style="margin:4px 0 2px;'+(changed?'color:var(--red);font-weight:600;':'')+'">'+label+'<span style="color:#999;">（默认'+dv+'）</span></label>'
-            +'<input type="number" step="any" data-type="'+type+'" data-k="'+k+'" placeholder="'+dv+'" value="'+cur+'"></div>';
-        }).join("")
-      +'</div>';
+    html += '<div style="margin-top:18px;font-weight:600;display:flex;justify-content:space-between;align-items:center;">'+def.label+'<button class="btn sm ghost" data-gocoeff="'+type+'">管理该类常量依据与版本</button></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px 14px;margin-top:8px;">'
+      +def.params.map(([k,label,dv])=>{const cur=(calcCfg[type]&&calcCfg[type][k]!==undefined)?calcCfg[type][k]:"";const changed=cur!==""&&parseFloat(cur)!==dv;
+        return '<div><label style="margin:4px 0 2px;'+(changed?'color:var(--red);font-weight:600;':'')+'">'+label+'<span style="color:#999;">（内置'+dv+'）</span></label><input type="number" step="any" readonly title="请通过参数治理草稿发布修改" value="'+(cur!==""?cur:dv)+'"></div>';}).join("")+'</div>';
   }
-  // 自定义指标
-  html += '<div style="margin-top:22px; font-weight:600;">自定义结果指标</div>'
+  return html;
+}
+
+function pgCatalogLabel(type,key){
+  const meta=paramCatalog.meta&&paramCatalog.meta[type]&&paramCatalog.meta[type][key]; if(meta&&meta.label) return meta.label;
+  const reg=window.SensitivityCore&&SensitivityCore.REGISTRY&&SensitivityCore.REGISTRY[type];
+  const d=reg&&(reg.params||[]).find(x=>x.k===key); if(d) return d.label;
+  const kf=((paramCatalog.keyFields||{})[type]||[]).find(x=>x.key===key); return kf?kf.label:key;
+}
+function pgBuiltRules(type){
+  const api=(paramCatalog.rules&&paramCatalog.rules[type])||[];
+  const base=window.ParamGovernance?ParamGovernance.fallbackRuleTable(type,api):api;
+  const custom=(calcCfg.paramrules&&calcCfg.paramrules[type])||[];
+  return Object.fromEntries([...base,...custom].filter(x=>x&&x.key).map(x=>[x.key,Object.assign({},x)]));
+}
+function pgImpactLabels(type){
+  const sens=calcCfg.sensitivity&&calcCfg.sensitivity[type]; if(!sens||!Array.isArray(sens.table)) return {};
+  return Object.fromEntries(ParamGovernance.classifyParameters(sens.table).map(x=>[x.key,x.impactLabel]));
+}
+function pgDisplayDefault(v){ return Array.isArray(v)?v.join(","):String(v??""); }
+function pgOptionHtml(options,value){return (options||[]).map(x=>'<option value="'+esc(x.value)+'" '+(x.value===value?'selected':'')+'>'+esc(x.label)+'</option>').join("");}
+function pgWorkingRows(type){
+  if(paramGovWorking[type]) return paramGovWorking[type];
+  const defs=(paramCatalog.defaults&&paramCatalog.defaults[type])||{}, metas=(paramCatalog.meta&&paramCatalog.meta[type])||{}, isCoeff=type.startsWith("coeff_"),baseType=isCoeff?type.slice(6):type,rules=isCoeff?{}:pgBuiltRules(type), overrides=isCoeff?(calcCfg[baseType]||{}):((calcCfg.paramdefaults&&calcCfg.paramdefaults[type])||{}), impacts=isCoeff?{}:pgImpactLabels(type);
+  const saved=Object.fromEntries((((paramGovState[type]||{}).rows)||[]).map(x=>[x.param_key,x]));
+  const rows={};
+  Object.keys(defs).forEach(key=>{
+    const rec=saved[key], live=rec?(rec.status==="draft"?rec.draft:rec.published):null, meta=metas[key]||{}, rule=rules[key]||{}, hasOverride=Object.prototype.hasOwnProperty.call(overrides,key);
+    rows[key]=Object.assign({key,label:pgCatalogLabel(type,key),unit:meta.unit||"—",role:meta.role||"project_fact",sourcePolicy:meta.sourcePolicy||"project_document",volatility:meta.volatility||"project_specific",confirmation:meta.confirmation||"required",impactLevel:impacts[key]||meta.impactLevel||"一般",input:meta.input!==false,derived:!!meta.derived,
+      hasExpertOverride:hasOverride,expertValue:hasOverride?overrides[key]:defs[key],ruleValue:Number.isFinite(rule.value)?rule.value:null,min:Number.isFinite(rule.min)?rule.min:null,max:Number.isFinite(rule.max)?rule.max:null,region:rule.region||"",projectType:rule.projectType||"",basis:rule.basis||"",evidenceRefs:Array.isArray(rule.evidenceRefs)?rule.evidenceRefs:[],effectiveDate:rule.effectiveDate||"",expiryDate:rule.expiryDate||"",enabled:Number.isFinite(rule.value)&&rule.enabled!==false,manualRequired:rule.manualRequired!==false,status:rec?rec.status:(rule.version?"published":"builtin"),draftVersion:rec?Number(rec.draft_version||1):1,publishedVersion:rec?Number(rec.published_version||0):Number(rule.version||0)},live||{});
+  });
+  paramGovWorking[type]=rows; return rows;
+}
+function pgEvidenceCaption(row){const n=(row.evidenceRefs||[]).length;return n?"已关联 "+n+" 条依据":"选择知识依据";}
+function paramGovernanceConfigHtml(type){
+  const labels={rent:"出租输入",sale:"出售输入",gaibao:"非居改保输入",coeff_rent:"出租公式常量",coeff_sale:"出售公式常量",coeff_gaibao:"非居改保常量",coeff_invest:"投资估算常量"};
+  const tabs=Object.keys(labels).map(t=>'<button class="btn sm '+(t===type?'':'ghost')+'" data-pgtype="'+t+'">'+labels[t]+'</button>').join("");
+  const defs=(paramCatalog.defaults&&paramCatalog.defaults[type])||{}, working=pgWorkingRows(type),isCoeff=type.startsWith("coeff_"),roleOps=paramCatalog.roleOptions||[],sourceOps=paramCatalog.sourcePolicyOptions||[],volOps=paramCatalog.volatilityOptions||[],confirmOps=paramCatalog.confirmOptions||[];
+  const vals=Object.values(working),drafts=vals.filter(x=>x.status==="draft").length,core=vals.filter(x=>x.impactLevel==="核心").length,linked=vals.filter(x=>(x.evidenceRefs||[]).length).length;
+  const rows=Object.keys(defs).map(key=>{const row=working[key],builtin=defs[key],expertType=Array.isArray(builtin)?"array":typeof builtin,expertVal=row.hasExpertOverride?pgDisplayDefault(row.expertValue):"";
+    const search=(row.label+" "+key+" "+row.unit).toLowerCase();
+    return '<tr class="pg-cfg-row" data-key="'+key+'" data-vtype="'+expertType+'" data-search="'+esc(search)+'"><td style="position:sticky;left:0;background:#fff;z-index:1;"><div class="pg-param-cn">'+esc(row.label)+'</div><div class="pg-param-key">'+esc(key)+'｜'+esc(row.unit||"—")+'</div></td>'
+      +'<td><span class="pg-tag">'+esc(row.impactLevel||"未分析")+'</span></td><td><select class="pg-role">'+pgOptionHtml(roleOps,row.role)+'</select></td><td><select class="pg-source-policy">'+pgOptionHtml(sourceOps,row.sourcePolicy)+'</select></td><td><select class="pg-volatility">'+pgOptionHtml(volOps,row.volatility)+'</select></td><td><select class="pg-confirmation">'+pgOptionHtml(confirmOps,row.confirmation)+'</select></td>'
+      +'<td><input class="pg-expert" value="'+esc(expertVal)+'" placeholder="内置 '+esc(pgDisplayDefault(builtin))+'" title="留空使用代码内置值"></td><td><input class="pg-rule-value" type="number" step="any" value="'+(Number.isFinite(row.ruleValue)?row.ruleValue:"")+'"></td>'
+      +'<td style="display:flex;gap:4px;min-width:150px;"><input class="pg-min" type="number" step="any" placeholder="下限" value="'+(Number.isFinite(row.min)?row.min:"")+'"><input class="pg-max" type="number" step="any" placeholder="上限" value="'+(Number.isFinite(row.max)?row.max:"")+'"></td>'
+      +'<td><input class="pg-region" value="'+esc(row.region||"")+'" placeholder="全部地区"><input class="pg-project-type" value="'+esc(row.projectType||"")+'" placeholder="全部项目类型" style="margin-top:4px;"></td>'
+      +'<td><input class="pg-basis" value="'+esc(row.basis||"")+'" placeholder="依据摘要/条款"><button type="button" class="btn sm ghost pg-evidence-btn" data-pgevidence="'+key+'" style="margin-top:4px;">'+esc(pgEvidenceCaption(row))+'</button></td>'
+      +'<td><input class="pg-effective" type="date" value="'+esc(row.effectiveDate||"")+'"><input class="pg-expiry" type="date" value="'+esc(row.expiryDate||"")+'" style="margin-top:4px;"></td>'
+      +'<td style="text-align:center;"><input class="pg-enabled" type="checkbox" '+(row.enabled?'checked':'')+' title="启用行业规则"><div class="'+(row.status==="draft"?'pg-draft':'pg-published')+'" style="font-size:10px;margin-top:5px;">'+(row.status==="draft"?'待发布':row.status==="published"?'已发布':'内置基线')+' v'+(row.publishedVersion||0)+'</div></td></tr>';
+  }).join("");
+  const history=((paramGovState[type]||{}).history||[]).slice(0,12).map(x=>'<div style="font-size:11px;padding:5px 0;border-bottom:1px dashed var(--line-soft);display:flex;justify-content:space-between;gap:8px;"><span><code>'+esc(x.param_key)+'</code> v'+x.version+'｜'+esc(x.change_summary||"首次发布")+'｜'+esc(x.published_by||"")+'</span><button class="btn sm ghost" data-pgrestore="'+esc(x.param_key)+'" data-version="'+x.version+'">恢复为草稿</button></div>').join("");
+  const triggerLabels={formula_coefficient_change:"公式/系数变化",parameter_rule_change:"参数规则变化",input_schema_change:"输入结构变化",impact_classification_change:"影响等级变化",sensitivity_result_change:"敏感性排名变化"};
+  const reviewEvents=((paramGovState[type]||{}).reviewEvents||[]).map(x=>'<div style="padding:9px 10px;margin-top:6px;border-left:3px solid '+(x.severity==="high"?'var(--red)':'#D99A24')+';background:'+(x.severity==="high"?'#FFF3F1':'#FFF8E8')+';display:flex;justify-content:space-between;gap:10px;align-items:center;"><div><b>'+esc(triggerLabels[x.trigger_type]||x.trigger_type)+'：</b>'+esc(x.summary||"")+'<div style="font-size:10.5px;color:var(--soft);margin-top:3px;">'+new Date(Number(x.created_at)).toLocaleString("zh-CN")+'｜记录人 '+esc(x.created_by||"系统")+'；需重新检查敏感等级、异常规则和低影响联合扰动</div></div><button class="btn sm ghost" data-pgack="'+esc(x.id)+'">已完成重评估</button></div>').join("");
+  return '<div class="sub" style="margin-top:14px;margin-bottom:8px;">参数按“角色、来源、变化特征、影响等级、确认方式”多维治理。这里保存的是草稿；只有点击“审核并发布”后，专家默认值和行业规则才会进入正式测算。IRR、NPV等派生结果不进入本表。</div>'
+    +'<div class="pg-toolbar">'+tabs+'<input id="pgFilter" placeholder="搜索中文参数名或技术键" value="'+esc(pgFilterText)+'"></div>'
+    +'<div class="pg-summary"><div>输入参数<b>'+vals.length+'</b></div><div>核心参数<b>'+core+'</b></div><div>已关联知识依据<b>'+linked+'</b></div><div>待发布参数<b>'+drafts+'</b></div></div>'
+    +(reviewEvents?'<details open style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;color:#9A5D00;">待处理的重新评估提醒（'+((paramGovState[type]||{}).reviewEvents||[]).length+'）</summary>'+reviewEvents+'</details>':'')
+    +'<div style="overflow:auto;margin-top:12px;max-height:650px;border:1px solid var(--line);"><table class="tbl" style="min-width:2220px;width:100%;"><tr><th style="position:sticky;left:0;top:0;z-index:3;">中文参数名称</th><th>影响等级</th><th>参数角色</th><th>首选来源策略</th><th>变化特征</th><th>确认方式</th><th>'+(isCoeff?'拟发布覆盖值':'专家默认值')+'</th><th>'+(isCoeff?'参考建议值':'行业建议值')+'</th><th>合理区间</th><th>地区/项目范围</th><th>依据与知识库</th><th>生效/失效</th><th>规则状态</th></tr>'+rows+'</table></div>'
+    +(history?'<details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:600;">最近发布记录</summary>'+history+'</details>':'');
+}
+
+function openPgEvidence(key){
+  readCfgForm(); const row=pgWorkingRows(pgCfgType)[key]; if(!row)return; const selected=new Set((row.evidenceRefs||[]).map(x=>x.id));
+  const ov=document.createElement("div");ov.className="pg-modal";ov.innerHTML='<div class="pg-modal-box"><div style="font-weight:700;">为“'+esc(row.label)+'”选择知识依据</div><div class="sub" style="margin:4px 0 8px;">可关联正式资料、已发布Wiki、RAG精确条款和Excel单元格。最多8条；发布后参数推荐会同步返回这些依据。</div><input id="pgRefSearch" placeholder="搜索文件名、文号、条款或单元格"><div class="pg-ref-list" id="pgRefList"></div><div class="bar" style="margin:12px 0 0;"><button class="btn" id="pgRefOk">确定</button><button class="btn ghost" id="pgRefCancel">取消</button></div></div>';document.body.appendChild(ov);
+  const draw=()=>{const q=document.getElementById("pgRefSearch").value.trim().toLowerCase(),list=paramEvidenceRefs.filter(x=>!q||(x.label+" "+x.sourceRef).toLowerCase().includes(q)).slice(0,160);document.getElementById("pgRefList").innerHTML=list.length?list.map(x=>'<label class="pg-ref-item"><input type="checkbox" data-refid="'+esc(x.id)+'" '+(selected.has(x.id)?'checked':'')+'><span>'+esc(x.label)+'<small>'+esc([x.version,x.sourceRef,x.effectiveDate?"生效"+x.effectiveDate:"",x.expiryDate?"失效"+x.expiryDate:""].filter(Boolean).join("｜"))+'</small></span></label>').join(""):'<div class="empty">没有匹配依据；请先在正式资料台账、Wiki或Excel映射中接入资料。</div>';document.querySelectorAll("[data-refid]").forEach(c=>c.onchange=()=>{if(c.checked){if(selected.size>=8){c.checked=false;msg("每个参数最多关联8条依据","err");}else selected.add(c.dataset.refid);}else selected.delete(c.dataset.refid);});};
+  document.getElementById("pgRefSearch").oninput=draw;draw();document.getElementById("pgRefCancel").onclick=()=>ov.remove();document.getElementById("pgRefOk").onclick=()=>{row.evidenceRefs=paramEvidenceRefs.filter(x=>selected.has(x.id));ov.remove();renderCalcCfg();};
+}
+
+function calcMetricConfigHtml(){
+  return '<div style="margin-top:18px;font-weight:600;">自定义结果指标</div>'
     +'<div class="sub">公式可用变量：'+METRIC_VARS+'，支持 + - * / ( ) 与数字。示例：净利率(%) = totalNetProfit / totalIncome * 100</div>'
     +'<div id="metricList">'
     + (calcCfg.metrics||[]).map((m,i)=>metricRowHtml(m,i)).join("")
@@ -1826,25 +2114,7 @@ function renderCalcCfg(){
     +'<div id="scoreList">'
     + (calcCfg.score||[]).map((m,i)=>scoreRowHtml(m,i)).join("")
     +'</div>'
-    +'<span class="add-link" id="addScore" style="margin-left:0;">+ 添加评分规则</span>'
-    +'<div class="bar" style="margin-top:18px;">'
-    +'<button class="btn" id="saveCalcCfg">保存全部配置</button>'
-    +'<button class="btn ghost" id="cfgBack">返回列表</button></div>';
-  box.innerHTML = html;
-  document.getElementById("saveCalcCfg").onclick = saveCalcCfg;
-  document.getElementById("cfgBack").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
-  document.getElementById("addMetric").onclick = ()=>{
-    readCfgForm(); calcCfg.metrics.push({name:"",expr:"",scope:"all"}); renderCalcCfg();
-  };
-  document.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=()=>{
-    readCfgForm(); calcCfg.metrics.splice(+b.dataset.mdel,1); renderCalcCfg();
-  });
-  document.getElementById("addScore").onclick = ()=>{
-    readCfgForm(); calcCfg.score.push({name:"",expr:"",dir:">=",goodV:"",midV:"",weight:10,scope:"all"}); renderCalcCfg();
-  };
-  document.querySelectorAll("[data-sdel]").forEach(b=>b.onclick=()=>{
-    readCfgForm(); calcCfg.score.splice(+b.dataset.sdel,1); renderCalcCfg();
-  });
+    +'<span class="add-link" id="addScore" style="margin-left:0;">+ 添加评分规则</span>';
 }
 
 function scoreRowHtml(m,i){
@@ -1868,21 +2138,39 @@ function metricRowHtml(m,i){
     +'<select class="m-scope" data-i="'+i+'" style="width:110px;"><option value="all" '+sel("all")+'>全部类型</option><option value="gaibao" '+sel("gaibao")+'>非居改保</option><option value="rent" '+sel("rent")+'>出租类</option><option value="sale" '+sel("sale")+'>出售类</option></select>'
     +'<button class="btn sm red" data-mdel="'+i+'">×</button></div>';
 }
-function readCfgForm(){
+function pgParseExpertValue(raw,type){
+  if(type==="number"){ const n=Number(raw); return Number.isFinite(n)?n:null; }
+  if(type==="array") return raw.split(/[,，\s]+/).map(x=>Number(x)).filter(Number.isFinite);
+  if(type==="boolean") return /^(true|1|是)$/i.test(raw);
+  return raw;
+}
+function readCfgForm(markVersion){
   document.querySelectorAll("[data-type][data-k]").forEach(el=>{
     const t=el.dataset.type, k=el.dataset.k, v=el.value.trim();
     if(!calcCfg[t]) calcCfg[t]={};
     if(v==="") delete calcCfg[t][k];
     else calcCfg[t][k] = parseFloat(v);
   });
+  const pgRows=[...document.querySelectorAll(".pg-cfg-row")];
+  if(pgRows.length){
+    const type=pgCfgType, working=pgWorkingRows(type);
+    pgRows.forEach(tr=>{
+      const key=tr.dataset.key,row=working[key],raw=tr.querySelector(".pg-expert").value.trim(),before=JSON.stringify(row);
+      const num=cls=>{const v=tr.querySelector(cls).value.trim();return v===""?null:Number(v);};
+      row.hasExpertOverride=raw!==""; if(raw!==""){const parsed=pgParseExpertValue(raw,tr.dataset.vtype);if(parsed!==null)row.expertValue=parsed;}
+      row.ruleValue=num(".pg-rule-value");row.min=num(".pg-min");row.max=num(".pg-max");row.region=tr.querySelector(".pg-region").value.trim();row.projectType=tr.querySelector(".pg-project-type").value.trim();
+      row.basis=tr.querySelector(".pg-basis").value.trim();row.effectiveDate=tr.querySelector(".pg-effective").value;row.expiryDate=tr.querySelector(".pg-expiry").value;row.enabled=tr.querySelector(".pg-enabled").checked;
+      row.role=tr.querySelector(".pg-role").value;row.sourcePolicy=tr.querySelector(".pg-source-policy").value;row.volatility=tr.querySelector(".pg-volatility").value;row.confirmation=tr.querySelector(".pg-confirmation").value;row.manualRequired=row.confirmation!=="automatic";
+      if(before!==JSON.stringify(row))row.status="draft";
+    });
+  }
   const names=[...document.querySelectorAll(".m-name")], exprs=[...document.querySelectorAll(".m-expr")], scopes=[...document.querySelectorAll(".m-scope")];
-  calcCfg.metrics = names.map((n,i)=>({name:n.value.trim(), expr:exprs[i].value.trim(), scope:scopes[i].value}))
-    .filter(m=>m.name&&m.expr);
+  if(document.getElementById("metricList")) calcCfg.metrics = names.map((n,i)=>({name:n.value.trim(), expr:exprs[i].value.trim(), scope:scopes[i].value})).filter(m=>m.name&&m.expr);
   const sn=[...document.querySelectorAll(".sc-name")], se=[...document.querySelectorAll(".sc-expr")],
     sd=[...document.querySelectorAll(".sc-dir")], sg=[...document.querySelectorAll(".sc-good")],
     sm2=[...document.querySelectorAll(".sc-mid")], sw=[...document.querySelectorAll(".sc-w")],
     ss=[...document.querySelectorAll(".sc-scope")];
-  calcCfg.score = sn.map((n,i)=>({name:n.value.trim(), expr:se[i].value.trim(), dir:sd[i].value,
+  if(document.getElementById("scoreList")) calcCfg.score = sn.map((n,i)=>({name:n.value.trim(), expr:se[i].value.trim(), dir:sd[i].value,
     goodV:sg[i].value.trim(), midV:sm2[i].value.trim(), weight:parseFloat(sw[i].value)||0, scope:ss[i].value}))
     .filter(m=>m.name&&m.expr&&m.goodV!=="");
 }
@@ -1891,15 +2179,40 @@ async function saveCalcCfg(){
   const btn = document.getElementById("saveCalcCfg");
   btn.disabled=true; btn.textContent="保存中…";
   try{
-    for(const key of ["gaibao","rent","sale","invest","metrics","score"]){
+    for(const key of ["metrics","score"]){
       const r = await fetch("/api/calcconfig",{method:"POST",headers:authHeaders(),
         body:JSON.stringify({key, data:calcCfg[key]})});
       const d = await r.json();
-      if(!d.ok){ msg(d.error||"保存失败","err"); btn.disabled=false; btn.textContent="保存全部配置"; return; }
+      if(!d.ok){ msg(d.error||"保存失败","err"); btn.disabled=false; btn.textContent="保存指标与评分"; return; }
     }
     msg("配置已保存，所有用户下次测算生效","ok");
   }catch(e){ msg("网络错误","err"); }
-  btn.disabled=false; btn.textContent="保存全部配置";
+  btn.disabled=false; btn.textContent="保存指标与评分";
+}
+
+async function saveParamGovernanceDraft(silent){
+  readCfgForm();const btn=document.getElementById("savePgDraft");if(btn){btn.disabled=true;btn.textContent="保存草稿中…";}
+  try{const rows=Object.values(pgWorkingRows(pgCfgType)),r=await fetch("/api/paramgovernance",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"saveDraft",calcType:pgCfgType,rows})}),d=await r.json();if(!d.ok)throw new Error(d.error||"保存失败");paramGovState[pgCfgType]=null;paramGovWorking[pgCfgType]=null;await loadParamGovType(pgCfgType);if(!silent){msg(d.message||"草稿已保存","ok");renderCalcCfg();}return true;}catch(e){msg(e.message||"保存失败","err");return false;}finally{if(btn){btn.disabled=false;btn.textContent="保存治理草稿";}}
+}
+function applyParamDraftSuggestions(){
+  readCfgForm();if(!window.ParamGovernance)return;
+  const before=pgWorkingRows(pgCfgType),after=ParamGovernance.suggestDraftRows(before,pgCfgType,paramEvidenceRefs),changed=Object.keys(after).filter(k=>JSON.stringify(before[k])!==JSON.stringify(after[k]));
+  paramGovWorking[pgCfgType]=after;renderCalcCfg();
+  msg(changed.length?"已生成 "+changed.length+" 个待审核建议；尚未保存、尚未发布，请逐项核对依据":"当前类型没有可由现有规则安全补充的空白项","ok");
+}
+async function ackParamReview(id){
+  try{const r=await fetch("/api/paramgovernance",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"ackReview",calcType:pgCfgType,id})}),d=await r.json();if(!d.ok)throw new Error(d.error||"确认失败");paramGovState[pgCfgType]=null;await loadParamGovType(pgCfgType);msg(d.message,"ok");renderCalcCfg();}catch(e){msg(e.message||"确认失败","err");}
+}
+async function publishParamGovernance(){
+  const ok=await saveParamGovernanceDraft(true);if(!ok)return;
+  const working=pgWorkingRows(pgCfgType),changed=Object.values(working).filter(x=>x.status==="draft"),core=changed.filter(x=>x.impactLevel==="核心").length;
+  if(!confirm("将发布 "+changed.length+" 个参数草稿，其中核心参数 "+core+" 个。发布后会影响用户下次参数推荐和测算初值，是否继续？"))return;
+  const btn=document.getElementById("publishPg");btn.disabled=true;btn.textContent="发布中…";
+  try{const r=await fetch("/api/paramgovernance",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"publish",calcType:pgCfgType})}),d=await r.json();if(!d.ok)throw new Error(d.error||"发布失败");const cfg=await fetch("/api/calcconfig",{headers:authHeaders()}).then(x=>x.json());if(cfg.ok)calcCfg=Object.assign(calcCfg,cfg.config);paramGovState[pgCfgType]=null;paramGovWorking[pgCfgType]=null;await loadParamGovType(pgCfgType);msg((d.message||"发布完成")+"；共变更 "+(d.changes||[]).length+" 项","ok");renderCalcCfg();}catch(e){msg(e.message||"发布失败","err");}finally{btn.disabled=false;btn.textContent="审核并发布";}
+}
+async function restoreParamVersion(key,version){
+  if(!confirm("将 "+key+" 的历史版本 v"+version+" 恢复为待审核草稿。正式测算不会立即变化，是否继续？"))return;
+  try{const r=await fetch("/api/paramgovernance",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"restoreDraft",calcType:pgCfgType,key,version})}),d=await r.json();if(!d.ok)throw new Error(d.error||"恢复失败");paramGovState[pgCfgType]=null;paramGovWorking[pgCfgType]=null;await loadParamGovType(pgCfgType);msg(d.message,"ok");renderCalcCfg();}catch(e){msg(e.message||"恢复失败","err");}
 }
 
 async function loadList(){
@@ -2060,7 +2373,14 @@ else{
   document.getElementById("btnCalcCfg").onclick = ()=>{ setActiveNav("btnCalcCfg"); openCalcCfg(); };
   document.getElementById("btnExamples").onclick = ()=>{ setActiveNav("btnExamples"); openExamples(); };
   document.getElementById("btnAiRules").onclick = ()=>{ setActiveNav("btnAiRules"); openAiRules(); };
+  document.getElementById("btnWiki").onclick = ()=>{ setActiveNav("btnWiki"); openWiki(); };
   document.getElementById("btnRag").onclick = ()=>{ setActiveNav("btnRag"); openRag(); };
+  // 独立资料台账入口：动态插入可避免旧版静态导航缓存时出现重复菜单。
+  const materialsNav = document.createElement("div");
+  materialsNav.className = "nav-item"; materialsNav.id = "btnMaterials";
+  materialsNav.innerHTML = '<span class="ic">📦</span>正式资料台账';
+  document.getElementById("btnRag").insertAdjacentElement("afterend", materialsNav);
+  materialsNav.onclick = ()=>{ setActiveNav("btnMaterials"); openMaterials(); };
   document.getElementById("btnAgent").onclick = ()=>{ setActiveNav("btnAgent"); openAgentTraces(); };
   document.getElementById("btnCases").onclick = ()=>{ setActiveNav("btnCases"); openCalcCases(); };
   document.getElementById("btnPopulation").onclick = ()=>{ setActiveNav("btnPopulation"); openPopulation(); };

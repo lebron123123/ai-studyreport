@@ -112,7 +112,7 @@ const RENT_PARAMS = [
   {k:"rentDiscount", label:"租金折扣系数", lo:0.8, hi:1.0, group:"收入"},
   {k:"subsidyArea", label:"政府补贴对应面积(㎡)", lo:0, hi:10000, group:"收入"},
   {k:"subsidyPrice", label:"补贴单价(元/㎡/月)", lo:0, hi:30, group:"收入"},
-  {k:"subsidyDiscount", label:"补贴折扣系数", lo:0.2, hi:0.5, group:"收入"},
+  {k:"subsidyDiscount", label:"补贴折扣系数", lo:0.2, hi:1, group:"收入"},
   {k:"subsidyStableOcc", label:"补贴部分出租率", lo:0, hi:0.9, group:"收入"},
   {k:"parkCount", label:"车位个数", lo:300, hi:500, group:"收入"},
   {k:"parkPrice", label:"车位月租金(元/个)", lo:150, hi:300, group:"收入"},

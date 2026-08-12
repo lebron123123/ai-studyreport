@@ -154,6 +154,7 @@ function buildExportPayload(){
       const cf = s.prov.confidence;
       const parts = [];
       if(s.prov.hasCalcData) parts.push("内置公式测算数据");
+      if((s.prov.excelSources||[]).length) parts.push("Excel单元格：" + s.prov.excelSources.map(x=>x.label).join("、"));
       if((s.prov.kbDocs||[]).length) parts.push("资料库：" + s.prov.kbDocs.map(d=>d.title).join("、"));
       if((s.prov.rag||[]).length) parts.push("知识库：" + s.prov.rag.map(r=>r.title+"("+r.tier+r.score+")"
         + (r.lifecycle && r.lifecycle!=="valid" ? "⚠"+(r.lifecycleNote||"") : "")).join("；"));

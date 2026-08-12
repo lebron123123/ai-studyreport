@@ -40,11 +40,13 @@ test("medianMethod：完全没有案例时用行业默认值兜底", () => {
   assert.equal(r.value, 40);
 });
 
-test("linearMethod/rfMethod：现阶段必须显式报告未启用，不能编造数字", () => {
+test("linearMethod/rfMethod：白箱口径下永久退出正式投票，仅保留异常诊断身份", () => {
   const l = ParamEstimate.linearMethod("rent", [], []);
   const rf = ParamEstimate.rfMethod("rent", [], []);
   assert.equal(l.valid, false);
   assert.equal(rf.valid, false);
+  assert.equal(l.diagnosticOnly, true);
+  assert.equal(rf.diagnosticOnly, true);
   assert.ok(typeof l.reason === "string" && l.reason.length > 0);
   assert.ok(typeof rf.reason === "string" && rf.reason.length > 0);
 });

@@ -1,0 +1,192 @@
+/* ============================================================
+   project-workflow.js —— 可研项目持续协作内核
+   只保存确定状态和候选修改，不调用AI、不直接改DOM。
+   浏览器与Node测试共用，避免参数联动/版本逻辑散落在页面脚本里。
+   ============================================================ */
+(function(root){
+  "use strict";
+
+  const FINANCE_WORDS = /投资|资金|财务|收入|成本|费用|税|利润|现金流|偿债|融资|借款|回报|收益|敏感性|经济评价|盈利/;
+  const MARKET_WORDS = /市场|需求|租金|售价|出租|销售|去化|竞品|运营|经营|产品定位/;
+  const BUILD_WORDS = /建设|实施|进度|工期|工程|施工|招标|计划/;
+  const SCALE_WORDS = /规模|用地|面积|建筑|户型|车位|方案|总平面/;
+  const CONCLUSION_WORDS = /结论|建议|可行性|风险|综合评价/;
+
+  const METRIC_LABELS = {
+    irr:"全投资IRR", capitalIrr:"资本金IRR", totalNpv:"累计净现值",
+    totalIncome:"全周期总收入", totalCost:"全周期总成本", totalNetProfit:"净利润合计",
+    payback:"静态投资回收期", dynamicPayback:"动态投资回收期", icr:"利息备付率",
+    dscr:"偿债备付率", totalInvestment:"总投资", totalTax:"税费合计",
+  };
+
+  const PARAM_GROUPS = {
+    build:["buildStart","buildYears","operateYears","firstMonths","repayStart"],
+    scale:["area","saleArea","commArea","subsidyArea","totalBuildArea","landArea","landUseArea","parkCount","units"],
+    market:["rent","rentRate","rentSpan","stableOcc","rampOcc","occRamp","rentDiscount","saleAvgPrice","rate1","rate2","rate3","commRent","commRentRate","commStableOcc","parkPrice","collect"],
+    finance:["totalInvestment","invest","loan","loanAmount","loanRate","loanTotalYears","repay","repayAmount","discount","discountPct","constructionCost","landCost","deco","decorationCost","unitCost"],
+  };
+
+  function clone(v){ return v==null?v:JSON.parse(JSON.stringify(v)); }
+  function uid(prefix){
+    if(root.crypto && typeof root.crypto.randomUUID==="function") return prefix+"-"+root.crypto.randomUUID();
+    return prefix+"-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10);
+  }
+  function hash(value){
+    const s=JSON.stringify(value||{}); let h=2166136261;
+    for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); }
+    return (h>>>0).toString(16).padStart(8,"0");
+  }
+  function currentText(section){ return section&&section.editedHtml ? section.editedHtml : String(section&&section.content||""); }
+  function paramGroup(key){
+    for(const [g,keys] of Object.entries(PARAM_GROUPS)) if(keys.includes(key)) return g;
+    return "finance";
+  }
+  function sectionAffected(section,chapter,key){
+    const text=String((chapter&&chapter.name)||"")+" "+String((section&&section.t)||"");
+    const title=String((section&&section.t)||"");
+    const group=paramGroup(key);
+    if(section&&section.numeric) return true;
+    if(CONCLUSION_WORDS.test(text)) return true;
+    // 章节名只能提供语境，纯政策/法规/依据小节不能因为同章含“市场”就被租金变化误判为需重写。
+    if(group==="market" && MARKET_WORDS.test(text) && !/政策|法规|依据|建设方案|环境|节能|消防/.test(title)) return true;
+    if(group==="build" && BUILD_WORDS.test(text)) return true;
+    if(group==="scale" && (SCALE_WORDS.test(text)||MARKET_WORDS.test(text))) return true;
+    if(group==="finance" && FINANCE_WORDS.test(text)) return true;
+    return false;
+  }
+  function impactedSections(chapters,keys){
+    const out=[]; const uniq=[...new Set((keys||[]).filter(Boolean))];
+    (chapters||[]).forEach(c=>(c.sections||[]).forEach((s,si)=>{
+      const why=uniq.filter(k=>sectionAffected(s,c,k));
+      if(why.length) out.push({cn:c.cn,si,title:s.t,chapter:c.name,keys:why,locked:!!s.locked});
+    }));
+    return out;
+  }
+  function markImpacted(chapters,keys,reason){
+    const hits=impactedSections(chapters,keys);
+    hits.forEach(h=>{
+      const c=(chapters||[]).find(x=>String(x.cn)===String(h.cn)); const s=c&&c.sections[h.si]; if(!s)return;
+      s.syncStatus=s.locked?"locked-stale":"stale";
+      s.staleReason=reason||("参数变化："+h.keys.join("、"));
+      s.staleKeys=h.keys.slice();
+    });
+    return hits;
+  }
+  function clearSectionStale(section){
+    if(!section)return; section.syncStatus="current"; section.staleReason=""; section.staleKeys=[];
+  }
+  function summaryDiff(before,after){
+    const keys=[...new Set(Object.keys(before||{}).concat(Object.keys(after||{})))];
+    return keys.filter(k=>typeof (before||{})[k]==="number"||typeof (after||{})[k]==="number").map(k=>{
+      const a=Number((before||{})[k]),b=Number((after||{})[k]);
+      if(!Number.isFinite(a)||!Number.isFinite(b)||Math.abs(a-b)<1e-9)return null;
+      return {key:k,label:METRIC_LABELS[k]||k,before:a,after:b,delta:b-a,deltaPct:Math.abs(a)>1e-9?(b-a)/Math.abs(a)*100:null};
+    }).filter(Boolean).sort((a,b)=>Math.abs(b.deltaPct||0)-Math.abs(a.deltaPct||0));
+  }
+  function createCalcSnapshot(state,calcType,params,result,meta){
+    state=state||{}; state.calcSnapshots=Array.isArray(state.calcSnapshots)?state.calcSnapshots:[];
+    const nextVersion=state.calcSnapshots.reduce((n,x)=>Math.max(n,Number(x.version)||0),0)+1;
+    const snap={id:uid("calc"),version:nextVersion,createdAt:new Date().toISOString(),calcType,
+      params:clone(params||{}),summary:clone(result&&result.summary||{}),hash:hash({calcType,params,summary:result&&result.summary}),
+      reason:String(meta&&meta.reason||"测算确认"),confirmedBy:String(meta&&meta.confirmedBy||"")};
+    state.calcSnapshots.push(snap);if(state.calcSnapshots.length>50)state.calcSnapshots.splice(0,state.calcSnapshots.length-50);state.currentCalcSnapshotId=snap.id; return snap;
+  }
+  function createReportVersion(state,chapters,meta){
+    state=state||{}; state.reportVersions=Array.isArray(state.reportVersions)?state.reportVersions:[];
+    const body=(chapters||[]).map(c=>({cn:c.cn,name:c.name,checked:c.checked,sections:(c.sections||[]).map(s=>({t:s.t,numeric:!!s.numeric,content:s.content||"",editedHtml:s.editedHtml||null,locked:!!s.locked,syncStatus:s.syncStatus||"current",prov:clone(s.prov||null)}))}));
+    const nextVersion=state.reportVersions.reduce((n,x)=>Math.max(n,Number(x.version)||0),0)+1;
+    const ver={id:uid("report"),version:nextVersion,createdAt:new Date().toISOString(),
+      calcSnapshotId:state.currentCalcSnapshotId||null,reason:String(meta&&meta.reason||"报告保存"),chapters:body,hash:hash(body)};
+    const prev=state.reportVersions[state.reportVersions.length-1];
+    if(prev&&prev.hash===ver.hash&&prev.calcSnapshotId===ver.calcSnapshotId)return prev;
+    state.reportVersions.push(ver);if(state.reportVersions.length>5)state.reportVersions.splice(0,state.reportVersions.length-5);state.currentReportVersionId=ver.id; return ver;
+  }
+  function setCandidate(section,newText,instruction){
+    if(!section)return null;
+    const candidate={id:uid("patch"),createdAt:new Date().toISOString(),instruction:String(instruction||""),before:currentText(section),after:String(newText||"")};
+    section.pendingRevision=candidate; return candidate;
+  }
+  function acceptCandidate(section){
+    if(!section||!section.pendingRevision)return null;
+    section.undoStack=Array.isArray(section.undoStack)?section.undoStack:[];
+    section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null});
+    const c=section.pendingRevision; section.content=c.after; section.editedHtml=null; section.pendingRevision=null; clearSectionStale(section); return c;
+  }
+  function rejectCandidate(section){ if(!section)return; section.pendingRevision=null; }
+  function undoSection(section){
+    if(!section||!Array.isArray(section.undoStack)||!section.undoStack.length)return false;
+    const prev=section.undoStack.pop(); section.content=prev.content; section.editedHtml=prev.editedHtml; return true;
+  }
+  function escapeHtml(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  function simpleDiffHtml(before,after){
+    const a=String(before||""),b=String(after||"");
+    if(a===b)return '<div class="wf-diff-same">内容没有变化</div>';
+    return '<div class="wf-diff-cols"><div><b>修改前</b><div class="wf-diff-old">'+escapeHtml(a)+'</div></div><div><b>建议稿</b><div class="wf-diff-new">'+escapeHtml(b)+'</div></div></div>';
+  }
+  function ensureState(raw){
+    const s=raw&&typeof raw==="object"?raw:{};
+    if(!Array.isArray(s.calcSnapshots))s.calcSnapshots=[];
+    if(!Array.isArray(s.reportVersions))s.reportVersions=[];
+    return s;
+  }
+  function bulkConfirm(items){
+    let changed=0;
+    Array.from(items||[]).forEach(item=>{if(item&&!item.checked){item.checked=true;changed++;}});
+    return {total:Array.from(items||[]).length,changed};
+  }
+
+  /* AI可研对话流程只认“已经形成的业务结果”，不认页面刚好渲染了哪张旧卡片。
+     这样刷新、切换项目或旧会话缺少某张按钮卡时，都能恢复到唯一正确的下一步。 */
+  function aiReportStage(state){
+    state=state||{};
+    const chat=Array.isArray(state.chat)?state.chat:[];
+    const progress=chat.find(x=>x&&x.kind==="genProgress");
+    const delivered=chat.some(x=>x&&x.kind==="deliver");
+    if(delivered || (progress&&progress.active===false&&progress.stopped===false&&Number(progress.done)>=Number(progress.total))) return "delivered";
+    if((state.hasDoc || progress)&&state.suggested) return progress&&progress.stopped?"paused":"generating";
+    if(state.suggested&&(state.calcParams || state.calcSummary)) return "calculated";
+    if(state.suggested) return "suggested";
+    if(state.extracted) return "info";
+    return "empty";
+  }
+  function aiReportStageRank(stage){return {empty:0,info:1,suggested:2,calculated:3,generating:4,paused:4,delivered:5}[stage]||0;}
+  function resumeAppMode(savedMode,hasAiSession){
+    if(hasAiSession)return "aireport";
+    return ["report","calc","review","office","aireport"].includes(savedMode)?savedMode:"report";
+  }
+  function aiReportDirectAction(text){
+    const q=String(text||"").trim().replace(/[，。！？!?,.\s]/g,"");
+    if(/^(开始|进入|去|帮我|我要|进行|立即|现在)*(复核|审查|人工审查|复核与签发)$/.test(q))return "review";
+    return null;
+  }
+  function buildProjectDiagnostic(input){
+    input=input||{};
+    const project=clone(input.project||{}),summary=clone(input.summary||{}),params=input.params||{};
+    const anomalies=(input.anomalies||[]).map(x=>({severity:x.severity||"warn",key:x.key||"",label:x.label||x.key||"参数",message:x.message||"",rule:x.rule||"",currentValue:x.currentValue,referenceValue:x.referenceValue}));
+    const sensitivity=(input.sensitivity||[]).slice().sort((a,b)=>(Number(a.impactRank)||999)-(Number(b.impactRank)||999)).slice(0,10).map(x=>({key:x.key,label:x.label||x.key,impactLevel:x.impactLabel||x.impactLevel||"未分析",rank:x.impactRank||x.combinedRank||null,strength:Number.isFinite(x.STi)?x.STi:Number.isFinite(x.spearmanRho)?Math.abs(x.spearmanRho):null}));
+    const sources=Object.entries(input.sources||{}),sourceRisks=sources.filter(([,x])=>x&&(x.requiresManualConfirmation||x.confidence==="低")).map(([key,x])=>({key,label:(input.paramMeta&&input.paramMeta[key]&&input.paramMeta[key].label)||key,source:x.from||x.sourceLabel||"未说明",confidence:x.confidence||"低",manualRequired:!!x.requiresManualConfirmation}));
+    const sections=(input.sections||[]),stale=sections.filter(x=>x.status==="stale"),lockedStale=sections.filter(x=>x.status==="locked-stale"),pending=sections.filter(x=>x.pendingRevision);
+    const review=(input.reviewIssues||[]).map(x=>({severity:x.sev||x.severity||"info",chapter:x.chName||x.chapter||"",section:x.secTitle||x.title||"",message:x.msg||x.message||""}));
+    const actions=[];
+    anomalies.forEach(x=>actions.push({priority:x.severity==="error"?"高":"中",action:"核实并修正参数“"+x.label+"”",basisType:"硬规则/白箱异常",basis:x.message+(x.rule?"；依据："+x.rule:"")}));
+    if(stale.length)actions.push({priority:"高",action:"更新 "+stale.length+" 个未锁定的待同步章节",basisType:"流程状态",basis:"测算版本已变化，但正文仍对应旧快照"});
+    if(lockedStale.length)actions.push({priority:"高",action:"人工复核 "+lockedStale.length+" 个锁定且待同步章节",basisType:"流程状态",basis:"系统不会自动覆盖人工锁定正文"});
+    review.filter(x=>x.severity==="err"||x.severity==="warn").slice(0,10).forEach(x=>actions.push({priority:x.severity==="err"?"高":"中",action:"处理审查问题"+(x.section?"：“"+x.section+"”":""),basisType:"确定性审查",basis:x.message}));
+    if(sourceRisks.length)actions.push({priority:"中",action:"补强 "+sourceRisks.length+" 项低置信度或需人工确认的参数依据",basisType:"参数来源",basis:sourceRisks.slice(0,6).map(x=>x.label+"（"+x.source+"）").join("、")});
+    if(!sensitivity.length)actions.push({priority:"提示",action:"补跑或发布敏感性分析结果",basisType:"数据缺口",basis:"当前没有可用敏感性排序，不能可靠判断优化杠杆"});
+    const metricKeys=["irr","capitalIrr","totalNpv","totalIncome","totalCost","totalNetProfit","payback","dynamicPayback","icr","dscr","totalInvestment"];
+    const metrics=Object.fromEntries(metricKeys.filter(k=>summary[k]!==undefined&&summary[k]!==null).map(k=>[k,summary[k]]));
+    return {generatedAt:new Date().toISOString(),scope:"diagnosis_read_only",projectFacts:project,calcType:input.calcType||null,metrics,
+      dataAvailability:{hasCalculation:!!input.summary,hasSensitivity:!!sensitivity.length,hasReview:!!review.length,hasKnowledgeEvidence:!!(input.knowledgeEvidence||[]).length},
+      hardRuleAnomalies:anomalies,sensitivityTop:sensitivity,parameterSourceRisks:sourceRisks.slice(0,20),
+      reportStatus:{total:sections.length,current:sections.filter(x=>x.status==="current").length,stale:stale.length,lockedStale:lockedStale.length,pendingRevision:pending.length,items:sections.filter(x=>x.status!=="current"||x.pendingRevision).slice(0,30)},
+      reviewIssues:review.slice(0,30),knowledgeEvidence:clone(input.knowledgeEvidence||[]),actionCandidates:actions.slice(0,30),
+      guardrails:["财务数字来自白箱测算结果","异常结论来自硬规则检查","知识资料仅按检索匹配度作为依据","未提供的数据必须明确写暂无，不能推测","本工具只诊断，不修改参数或正文"]};
+  }
+
+  const api={clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,
+    createCalcSnapshot,createReportVersion,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,ensureState,bulkConfirm,
+    aiReportStage,aiReportStageRank,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,METRIC_LABELS};
+  root.ProjectWorkflow=api;
+  if(typeof module==="object"&&module.exports)module.exports=api;
+})(typeof window!=="undefined"?window:globalThis);

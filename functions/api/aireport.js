@@ -6,6 +6,7 @@
 // DELETE                                               清空对话进度
 import { verifyAuth, json } from "./_auth.js";
 import { adaptEnv } from "./_adapters.js";
+import { catalogFor, ROLE_OPTIONS, VOLATILITY_OPTIONS, CONFIRM_OPTIONS, SOURCE_POLICY_OPTIONS } from "./_paramcatalog.js";
 
 const TYPE_CN = { rent:"出租类", sale:"出售类", gaibao:"非居改保" };
 
@@ -46,6 +47,7 @@ const DEFAULTS = {
     interestBase:10600, rateDiscount:0.80, loanRate:3.5, discount:6, repay:1157.67,
   },
 };
+const PARAM_CATALOG = catalogFor(DEFAULTS);
 
 // 7个"关键参数"——前期灵敏度测试实测对IRR影响最大的字段，唯一需要人工确认的环节
 const KEY_FIELDS = {
@@ -76,6 +78,23 @@ const KEY_FIELDS = {
     { key:"units", label:"户数（总套数）" },
     { key:"deco", label:"装修单价（元/㎡）" },
   ],
+};
+// 与浏览器 paramgovernance.js 的内置兜底表保持同一业务口径；后台 calc_paramrules 可按key覆盖。
+// 这里只有确有规则依据的参数，其他字段继续明确标为“专家默认值”，不能一概冒充行业规则。
+export const BUILTIN_PARAM_RULES = {
+  rent:[
+    {key:"buildYears",value:4,basis:"建设期原则上不超过4年"},{key:"loanRate",value:3,basis:"贷款利率3%±0.3个百分点校核"},
+    {key:"discountPct",value:3.5,basis:"保障房项目常用审慎区间，须按项目性质确认"},{key:"rampOcc",value:0.7,basis:"首年出租率不高于75%"},
+    {key:"stableOcc",value:0.9,basis:"稳定期出租率不高于95%"},{key:"rentRate",value:5,basis:"租金递增率行业兜底，须结合合同确认"},
+    {key:"manageCoeff",value:0.9,basis:"公司分区域七档管理系数，未明确区域档位时须人工确认"}],
+  gaibao:[
+    {key:"buildYears",value:1,basis:"建设期原则上不超过4年"},{key:"loanRate",value:3,basis:"贷款利率3%±0.3个百分点校核"},
+    {key:"discount",value:6,basis:"行业兜底区间，须按项目性质确认"},{key:"rampOcc",value:0.75,basis:"首年出租率不高于75%"},
+    {key:"stableOcc",value:0.95,basis:"稳定期出租率不高于95%"},{key:"rentRate",value:5,basis:"租金递增率行业兜底，须结合合同确认"}],
+  sale:[
+    {key:"buildYears",value:5,basis:"出售类建设进度行业初值，须由项目计划确认"},{key:"loanRate",value:3,basis:"贷款利率3%±0.3个百分点校核"},
+    {key:"discountPct",value:3.5,basis:"行业兜底区间，须按项目性质确认"},{key:"rate1",value:1,basis:"销售计划须在0~100%内"},
+    {key:"commStableOcc",value:0.96,basis:"商业稳定出租率审慎上限，须由市场调研确认"}],
 };
 
 function median(nums){
@@ -119,6 +138,22 @@ export async function onRequestGet(context){
   const env = adaptEnv(context.env);
   const user = await verifyAuth(request, env);
   if(!user) return json({ok:false, error:"未登录或登录已过期"}, 401);
+  const url = new URL(request.url);
+  if(url.searchParams.get("catalog")==="1"){
+    return json({ok:true, defaults:DEFAULTS, rules:BUILTIN_PARAM_RULES, keyFields:KEY_FIELDS,
+      meta:PARAM_CATALOG, roleOptions:ROLE_OPTIONS, volatilityOptions:VOLATILITY_OPTIONS, confirmOptions:CONFIRM_OPTIONS, sourcePolicyOptions:SOURCE_POLICY_OPTIONS,
+      sourceHierarchy:["项目Excel/测算底稿","项目正式资料","适用政策/公司硬规则","同区域同类型案例中位数","其他同类型案例中位数","行业规则兜底","专家默认值"]});
+  }
+  const projectId = String(url.searchParams.get("projectId")||"").trim();
+  if(projectId){
+    try{
+      const row = await env.DB.prepare("SELECT data, updated_at FROM aireport_project_sessions WHERE user_id=? AND project_id=?")
+        .bind(user.userId, projectId).first();
+      if(!row) return json({ok:true,state:null,projectId});
+      let state=null; try{state=JSON.parse(row.data);}catch(e){}
+      return json({ok:true,state,projectId,updated_at:row.updated_at});
+    }catch(e){ return json({ok:true,state:null,projectId,migrationRequired:true}); }
+  }
   try{
     const row = await env.DB.prepare("SELECT data, updated_at FROM aireport_sessions WHERE user_id=?")
       .bind(user.userId).first();
@@ -137,7 +172,11 @@ export async function onRequestDelete(context){
   const env = adaptEnv(context.env);
   const user = await verifyAuth(request, env);
   if(!user) return json({ok:false, error:"未登录或登录已过期"}, 401);
-  try{ await env.DB.prepare("DELETE FROM aireport_sessions WHERE user_id=?").bind(user.userId).run(); }catch(e){}
+  const url=new URL(request.url), projectId=String(url.searchParams.get("projectId")||"").trim();
+  try{
+    if(projectId) await env.DB.prepare("DELETE FROM aireport_project_sessions WHERE user_id=? AND project_id=?").bind(user.userId,projectId).run();
+    else await env.DB.prepare("DELETE FROM aireport_sessions WHERE user_id=?").bind(user.userId).run();
+  }catch(e){}
   return json({ok:true});
 }
 
@@ -161,7 +200,16 @@ async function doSaveState(context, body, user){
   const dataStr = JSON.stringify(body.state||{});
   if(dataStr.length > 400000) return json({ok:false, error:"对话内容过大，无法保存"}, 413);
   const now = Date.now();
+  const projectId=String(body.projectId||"").trim();
   try{
+    if(projectId){
+      if(!/^[A-Za-z0-9-]{8,64}$/.test(projectId)) return json({ok:false,error:"项目ID非法"},400);
+      const id="airs-"+user.userId+"-"+projectId;
+      const exist=await env.DB.prepare("SELECT id FROM aireport_project_sessions WHERE user_id=? AND project_id=?").bind(user.userId,projectId).first();
+      if(exist) await env.DB.prepare("UPDATE aireport_project_sessions SET data=?, updated_at=? WHERE user_id=? AND project_id=?").bind(dataStr,now,user.userId,projectId).run();
+      else await env.DB.prepare("INSERT INTO aireport_project_sessions(id,user_id,project_id,data,updated_at) VALUES(?,?,?,?,?)").bind(id,user.userId,projectId,dataStr,now).run();
+      return json({ok:true,projectId});
+    }
     const exist = await env.DB.prepare("SELECT user_id FROM aireport_sessions WHERE user_id=?").bind(user.userId).first();
     if(exist){
       await env.DB.prepare("UPDATE aireport_sessions SET data=?, updated_at=? WHERE user_id=?")
@@ -253,6 +301,21 @@ async function doSuggest(context, body){
   const calcType = String(body.calcType||"");
   if(!DEFAULTS[calcType]) return json({ok:false, error:"测算类型不合法"}, 400);
   const location = String(body.location||"").trim();
+  const projectType = String(body.projectType||"").trim();
+  const today = new Date().toISOString().slice(0,10);
+  const explicitParams = (body.explicitParams && typeof body.explicitParams==="object") ? body.explicitParams : {};
+
+  let expertOverrides = {};
+  try{
+    const row = await env.DB.prepare("SELECT data FROM configs WHERE key=?").bind("calc_paramdefaults").first();
+    const all = row ? JSON.parse(row.data||"{}") : {};
+    expertOverrides = all[calcType] && typeof all[calcType]==="object" ? all[calcType] : {};
+  }catch(e){ expertOverrides={}; }
+  try{
+    const q=await env.DB.prepare("SELECT param_key,published_data FROM param_governance WHERE calc_type=? AND status='published'").bind(calcType).all(),day=new Date().toISOString().slice(0,10);
+    for(const x of q.results||[]){let d={};try{d=JSON.parse(x.published_data||"{}");}catch(e){}delete expertOverrides[x.param_key];const active=(!d.effectiveDate||d.effectiveDate<=day)&&(!d.expiryDate||d.expiryDate>=day);if(active&&d.hasExpertOverride&&!d.derived&&d.input!==false)expertOverrides[x.param_key]=d.expertValue;}
+  }catch(e){/* 参数治理表尚未初始化时继续使用兼容配置 */}
+  const effectiveDefaults = Object.assign({}, DEFAULTS[calcType], expertOverrides);
 
   let sensAll = null;
   try{
@@ -263,6 +326,14 @@ async function doSuggest(context, body){
     sensAll = null;
   }
   const keyFields = resolveKeyFields(calcType, sensAll);
+
+  let configuredRules = [];
+  try{
+    const row = await env.DB.prepare("SELECT data FROM configs WHERE key=?").bind("calc_paramrules").first();
+    const all = row ? JSON.parse(row.data||"{}") : {};
+    configuredRules = Array.isArray(all[calcType]) ? all[calcType] : [];
+  }catch(e){ configuredRules=[]; }
+  const configuredRuleMap = Object.fromEntries([...(BUILTIN_PARAM_RULES[calcType]||[]),...configuredRules].filter(x=>x&&x.key).map(x=>[x.key,x]));
 
   let cases = [];
   try{
@@ -289,18 +360,41 @@ async function doSuggest(context, body){
     evidence: hits.map(c=>({ name:c.name, value:c.params[key] })),
   });
 
-  const params = Object.assign({}, DEFAULTS[calcType]);
+  const params = Object.assign({}, effectiveDefaults);
   const sources = {};
-  keyFields.forEach(f=>{
-    const regionHits = regionCases.filter(c=>typeof c.params[f.key]==="number");
-    const otherHits = otherCases.filter(c=>typeof c.params[f.key]==="number");
-    const src = regionHits.length ? mkSource(regionHits, f.key, "个同区域案例中位数", regionHits.length>=2?"高":"中")
-      : otherHits.length ? mkSource(otherHits, f.key, "个案例中位数（非本区域，仅供参考）", "中")
-      : { value: DEFAULTS[calcType][f.key], from:"行业默认值，无历史案例，请务必人工核实", confidence:"低", evidence:[] };
-    params[f.key] = src.value;
-    sources[f.key] = src;
+  const keyInfo = Object.fromEntries(keyFields.map(f=>[f.key,f]));
+  Object.keys(params).forEach(key=>{
+    const f = keyInfo[key] || {key,label:key};
+    const meta=(PARAM_CATALOG[calcType]&&PARAM_CATALOG[calcType][key])||{};
+    const regionHits = regionCases.filter(c=>typeof c.params[key]==="number");
+    const otherHits = otherCases.filter(c=>typeof c.params[key]==="number");
+    const candidateRule=configuredRuleMap[key];
+    const regionOk=!candidateRule||!candidateRule.region||sameRegion(candidateRule.region,location);
+    const projectOk=!candidateRule||!candidateRule.projectType||!projectType||sameRegion(candidateRule.projectType,projectType);
+    const dateOk=!candidateRule||(!candidateRule.effectiveDate||candidateRule.effectiveDate<=today)&&(!candidateRule.expiryDate||candidateRule.expiryDate>=today);
+    const rule=candidateRule&&candidateRule.enabled!==false&&regionOk&&projectOk&&dateOk&&Number.isFinite(candidateRule.value)?candidateRule:null;
+    const ruleSource=()=>({value:rule.value,from:"行业/制度规则："+(rule.basis||rule.label||f.label),confidence:rule.evidenceRefs&&rule.evidenceRefs.length?"中":"低",evidence:Array.isArray(rule.evidenceRefs)?rule.evidenceRefs:[],sourceCode:rule.role==="policy_constant"?"binding_rule":"industry_fallback",sourceLevel:rule.role==="policy_constant"?3:6,requiresManualConfirmation:rule.manualRequired!==false,basis:rule.basis||"",version:rule.version||null,effectiveDate:rule.effectiveDate||"",expiryDate:rule.expiryDate||""});
+    const expertSource=()=>({value:effectiveDefaults[key],from:"专家默认值/占位初值（尚无适用的高等级来源）",confidence:"低",evidence:[],sourceCode:"expert_default",sourceLevel:7,requiresManualConfirmation:true,basis:""});
+    let src;
+    const explicitValue=explicitParams[key],hasExplicit=Object.prototype.hasOwnProperty.call(explicitParams,key)&&((typeof explicitValue==="number"&&isFinite(explicitValue))||typeof explicitValue==="string"||Array.isArray(explicitValue));
+    if(hasExplicit){
+      src={value:explicitValue,from:"项目正式资料/信息卡",confidence:"高",evidence:[],sourceCode:"project_document",sourceLevel:2,requiresManualConfirmation:false};
+    }else if(rule && (meta.sourcePolicy==="binding_rule"||meta.sourcePolicy==="industry_fallback")){
+      src=ruleSource();
+    }else if(meta.sourcePolicy==="project_document"||meta.sourcePolicy==="manual_decision"){
+      // 项目事实和管理决策不能拿别的项目中位数冒充本项目数据；缺资料时只给低置信度占位值。
+      src=expertSource();
+    }else if(regionHits.length){
+      src=Object.assign(mkSource(regionHits,key,"个同区域案例中位数",regionHits.length>=2?"高":"中"),{sourceCode:"regional_case",sourceLevel:4,requiresManualConfirmation:true});
+    }else if(otherHits.length){
+      src=Object.assign(mkSource(otherHits,key,"个案例中位数（非本区域，仅供参考）","中"),{sourceCode:"general_case",sourceLevel:5,requiresManualConfirmation:true});
+    }else if(rule) src=ruleSource();
+    else src=expertSource();
+    params[key] = src.value;
+    sources[key] = src;
   });
 
-  return json({ok:true, params, sources, keyFields, caseCount:cases.length, regionCaseCount:regionCases.length,
-    keyFieldsSource: keyFields===KEY_FIELDS[calcType] ? "manual" : "sensitivity"});
+  return json({ok:true, params, sources, keyFields, paramMeta:PARAM_CATALOG[calcType], caseCount:cases.length, regionCaseCount:regionCases.length,
+    keyFieldsSource: keyFields===KEY_FIELDS[calcType] ? "manual" : "sensitivity",
+    sourceHierarchy:["项目Excel/测算底稿","项目正式资料","适用政策/公司硬规则","同区域同类型案例中位数","其他同类型案例中位数","行业规则兜底","专家默认值"]});
 }

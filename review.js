@@ -250,6 +250,15 @@ function calcStdHardChecks(calcParams, investCfg){
   }
   return out;
 }
+function excelMappingChecks(maps, calcParams, calcSummary, fullText){
+  const out=[]; (maps||[]).forEach(m=>{
+    const excelValue=parseFloat(String(m.raw_value||m.display_value||"").replace(/,/g,"")); if(!Number.isFinite(excelValue))return;
+    const engine=(calcParams&&typeof calcParams[m.field_key]==="number")?calcParams[m.field_key]:(calcSummary&&typeof calcSummary[m.field_key]==="number"?calcSummary[m.field_key]:null);
+    const label=m.field_label||m.field_key,source="《"+(m.workbook_title||"")+"》→"+m.sheet_name+"!"+m.cell_address,tol=Math.max(Math.abs(excelValue)*0.005,0.01);
+    if(typeof engine==="number"&&Math.abs(engine-excelValue)>tol)out.push({sev:"err",msg:label+"：Excel值 "+excelValue+" 与测算引擎值 "+engine+" 不一致（来源："+source+"）"});
+    const re=new RegExp(label+"[^。\\n]{0,30}?(-?[\\d,]+(?:\\.\\d+)?)","g");let mm;while((mm=re.exec(fullText||""))){const v=parseFloat(mm[1].replace(/,/g,""));if(Number.isFinite(v)&&Math.abs(v-excelValue)>tol)out.push({sev:"err",msg:label+"：正文值 "+mm[1]+" 与Excel值 "+excelValue+" 不一致（来源："+source+"）"});}
+  });return out;
+}
 
 /* ================= 可研审核 · 硬规则检查（零AI成本，确定性） ================= */
 function runAudit(){
@@ -315,6 +324,19 @@ function runAudit(){
       issues.push({sev, cn:"—", si:null, secTitle:"", chName:"测算参数核查(编制标准)", msg});
     });
   }
+  // Excel 单元格来源进入签发前审核：已选数字来源必须仍能定位，且没有重复坐标。
+  if(appMode!=="review"){
+    let xs=[]; try{ xs=JSON.parse(sessionStorage.getItem("projectExcelSources")||"[]")||[]; }catch(e){}
+    const seenExcel=new Set();
+    xs.forEach(x=>{ const k=(x.workbookId||"")+"|"+(x.sheetName||"")+"|"+(x.address||"");
+      if(!x.label||!x.address) issues.push({sev:"warn",cn:"—",si:null,secTitle:"",chName:"Excel数字溯源",msg:"存在缺少单元格定位的 Excel 来源，不能作为签发依据"});
+      else if(seenExcel.has(k)) issues.push({sev:"info",cn:"—",si:null,secTitle:"",chName:"Excel数字溯源",msg:"Excel 来源 "+x.label+" 被重复选择，建议保留一条"});
+      seenExcel.add(k);
+    });
+    // 自动字段映射三方核对：Excel原始值 ↔ 测算引擎 ↔ 报告正文。
+    let maps=[]; try{maps=JSON.parse(sessionStorage.getItem("resolvedExcelMappings")||"[]")||[];}catch(e){}
+    excelMappingChecks(maps,calcParams,calcResult&&calcResult.summary,fullText).forEach(x=>issues.push({sev:x.sev,cn:"—",si:null,secTitle:"",chName:"Excel映射三方核对",msg:x.msg}));
+  }
   return issues;
 }
 function auditPanelHtml(issues){
@@ -334,9 +356,11 @@ function auditPanelHtml(issues){
 
 function stepReview(){
   const active = chapters.filter(c=>c.checked);
+  const staleCount=active.reduce((n,c)=>n+c.sections.filter(s=>s.syncStatus==="stale"||s.syncStatus==="locked-stale").length,0);
   let inner = active.map(c=>'<div class="chapter-block"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
     + c.sections.map((s,si)=>'<div class="section-block" data-cn="'+c.cn+'" data-si="'+si+'"><h4>'+s.t+'<button class="regen-btn" data-cn="'+c.cn+'" data-si="'+si+'" title="用AI重写本节">↻ 重写</button><button class="regen-btn rev-toggle" data-cn="'+c.cn+'" data-si="'+si+'" title="提修改意见，AI按要求改">✎ AI修改</button></h4>'
         +'<div class="body" contenteditable="true">'+(s.editedHtml? s.editedHtml : (s.content? renderContent(s.content) : "（该子章节未生成）"))+'</div>'
+        + workflowSectionHtml(c,s,si)
         +'<div class="revise-bar" style="display:none;"><input type="text" class="rev-input" placeholder="修改意见，如：数据分析太浅，应结合敏感性分析展开；语气再正式一些…"><button class="btn rev-go" data-cn="'+c.cn+'" data-si="'+si+'" style="padding:7px 16px; font-size:12px; flex-shrink:0;">按要求修改</button></div>'
         +(s.numeric?'<div class="data-flag">⚠ 请核对/替换为真实数据后再签发</div>':'')+'</div>').join("")
     +'</div>').join("");
@@ -344,6 +368,8 @@ function stepReview(){
     +'<h1 class="doc-title">'+(project.name||"（未命名项目）")+'可行性研究报告</h1>'
     +(!signed?'<div class="watermark">AI初稿 · 未经复核</div>':'')
     + archiveCardHtml()
+    + workflowVersionCardHtml()
+    +(staleCount?'<div class="wf-sync-banner"><b>'+staleCount+'个小节需要同步或复核</b><span>测算或依据已变化，旧正文不再标记为最新。</span><button class="btn" id="wfUpdateStale">只更新未锁定的受影响章节</button></div>':'')
     +'<div class="step-desc">每一段正文可直接点击编辑。数据类子章节的表格须由人工替换为真实测算结果后，方可确认签发。</div>'
     +'<div class="cf-chart" style="margin:0 0 16px;"><div class="cf-head"><span>签发前审核检查</span><span style="display:flex; gap:8px;"><button class="ub-btn" id="auditBtn">运行审核检查</button><button class="ub-btn" id="aiAuditBtn">AI深度审核</button></span></div><div id="aiAuditBox" style="font-size:12.5px; display:none;"></div><div id="auditBox" style="font-size:12.5px;"><span style="color:var(--ink-soft);">检查项：内容完整性（未生成/待填）、规范性（篇幅/数据表格/AI穿帮语）、全文与测算结果的数据一致性。</span></div></div>'
     + inner
@@ -351,6 +377,35 @@ function stepReview(){
     +'<div class="actions"><button class="btn ghost" id="backStep4r">← 返回生成</button>'
     +'<button class="btn ghost" id="exportWordBtn">导出 Word</button>'
     +(!signed?'<button class="btn" id="signBtn">人工复核 · 确认签发</button>':'<button class="btn" id="printBtn">打印</button>')+'</div>';
+}
+
+function workflowVersionCardHtml(){
+  const cs=projectWorkflow&&projectWorkflow.calcSnapshots||[],rs=projectWorkflow&&projectWorkflow.reportVersions||[];
+  const curC=cs.find(x=>x.id===projectWorkflow.currentCalcSnapshotId)||cs[cs.length-1],curR=rs.find(x=>x.id===projectWorkflow.currentReportVersionId)||rs[rs.length-1];
+  const opts=rs.slice().reverse().map(v=>'<option value="'+v.id+'" '+(curR&&v.id===curR.id?'selected':'')+'>报告V'+v.version+' · '+new Date(v.createdAt).toLocaleString('zh-CN')+' · '+escapeHtml(v.reason||'')+'</option>').join('');
+  return '<div class="wf-version-card"><div><b>当前版本</b><div>测算 '+(curC?'V'+curC.version+' · '+escapeHtml(curC.reason):'尚未建立')+'｜报告 '+(curR?'V'+curR.version+' · 绑定测算'+(curR.calcSnapshotId?(cs.find(x=>x.id===curR.calcSnapshotId)?.version||'—'):'—'):'尚未建立')+'</div></div>'
+    +(opts?'<div class="wf-version-restore"><select id="wfReportVersion">'+opts+'</select><button class="ub-btn" id="wfRestoreVersion">恢复所选报告版本</button></div>':'')+'</div>';
+}
+
+function restoreReportVersion(id){
+  const v=(projectWorkflow.reportVersions||[]).find(x=>x.id===id);if(!v)return false;
+  v.chapters.forEach(vc=>{const c=chapters.find(x=>String(x.cn)===String(vc.cn));if(!c)return;(vc.sections||[]).forEach((vs,i)=>{if(c.sections[i])Object.assign(c.sections[i],ProjectWorkflow.clone(vs));});});
+  projectWorkflow.currentReportVersionId=v.id;
+  const snap=(projectWorkflow.calcSnapshots||[]).find(x=>x.id===v.calcSnapshotId);
+  if(snap){calcType=snap.calcType;rptCtype=calcType==="sale"?"sale":"rent";calcParams=ProjectWorkflow.clone(snap.params);calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;projectWorkflow.currentCalcSnapshotId=snap.id;}
+  return true;
+}
+
+function workflowSectionHtml(c,s,si){
+  const status=s.syncStatus||"current";
+  const label=status==="stale"?"待同步":status==="locked-stale"?"锁定·待复核":s.locked?"人工锁定":"最新";
+  let h='<div class="wf-section-tools"><span class="wf-status '+status+'">'+label+'</span>'
+    +'<button class="ub-btn wf-lock" data-cn="'+c.cn+'" data-si="'+si+'">'+(s.locked?'解除锁定':'锁定')+'</button>'
+    +(Array.isArray(s.undoStack)&&s.undoStack.length?'<button class="ub-btn wf-undo" data-cn="'+c.cn+'" data-si="'+si+'">撤销</button>':'')+'</div>';
+  if(s.staleReason)h+='<div class="wf-stale-note">'+escapeHtml(s.staleReason)+(s.locked?'；本节已锁定，不会自动覆盖。':'')+'</div>';
+  if(s.pendingRevision)h+='<div class="wf-candidate">'+window.ProjectWorkflow.simpleDiffHtml(s.pendingRevision.before,s.pendingRevision.after)
+    +'<div class="wf-candidate-actions"><button class="btn wf-accept" data-cn="'+c.cn+'" data-si="'+si+'">接受修改</button><button class="btn ghost wf-reject" data-cn="'+c.cn+'" data-si="'+si+'">拒绝</button></div></div>';
+  return h;
 }
 
 
@@ -365,4 +420,4 @@ function findSection(cn, si){ const r = findChapterSection(cn, si); return r? r.
 // 浏览器里这个文件是普通<script>（非CommonJS），顶层函数声明本来就会挂到window上，不需要这段；
 // 只有在Node测试环境里require()本文件时（被CommonJS包一层函数作用域）才需要显式导出，
 // 否则calcStdHardChecks这类纯函数在测试文件里require()不到。不影响浏览器端任何行为。
-if(typeof module==="object" && module.exports){ module.exports = { calcStdHardChecks }; }
+if(typeof module==="object" && module.exports){ module.exports = { calcStdHardChecks, excelMappingChecks }; }

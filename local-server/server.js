@@ -20,6 +20,9 @@ import path from "node:path";
 import { createD1Shim } from "./d1-shim.js";
 import { createVectorStore } from "./vector-pg.js";
 import { createAIAdapter } from "./ai-ollama.js";
+import { createWorker } from "tesseract.js";
+import chiSimData from "@tesseract.js-data/chi_sim";
+import { verifyAuth } from "../functions/api/_auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");          // 仓库根目录（网页文件在这里）
@@ -63,6 +66,13 @@ async function selfCheck() {
     line(false, "数据表读取失败，可能是还没建表。请先执行 schema-postgres.sql");
   }
 
+  // 轻量向前迁移：新增表使用IF NOT EXISTS，旧部署升级无需人工执行整份schema。
+  try{
+    await db.prepare("CREATE TABLE IF NOT EXISTS aireport_project_sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, project_id TEXT NOT NULL, data TEXT NOT NULL, updated_at BIGINT NOT NULL, UNIQUE(user_id, project_id))").run();
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_aireport_project_sessions_user ON aireport_project_sessions(user_id, updated_at DESC)").run();
+    line(true,"项目级AI可研会话表已就绪");
+  }catch(e){ line(false,"项目级AI可研会话表初始化失败："+e.message); }
+
   try {
     const info = await ai._ping();
     const has = info.models.some((m) => m.startsWith(ai._embedModel));
@@ -86,6 +96,24 @@ async function selfCheck() {
 
 /* ---------- 3. 路由 ---------- */
 const app = new Hono();
+
+// 本地离线 OCR：中文训练数据随本地服务安装，不把扫描件上传到任何云端。
+let ocrWorkerPromise = null;
+let ocrQueue = Promise.resolve();
+async function getOcrWorker(){
+  if(!ocrWorkerPromise) ocrWorkerPromise = createWorker("chi_sim", 1, { langPath: chiSimData.langPath, gzip: chiSimData.gzip });
+  return ocrWorkerPromise;
+}
+app.post("/api/local-ocr", async c=>{
+  const user=await verifyAuth(c.req.raw,ENV); if(!user) return c.json({ok:false,error:"未登录"},401);
+  try{
+    const body=await c.req.json(), b64=String(body.dataBase64||"");
+    if(!b64||b64.length>18*1024*1024) return c.json({ok:false,error:"OCR图片为空或超过限制"},400);
+    const worker=await getOcrWorker(), image=Buffer.from(b64,"base64");
+    const job=ocrQueue.then(()=>worker.recognize(image)); ocrQueue=job.catch(()=>{}); const result=await job;
+    const text=String(result.data&&result.data.text||"").trim(); return c.json({ok:true,text,confidence:Number(result.data&&result.data.confidence||0)});
+  }catch(e){return c.json({ok:false,error:"本地OCR失败："+(e.message||e)},500);}
+});
 
 // 可用的接口名单（从目录扫描，下划线开头的是内部模块，不对外）
 const apiNames = existsSync(API_DIR)

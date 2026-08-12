@@ -4,7 +4,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { calcStdHardChecks } = require("../review.js");
+const { calcStdHardChecks, excelMappingChecks } = require("../review.js");
 
 // 一组完全合规的测算参数：贷款利率3%、建设期4年、首年出租率75%（边界内）、
 // 稳定期出租率95%（边界内）、管理费系数取标准7档之一、自有资金比例20%（≤30%）
@@ -80,4 +80,17 @@ test("calcStdHardChecks：折现率/IRR达标线这类依赖项目性质分类�
   // 不能在这个纯硬规则函数里冒充判定——即便参数里塞了discountPct/irr字段也不该被这个函数处理
   const issues = calcStdHardChecks(Object.assign({}, COMPLIANT_PARAMS, { discountPct: 99, irr: -50 }), {});
   assert.ok(!issues.some(i => i.msg.includes("折现率") || i.msg.includes("IRR")));
+});
+
+const EXCEL_MAP=[{field_key:"totalInvestment",field_label:"总投资",workbook_title:"测试测算表",sheet_name:"投资估算",cell_address:"B15",raw_value:"23500",display_value:"23,500"}];
+test("excelMappingChecks：Excel、引擎、正文三方一致时不报警",()=>{
+  assert.deepEqual(excelMappingChecks(EXCEL_MAP,{totalInvestment:23500},{},"项目总投资为23,500万元。"),[]);
+});
+test("excelMappingChecks：Excel与测算引擎不一致时报错并带单元格来源",()=>{
+  const issues=excelMappingChecks(EXCEL_MAP,{totalInvestment:24000},{},"");
+  assert.equal(issues.length,1); assert.match(issues[0].msg,/投资估算!B15/);
+});
+test("excelMappingChecks：正文数字与Excel不一致时报错",()=>{
+  const issues=excelMappingChecks(EXCEL_MAP,{totalInvestment:23500},{},"总投资为24,000万元。");
+  assert.equal(issues.length,1); assert.match(issues[0].msg,/正文值/);
 });

@@ -22,6 +22,20 @@ async function embed(env, texts){
   return r.data;   // number[][]
 }
 
+// 文号和条款的精确索引独立于向量库保存：政策查询不能只靠“语义像不像”。
+// 新版代码先于建表上线时自动补齐；正式部署仍可执行 migrations/0002 脚本。
+let exactSchemaReady = false;
+async function ensureExactSchema(env){
+  if(exactSchemaReady) return;
+  const tsType = env.DEPLOY_MODE === "local" ? "BIGINT" : "INTEGER";
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS rag_file_meta (title TEXT PRIMARY KEY, doc_no TEXT DEFAULT '', issuer TEXT DEFAULT '', source_ref TEXT DEFAULT '', updated_at "+tsType+" NOT NULL)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS rag_text_chunks (id TEXT PRIMARY KEY, title TEXT NOT NULL, chapter TEXT DEFAULT '', section TEXT DEFAULT '', text TEXT NOT NULL, category TEXT DEFAULT '', doc_no TEXT DEFAULT '', issuer TEXT DEFAULT '', source_ref TEXT DEFAULT '', created_at "+tsType+" NOT NULL)").run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_rag_text_chunks_title ON rag_text_chunks(title)").run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_rag_text_chunks_doc_no ON rag_text_chunks(doc_no)").run();
+  exactSchemaReady = true;
+}
+function exactText(v, n){ return String(v||"").trim().slice(0,n); }
+
 export async function onRequestPost(context){
   const { request } = context;
   const env = adaptEnv(context.env);   // 云端原样返回，行为零变化；本地才切到本地实现
@@ -30,6 +44,7 @@ export async function onRequestPost(context){
   if(!env.VECTORIZE || !env.AI) return json({ok:false, error:"未绑定 VECTORIZE / AI，请按部署说明配置"}, 500);
   let body;
   try{ body = await request.json(); }catch(e){ return json({ok:false, error:"格式有误"}, 400); }
+  try{ await ensureExactSchema(env); }catch(e){ return json({ok:false, error:"精确检索索引初始化失败："+e.message},500); }
 
   // 多格式解析：用 Workers AI 的 toMarkdown 处理浏览器端解析不了的格式
   // 支持：图片(jpg/png/webp，走视觉模型≈OCR)、xlsx/csv/pptx等Office格式、html/xml
@@ -83,6 +98,7 @@ export async function onRequestPost(context){
     const chunks = (body.chunks||[]).slice(0, 20);   // 每请求最多20块
     if(!chunks.length) return json({ok:false, error:"无内容"}, 400);
     const texts = chunks.map(c=>String(c.text||"").slice(0, 2500));
+    const docNo = exactText(body.docNo,80), issuer = exactText(body.issuer,60), sourceRef = exactText(body.sourceRef,240);
     const vecs = await embed(env, texts);
     const now = Date.now();
     const items = chunks.map((c,i)=>({
@@ -94,6 +110,7 @@ export async function onRequestPost(context){
         section: String(c.section||"").slice(0,80),
         category: String(body.category||"未分类").slice(0,30),
         level: parseInt(body.level)||2,
+        docNo, issuer, sourceRef,
         text: texts[i],
       },
     }));
@@ -110,12 +127,26 @@ export async function onRequestPost(context){
             await env.VECTORIZE.deleteByIds(oldIds);
             replacedOld = oldIds.length;
           }
+          await env.DB.prepare("DELETE FROM rag_text_chunks WHERE title=?").bind(title0).run();
           // 清空台账里的旧id，本批次开始重新累计
           await env.DB.prepare("UPDATE rag_files_v2 SET ids='[]', chunks=0 WHERE title=?").bind(title0).run();
         }
       }catch(e){ /* 删除失败不阻断入库，但会在返回里提示 */ }
     }
     await env.VECTORIZE.upsert(items);
+    // 结构化文本索引：查询文号/第X条时直接精确命中，向量检索仍作为通用兜底。
+    try{
+      const title = String(chunks[0].title||"未命名").slice(0,80);
+      const cat = String(body.category||"未分类").slice(0,30);
+      for(const it of items){
+        const md = it.metadata;
+        await env.DB.prepare("INSERT INTO rag_text_chunks(id,title,chapter,section,text,category,doc_no,issuer,source_ref,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
+          .bind(it.id,title,md.chapter||"",md.section||"",md.text||"",cat,docNo,issuer,sourceRef,now).run();
+      }
+      const oldMeta = await env.DB.prepare("SELECT title FROM rag_file_meta WHERE title=?").bind(title).first();
+      if(oldMeta) await env.DB.prepare("UPDATE rag_file_meta SET doc_no=?,issuer=?,source_ref=?,updated_at=? WHERE title=?").bind(docNo,issuer,sourceRef,now,title).run();
+      else await env.DB.prepare("INSERT INTO rag_file_meta(title,doc_no,issuer,source_ref,updated_at) VALUES(?,?,?,?,?)").bind(title,docNo,issuer,sourceRef,now).run();
+    }catch(e){}
     // 登记入库台账（同一文件的多个批次累加本次的块）
     try{
       const title = String(chunks[0].title||"未命名").slice(0,80);
@@ -224,6 +255,15 @@ export async function onRequestPost(context){
     const recall = Math.min(parseInt(opts.recall) || CFG.recall, 60);
     const [vec] = await embed(env, [q]);
     const r = await env.VECTORIZE.query(vec, { topK: recall, returnMetadata: "all" });
+    // 精确路径：用户明确输入文号或“第X条”时，优先从结构化条款索引取，不让向量相似度把答案带偏。
+    const article = (q.match(/第\s*[一二三四五六七八九十百千0-9]+\s*条/)||[""])[0].replace(/\s/g,"");
+    let exactRows = [];
+    try{
+      const articleLike = article ? "%"+article+"%" : "";
+      const er = await env.DB.prepare("SELECT id,title,chapter,section,text,category,doc_no,issuer,source_ref FROM rag_text_chunks WHERE (doc_no<>'' AND ? LIKE '%' || doc_no || '%') OR (?<>'' AND (section LIKE ? OR text LIKE ?)) LIMIT 12")
+        .bind(q,article,articleLike,articleLike).all();
+      exactRows = er.results || [];
+    }catch(e){}
     let myDept = "", myClearance = 1;
     try{
       const u = await env.DB.prepare("SELECT department, clearance FROM users WHERE id=?").bind(user.userId).first();
@@ -281,12 +321,14 @@ export async function onRequestPost(context){
       const lc = lifecycleOf(md.title);
       const base = m.score * (LW[lvl]||1) * lc.weight;
       return {
+        id: m.id,
         rawScore: m.score,
         lifecycle: lc.status, lifecycleNote: lc.note,
         score: Math.round((base + kwBonus) * 1000)/1000,
         kwHits: kwHitList,
         title: md.title, chapter: md.chapter, section: md.section,
         category: md.category||"未分类", level: lvl, text: md.text,
+        docNo: md.docNo||"", issuer: md.issuer||"", sourceRef: md.sourceRef||"",
       };
     }).filter(m=>{
       if(disabled.has(m.title)) return false;
@@ -294,6 +336,25 @@ export async function onRequestPost(context){
       if(wantCat && m.category !== wantCat) return false;
       return true;
     });
+    const exactMatches = exactRows.map(x=>{
+      const docHit = !!(x.doc_no && q.includes(x.doc_no));
+      const articleHit = !!(article && (String(x.section||"").includes(article) || String(x.text||"").includes(article)));
+      return {
+        id:x.id, rawScore:1, score:docHit&&articleHit?1.1:(docHit?1.02:0.98), exact:true,
+        exactReason:docHit&&articleHit?"文号＋条款精确命中":(docHit?"文号精确命中":"条款精确命中"),
+        lifecycle:lifecycleOf(x.title).status, lifecycleNote:lifecycleOf(x.title).note, kwHits:[],
+        title:x.title, chapter:x.chapter, section:x.section, category:x.category||"未分类", level:1, text:x.text,
+        docNo:x.doc_no||"", issuer:x.issuer||"", sourceRef:x.source_ref||"",
+      };
+    }).filter(m=>{
+      if(disabled.has(m.title)) return false;
+      if(!canSee(m.title)) return false;
+      if(wantCat && m.category !== wantCat) return false;
+      return true;
+    });
+    // 相同向量块只留精确结果；其余向量结果仍按原来的语义排序保留。
+    const exactIds = new Set(exactMatches.map(m=>m.id));
+    matches = exactMatches.concat(matches.filter(m=>!exactIds.has(m.id)));
     matches.sort((a,b)=>b.score-a.score);
 
     const rerankN = Math.min(matches.length, CFG.rerankN);
@@ -391,7 +452,7 @@ export async function onRequestPost(context){
   if(body.action === "list"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
   if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
-    const rows = await env.DB.prepare("SELECT title, chunks, category, level, enabled, security, dept_scope, effective_date, expiry_date, version, updated_at, created_at FROM rag_files_v2 ORDER BY created_at DESC LIMIT 500").all();
+    const rows = await env.DB.prepare("SELECT f.title, f.chunks, f.category, f.level, f.enabled, f.security, f.dept_scope, f.effective_date, f.expiry_date, f.version, f.updated_at, f.created_at, m.doc_no, m.issuer, m.source_ref FROM rag_files_v2 f LEFT JOIN rag_file_meta m ON f.title=m.title ORDER BY f.created_at DESC LIMIT 500").all();
     return json({ok:true, files: rows.results||[]});
   }
 
@@ -585,6 +646,10 @@ export async function onRequestPost(context){
     for(let i=0; i<ids.length; i+=100){
       await env.VECTORIZE.deleteByIds(ids.slice(i, i+100));
     }
+    try{
+      await env.DB.prepare("DELETE FROM rag_text_chunks WHERE title=?").bind(title).run();
+      await env.DB.prepare("DELETE FROM rag_file_meta WHERE title=?").bind(title).run();
+    }catch(e){}
     await env.DB.prepare("DELETE FROM rag_files_v2 WHERE title=?").bind(title).run();
     return json({ok:true, deleted: ids.length});
   }

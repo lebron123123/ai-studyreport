@@ -1,13 +1,8 @@
-// 参数估算调度层 —— 从"少量输入"推算案例库相关的测算参数初值，供 AI可研生成(aireport.js) 之类的调用方使用。
-// 背景（全流程可研生成对话，2026-08-07 讨论）：目标不是每个参数单独测到多准，是让最终IRR偏离<1%；
-// 因此按敏感性分析（sensitivity-core.js 的 Sobol/Spearman/SRC 排序）挑出真正决定IRR的少数目标参数，
-// 每个目标参数由多个独立方法各出一个估计值——方法间"一致→高置信，分歧→强制人工确认"，比单一模型自己
-// 编一个置信度标签更诚实，分歧本身就是最真实的置信度信号。
+// 参数初值辅助层（历史兼容文件名仍为 paramestimate.js）。正式IRR始终只由白箱引擎计算；
+// 本模块的案例中位数只给输入初值，不能替代项目正式资料、适用规则或人工确认。
 //
-// 案例库(calc_cases)当前是0条：线性回归/随机森林这类需要真实数据才能验证效果的训练逻辑本次不写——
-// 写了也没法证明对不对，等库里有数据后再实现。本次只把接口、分级调度、置信度合并逻辑定下来并配好单测，
-// methods.linear / methods.rf 先显式返回"未启用"，调度框架（LOOCV门槛判断、越界检测、防循环依赖）已经
-// 接好调用位置，以后填真实训练代码时只需要替换对应函数体，不需要改调用方。
+// 线性回归/随机森林不再作为正式参数“投票者”。将来案例足够时，只允许用于同类项目分布异常、
+// 多变量越界和“模型期望值与白箱输入差异”的辅助诊断；诊断结果只能报警，不能改写参数或IRR。
 (function(root, factory){
   if(typeof module==="object" && module.exports) module.exports = factory();
   else root.ParamEstimate = factory();
@@ -50,23 +45,18 @@ function medianMethod(key, cases, location, industryDefault, predictorKeys){
 // 不产出任何看起来像结果、实际没验证过的数字。样本量门槛只是参考经验值，真正的启用条件是
 // loocvBeatsBaseline() 跑赢中位数法基线，不是单纯数够了就自动信。 =====
 function linearMethod(/* key, cases, predictorKeys */){
-  return { valid:false, reason:"案例库暂无数据，线性/GBM统计模型尚未实现——等有真实案例后再接入训练逻辑" };
+  return { valid:false, diagnosticOnly:true, reason:"白箱口径已确认：统计模型不参与正式参数投票；有足量真实案例后仅可用于异常诊断" };
 }
 function rfMethod(/* key, cases, predictorKeys */){
-  return { valid:false, reason:"案例库暂无数据，随机森林/GBDT尚未实现（经验门槛：样本量需达到所用特征数的5-10倍）" };
+  return { valid:false, diagnosticOnly:true, reason:"白箱口径已确认：随机森林/GBDT不参与正式参数或IRR生成；将来仅可作为异常诊断辅证" };
 }
 const METHODS = { median: medianMethod, linear: linearMethod, rf: rfMethod };
 
-// ===== LOOCV门槛（骨架）：真正接入回归/RF训练代码后，这里应对每条case做留一验证，
-// 比较该方法和medianMethod在被留出的case上的预测误差(MAE)，明显优于基线才允许参与投票——
-// 避免小样本训练出的模型看着有数字、实际比瞎猜中位数还不稳。方法本身是stub时恒定返回false。 =====
+// 兼容旧调用：正式参数投票永久返回false。以后异常检测模型的交叉验证应另建 diagnostic API，
+// 即使诊断模型优于基线，也不能从这里进入正式测算参数链路。
 function loocvBeatsBaseline(methodName, key, cases, opts){
   const method = METHODS[methodName];
   if(!method) return false;
-  const probe = method(key, cases, (opts&&opts.predictorKeys)||[]);
-  if(!probe.valid) return false;
-  // 真实实现：对cases做留一交叉验证，分别算method和medianMethod的MAE，method明显更小才return true。
-  // 目前linear/rf恒定valid=false，这段永远不会走到；先占位，接口就位。
   return false;
 }
 
@@ -136,7 +126,7 @@ function resolveTargetParams(sensResult, opts){
   return out;
 }
 
-// ===== 统一入口：对一个目标参数跑全部方法，按LOOCV门槛筛选后合并投票 =====
+// ===== 统一入口：正式初值只采用案例中位数；模型字段仅用于明确展示“诊断未启用” =====
 function estimateOne(key, cases, opts){
   opts = opts || {};
   const location = opts.location || "";
@@ -146,8 +136,8 @@ function estimateOne(key, cases, opts){
     linear: linearMethod(key, cases, predictorKeys),
     rf: rfMethod(key, cases, predictorKeys),
   };
-  const votingMethods = ["linear","rf"].filter(m=> results[m].valid && loocvBeatsBaseline(m, key, cases, opts));
-  const votes = [results.median].concat(votingMethods.map(m=>results[m])).filter(r=>r.valid);
+  const votingMethods = [];
+  const votes = [results.median].filter(r=>r.valid);
   const value = votes.length ? median(votes.map(v=>v.value)) : results.median.value;
   return {
     key,
