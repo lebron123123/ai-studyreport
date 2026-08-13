@@ -24,10 +24,25 @@ const SALE_DEFAULTS = {
   incomeTax: 0.25,        // 所得税率
   lossCarry: 5,           // 亏损弥补年限
   stampSaleRate: 0,       // 销售印花税率(默认0)
+  firstRepayRatio: 0.03,  // 第二版：首次还本=总借款×3%
+  repayIncreaseRate: 0.045,// 第二版：以后年度还本额递增4.5%
 };
 
 function r4(x){ return Math.round(x*10000)/10000; }
 function r2(x){ return Math.round(x*100)/100; }
+function paybackPeriod(years,rows,key){
+  let prev=0,seenNegative=false;
+  for(let i=0;i<years.length;i++){
+    const cur=Number(rows[years[i]]&&rows[years[i]][key])||0;
+    if(cur<0)seenNegative=true;
+    if(seenNegative&&cur>=0){
+      const flow=Number(rows[years[i]]&&rows[years[i]].net)||0;
+      return {year:years[i],index:i+1,period:r4(i+(flow?Math.abs(prev)/Math.abs(flow):0))};
+    }
+    prev=cur;
+  }
+  return null;
+}
 
 /** p:
  *  buildStart, buildYears, operateYears,
@@ -133,18 +148,19 @@ function calc(p, cfgIn){
   });
   const rentalPvTotal = r4(opArr.reduce((s,y)=>s+rental[y].pv,0));
 
-  // ===== 2. 收入（配保房销售 + 出租净收益现值(首年) + 其他收入(首年)） =====
+  // ===== 2. 收入（Word 59：当年销售、移交及商业出租收入） =====
   const income = {};
   allYears.forEach(y=>{
     const rate = (p.saleRamp&&p.saleRamp[y])||0;
     const sale = isOp[y]? r4(p.saleArea*p.saleAvgPrice*rate/10000) : 0;
     const other = (y===opStart)? r4(p.otherTotal||0) : 0;
-    const rentPv = (y===opStart)? rentalPvTotal : 0;
-    income[y] = {sale, other, rentPv, commIncome: rental[y]? rental[y].income:0,
-      total: r4(sale + other + rentPv)};
+    const transfer = (y===opStart)?r4(p.costTransferIncome||0):0;
+    const rentPv = (y===opStart)? rentalPvTotal : 0; // 仅作指标展示，不进入当年损益收入
+    income[y] = {sale,transfer,other,rentPv,commIncome:rental[y]?rental[y].income:0,
+      total:r4(sale+transfer+other+(rental[y]?rental[y].income:0))};
   });
 
-  // ===== 3. 还本付息（自定义还款计划模式） =====
+  // ===== 3. 还本付息（Word 67：首还3%，以后每年增长4.5%，末年还清） =====
   const loanPlan={}; loanPlan[p.buildStart]=p.loanAmount;
   const rate=p.loanRate/100;
   const firstLoanYear=p.buildStart, lastLoanYear=firstLoanYear+p.loanTotalYears-1;
@@ -154,7 +170,11 @@ function calc(p, cfgIn){
     const begin=endLast, cur=loanPlan[y]||0;
     const interest=(begin+cur/2)*rate;
     const payInt=interest;
-    const plan = (y<=lastLoanYear)? ((p.customRepay&&p.customRepay[y])||0) : 0;
+    let plan=0;
+    if(y>=Number(p.repayStart||opStart)&&y<lastLoanYear){
+      const repayIndex=y-Number(p.repayStart||opStart);
+      plan=p.loanAmount*(Number(p.firstRepayRatio||K.firstRepayRatio*100)/100)*Math.pow(1+Number(p.repayIncreaseRate||K.repayIncreaseRate*100)/100,repayIndex);
+    }
     const maxRepay=begin+cur+interest-payInt;
     const rp = y<lastLoanYear? Math.min(plan, maxRepay) : maxRepay;
     let end=begin+cur+interest-payInt-rp; end=Math.max(end,0);
@@ -168,37 +188,24 @@ function calc(p, cfgIn){
   const landDeductTotal = p.saleArea*p.landFloorPrice/10000;
   const totalSaleIncomeAll = allYears.reduce((s,y)=>s+income[y].sale,0);
   const totalSaleFeeAll = totalSaleIncomeAll*K.saleFeeRate;
-  /* 开发成本两个基数：
-     默认按公式推算（总投资/非配售开发成本口径）；
-     若显式给了 devSaleBaseOverride / devDepBaseOverride，则直接采用——
-     因 Excel 中这两项取自「配售部分」「不计入配售部分」两张专表，
-     其口径无法由现有输入参数完全还原，允许直接填入更可靠。 */
-  const devCostSaleBase = (p.devSaleBaseOverride!=null) ? p.devSaleBaseOverride
-    : (p.totalInvestment - buildFinTotal*ratioSale - totalSaleFeeAll);
-  const devCostDepBase = (p.devDepBaseOverride!=null) ? p.devDepBaseOverride
-    : ((p.landCost + p.devCost - buildFinTotal*ratioComm)*K.devDepRatio);
+  const devCostSaleBase = Number(p.saleDevelopmentCost)||0;
+  const devCostDepBase = Number(p.nonSaleDepreciableCost)||0;
   const cost = {};
   let cumOut=0, cumIn=0, cumVat=0;
   allYears.forEach(y=>{
     const saleInc = income[y].sale;
     const saleRate = (p.saleRamp&&p.saleRamp[y])||0;
-    const otherInc = income[y].other;
     const saleFee = saleInc*K.saleFeeRate;
-    const outVat = saleInc>0? (saleInc + otherInc - landDeductTotal*saleRate)*(K.vatSale/(1+K.vatSale)) : 0;
-    const inVat6 = ratioComm!==0? (p.otherEngCost/ratioComm + totalSaleFeeAll)*saleRate*(K.vatIn6/(1+K.vatIn6)) : 0;
-    const inVat9 = (p.saleConstructionCost + p.saleInfraCost + p.constructionCost + p.infraCost)*saleRate*(K.vatSale/(1+K.vatSale));
+    const outVat = saleInc>0? (saleInc-landDeductTotal*saleRate)*(K.vatSale/(1+K.vatSale)) : 0;
+    const inVat6 = (Number(p.saleOtherCost6)||0)*saleRate*(K.vatIn6/(1+K.vatIn6));
+    const inVat9 = (Number(p.saleConstructionCost)+Number(p.saleInfraCost))*saleRate*(K.vatSale/(1+K.vatSale));
     const inVat = inVat6+inVat9;
     cumOut += outVat; cumIn += inVat;
     const vat = Math.max(cumOut - cumIn - cumVat, 0);
     cumVat += vat;
     const vatSur = vat*K.surcharge;
-    const stamp = saleInc*K.stampSaleRate/(1+K.vatSale);
-    /* 销售税金及附加：默认按销项-进项迭代算增值税；
-       若给了 saleTaxTotalOverride（Excel 已算好的合计），则按销售率分摊到各年，
-       因 Excel 的进项税拆分口径（配售/不计入配售分摊比例）无法由现有参数完全还原。 */
-    const saleTax = (p.saleTaxTotalOverride!=null)
-      ? p.saleTaxTotalOverride*saleRate
-      : (vat + vatSur + stamp);
+    const stamp = 0; // Word 49.4：本项目印花税为0
+    const saleTax = vat + vatSur + stamp; // Word 50、51：土地增值税均为0
     const devSale = devCostSaleBase*saleRate;
     const devDep = (y===opStart)? devCostDepBase : 0;
     let devDep2 = 0;
@@ -208,43 +215,41 @@ function calc(p, cfgIn){
     }
     const finB = isOp[y]?0:finCost[y];
     const finO = isOp[y]?finCost[y]:0;
-    const total = devSale + devDep + saleFee + saleTax + finB + finO;
+    const rentCost=rental[y]?rental[y].costTotal:0, rentTax=rental[y]?rental[y].taxTotal:0;
+    const total = devSale + devDep + saleFee + saleTax + rentCost + rentTax + finB + finO;
     cost[y] = {devSale:r4(devSale), devDep:r4(devDep), devDep2:r4(devDep2), saleFee:r4(saleFee),
       saleTax:r4(saleTax), vat:r4(vat), outVat:r4(outVat), inVat:r4(inVat),
       landDeduct:r4(landDeductTotal*saleRate), vatSur:r4(vatSur),
-      finBuild:r4(finB), finOp:r4(finO), total:r4(total)};
+      rentCost:r4(rentCost),rentTax:r4(rentTax),finBuild:r4(finB), finOp:r4(finO), total:r4(total)};
   });
 
   // ===== 5. 损益（出售类：利润总额=收入-成本，不扣税金；五年弥补亏损） =====
   const profit={};
-  let lossHist=[], firstProfitYear=null, lastNeg=0, lossUsed=0;
-  allYears.forEach((y,idx)=>{
+  let lossBuckets=[];
+  allYears.forEach(y=>{
     const pt = r4(income[y].total - cost[y].total);
-    lossHist.push(pt);
-    if(firstProfitYear===null && pt>0) firstProfitYear=y;
-    let makeup=0;
-    if(firstProfitYear!==null){
-      if(lossUsed>=K.lossCarry) makeup=0;
-      else if(y===firstProfitYear) makeup=lossHist.slice(Math.max(0,idx-K.lossCarry),idx).reduce((s,v)=>s+v,0);
-      else makeup = lastNeg<0? lastNeg:0;
+    lossBuckets=lossBuckets.filter(b=>y-b.year<=K.lossCarry&&b.amount>1e-9);
+    let remainingProfit=Math.max(pt,0),used=0;
+    for(const bucket of lossBuckets){
+      if(remainingProfit<=0)break;
+      const take=Math.min(bucket.amount,remainingProfit);bucket.amount-=take;remainingProfit-=take;used+=take;
     }
-    const taxable=pt+makeup;
-    if(firstProfitYear!==null && makeup!==0) lossUsed++;
-    lastNeg = taxable<0? taxable:0;
-    const incomeTax = taxable>0? r4(taxable*K.incomeTax):0;
-    profit[y]={total:pt, makeup:r4(makeup), taxable:r4(taxable), incomeTax, net:r4(pt-incomeTax)};
+    lossBuckets=lossBuckets.filter(b=>b.amount>1e-9);
+    if(pt<0)lossBuckets.push({year:y,amount:-pt});
+    const makeup=-used,taxable=Math.max(pt-used,0),incomeTax=r4(taxable*K.incomeTax);
+    profit[y]={total:pt,makeup:r4(makeup),taxable:r4(taxable),incomeTax,net:r4(pt-incomeTax),lossBalance:r4(lossBuckets.reduce((s,b)=>s+b.amount,0))};
   });
 
   // ===== 6. 现金流（出售类专属口径） =====
   // 流入=配保房销售+其他收入+商业出租收入+回收固定资产余值(运营首年)
-  const recoverFixed = r4((p.landCost + p.devCost - buildFinTotal*ratioComm)*K.recoverRatio);
+  const recoverFixed = r4(Number(p.nonSaleRecoverableFixed)||0);
   // 开发成本投资计划(默认建设期平摊总投资)
   const devPlan = p.devCostPlan || (function(){ const o={}; buildArr.forEach(y=>o[y]=p.totalInvestment/buildArr.length); return o; })();
   const discount=p.discountPct/100;
   const cf={};
   let cum=0;
   allYears.forEach(y=>{
-    const inflow = r4(income[y].sale + income[y].other + (rental[y]?rental[y].income:0) + (y===opStart?recoverFixed:0));
+    const inflow = r4(income[y].sale+income[y].transfer+income[y].other+(rental[y]?rental[y].income:0)+(y===opStart?recoverFixed:0));
     const rentTax = rental[y]? rental[y].taxTotal:0;
     const rentCost = rental[y]? rental[y].costTotal:0;
     const adjTax = Math.max((inflow - (y===opStart?recoverFixed:0)
@@ -257,16 +262,20 @@ function calc(p, cfgIn){
       rentTax:r4(rentTax), rentCost:r4(rentCost), adjTax:r4(adjTax),
       recover:(y===opStart?recoverFixed:0), outflow, net, cumNet:r4(cum)};
   });
-  // NPV：从首个非零现金流年记0期
-  const nonzero = allYears.filter(y=>Math.abs(cf[y].net)>1e-9);
-  const firstIdx = nonzero.length? allYears.indexOf(nonzero[0]) : 0;
+  // Word 72~74：全部现金流统一采用年中折现 (n+0.5)，不再保留旧0期口径。
   let cumNpv=0;
   allYears.forEach((y,idx)=>{
-    const period = idx - firstIdx;
-    const factor = period<0? 1.0 : Math.pow(1+discount, period);
-    const npv = cf[y].net/factor;
+    const npv = cf[y].net/Math.pow(1+discount,idx+.5);
     cumNpv += npv;
     cf[y].npv = r4(npv); cf[y].cumNpv = r4(cumNpv);
+  });
+
+  // 75~76 资本金现金流：全投资现金流基础上计入借款流入、还本及利息支出。
+  const capitalCf={};let capitalCum=0,capitalCumNpv=0;
+  allYears.forEach((y,idx)=>{
+    const inflow=r4(cf[y].inflow+loan[y].borrow),outflow=r4(cf[y].outflow+loan[y].repay+loan[y].payInt);
+    const net=r4(inflow-outflow);capitalCum+=net;const npv=net/Math.pow(1+discount,idx+.5);capitalCumNpv+=npv;
+    capitalCf[y]={inflow,outflow,borrow:loan[y].borrow,repay:loan[y].repay,interest:loan[y].payInt,net,cumNet:r4(capitalCum),npv:r4(npv),cumNpv:r4(capitalCumNpv)};
   });
 
   // ===== 7. IRR + 出售类利息保障倍数 =====
@@ -276,18 +285,26 @@ function calc(p, cfgIn){
   const icrNum = sum(y=>profit[y].net) + oF + sum(y=>profit[y].incomeTax) + sum(y=>cost[y].devDep) - K.devDepRatio*sum(y=>income[y].other);
   const icr = (bF+oF)!==0? r2(icrNum/(bF+oF)) : 0;
   let payback=null;
-  for(let i=0;i<allYears.length;i++){ if(cf[allYears[i]].cumNet>=0){ payback={year:allYears[i], index:i+1}; break; } }
+  for(let i=0;i<allYears.length;i++){if(cf[allYears[i]].cumNet>=0){payback={year:allYears[i],index:i+1};break;}}
+  const paybackDetailed=paybackPeriod(allYears,cf,"cumNet"),paybackDynamic=paybackPeriod(allYears,cf,"cumNpv");
+  const capitalIrr=excelIrr(allYears.map(y=>capitalCf[y].net));
+  const capitalPayback=paybackPeriod(allYears,capitalCf,"cumNet"),capitalPaybackDynamic=paybackPeriod(allYears,capitalCf,"cumNpv");
+  const totalProfit=sum(y=>profit[y].total),totalNetProfit=sum(y=>profit[y].net),totalIncome=sum(y=>income[y].total);
 
-  return { allYears, opArr, income, rental, rentalPvTotal, cost, loan, profit, cf, recoverFixed,
+  return { allYears, opArr, income, rental, rentalPvTotal, cost, loan, profit, cf, capitalCf, recoverFixed,
     summary:{
-      totalIncome: r2(sum(y=>income[y].total)),
+      totalIncome: r2(totalIncome),
       totalCost: r2(sum(y=>cost[y].total)),
       totalSaleIncome: r2(totalSaleIncomeAll),
       rentalPvTotal: r2(rentalPvTotal),
-      totalNetProfit: r2(sum(y=>profit[y].net)),
+      totalNetProfit: r2(totalNetProfit),
       totalNpv: r2(cumNpv),
       irr: irr!==null? r2(irr*100):null,
-      icr, payback,
+      icr,payback,paybackDetailed,paybackDynamic,
+      investReturnRate:p.totalInvestment? r4(totalProfit/p.totalInvestment):null,
+      netInvestReturnRate:p.totalInvestment? r4(totalNetProfit/p.totalInvestment):null,
+      opProfitMargin:totalIncome? r4(totalProfit/totalIncome):null,
+      capitalIrr:capitalIrr!==null?r2(capitalIrr*100):null,capitalPayback,capitalPaybackDynamic,
     }};
 }
 function npvAt(r,fl){ let s=0; fl.forEach((f,i)=>{ s+=f/Math.pow(1+r,i); }); return s; }

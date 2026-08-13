@@ -10,8 +10,39 @@ async function exportCalcExcel(){
   }catch(e){ alert("导出失败："+e.message); }
   if(btn){ btn.disabled=false; btn.textContent="导出 Excel"; }
 }
+function buildSaleWordWorkbook(X,R,p){
+  const wb=X.utils.book_new(),E=R.saleEstimate,A=E.allocation||{},ys=R.allYears||[],sch=p.investSchedule||{},plan=R.saleInvestmentPlan||{years:[],rows:[]};
+  const add=(name,rows,widths)=>{const ws=X.utils.aoa_to_sheet(rows);ws["!cols"]=(widths||[12,30,16,16,42]).map(w=>({wch:w}));ws["!freeze"]={xSplit:2,ySplit:1};X.utils.book_append_sheet(wb,ws,name);};
+  const yearTable=(title,rows)=>[[title,"全周期合计"].concat(ys)].concat(rows.map(r=>{
+    const vals=ys.map(y=>Number(r.get(y)||0));return [r.name,r.last?vals[vals.length-1]||0:vals.reduce((s,v)=>s+v,0)].concat(vals);
+  }));
+  add("1技术指标",[["序号","指标","数值","单位","公式/口径"]].concat((E.rows||[]).filter(x=>/^1(\.|$)/.test(x.no)).map(x=>[x.no,x.name,x.value,x.unit||"",x.formula||""])));
+  add("2投资估算",[["序号","费用项目","金额（万元）","公式/口径"]].concat((E.rows||[]).filter(x=>{const n=parseInt(x.no,10);return n>=5&&n<=18;}).map(x=>[x.no,x.name,x.value,x.formula||""])),[12,34,18,64]);
+  const ab=(side)=>[["公式序号","费用项目","金额（万元）","分摊依据"]].concat((E.allocationRows||[]).map(x=>[side==="a"?String(x.no).split("/")[0]:String(x.no).split("/")[1],x.name,x[side],side==="a"?"计入配售A":"不计入配售B"]));
+  add("3计入配售部分",ab("a"));add("4不计入配售部分",ab("b"));
+  add("5工期进度",[["序号","工作阶段"].concat((sch.periods||[]).map(x=>x.label))].concat((sch.tasks||[]).map((t,i)=>[i+1,t.name].concat((sch.periods||[]).map((_,q)=>InvestmentSchedule.activePeriods(t,sch.totalQuarters).includes(q)?"■":"")))),[8,22].concat((sch.periods||[]).map(()=>8)));
+  add("6投资计划",[["序号","项目名称","合计（万元）"].concat((plan.years||[]).map(y=>y+"年"),["金额来源/公式口径"])].concat((plan.rows||[]).map(r=>[r.no,r.name,r.amount].concat((plan.years||[]).map(y=>r.annual[y]||0),[r.source||""]))),[12,30,18].concat((plan.years||[]).map(()=>14),[42]));
+  const hp=E.housingPrice||{};add("7住房价格",[["序号","价格构成","元/㎡","公式口径"],["46.1","项目地价",hp.landUnit,"公式46"],["46.2","工程建设",hp.engineeringUnit,"公式46"],["46.3","其他工程建设",hp.otherUnit,"公式46"],["46.4","物业维修基金",hp.repairUnit,"公式46"],["46.5","财务成本",hp.financeUnit,"公式46"],["46.6","利润",hp.profitUnit,"公式46"],["46.7","增值税",hp.vatUnit,"公式46"],["46.8","城市维护建设税",hp.cityTaxUnit,"公式46"],["46.9","所得税",hp.incomeTaxUnit,"公式46"],["46","配售住房测算价格",hp.total,"以上各项之和"]]);
+  add("8销售收入",yearTable("47~53 销售收入",[
+    {name:"47 配保房销售收入",get:y=>R.income[y].sale},{name:"47.2 成本价移交收入",get:y=>R.income[y].transfer},{name:"48 销售回款",get:y=>R.income[y].sale+R.income[y].transfer},{name:"49 销售税金及附加",get:y=>R.cost[y].saleTax},{name:"52 销售费用",get:y=>R.cost[y].saleFee},{name:"53 销售净收入",get:y=>R.income[y].sale+R.income[y].transfer-R.cost[y].saleTax-R.cost[y].saleFee}
+  ]),[32,16].concat(ys.map(()=>13)));
+  add("9租赁收入",yearTable("54~58 租赁收入",[
+    {name:"54 商业出租收入",get:y=>R.rental[y]&&R.rental[y].income},{name:"55 租赁税金",get:y=>R.rental[y]&&R.rental[y].taxTotal},{name:"56 租赁运营成本",get:y=>R.rental[y]&&R.rental[y].costTotal},{name:"57 租赁净收入",get:y=>R.rental[y]&&R.rental[y].netIncome},{name:"58 租赁净收益现值",get:y=>R.rental[y]&&R.rental[y].pv}
+  ]),[32,16].concat(ys.map(()=>13)));
+  add("10损益",yearTable("59~66 损益",[
+    {name:"59 总收入",get:y=>R.income[y].total},{name:"61 总成本费用",get:y=>R.cost[y].total},{name:"62 利润总额",get:y=>R.profit[y].total},{name:"63 弥补以前年度亏损",get:y=>R.profit[y].makeup},{name:"64 应纳税所得额",get:y=>R.profit[y].taxable},{name:"65 所得税",get:y=>R.profit[y].incomeTax},{name:"66 净利润",get:y=>R.profit[y].net}
+  ]),[32,16].concat(ys.map(()=>13)));
+  add("11还本付息",yearTable("67 还本付息",[
+    {name:"67.1 期初借款余额",get:y=>R.loan[y].begin},{name:"67.2 本期借款",get:y=>R.loan[y].borrow},{name:"67.3 本期利息",get:y=>R.loan[y].interest},{name:"67.4 本期还本",get:y=>R.loan[y].repay},{name:"67.5 还本付息合计",get:y=>R.loan[y].total},{name:"67.6 期末借款余额",get:y=>R.loan[y].end,last:true}
+  ]),[32,16].concat(ys.map(()=>13)));
+  add("12现金流",yearTable("68~76 全投资及资本金现金流",[
+    {name:"68 全投资现金流入",get:y=>R.cf[y].inflow},{name:"69 全投资现金流出",get:y=>R.cf[y].outflow},{name:"70 全投资净现金流",get:y=>R.cf[y].net},{name:"71 累计净现金流",get:y=>R.cf[y].cumNet,last:true},{name:"72 年中折现净现值",get:y=>R.cf[y].npv},{name:"73 累计净现值",get:y=>R.cf[y].cumNpv,last:true},{name:"75 资本金现金流入",get:y=>R.capitalCf[y].inflow},{name:"75.2 资本金现金流出",get:y=>R.capitalCf[y].outflow},{name:"76 资本金净现金流",get:y=>R.capitalCf[y].net},{name:"76.1 累计资本金净现金流",get:y=>R.capitalCf[y].cumNet,last:true}
+  ]),[34,16].concat(ys.map(()=>13)));
+  return wb;
+}
 function buildCalcWorkbook(){
   const X = window.XLSX, R = scResult, ys = R.allYears, specs = calcSpecs(), K = calcEffK();
+  if(calcType==="sale"&&R.saleEstimate)return buildSaleWordWorkbook(X,R,scParams||{});
   const wb = X.utils.book_new();
   const col = i => X.utils.encode_col(2+i);   // C 起为年份列
 
@@ -25,6 +56,17 @@ function buildCalcWorkbook(){
   const wsP = X.utils.aoa_to_sheet(pRows);
   wsP["!cols"] = [{wch:10},{wch:20},{wch:14},{wch:60}];
   X.utils.book_append_sheet(wb, wsP, "参数");
+
+  if(calcType==="sale"&&R.saleEstimate){
+    const E=R.saleEstimate,A=E.allocation||{},hp=E.housingPrice||{};
+    const fullRows=[["序号","指标","金额/数值","单位","公式/口径","来源"]].concat((E.rows||[]).map(x=>[x.no,x.name,x.value,x.unit||"万元",x.formula||"",x.source||"公式计算"]));
+    fullRows.push([], ["A/B分摊恒等式","A部分",A.aBase,"万元"],["A/B分摊恒等式","B部分",A.bBase,"万元"],["A/B分摊恒等式","A+B",Number(A.aBase||0)+Number(A.bBase||0),"万元"],["A/B分摊恒等式","差额",E.reconciliation.totalVsAB,"万元"]);
+    const wsF=X.utils.aoa_to_sheet(fullRows);wsF["!cols"]=[{wch:14},{wch:34},{wch:16},{wch:10},{wch:58},{wch:20}];X.utils.book_append_sheet(wb,wsF,"出售全量投资估算");
+    const abRows=[["编号","费用类别","计入配售A（万元）","不计入配售B（万元）","合计（万元）","A+B差额"]].concat((E.allocationRows||[]).map(x=>[x.no,x.name,x.a,x.b,x.total,x.difference]));
+    const wsAB=X.utils.aoa_to_sheet(abRows);wsAB["!cols"]=[{wch:12},{wch:28},{wch:20},{wch:22},{wch:18},{wch:14}];X.utils.book_append_sheet(wb,wsAB,"19-43配售与非配售分摊");
+    const hpRows=[["46 配售住房价格构成","元/㎡"],["项目地价",hp.landUnit],["工程建设",hp.engineeringUnit],["其他工程建设",hp.otherUnit],["物业维修基金",hp.repairUnit],["财务成本",hp.financeUnit],["利润",hp.profitUnit],["增值税",hp.vatUnit],["城市维护建设税",hp.cityTaxUnit],["所得税",hp.incomeTaxUnit],["配售住房测算价格",hp.total]];
+    const wsH=X.utils.aoa_to_sheet(hpRows);wsH["!cols"]=[{wch:30},{wch:18}];X.utils.book_append_sheet(wb,wsH,"46配售住房价格");
+  }
 
   // 预登记所有行位置（sheet名+行号），跨表引用需要
   const reg = {};
@@ -102,6 +144,8 @@ function buildCalcWorkbook(){
   }
   return wb;
 }
+if(typeof window!=="undefined")window.buildCalcWorkbook=buildCalcWorkbook;
+if(typeof module==="object"&&module.exports)module.exports={buildSaleWordWorkbook};
 
 let docxLibLoading = null;
 function loadScript(src){

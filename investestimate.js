@@ -299,7 +299,7 @@ function schedule(est, buildStart, buildYears, cfgIn, scheduleOpt){
   return { investPlan, phaseCost, phaseQuarters };
 }
 
-/** 按doc原文序号(1、1.1、1.1.1...18)展开成一维数组，供前端渲染成可逐级折叠的大纲表，
+/** 按正式公式序号(1、1.1、1.1.1...18)展开成一维数组，供前端渲染成可逐级折叠的完整表，
  *  方便逐条核对。level=层级(按"."个数)，no末尾不带"."。金额单位默认"万元"，个别行覆盖unit。 */
 function outline(est, sch){
   const t=est.technical, l=est.land, pc=est.preConstruction, c=est.construction, ind=est.indirect, s=est.summary;
@@ -309,8 +309,8 @@ function outline(est, sch){
     L("1.1","计容建筑面积", t.capacityArea, "㎡"),
     L("1.2","地面核增面积", t.aboveIncrease, "㎡"),
     L("1.3","容积率", t.farRatio, ""),
-    L("2","户型比例规则", null, "", "按XX区XX住房需求分解综合确定（doc未给具体值）"),
-    L("3","建筑面积三档确定规则", null, "", "一房/两房/三房㎡，根据户型配比结合实际确定（doc未给具体值）"),
+    L("2","户型比例规则", null, "", "按项目所在区域住房需求分解综合确定"),
+    L("3","建筑面积三档确定规则", null, "", "一房/两房/三房建筑面积根据户型配比结合实际确定"),
     L("4","各户型占比", null, "", t.unitTypes && t.unitTypes.length ? t.unitTypes.map(u=>u.name+" "+u.area+"㎡("+(u.ratio!=null?(u.ratio*100).toFixed(1)+"%":"—")+")").join("；") : "未录入户型明细"),
 
     L("5","土地成本费用", l.landCostTotal),
@@ -419,7 +419,13 @@ function outline(est, sch){
   ];
   if(sch){
     if(Array.isArray(sch.tasks)&&Array.isArray(sch.periods)){
-      sch.tasks.forEach((task,i)=>{const qs=(sch.totalQuarters?InvestmentSchedule.activePeriods(task,sch.totalQuarters):[]).map(q=>sch.periods[q]&&sch.periods[q].label).filter(Boolean);rows.push(L(String(15+i),task.name,qs.length, "季度",qs.join("、")));});
+      const taskMap=Object.fromEntries(sch.tasks.map(x=>[x.id,x])),groups=[
+        ["15","土地成本及前期工程",["land","preliminary"]],
+        ["16","地下建筑部分",["underground","earthwork","pile","basement"]],
+        ["17","地上建筑、安装及装修",["above","installation","decoration"]],
+        ["18","室外工程及竣工验收",["outdoor","completion"]]
+      ];
+      groups.forEach(g=>{const active=[...new Set(g[2].flatMap(id=>taskMap[id]&&sch.totalQuarters?InvestmentSchedule.activePeriods(taskMap[id],sch.totalQuarters):[]))].sort((a,b)=>a-b),labels=active.map(q=>sch.periods[q]&&sch.periods[q].label).filter(Boolean);rows.push(L(g[0],g[1],active.length,"季度",labels.join("、")));});
     }else{
       const labels=["土地成本→前期工程","地下建筑部分","地上建筑部分→安装工程→精装修","室外工程→竣工验收"];
       [0,1,2,3].forEach(i=>{rows.push(L(String(15+i), labels[i], sch.phaseQuarters[i], "季度", "对应费用 "+sch.phaseCost[i]+" 万元"));});

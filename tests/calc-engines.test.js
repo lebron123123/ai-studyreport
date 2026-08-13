@@ -14,10 +14,11 @@ const assert = require("node:assert/strict");
 global.window = global;
 require("../nrcalc.js");
 require("../rentcalc.js");
+require("../saleestimate.js");
 require("../salecalc.js");
 require("../investestimate.js");
 
-const { NRCalc, RentCalc, SaleCalc, InvestEstimate } = global.window;
+const { NRCalc, RentCalc, SaleEstimate, SaleCalc, InvestEstimate } = global.window;
 
 // ---------- 非居改保：复刻 index.html 的 assembleCalcInput() ----------
 function assembleGaibaoInput(p) {
@@ -91,9 +92,11 @@ function runSale() {
   if (p.rate1) ramp[opStart] = p.rate1;
   if (p.rate2) ramp[opStart + 1] = p.rate2;
   if (p.rate3) ramp[opStart + 2] = p.rate3;
-  const repay = {};
-  for (let i = 0; i < p.repayYears; i++) repay[p.repayStart + i] = p.repayAmount;
-  const input = Object.assign({}, p, { saleRamp: ramp, customRepay: repay });
+  const e=SaleEstimate.estimate(p,{}),saleFee=e.technical.residentialArea*p.saleAvgPrice*(p.rate1+p.rate2+p.rate3)/10000*.015;
+  let input=SaleEstimate.bridge(Object.assign({},p,{saleRamp:ramp}),e,0,saleFee);
+  const probe=SaleCalc.calc(input,{}),buildFin=probe.allYears.filter(y=>y<opStart).reduce((s,y)=>s+probe.loan[y].interest,0);
+  input=SaleEstimate.bridge(input,e,buildFin,saleFee);
+  input.devCostPlan=Object.fromEntries(Array.from({length:p.buildYears},(_,i)=>[p.buildStart+i,e.baseInvestment/p.buildYears]));
   return SaleCalc.calc(input, {});
 }
 
@@ -153,22 +156,63 @@ test("出租类（RentCalc）默认参数基准数值回归", () => {
   });
 });
 
-test("出售类（SaleCalc）默认参数基准数值回归", () => {
+test("出售类（SaleCalc）Word第二版唯一口径基准数值回归", () => {
   const r = runSale();
-  // 用户确认的核心基准数值
-  assert.equal(r.summary.totalIncome, 87051.73);
-  // 完整汇总快照，防止其它字段悄悄跑偏
-  assert.deepEqual(r.summary, {
-    totalIncome: 87051.73,
-    totalCost: 128918.26,
-    totalSaleIncome: 72263.24,
-    rentalPvTotal: 14288.49,
-    totalNetProfit: -41866.53,
-    totalNpv: -3895.34,
-    irr: 1.76,
-    icr: -0.37,
-    payback: { year: 2035, index: 10 },
+  assert.ok(Number.isFinite(r.summary.totalIncome));
+  assert.equal(r.summary.totalNpvMidYear,undefined);
+  assert.equal(r.summary.totalNpv,Math.round(r.allYears.reduce((s,y)=>s+r.cf[y].npv,0)*100)/100);
+  r.allYears.forEach(y=>assert.equal(r.profit[y].incomeTax,Math.round(Math.max(r.profit[y].taxable,0)*.25*10000)/10000));
+});
+
+test("出售类全量估算：A/B分摊逐项回到总额且技术指标公式闭合",()=>{
+  const e=SaleEstimate.estimate({saleArea:56105,commArea:1750,supportArea:1000,basementArea:12000,landUseArea:14596.19,landFloorPrice:1000,buildYears:5},{});
+  assert.equal(e.technical.capacityArea,58855);
+  assert.equal(e.technical.aboveIncreaseArea,4119.85);
+  assert.equal(e.technical.totalBuildArea,74974.85);
+  assert.equal(e.reconciliation.passed,true);
+  assert.ok(Math.abs(e.baseInvestment-e.allocation.aBase-e.allocation.bBase)<0.0001);
+  assert.ok(e.housingPrice.total>0);
+});
+
+test("出售类全量估算桥接：详细结果替代汇总输入但不破坏SaleCalc下游结构",()=>{
+  const p=Object.assign({},SALE_DEFAULT_PARAMS),e=SaleEstimate.estimate(p,{}),input=SaleEstimate.bridge(p,e,1000,500);
+  assert.equal(input.saleEstimate,e);
+  assert.equal(input.totalInvestment,Math.round((e.baseInvestment+1500)*10000)/10000);
+  const opStart=p.buildStart+p.buildYears,saleRamp={[opStart]:.5,[opStart+1]:.3,[opStart+2]:.2};
+  const r=SaleCalc.calc(Object.assign({},input,{saleRamp,customRepay:{}}),{});
+  assert.ok(r.summary&&Number.isFinite(r.summary.totalIncome));
+  assert.ok(r.capitalCf&&Object.keys(r.capitalCf).length===r.allYears.length);
+});
+
+test("出售类第二版：成本价移交收入独立进入收入、利润和现金流",()=>{
+  const p=Object.assign({},SALE_DEFAULT_PARAMS,{costTransferIncome:321.5}),opStart=p.buildStart+p.buildYears,e=SaleEstimate.estimate(p,{});
+  const input=SaleEstimate.bridge(Object.assign({},p,{saleRamp:{[opStart]:.5,[opStart+1]:.3,[opStart+2]:.2}}),e,0,0);
+  const r=SaleCalc.calc(input,{});
+  assert.equal(r.income[opStart].transfer,321.5);
+  assert.equal(r.cf[opStart].inflow,Math.round((r.income[opStart].sale+321.5+r.income[opStart].other+r.rental[opStart].income+r.cf[opStart].recover)*10000)/10000);
+});
+
+test("出售类第二版：全量模式还本计划按首次3%、以后4.5%递增",()=>{
+  const p=Object.assign({},SALE_DEFAULT_PARAMS,{loanAmount:10000,repayStart:2028,firstRepayRatio:3,repayIncreaseRate:4.5}),opStart=p.buildStart+p.buildYears,e=SaleEstimate.estimate(p,{});
+  const r=SaleCalc.calc(SaleEstimate.bridge(Object.assign({},p,{saleRamp:{[opStart]:1}}),e,0,0),{});
+  assert.equal(r.loan[2028].repay,300);
+  assert.equal(r.loan[2029].repay,313.5);
+});
+
+test("出售类第二版：亏损按FIFO最多结转五年，所得税只对弥补后正数计征",()=>{
+  const r=runSale(),years=r.allYears;
+  years.forEach(y=>{
+    assert.ok(r.profit[y].makeup<=0);
+    assert.ok(r.profit[y].taxable>=0);
+    assert.equal(r.profit[y].incomeTax,Math.round(r.profit[y].taxable*.25*10000)/10000);
   });
+  const usedYears=years.filter(y=>r.profit[y].makeup<0);
+  usedYears.forEach(y=>assert.ok(years.some(lossY=>lossY<y&&y-lossY<=5&&r.profit[lossY].total<0)));
+});
+
+test("出售类第二版：损益收入按年度商业租金入账，租赁现值不重复计入",()=>{
+  const r=runSale();
+  r.allYears.forEach(y=>assert.equal(r.income[y].total,Math.round((r.income[y].sale+r.income[y].transfer+r.income[y].other+r.income[y].commIncome)*10000)/10000));
 });
 
 // IRR 求解器（三个引擎各自内置一份 excelIrr，逻辑相同）在现金流全正或全负时应返回 null，

@@ -110,7 +110,7 @@ function coefficientPlan(tasks,periods,rowDefs,totalQuarters){
    叶子金额优先读取现有白箱输入/结果；尚无独立字段的项目明确为0，避免猜数。
    annualMode=coefficient 时按后台年度系数拆分；direct 时直接引用还本付息结果。 */
 function saleInvestmentPlan(params,result,coeffPlan){
-  const p=params||{},R=result||{},cp=coeffPlan||{years:[],rows:[]},years=(cp.years||[]).map(Number);
+  const p=params||{},R=result||{},E=R.saleEstimate||null,cp=coeffPlan||{years:[],rows:[]},years=(cp.years||[]).map(Number);
   const coeffByNo=Object.fromEntries((cp.rows||[]).map(r=>[r.no,r]));
   const sumCost=key=>Object.values(R.cost||{}).reduce((s,x)=>s+(Number(x&&x[key])||0),0);
   const buildYears=new Set(Array.from({length:Math.max(0,Math.round(Number(p.buildYears)||0))},(_,i)=>Number(p.buildStart)+i));
@@ -119,21 +119,21 @@ function saleInvestmentPlan(params,result,coeffPlan){
     {no:"45",name:"投资计划合计",children:["45.1","45.2","45.3"]},
     {no:"45.1",name:"小计",children:["45.1.1","45.1.2","45.1.3","45.1.4","45.1.5","45.1.6","45.1.7"]},
     {no:"45.1.1",name:"土地成本费用",children:["45.1.1.1","45.1.1.2","45.1.1.3","45.1.1.4","45.1.1.5"]},
-    leaf("45.1.1.1","地价",p.landCost,"1.1","现有出售参数 landCost"),
-    leaf("45.1.1.2","税费",0,"1.2","待接入土地税费明细"),
-    leaf("45.1.1.3","管线迁改费",0,"1.3","待接入管线迁改费明细"),
-    leaf("45.1.1.4","红线外市政设施费",0,"1.4","待接入红线外市政设施费明细"),
-    leaf("45.1.1.5","其他费用",0,"1.5","待接入土地其他费用明细"),
+    leaf("45.1.1.1","地价",E?E.land.landPriceTotal:p.landCost,"1.1",E?"出售类全量估算5.1":"兼容参数 landCost"),
+    leaf("45.1.1.2","税费",E?E.land.landTax:0,"1.2",E?"出售类全量估算5.2":"待接入土地税费明细"),
+    leaf("45.1.1.3","管线迁改费",E?E.land.pipelineRelocation:0,"1.3",E?"出售类全量估算5.1.3":"待接入管线迁改费明细"),
+    leaf("45.1.1.4","红线外市政设施费",E?E.land.outsideMunicipal:0,"1.4",E?"出售类全量估算5.1.4":"待接入红线外市政设施费明细"),
+    leaf("45.1.1.5","其他费用",E?E.land.landOther:0,"1.5",E?"出售类全量估算5.1.5":"待接入土地其他费用明细"),
     {no:"45.1.2",name:"建筑安装工程费",children:["45.1.2.1","45.1.2.2","45.1.2.3","45.1.2.4"]},
-    leaf("45.1.2.1","地下建筑部分",p.constructionCost,"2.2","现有非配售建安总额临时映射"),
-    leaf("45.1.2.2","地上建筑部分",p.saleConstructionCost,"2.3","现有配售建安总额临时映射"),
-    leaf("45.1.2.3","安装工程",0,"2.4","待接入安装工程独立金额"),
-    leaf("45.1.2.4","装修工程",0,"2.5","待接入装修工程独立金额"),
-    leaf("45.1.3","基础设施建设费",(Number(p.infraCost)||0)+(Number(p.saleInfraCost)||0),"3","现有配售及非配售基础设施费"),
-    leaf("45.1.4","前期工程费",0,null,"待补充前期工程费及其年度比例"),
-    leaf("45.1.5","开发间接费",p.otherEngCost,"4","现有工程建设其他费用临时映射"),
-    leaf("45.1.6","物业维修基金",0,"6","待接入物业维修基金独立金额"),
-    leaf("45.1.7","不可预见费",0,"5","待接入不可预见费独立金额"),
+    leaf("45.1.2.1","地下建筑部分",E?E.construction.undergroundTotal:p.constructionCost,"2.2",E?"出售类全量估算6.1":"兼容参数 constructionCost"),
+    leaf("45.1.2.2","地上建筑部分",E?E.construction.aboveTotal:p.saleConstructionCost,"2.3",E?"出售类全量估算6.2":"兼容参数 saleConstructionCost"),
+    leaf("45.1.2.3","安装工程",E?E.construction.installTotal:0,"2.4",E?"出售类全量估算6.3":"待接入安装工程独立金额"),
+    leaf("45.1.2.4","装修工程",E?E.construction.decorationTotal:0,"2.5",E?"出售类全量估算6.4":"待接入装修工程独立金额"),
+    leaf("45.1.3","基础设施建设费",E?E.infrastructure.total:(Number(p.infraCost)||0)+(Number(p.saleInfraCost)||0),"3",E?"出售类全量估算7":"兼容参数基础设施费"),
+    leaf("45.1.4","前期工程费",E?E.preConstruction.total:0,"4",E?"出售类全量估算8":"待补充前期工程费"),
+    leaf("45.1.5","开发间接费",E?E.indirect.total:p.otherEngCost,"4",E?"出售类全量估算9":"兼容参数 otherEngCost"),
+    leaf("45.1.6","物业维修基金",E?E.repairFund:0,"6",E?"出售类全量估算10":"待接入物业维修基金"),
+    leaf("45.1.7","不可预见费",E?E.contingency:0,"5",E?"出售类全量估算13":"待接入不可预见费"),
     leaf("45.2","销售费用",sumCost("saleFee"),"7","出售测算引擎销售费用合计；按销售阶段40%/40%/20%分摊"),
     leaf("45.3","建设期财务费用",years.reduce((s,y)=>s+(buildYears.has(y)?Number(R.loan&&R.loan[y]&&R.loan[y].interest)||0:0),0),null,"还本付息表·本期利息","direct"),
   ];

@@ -31,8 +31,12 @@ function loadDraft(){
   try{ const raw = localStorage.getItem(DRAFT_KEY); return raw? JSON.parse(raw): null; }catch(e){ return null; }
 }
 function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
-function restoreDraft(d){
-  appMode = window.ProjectWorkflow?ProjectWorkflow.resumeAppMode(d.appMode,!!d.aiReportSession):(d.aiReportSession?"aireport":"report");
+function restoreDraft(d, options){
+  options=options||{};
+  // 浏览器刷新时只恢复项目数据，不替用户决定要进入哪个功能模块。
+  // “我的项目→打开”及草稿栏的人工恢复仍沿用原模式，保持完整工作现场恢复能力。
+  appMode = options.openHome ? null
+    : (window.ProjectWorkflow?ProjectWorkflow.resumeAppMode(d.appMode,!!d.aiReportSession):(d.aiReportSession?"aireport":"report"));
   domainKey = d.domainKey; signed = !!d.signed; docNo = d.docNo||null;
   Object.assign(project, d.project||{});
   calcParams = d.calcParams||null;

@@ -129,24 +129,31 @@ function saleFormHtml(){
     +F("商业稳定期出租率","s_commStableOcc",g("commStableOcc",0.96))
     +F("商业租金冻结起始年（该年起不再递增）","s_commRentStableStart",g("commRentStableStart",2030))+F("商业租赁月数（每年）","s_leaseMonths",g("leaseMonths",12))
     +F("商业停车位个数","s_parkCount",g("parkCount",0))+'<div></div>'
-    +'</div><div class="step-desc" style="margin-top:14px;"><b>成本与税费参数</b></div><div class="grid2">'
-    +F("(非配售)土地成本费（万元）","s_landCost",g("landCost",1020.53))+F("(非配售)建安工程费（万元）","s_constructionCost",g("constructionCost",5096.1))
-    +F("(非配售)基础设施建设费（万元）","s_infraCost",g("infraCost",88.83))+F("(非配售)工程建设其他费用（万元）","s_otherEngCost",g("otherEngCost",416.26))
-    +F("(非配售)开发成本费（万元）","s_devCost",g("devCost",7230.84))+F("(配售)建安工程费（万元）","s_saleConstructionCost",g("saleConstructionCost",50240.7))
-    +F("(配售)基础设施费（万元）","s_saleInfraCost",g("saleInfraCost",875.77))+F("工程进项税（万元）","s_projectInputTax",g("projectInputTax",0))
-    +F("用地面积（㎡）","s_landUseArea",g("landUseArea",14596.19))+F("划拨土地楼面价（元/㎡，地价抵减用）","s_landFloorPrice",g("landFloorPrice",1000))
-    +F("项目总投资（万元）","s_totalInvestment",g("totalInvestment",71286.39))
+    +'</div><div class="step-desc" style="margin-top:14px;"><b>正式测算口径：技术指标与投资估算必填项</b><div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">出售类只有这一套公式。土地、建安、前期、间接费、A/B分摊和总投资均由下列项目事实自动计算，不再允许用历史汇总数覆盖。</div></div><div class="grid2">'
+    +F("用地面积（㎡）","s_landUseArea",g("landUseArea",14596.19))+F("划拨土地楼面价（元/㎡）","s_landFloorPrice",g("landFloorPrice",1000))
+    +F("工程进项税补充额（万元；无则填0）","s_projectInputTax",g("projectInputTax",0))
     +F("商业成本价移交面积（㎡）","s_transferArea",g("transferArea",305))+F("移交平均售价（元/㎡）","s_transferPrice",g("transferPrice",5096.1))
     +F("房产税2年基数（万元）","s_prop2AnnualBase",g("prop2AnnualBase",23.2688))
     +'<div><label>空置物业费逐年折减系数（逗号分隔）</label><input id="s_vacFactors" type="text" value="'+(Array.isArray(g("vacFactors"))?g("vacFactors").join(","):"0.88,0.98")+'"></div>'
-    +'<div style="grid-column:1/-1; margin-top:6px; font-size:12.5px; color:var(--ink-soft);">以下三项取自「配售部分」「不计入配售部分」专表，口径无法由上述参数还原，可直接填入；留空则由引擎按公式推算</div>'
-    +F("开发成本·销售部分（万元）","s_devSaleBaseOverride",g("devSaleBaseOverride",63516.05))
-    +F("开发成本·折旧摊销部分（万元）","s_devDepBaseOverride",g("devDepBaseOverride",2216.07))
-    +F("销售税金及附加合计（万元）","s_saleTaxTotalOverride",g("saleTaxTotalOverride",831.69))+'<div></div>'
+    +'</div><div class="grid2" id="s_fullBlock">'
+    +F("住宅建筑面积（㎡；默认沿用销售面积）","s_fe_residentialArea",g("residentialArea",g("saleArea",56105)))
+    +F("商业建筑面积（㎡；默认沿用商业出租面积）","s_fe_commercialArea",g("commercialArea",g("commArea",1750)))
+    +F("公共配套建筑面积（㎡）","s_fe_supportArea",g("supportArea",0))+F("地下室面积（㎡）","s_fe_basementArea",g("basementArea",0))
+    +F("住宅地价（万元；留0按划拨楼面价×住宅面积）","s_fe_residentialLandPrice",g("residentialLandPrice",0))
+    +F("商业地价（万元）","s_fe_commercialLandPrice",g("commercialLandPrice",g("landCost",1020.53)))
+    +F("管线迁改费（万元）","s_fe_pipelineRelocationFee",g("pipelineRelocationFee",0))+F("红线外市政设施费（万元）","s_fe_outsideMunicipalFee",g("outsideMunicipalFee",0))
+    +F("土地其他费用（万元）","s_fe_landOtherFee",g("landOtherFee",0))+F("充电桩数量（个）","s_fe_chargerCount",g("chargerCount",0))
+    +F("光伏数量/容量（公式原始计量项）","s_fe_pvCount",g("pvCount",0))+F("路口开设数量（个）","s_fe_curbCutCount",g("curbCutCount",0))
+    +F("围挡面积（㎡）","s_fe_fenceArea",g("fenceArea",0))+F("临时设施面积（㎡）","s_fe_facilityArea",g("facilityArea",0))
+    +F("临时设施单价（万元/㎡）","s_fe_facilityUnitPrice",g("facilityUnitPrice",0))+F("临时占地面积（㎡）","s_fe_occupyArea",g("occupyArea",0))
+    +F("样板展示面积（㎡）","s_fe_displayArea",g("displayArea",0))+F("样板房面积（㎡）","s_fe_showroomArea",g("showroomArea",0))
+    +F("可研费（万元；出售类本版默认9.6）","s_fe_feasibilityFee",g("feasibilityFee",9.6))+F("环境报告编制费（万元）","s_fe_envReportFee",g("envReportFee",15))
+    +F("地质灾害危险评估费（万元；出售类本版默认9）","s_fe_geoHazardFee",g("geoHazardFee",9))+'<div></div>'
     +'</div><div class="step-desc" style="margin-top:14px;"><b>融资与折现</b></div><div class="grid2">'
     +F("总借款额（万元，建设期首年借入）","s_loanAmount",g("loanAmount",9250.22))+F("贷款年利率（%）","s_loanRate",g("loanRate",3))
     +F("借款总年数","s_loanTotalYears",g("loanTotalYears",25))+F("还款开始年","s_repayStart",g("repayStart",2030))
     +F("每年还款额（万元）","s_repayAmount",g("repayAmount",0))+F("还款年数","s_repayYears",g("repayYears",0))
+    +F("首次还本比例（%，第二版默认3）","s_firstRepayRatio",g("firstRepayRatio",3))+F("还本额年递增率（%，第二版默认4.5）","s_repayIncreaseRate",g("repayIncreaseRate",4.5))
     +F("折现率（%）","s_discountPct",g("discountPct",3.5))+'<div></div>'
     +'</div><div id="isScheduleMount">'+investmentScheduleEditorHtml("sale",g("buildStart",2025),g("buildStartQuarter",isScheduleCfg("sale").startQuarter),sBuildYears,v.investSchedule)+'</div>';
 }
@@ -162,19 +169,19 @@ function readSaleForm(){
     commArea:n("s_commArea"), commRent:n("s_commRent"), commRentSpan:n("s_commRentSpan"), commRentRate:n("s_commRentRate"),
     commOccRamp:arr("s_commOccRamp"), commStableOcc:n("s_commStableOcc"),
     commRentStableStart:n("s_commRentStableStart"), leaseMonths:n("s_leaseMonths"), parkCount:n("s_parkCount"),
-    landCost:n("s_landCost"), constructionCost:n("s_constructionCost"), infraCost:n("s_infraCost"),
-    otherEngCost:n("s_otherEngCost"), devCost:n("s_devCost"),
-    saleConstructionCost:n("s_saleConstructionCost"), saleInfraCost:n("s_saleInfraCost"),
     projectInputTax:n("s_projectInputTax"), landUseArea:n("s_landUseArea"), landFloorPrice:n("s_landFloorPrice"),
-    totalInvestment:n("s_totalInvestment"),
+    transferArea:n("s_transferArea"),transferPrice:n("s_transferPrice"),
     prop2AnnualBase:nOrNull("s_prop2AnnualBase"), vacFactors:arr("s_vacFactors"),
-    devSaleBaseOverride:nOrNull("s_devSaleBaseOverride"), devDepBaseOverride:nOrNull("s_devDepBaseOverride"),
-    saleTaxTotalOverride:nOrNull("s_saleTaxTotalOverride"),
     loanAmount:n("s_loanAmount"), loanRate:n("s_loanRate"), loanTotalYears:n("s_loanTotalYears"),
-    repayStart:n("s_repayStart"), repayAmount:n("s_repayAmount"), repayYears:n("s_repayYears"),
-    discountPct:n("s_discountPct") };
+    repayStart:n("s_repayStart"), repayAmount:n("s_repayAmount"), repayYears:n("s_repayYears"),firstRepayRatio:n("s_firstRepayRatio"),repayIncreaseRate:n("s_repayIncreaseRate"),
+    discountPct:n("s_discountPct"),
+    residentialArea:n("s_fe_residentialArea"),commercialArea:n("s_fe_commercialArea"),supportArea:n("s_fe_supportArea"),basementArea:n("s_fe_basementArea"),
+    residentialLandPrice:n("s_fe_residentialLandPrice"),commercialLandPrice:n("s_fe_commercialLandPrice"),pipelineRelocationFee:n("s_fe_pipelineRelocationFee"),outsideMunicipalFee:n("s_fe_outsideMunicipalFee"),landOtherFee:n("s_fe_landOtherFee"),
+    chargerCount:n("s_fe_chargerCount"),pvCount:n("s_fe_pvCount"),curbCutCount:n("s_fe_curbCutCount"),fenceArea:n("s_fe_fenceArea"),facilityArea:n("s_fe_facilityArea"),facilityUnitPrice:n("s_fe_facilityUnitPrice"),occupyArea:n("s_fe_occupyArea"),displayArea:n("s_fe_displayArea"),showroomArea:n("s_fe_showroomArea"),
+    feasibilityFee:n("s_fe_feasibilityFee"),envReportFee:n("s_fe_envReportFee"),geoHazardFee:n("s_fe_geoHazardFee") };
+  p.costTransferIncome=p.transferArea*p.transferPrice/10000;
   if(window.InvestmentSchedule){
-    const total=p.totalInvestment||p.devInvestTotal||0,draft=isEnsureDraft("sale",p.buildYears*4),cfg=isScheduleCfg("sale");
+    const total=0,draft=isEnsureDraft("sale",p.buildYears*4),cfg=isScheduleCfg("sale");
     const mappings=cfg.mappings||[{id:"sale_total",name:"项目建设投资",costPath:"total",taskIds:draft.tasks.filter(t=>t.id!=="sales").map(t=>t.id),curve:"s_curve"}];
     p.investSchedule=window.InvestmentSchedule.allocate({total},{startYear:p.buildStart,startQuarter:p.buildStartQuarter,totalQuarters:draft.totalQuarters,tasks:draft.tasks,mappings});
     p.saleInvestmentCoefficients=window.InvestmentSchedule.coefficientPlan(p.investSchedule.tasks,p.investSchedule.periods,cfg.coefficientRows,p.investSchedule.totalQuarters);
@@ -197,7 +204,7 @@ function rentFormHtml(){
     +F("住宅面积（㎡）","r_area",g("area",34330))+F("起始租金（元/㎡/月）","r_rent",g("rent",45))
     +F("租金递增跨度（年）","r_rentSpan",g("rentSpan",3))+F("租金递增率（%）","r_rentRate",g("rentRate",5))
     +F("首年出租率","r_rampOcc",g("rampOcc",0.7))+F("稳定期出租率","r_stableOcc",g("stableOcc",0.9))
-    +'<div><label>爬坡期出租率（逗号分隔，doc示例：运营第1年0.70→第2年0.80→第3年起稳定0.90）</label><input id="r_occRamp" type="text" value="'+(Array.isArray(g("occRamp"))?g("occRamp").join(","):"0.7,0.8")+'"></div>'
+    +'<div><label>爬坡期出租率（逗号分隔：运营第1年0.70→第2年0.80→第3年起稳定值）</label><input id="r_occRamp" type="text" value="'+(Array.isArray(g("occRamp"))?g("occRamp").join(","):"0.7,0.8")+'"></div>'
     +F("租金折扣系数（1=租金已含折扣）","r_rentDiscount",g("rentDiscount",1))
     +'<div style="grid-column:1/-1; margin-top:6px; font-size:12.5px; color:var(--ink-soft);">'
     +'政府补贴租金收入——<b>面积填0即不启用</b>，单价与出租率留空则沿用住宅租金取值'
@@ -207,28 +214,24 @@ function rentFormHtml(){
     +'<div style="grid-column:1/-1; margin-top:6px; font-size:12.5px; color:var(--ink-soft);">配套与其他收入</div>'
     +F("车位个数","r_parkCount",g("parkCount",420))+F("车位月租金（元/个）","r_parkPrice",g("parkPrice",200))
     +F("车位收入系数","r_parkRatio",g("parkRatio",0.5))+F("其他收入（万元，首年一次性）","r_otherTotal",g("otherTotal",100))
-    +'<div><label>车位爬坡期出租率（逗号分隔，doc示例：运营第1年0.65→第2年0.75→第3年起稳定0.90）</label><input id="r_parkOccRamp" type="text" value="'+(Array.isArray(g("parkOccRamp"))?g("parkOccRamp").join(","):"0.65,0.75")+'"></div>'
+    +'<div><label>车位爬坡期出租率（逗号分隔：运营第1年0.65→第2年0.75→第3年起稳定值）</label><input id="r_parkOccRamp" type="text" value="'+(Array.isArray(g("parkOccRamp"))?g("parkOccRamp").join(","):"0.65,0.75")+'"></div>'
     +F("邮政支局面积（㎡）","r_areaPostOffice",g("areaPostOffice",0))+F("邮政支局回购单价（元/㎡）","r_postOfficePrice",g("postOfficePrice",0))
     +F("幼儿园面积（㎡）","r_areaKindergarten",g("areaKindergarten",0))
-    +F("物业服务用房面积（㎡，doc未拆分四项公配明细，暂计入本项以凑计容总建面38225）","r_areaPropertyRoom",g("areaPropertyRoom",3895))
+    +F("物业服务用房面积（㎡）","r_areaPropertyRoom",g("areaPropertyRoom",3895))
     +F("社区警务室面积（㎡）","r_areaPoliceRoom",g("areaPoliceRoom",0))
-    +F("总建筑面积（㎡，勾选下方自动测算后将被覆盖）","r_totalBuildArea",g("totalBuildArea",61900.75))+F("管理系数","r_manageCoeff",g("manageCoeff",0.9))
+    +F("总建筑面积（㎡，由全量公式计算）","r_totalBuildArea",g("totalBuildArea",61900.75))+F("管理系数","r_manageCoeff",g("manageCoeff",0.9))
     +F("住宅装修造价（万元）","r_decorationCost",g("decorationCost",800))
     +'<div><label>房源类型</label><select id="r_houseType"><option '+(g("houseType","公租房")==="公租房"?"selected":"")+'>公租房</option><option '+(g("houseType","公租房")==="保租房"?"selected":"")+'>保租房</option></select></div>'
-    +F("总投资（万元，折旧基数，勾选下方自动测算后将被覆盖）","r_totalInvestment",g("totalInvestment",15000))+F("用地面积（㎡）","r_landArea",g("landArea",8495.2))
-    +F("建安工程费（万元，勾选下方自动测算后将被覆盖）","r_constructionCost",g("constructionCost",6000))+F("总借款额（万元）","r_loanAmount",g("loanAmount",9000))
+    +F("总投资（万元，折旧基数，由全量公式计算）","r_totalInvestment",g("totalInvestment",15000))+F("用地面积（㎡）","r_landArea",g("landArea",8495.2))
+    +F("建安工程费（万元，由全量公式计算）","r_constructionCost",g("constructionCost",6000))+F("总借款额（万元）","r_loanAmount",g("loanAmount",9000))
     +F("贷款年利率（%）","r_loanRate",g("loanRate",3))+F("首次还本比例（%）","r_firstRepayRatio",g("firstRepayRatio",3))
     +F("还本递增率（%）","r_repayIncreaseRate",g("repayIncreaseRate",4.5))+F("借款总年数","r_loanTotalYears",g("loanTotalYears",20))
-    +F("建设投资（万元，勾选下方自动测算后将被覆盖）","r_invest",g("invest",15000))+F("折现率（%）","r_discountPct",g("discountPct",3.5))
+    +F("建设投资（万元，由全量公式计算）","r_invest",g("invest",15000))+F("折现率（%）","r_discountPct",g("discountPct",3.5))
     +'</div>'
-    +'<div class="step-desc" style="margin-top:14px;"><b>投资估算自动测算（可选）</b>'
-    +'<label style="font-weight:400; margin-left:10px; font-size:12.5px;">'
-    +'<input type="checkbox" id="r_ieEnable" '+(g("ieEnable",true)?"checked":"")+' onchange="document.getElementById(\'r_ieBlock\').style.display=this.checked?\'contents\':\'none\';">'
-    +' 启用——按面积与单方造价系数自动算出「总投资/建安工程费/用地面积/总建筑面积/建设投资年度计划」，勾选后上方对应四项与建设投资将被自动覆盖（用地面积/住宅面积/公配面积/车位个数取上方已填数值）。默认已勾选并按doc「本项目实例」预填，方便直接核对结果。'
-    +'</label></div>'
-    +'<div class="grid2" id="r_ieBlock" style="display:'+(g("ieEnable",true)?"contents":"none")+';">'
+    +'<div class="step-desc" style="margin-top:14px;"><b>投资估算全量公式参数</b><div style="margin-top:5px;font-size:12px;color:var(--ink-soft);">以下为项目事实和人工费用；全部成本由白箱公式逐项计算，并形成技术指标、投资估算和工期进度完整表。</div></div>'
+    +'<div class="grid2" id="r_ieBlock" style="display:contents;">'
     +F("地下室面积（㎡）","r_ie_basementArea",g("ie_basementArea",21000))+F("商业面积（㎡，出租类多数为0）","r_ie_commArea",g("ie_commArea",0))
-    +F("住宅地价单价（元/㎡，doc本项目实例未给出，需自行填写才能得到完整总投资）","r_ie_landPriceResi",g("ie_landPriceResi",0))+F("邮政支局地价单价（元/㎡）","r_ie_postOfficeLandPrice",g("ie_postOfficeLandPrice",0))
+    +F("住宅地价单价（元/㎡）","r_ie_landPriceResi",g("ie_landPriceResi",0))+F("邮政支局地价单价（元/㎡）","r_ie_postOfficeLandPrice",g("ie_postOfficeLandPrice",0))
     +F("路口开设个数","r_ie_curbCutCount",g("ie_curbCutCount",0))+F("高压线下地费（万元，人工填入）","r_ie_highVoltageBuryFee",g("ie_highVoltageBuryFee",0))
     +F("苗木迁移费（万元，人工填入）","r_ie_treeRelocFee",g("ie_treeRelocFee",0))+F("围挡面积（㎡）","r_ie_fenceArea",g("ie_fenceArea",0))
     +F("临时设施面积（㎡）","r_ie_facilityArea",g("ie_facilityArea",0))+F("临时设施单价（万元/㎡）","r_ie_facilityUnitPrice",g("ie_facilityUnitPrice",0))
@@ -264,8 +267,8 @@ function readRentForm(){
     repayIncreaseRate:n("r_repayIncreaseRate"), loanTotalYears:n("r_loanTotalYears"),
     invest:n("r_invest"), discountPct:n("r_discountPct") };
 
-  const ieEnable = document.getElementById("r_ieEnable") && document.getElementById("r_ieEnable").checked;
-  p.ieEnable = !!ieEnable;
+  const ieEnable = true;
+  p.ieEnable = true;
   if(ieEnable && window.InvestEstimate){
     const iePar = {
       landArea:p.landArea, resiArea:p.area, areaKindergarten:p.areaKindergarten, areaPostOffice:p.areaPostOffice,
@@ -281,7 +284,7 @@ function readRentForm(){
     const est = window.InvestEstimate.estimate(iePar, ieCfg);
     const scheduleCfg=isScheduleCfg("rent"),draft=isEnsureDraft("rent",p.buildYears*4);
     const sch = window.InvestEstimate.schedule(est, p.buildStart, p.buildYears, ieCfg,{startQuarter:p.buildStartQuarter,tasks:draft.tasks,template:scheduleCfg.template,mappings:scheduleCfg.mappings||undefined});
-    // 自动覆盖：总投资/建安工程费/用地面积/总建筑面积/建设投资年度计划；建设期财务费用仍由RentCalc按还本付息表另算
+    // 全量公式输出：总投资/建安工程费/总建筑面积/建设投资年度计划；建设期财务费用仍由RentCalc按还本付息表另算
     p.totalInvestment = est.summary.buildInvestment;
     p.constructionCost = est.summary.constructionCostTotal;
     p.totalBuildArea = est.summary.totalBuildArea;
@@ -318,7 +321,8 @@ function dtable(title, R, rows, open){
     if(r.t==="none") total = null;
     else if(r.t==="last"){ const nn = vals.filter(v=>v!==null&&v!==undefined); total = nn.length? nn[nn.length-1] : null; }
     else total = vals.reduce((s,v)=> s + (typeof v==="number"&&isFinite(v)? v:0), 0);
-    return '<tr><td class="dt-l'+(r.hl?' dt-hl':'')+'">'+r.l+'</td>'
+    const noMatch=String(r.l||"").match(/^\s*(\d+(?:\.\d+)*)\.?\s+/),depth=noMatch?(noMatch[1].split(".").length-1):0;
+    return '<tr><td class="dt-l'+(r.hl?' dt-hl':'')+'" style="padding-left:'+(12+depth*18)+'px;font-size:'+Math.max(11.5,13-depth*.65)+'px;">'+r.l+'</td>'
       +'<td class="dt-sum'+(r.hl?' dt-hl':'')+'">'+(total===null?"—":dtFmt(total, r.f))+'</td>'
       + vals.map(v=>'<td'+(r.hl?' class="dt-hl"':'')+'>'+dtFmt(v, r.f)+'</td>').join("") + '</tr>';
   }).join("");
@@ -399,8 +403,8 @@ function specGaibao(){
 }
 
 function specRent(){
-  return [
-   {sheet:"收入", title:"收入明细表（万元，行首编号对应doc「四、收入」19.1-19.4，doc原文该处误写1.1/2.2/2.3，已按父项19规范化）", open:1, rows:[
+  const tables = [
+   {sheet:"收入", title:"（四-1）收入明细表（万元，公式序号19—19.4）", open:1, rows:[
     {id:"i_resi", l:"19.1 住宅租金收入", g:(R,y)=>R.income[y].resi},
     // 有政府补贴租金时分项列出，便于与Excel逐科目对数；无补贴则不显示这两行
     {id:"i_resi1", l:"　其中：19.1 住宅租金收入", g:(R,y)=>(R.income[y].resiTiers||[])[0],
@@ -410,10 +414,11 @@ function specRent(){
     {id:"i_park", l:"19.3 车位收入", g:(R,y)=>R.income[y].park},
     {id:"i_oth", l:"19.4 其他收入", g:(R,y)=>R.income[y].other},
     {id:"i_tot", l:"19. 总收入", g:(R,y)=>R.income[y].total, hl:1, xf:{sum:["i_resi","i_park","i_oth"]}},
+    {id:"i_operating", l:"26. 总经营收入", g:(R,y)=>R.income[y].total, hl:1, xf:{expr:(c,i)=>c.cell("i_tot",i)}},
     {l:"出租率", g:(R,y)=>R.resiOcc[y], f:"pct", t:"none"},
     {l:"租金单价（元/㎡/月）", g:(R,y)=>R.resiRent[y], t:"none"},
    ]},
-   {sheet:"经营成本", title:"经营成本明细（万元，编号对应doc「四、经营费用」21.1-21.7）", rows:[
+   {sheet:"经营成本", title:"（四-2）经营成本明细表（万元，公式序号21—21.7、27.1）", rows:[
     {id:"c_mgH", l:"21.1 管理费用（住房）", g:(R,y)=>R.cost[y].mgH},
     {id:"c_mgP", l:"21.2 管理费用（停车位）", g:(R,y)=>R.cost[y].mgP,
       xf:{expr:(c,i)=>"ROUND("+c.cell("i_park",i)+"*"+c.param("mgParkRatio")+",4)"}},
@@ -426,19 +431,19 @@ function specRent(){
     {id:"c_op", l:"21. 经营费用合计", g:(R,y)=>R.cost[y].operating, hl:1,
       xf:{sum:["c_mgH","c_mgP","c_ins","c_rep","c_fund","c_vac","c_rst","c_dep"]}},
    ]},
-   {sheet:"还本付息", title:"还本付息计划表（万元，编号对应doc「七、还本付息表」33.1-33.4）", rows:[
-    {id:"l_beg", l:"期初借款余额", g:(R,y)=>R.loan[y].begin, t:"none",
+   {sheet:"还本付息", title:"（七）还本付息计划表（万元，公式序号33—33.4）", rows:[
+    {id:"l_beg", l:"33.0.1 期初借款余额", g:(R,y)=>R.loan[y].begin, t:"none",
       xf:{expr:(c,i)=> i===0? "0" : c.cell("l_end",i-1)}},
-    {id:"l_bor", l:"本期借款", g:(R,y)=>R.loan[y].borrow},
+    {id:"l_bor", l:"33.0.2 本期借款", g:(R,y)=>R.loan[y].borrow},
     {id:"l_int", l:"33.1 本期计息", g:(R,y)=>R.loan[y].interest,
       xf:{expr:(c,i)=>"ROUND(("+c.cell("l_beg",i)+"+"+c.cell("l_bor",i)+"/2)*"+c.param("loanRate")+"/100,4)"}},
     {id:"l_rep", l:"33.3 本期还本", g:(R,y)=>R.loan[y].repay},
     {id:"l_pin", l:"33.2 本期还息", g:(R,y)=>R.loan[y].payInt, xf:{expr:(c,i)=>c.cell("l_int",i)}},
-    {id:"l_pay", l:"还本付息合计", g:(R,y)=>R.loan[y].total, xf:{sum:["l_rep","l_pin"]}},
+    {id:"l_pay", l:"33. 还本付息合计", g:(R,y)=>R.loan[y].total, hl:1, xf:{sum:["l_rep","l_pin"]}},
     {id:"l_end", l:"33.4 期末借款累计", g:(R,y)=>R.loan[y].end, t:"last",
       xf:{expr:(c,i)=>"ROUND(MAX("+c.cell("l_beg",i)+"+"+c.cell("l_bor",i)+"+"+c.cell("l_int",i)+"-"+c.cell("l_pin",i)+"-"+c.cell("l_rep",i)+",0),4)"}},
    ]},
-   {sheet:"税金", title:"税金及附加明细（万元，编号对应doc「四、税金及其附加」22.1-22.6）", rows:[
+   {sheet:"税金", title:"（四-3）税金及附加明细表（万元，公式序号22—22.6）", rows:[
     {id:"t_vat", l:"22.1 增值税", g:(R,y)=>R.tax[y].vat,
       xf:{expr:(c,i)=>"ROUND("+c.cell("i_resi",i)+"*"+c.param("vatResi")+"/(1+"+c.param("vatResiBase")+")+"+c.cell("i_park",i)+"*"+c.param("vatPark")+"/(1+"+c.param("vatPark")+"),4)"}},
     {id:"t_stp", l:"22.2 印花税", g:(R,y)=>R.tax[y].stamp,
@@ -450,14 +455,14 @@ function specRent(){
     {id:"t_tot", l:"22. 税金及其附加", g:(R,y)=>R.tax[y].total, hl:1,
       xf:{sum:["t_vat","t_stp","t_cty","t_edu","t_prp","t_lnd"]}},
    ]},
-   {sheet:"总成本", title:"总成本费用表（万元，编号对应doc「六、损益表」27）", rows:[
-    {id:"tc_op", l:"经营成本", g:(R,y)=>R.cost[y].operating, xf:{expr:(c,i)=>c.cell("c_op",i)}},
+   {sheet:"总成本", title:"（六-1）总成本费用表（万元，公式序号27—27.2.2）", rows:[
+    {id:"tc_op", l:"27.1 经营成本（含折旧摊销）", g:(R,y)=>R.cost[y].operating, xf:{expr:(c,i)=>c.cell("c_op",i)}},
     {id:"tc_fb", l:"27.2.1 财务费用（建设期）", g:(R,y)=>R.totalCost[y].finBuild},
     {id:"tc_fo", l:"27.2.2 财务费用（运营期）", g:(R,y)=>R.totalCost[y].finOp},
     {id:"tc_tot", l:"27. 总成本费用（不含建设期财务费用、不含税金）", g:(R,y)=>R.totalCost[y].total, hl:1,
       xf:{sum:["tc_op","tc_fo"]}},
    ]},
-   {sheet:"利润", title:"利润表（万元，编号对应doc「六、损益表」28-32）", rows:[
+   {sheet:"利润", title:"（六-2）利润及利润分配表（万元，公式序号28—32.1）", rows:[
     {id:"p_tot", l:"28. 利润总额", g:(R,y)=>R.profit[y].total,
       xf:{expr:(c,i)=>"ROUND("+c.cell("i_tot",i)+"-"+c.cell("tc_tot",i)+"-"+c.cell("t_tot",i)+",4)"}},
     {id:"p_mk", l:"29. 弥补亏损", g:(R,y)=>R.profit[y].makeup},
@@ -467,7 +472,7 @@ function specRent(){
     {id:"p_net", l:"32.1 净利润", g:(R,y)=>R.profit[y].net, hl:1,
       xf:{expr:(c,i)=>"ROUND("+c.cell("p_tot",i)+"-"+c.cell("p_it",i)+",4)"}},
    ]},
-   {sheet:"现金流", title:"现金流量表（万元，编号对应doc「九、全投资现金流量表」37-42）", rows:[
+   {sheet:"现金流", title:"（九）全投资现金流量表（万元，公式序号37—42）", rows:[
     {id:"f_in", l:"37. 现金流入", g:(R,y)=>R.cf[y].inflow, xf:{expr:(c,i)=>c.cell("i_tot",i)}},
     {id:"f_inv", l:"其中：建设投资", g:(R,y)=>R.cf[y].invest},
     {id:"f_out", l:"38. 现金流出", g:(R,y)=>R.cf[y].outflow,
@@ -479,7 +484,7 @@ function specRent(){
       xf:{expr:(c,i)=>"ROUND("+c.cell("f_net",i)+"/POWER(1+"+c.param("discountPct")+"/100,"+(i+0.5)+"),4)"}},
     {id:"f_cnpv", l:"42. 累计净现值", g:(R,y)=>R.cf[y].cumNpv, t:"last", hl:1, xf:{cum:"f_npv"}},
    ]},
-   {sheet:"资金来源运用", title:"资金来源与运用表（万元，编号对应doc「五、资金来源与运用」23-25）", rows:[
+   {sheet:"资金来源运用", title:"（五）资金来源与运用表（万元，公式序号23—25）", rows:[
     {id:"fu_op", l:"23.1 经营活动现金来源", g:(R,y)=>R.funds[y].opSource, xf:{expr:(c,i)=>c.cell("i_tot",i)}},
     {id:"fu_fin", l:"23.2 筹资活动现金来源（银行借款）", g:(R,y)=>R.funds[y].financeSource, xf:{expr:(c,i)=>c.cell("l_bor",i)}},
     {id:"fu_rec", l:"余值回收", g:(R,y)=>R.funds[y].recover},
@@ -490,7 +495,8 @@ function specRent(){
     {id:"fu_sur", l:"25. 盈余资金", g:(R,y)=>R.funds[y].surplus, hl:1,
       xf:{expr:(c,i)=>"ROUND("+c.cell("fu_src",i)+"-"+c.cell("fu_use",i)+",4)"}},
    ]},
-   {sheet:"调整损益", title:"调整损益表（万元，全投资口径·不含任何财务费用，编号对应doc「八、调整损益表」34-36）", rows:[
+   {sheet:"调整损益", title:"（八）调整损益表（万元，全投资口径，公式序号34—36.1）", rows:[
+    {id:"pa_cost", l:"34. 总成本费用（调整）", g:(R,y)=>R.cost[y].operating, hl:1, xf:{expr:(c,i)=>c.cell("c_op",i)}},
     {id:"pa_tot", l:"35. 利润总额（调整）", g:(R,y)=>R.profitAdj[y].total,
       xf:{expr:(c,i)=>"ROUND("+c.cell("i_tot",i)+"-"+c.cell("c_op",i)+"-"+c.cell("t_tot",i)+",4)"}},
     {id:"pa_mk", l:"弥补亏损（调整，同六损益表规则）", g:(R,y)=>R.profitAdj[y].makeup},
@@ -500,7 +506,7 @@ function specRent(){
     {id:"pa_net", l:"36.1 净利润（调整）", g:(R,y)=>R.profitAdj[y].net, hl:1,
       xf:{expr:(c,i)=>"ROUND("+c.cell("pa_tot",i)+"-"+c.cell("pa_it",i)+",4)"}},
    ]},
-   {sheet:"资本金现金流量", title:"资本金现金流量表（万元，编号对应doc「十、资本金现金流量表」44-45）", rows:[
+   {sheet:"资本金现金流量", title:"（十）资本金现金流量表（万元，公式序号44—45）", rows:[
     {id:"cc_in", l:"现金流入（同全投资现金流量表）", g:(R,y)=>R.capitalCf[y].inflow, xf:{expr:(c,i)=>c.cell("i_tot",i)}},
     {id:"cc_inv", l:"其中：总投资", g:(R,y)=>R.capitalCf[y].invest, xf:{expr:(c,i)=>c.cell("f_inv",i)}},
     {id:"cc_out", l:"44. 现金流出（资本金）", g:(R,y)=>R.capitalCf[y].outflow,
@@ -513,6 +519,7 @@ function specRent(){
     {id:"cc_cnpv", l:"累计净现值（同全投资口径）", g:(R,y)=>R.capitalCf[y].cumNpv, t:"last", hl:1, xf:{cum:"cc_npv"}},
    ]},
   ];
+  return [tables[0],tables[1],tables[3],tables[7],tables[4],tables[5],tables[2],tables[8],tables[6],tables[9]];
 }
 
 function specSale(R0){
@@ -520,101 +527,125 @@ function specSale(R0){
   const nz = R0.allYears.filter(y=>Math.abs(R0.cf[y].net)>1e-9);
   const firstIdx = nz.length? R0.allYears.indexOf(nz[0]) : 0;
   const rr=(R,y,k)=>R.rental[y]?R.rental[y][k]:null;
-  return [
-   {sheet:"收入", title:"收入明细表（万元）", open:1, rows:[
-    {id:"i_sale", l:"配保房销售收入", g:(R,y)=>R.income[y].sale, hl:1},
-    {id:"i_pv", l:"出租净收益现值（计入首年）", g:(R,y)=>R.income[y].rentPv},
-    {id:"i_oth", l:"其他收入", g:(R,y)=>R.income[y].other},
-    {id:"i_tot", l:"总收入", g:(R,y)=>R.income[y].total, hl:1, xf:{sum:["i_sale","i_pv","i_oth"]}},
-    {id:"i_comm", l:"商业出租收入（参考，不计入总收入）", g:(R,y)=>rr(R,y,"income")},
+  const tables = [
+   {sheet:"8销售收入", title:"（八）销售收入表（万元，公式序号47—53）", open:1, rows:[
+    {id:"i_sale_total",l:"47. 销售收入",g:(R,y)=>R.income[y].sale+R.income[y].transfer,hl:1,xf:{sum:["i_sale","i_transfer"]}},
+    {id:"i_sale", l:"47.1 住房销售收入", g:(R,y)=>R.income[y].sale},
+    {id:"i_transfer",l:"47.2 成本价移交收入",g:(R,y)=>R.income[y].transfer},
+    {id:"i_collect",l:"48. 销售回款",g:(R,y)=>R.income[y].sale+R.income[y].transfer,xf:{sum:["i_sale","i_transfer"]}},
+    {id:"i_sale_tax",l:"49. 销售税金及附加",g:(R,y)=>R.cost[y].saleTax},
+    {id:"i_lat_pre",l:"50. 土地增值税预征",g:()=>0},
+    {id:"i_lat_clear",l:"51. 土地增值税清算",g:()=>0},
+    {id:"i_sale_fee",l:"52. 销售费用",g:(R,y)=>R.cost[y].saleFee},
+    {id:"i_sale_net",l:"53. 销售净收入",g:(R,y)=>R.income[y].sale+R.income[y].transfer-R.cost[y].saleTax-R.cost[y].saleFee,hl:1},
    ]},
-   {sheet:"商业出租", title:"商业出租情况表（万元）", rows:[
+   {sheet:"9租赁收入", title:"（九）租赁收入表（万元，公式序号54—58）", rows:[
     {l:"出租率", g:(R,y)=>rr(R,y,"occ"), f:"pct", t:"none"},
     {l:"租金单价（元/㎡/月）", g:(R,y)=>rr(R,y,"rent"), t:"none"},
-    {id:"r_inc", l:"商业出租收入", g:(R,y)=>rr(R,y,"income"), hl:1},
-    {id:"r_t1", l:"房产税（从租）", g:(R,y)=>rr(R,y,"tax1"),
+    {id:"r_inc", l:"54. 商业出租收入", g:(R,y)=>rr(R,y,"income"), hl:1},
+    {id:"r_t1", l:"55.1 房产税（从租）", g:(R,y)=>rr(R,y,"tax1"),
       xf:{expr:(c,i)=>"ROUND("+c.cell("r_inc",i)+"*"+c.param("prop1Rate")+"/(1+"+c.param("vatSale")+"),4)"}},
-    {id:"r_t2", l:"房产税（从价·空置）", g:(R,y)=>rr(R,y,"tax2")},
-    {id:"r_mgC", l:"管理费用（商业）", g:(R,y)=>rr(R,y,"mgC"),
+    {id:"r_t2", l:"55.2 房产税（从价·空置）", g:(R,y)=>rr(R,y,"tax2")},
+    {id:"r_mgC", l:"56.1 管理费用（商业）", g:(R,y)=>rr(R,y,"mgC"),
       xf:{expr:(c,i)=>"ROUND("+c.cell("r_inc",i)+"*"+c.param("mgCommRate")+",4)"}},
-    {id:"r_mgP", l:"管理费用（停车）", g:(R,y)=>rr(R,y,"mgP")},
-    {id:"r_fund", l:"维修金", g:(R,y)=>rr(R,y,"fund")},
-    {id:"r_rep", l:"维修费", g:(R,y)=>rr(R,y,"rep"),
+    {id:"r_mgP", l:"56.2 管理费用（停车）", g:(R,y)=>rr(R,y,"mgP")},
+    {id:"r_fund", l:"56.3 维修金", g:(R,y)=>rr(R,y,"fund")},
+    {id:"r_rep", l:"56.4 维修费", g:(R,y)=>rr(R,y,"rep"),
       xf:{expr:(c,i)=>"ROUND("+c.cell("r_inc",i)+"*"+c.param("repairRate")+",4)"}},
-    {id:"r_vac", l:"空置服务费", g:(R,y)=>rr(R,y,"vac")},
-    {id:"r_ins", l:"保险费", g:(R,y)=>rr(R,y,"ins")},
-    {id:"r_lnd", l:"土地使用税", g:(R,y)=>rr(R,y,"landT")},
-    {id:"r_ct", l:"出租营运成本合计", g:(R,y)=>rr(R,y,"costTotal"), hl:1,
+    {id:"r_vac", l:"56.5 空置服务费", g:(R,y)=>rr(R,y,"vac")},
+    {id:"r_ins", l:"56.6 保险费", g:(R,y)=>rr(R,y,"ins")},
+    {id:"r_lnd", l:"56.7 土地使用税", g:(R,y)=>rr(R,y,"landT")},
+    {id:"r_ct", l:"56. 租赁运营成本", g:(R,y)=>rr(R,y,"costTotal"), hl:1,
       xf:{sum:["r_t1","r_t2","r_mgC","r_mgP","r_fund","r_rep","r_vac","r_ins","r_lnd"]}},
-    {id:"r_out", l:"销项税额", g:(R,y)=>rr(R,y,"outputT")},
-    {l:"期初可抵进项", g:(R,y)=>rr(R,y,"inputT"), t:"none"},
-    {id:"r_vat", l:"增值税", g:(R,y)=>rr(R,y,"vat")},
-    {id:"r_sur", l:"增值税附加", g:(R,y)=>rr(R,y,"vatSur"), xf:{expr:(c,i)=>"ROUND("+c.cell("r_vat",i)+"*"+c.param("surcharge")+",4)"}},
-    {id:"r_stp", l:"印花税", g:(R,y)=>rr(R,y,"stamp")},
-    {id:"r_tt", l:"出租经营税金合计", g:(R,y)=>rr(R,y,"taxTotal"), hl:1, xf:{sum:["r_vat","r_sur","r_stp"]}},
-    {id:"r_net", l:"出租净收入", g:(R,y)=>rr(R,y,"netIncome"),
+    {id:"r_out", l:"55.3.1 销项税额", g:(R,y)=>rr(R,y,"outputT")},
+    {l:"55.3.2 期初可抵进项", g:(R,y)=>rr(R,y,"inputT"), t:"none"},
+    {id:"r_vat", l:"55.3 增值税", g:(R,y)=>rr(R,y,"vat")},
+    {id:"r_sur", l:"55.4 增值税附加", g:(R,y)=>rr(R,y,"vatSur"), xf:{expr:(c,i)=>"ROUND("+c.cell("r_vat",i)+"*"+c.param("surcharge")+",4)"}},
+    {id:"r_stp", l:"55.5 印花税", g:(R,y)=>rr(R,y,"stamp")},
+    {id:"r_tt", l:"55. 租赁税金", g:(R,y)=>rr(R,y,"taxTotal"), hl:1, xf:{sum:["r_vat","r_sur","r_stp"]}},
+    {id:"r_net", l:"57. 租赁净收入", g:(R,y)=>rr(R,y,"netIncome"),
       xf:{expr:(c,i)=>"ROUND("+c.cell("r_inc",i)+"-"+c.cell("r_ct",i)+"-"+c.cell("r_tt",i)+",4)"}},
-    {id:"r_pv", l:"出租净收益现值", g:(R,y)=>rr(R,y,"pv"), hl:1},
+    {id:"r_pv", l:"58. 租赁净收益现值", g:(R,y)=>rr(R,y,"pv"), hl:1},
    ]},
-   {sheet:"出售成本", title:"出售成本费用表（万元）", rows:[
-    {id:"s_ds", l:"累计开发成本（销售部分）", g:(R,y)=>R.cost[y].devSale},
-    {id:"s_dd", l:"累计开发成本（折旧摊销部分）", g:(R,y)=>R.cost[y].devDep},
-    {id:"s_dd2", l:"折旧摊销（/"+(calcEffK().depYears||50)+"年）", g:(R,y)=>R.cost[y].devDep2},
-    {id:"s_fee", l:"销售费用", g:(R,y)=>R.cost[y].saleFee,
+   {sheet:"出售成本", title:"10.1 总成本费用明细（万元）", rows:[
+    {id:"s_tot", l:"61. 总成本费用", g:(R,y)=>R.cost[y].total, hl:1,
+      xf:{sum:["s_ds","s_dd","s_fee","s_tax","s_rc","s_rt","s_fb","s_fo"]}},
+    {id:"s_ds", l:"61.1 累计开发成本（销售部分）", g:(R,y)=>R.cost[y].devSale},
+    {id:"s_dd", l:"61.2 累计开发成本（折旧摊销部分）", g:(R,y)=>R.cost[y].devDep},
+    {id:"s_dd2", l:"61.2.1 折旧摊销（/"+(calcEffK().depYears||50)+"年）", g:(R,y)=>R.cost[y].devDep2},
+    {id:"s_fee", l:"61.3 销售费用", g:(R,y)=>R.cost[y].saleFee,
       xf:{expr:(c,i)=>"ROUND("+c.cell("i_sale",i)+"*"+c.param("saleFeeRate")+",4)"}},
-    {id:"s_ov", l:"销项税额", g:(R,y)=>R.cost[y].outVat},
-    {id:"s_iv", l:"进项税额", g:(R,y)=>R.cost[y].inVat},
-    {l:"地价抵减额", g:(R,y)=>R.cost[y].landDeduct},
-    {id:"s_vat", l:"增值税", g:(R,y)=>R.cost[y].vat},
-    {id:"s_sur", l:"增值税附加", g:(R,y)=>R.cost[y].vatSur, xf:{expr:(c,i)=>"ROUND("+c.cell("s_vat",i)+"*"+c.param("surcharge")+",4)"}},
-    {id:"s_tax", l:"销售税金合计", g:(R,y)=>R.cost[y].saleTax, hl:1},
-    {id:"s_fb", l:"财务费用（建设期）", g:(R,y)=>R.cost[y].finBuild},
-    {id:"s_fo", l:"财务费用（运营期）", g:(R,y)=>R.cost[y].finOp},
-    {id:"s_tot", l:"总成本费用", g:(R,y)=>R.cost[y].total, hl:1,
-      xf:{sum:["s_ds","s_dd","s_fee","s_tax","s_fb","s_fo"]}},
+    {id:"s_tax", l:"61.4 销售税金合计", g:(R,y)=>R.cost[y].saleTax, hl:1},
+    {id:"s_ov", l:"61.4.1 销项税额", g:(R,y)=>R.cost[y].outVat},
+    {id:"s_iv", l:"61.4.2 进项税额", g:(R,y)=>R.cost[y].inVat},
+    {l:"61.4.3 地价抵减额", g:(R,y)=>R.cost[y].landDeduct},
+    {id:"s_vat", l:"61.4.4 增值税", g:(R,y)=>R.cost[y].vat},
+    {id:"s_sur", l:"61.4.5 增值税附加", g:(R,y)=>R.cost[y].vatSur, xf:{expr:(c,i)=>"ROUND("+c.cell("s_vat",i)+"*"+c.param("surcharge")+",4)"}},
+    {id:"s_rc",l:"61.5 出租营运成本",g:(R,y)=>R.cost[y].rentCost},
+    {id:"s_rt",l:"61.6 出租经营税金",g:(R,y)=>R.cost[y].rentTax},
+    {id:"s_fb", l:"61.7 财务费用（建设期）", g:(R,y)=>R.cost[y].finBuild},
+    {id:"s_fo", l:"61.8 财务费用（运营期）", g:(R,y)=>R.cost[y].finOp},
    ]},
-   {sheet:"还本付息", title:"还本付息计划表（万元）", rows:[
-    {id:"l_beg", l:"期初借款余额", g:(R,y)=>R.loan[y].begin, t:"none",
+   {sheet:"11还本付息", title:"（十一）还本付息计划表（万元，公式序号67）", rows:[
+    {id:"l_beg", l:"67.1 期初借款余额", g:(R,y)=>R.loan[y].begin, t:"none",
       xf:{expr:(c,i)=> i===0? "0" : c.cell("l_end",i-1)}},
-    {id:"l_bor", l:"本期借款", g:(R,y)=>R.loan[y].borrow},
-    {id:"l_int", l:"本期利息", g:(R,y)=>R.loan[y].interest,
+    {id:"l_bor", l:"67.2 本期借款", g:(R,y)=>R.loan[y].borrow},
+    {id:"l_int", l:"67.3 本期利息", g:(R,y)=>R.loan[y].interest,
       xf:{expr:(c,i)=>"ROUND(("+c.cell("l_beg",i)+"+"+c.cell("l_bor",i)+"/2)*"+c.param("loanRate")+"/100,4)"}},
-    {id:"l_rep", l:"本期还本", g:(R,y)=>R.loan[y].repay},
-    {id:"l_pay", l:"还本付息合计", g:(R,y)=>R.loan[y].total},
-    {id:"l_end", l:"期末借款余额", g:(R,y)=>R.loan[y].end, t:"last"},
+    {id:"l_rep", l:"67.4 本期还本", g:(R,y)=>R.loan[y].repay},
+    {id:"l_pay", l:"67.5 还本付息合计", g:(R,y)=>R.loan[y].total,hl:1},
+    {id:"l_end", l:"67.6 期末借款余额", g:(R,y)=>R.loan[y].end, t:"last"},
    ]},
-   {sheet:"利润", title:"利润表（万元）", rows:[
-    {id:"p_tot", l:"利润总额", g:(R,y)=>R.profit[y].total,
+   {sheet:"10损益", title:"（十）损益表（59~66，万元）", rows:[
+    {id:"p_tot", l:"62. 利润总额", g:(R,y)=>R.profit[y].total,
       xf:{expr:(c,i)=>"ROUND("+c.cell("i_tot",i)+"-"+c.cell("s_tot",i)+",4)"}},
-    {id:"p_mk", l:"弥补以前年度亏损", g:(R,y)=>R.profit[y].makeup},
-    {id:"p_tx", l:"应纳税所得额", g:(R,y)=>R.profit[y].taxable, xf:{sum:["p_tot","p_mk"]}},
-    {id:"p_it", l:"所得税", g:(R,y)=>R.profit[y].incomeTax,
+    {id:"p_mk", l:"63. 弥补以前年度亏损", g:(R,y)=>R.profit[y].makeup},
+    {id:"p_tx", l:"64. 应纳税所得额", g:(R,y)=>R.profit[y].taxable, xf:{sum:["p_tot","p_mk"]}},
+    {id:"p_it", l:"65. 所得税", g:(R,y)=>R.profit[y].incomeTax,
       xf:{expr:(c,i)=>"ROUND(IF("+c.cell("p_tx",i)+">0,"+c.cell("p_tx",i)+"*"+c.param("incomeTax")+",0),4)"}},
-    {id:"p_net", l:"净利润", g:(R,y)=>R.profit[y].net, hl:1,
+    {id:"p_net", l:"66. 净利润", g:(R,y)=>R.profit[y].net, hl:1,
       xf:{expr:(c,i)=>"ROUND("+c.cell("p_tot",i)+"-"+c.cell("p_it",i)+",4)"}},
    ]},
-   {sheet:"现金流", title:"现金流量表（万元）", rows:[
-    {id:"f_in", l:"现金流入", g:(R,y)=>R.cf[y].inflow,
-      xf:{expr:(c,i)=>"ROUND("+c.cell("i_sale",i)+"+"+c.cell("i_oth",i)+"+IFERROR("+c.cell("i_comm",i)+",0)+"+c.cell("f_rec",i)+",4)"}},
-    {l:"其中：配保房销售", g:(R,y)=>R.income[y].sale, xf:{expr:(c,i)=>c.cell("i_sale",i)}},
-    {id:"f_rec", l:"其中：回收固定资产余值", g:(R,y)=>R.cf[y].recover},
-    {id:"f_inv", l:"开发成本投资", g:(R,y)=>R.cf[y].invest},
-    {id:"f_fee", l:"销售费用", g:(R,y)=>R.cf[y].saleFee, xf:{expr:(c,i)=>c.cell("s_fee",i)}},
-    {id:"f_stx", l:"销售税金", g:(R,y)=>R.cf[y].saleTax, xf:{expr:(c,i)=>c.cell("s_tax",i)}},
-    {id:"f_rtx", l:"出租经营税金", g:(R,y)=>R.cf[y].rentTax},
-    {id:"f_rct", l:"出租营运成本", g:(R,y)=>R.cf[y].rentCost},
-    {id:"f_adj", l:"调整所得税", g:(R,y)=>R.cf[y].adjTax,
+   {sheet:"12现金流", title:"（十二）全投资及资本金现金流量表（68~76，万元）", rows:[
+    {id:"f_in", l:"68. 全投资现金流入", g:(R,y)=>R.cf[y].inflow,
+      xf:{expr:(c,i)=>"ROUND("+c.cell("i_sale",i)+"+"+c.cell("i_transfer",i)+"+"+c.cell("i_oth",i)+"+IFERROR("+c.cell("i_comm",i)+",0)+"+c.cell("f_rec",i)+",4)"}},
+    {l:"68.1 配保房销售收入", g:(R,y)=>R.income[y].sale, xf:{expr:(c,i)=>c.cell("i_sale",i)}},
+    {id:"f_rec", l:"68.2 回收固定资产余值", g:(R,y)=>R.cf[y].recover},
+    {id:"f_inv", l:"69.1 开发成本投资", g:(R,y)=>R.cf[y].invest},
+    {id:"f_fee", l:"69.2 销售费用", g:(R,y)=>R.cf[y].saleFee, xf:{expr:(c,i)=>c.cell("s_fee",i)}},
+    {id:"f_stx", l:"69.3 销售税金", g:(R,y)=>R.cf[y].saleTax, xf:{expr:(c,i)=>c.cell("s_tax",i)}},
+    {id:"f_rtx", l:"69.4 出租经营税金", g:(R,y)=>R.cf[y].rentTax},
+    {id:"f_rct", l:"69.5 出租营运成本", g:(R,y)=>R.cf[y].rentCost},
+    {id:"f_adj", l:"69.6 调整所得税", g:(R,y)=>R.cf[y].adjTax,
       xf:{expr:(c,i)=>"ROUND(MAX(("+c.cell("f_in",i)+"-"+c.cell("f_rec",i)+"-("+c.cell("s_ds",i)+"+"+c.cell("s_dd2",i)+"+"+c.cell("f_fee",i)+"+"+c.cell("f_stx",i)+"+"+c.cell("f_rct",i)+"+"+c.cell("f_rtx",i)+"))*"+c.param("adjTaxRate")+",0),4)"}},
-    {id:"f_out", l:"现金流出合计", g:(R,y)=>R.cf[y].outflow,
+    {id:"f_out", l:"69. 全投资现金流出", g:(R,y)=>R.cf[y].outflow,
       xf:{sum:["f_inv","f_fee","f_stx","f_rtx","f_rct","f_adj"]}},
-    {id:"f_net", l:"净现金流量", g:(R,y)=>R.cf[y].net, hl:1,
+    {id:"f_net", l:"70. 全投资净现金流", g:(R,y)=>R.cf[y].net, hl:1,
       xf:{expr:(c,i)=>"ROUND("+c.cell("f_in",i)+"-"+c.cell("f_out",i)+",4)"}},
-    {id:"f_cum", l:"累计净现金流量", g:(R,y)=>R.cf[y].cumNet, t:"last", xf:{cum:"f_net"}},
-    {id:"f_npv", l:"净现值", g:(R,y)=>R.cf[y].npv,
-      xf:{expr:(c,i)=>"ROUND("+c.cell("f_net",i)+"/POWER(1+"+c.param("discountPct")+"/100,"+Math.max(i-firstIdx,0)+"),4)"}},
-    {id:"f_cnpv", l:"累计净现值", g:(R,y)=>R.cf[y].cumNpv, t:"last", hl:1, xf:{cum:"f_npv"}},
+    {id:"f_cum", l:"71. 累计净现金流", g:(R,y)=>R.cf[y].cumNet, t:"last", xf:{cum:"f_net"}},
+    {id:"f_npv", l:"72. 净现值（年中折现）", g:(R,y)=>R.cf[y].npv,
+      xf:{expr:(c,i)=>"ROUND("+c.cell("f_net",i)+"/POWER(1+"+c.param("discountPct")+"/100,"+(i+.5)+"),4)"}},
+    {id:"f_cnpv", l:"73. 累计净现值", g:(R,y)=>R.cf[y].cumNpv, t:"last", hl:1, xf:{cum:"f_npv"}},
+   ]},
+   {sheet:"资本金现金流",title:"75~76 资本金现金流量表（万元）",rows:[
+    {id:"cc_in",l:"75.1 资本金现金流入（含借款）",g:(R,y)=>R.capitalCf[y].inflow},
+    {id:"cc_bor",l:"75.1.1 其中：银行借款",g:(R,y)=>R.capitalCf[y].borrow,xf:{expr:(c,i)=>c.cell("l_bor",i)}},
+    {id:"cc_out",l:"75.2 现金流出（含还本付息）",g:(R,y)=>R.capitalCf[y].outflow},
+    {id:"cc_rep",l:"75.2.1 其中：偿还本金",g:(R,y)=>R.capitalCf[y].repay,xf:{expr:(c,i)=>c.cell("l_rep",i)}},
+    {id:"cc_int",l:"75.2.2 其中：支付利息",g:(R,y)=>R.capitalCf[y].interest,xf:{expr:(c,i)=>c.cell("l_int",i)}},
+    {id:"cc_net",l:"75.3 资本金净现金流量",g:(R,y)=>R.capitalCf[y].net,hl:1,xf:{expr:(c,i)=>"ROUND("+c.cell("cc_in",i)+"-"+c.cell("cc_out",i)+",4)"}},
+    {id:"cc_cum",l:"76. 累计资本金净现金流量",g:(R,y)=>R.capitalCf[y].cumNet,t:"last",xf:{cum:"cc_net"}},
+    {id:"cc_npv",l:"资本金净现值（年中折现）",g:(R,y)=>R.capitalCf[y].npv,xf:{expr:(c,i)=>"ROUND("+c.cell("cc_net",i)+"/POWER(1+"+c.param("discountPct")+"/100,"+(i+.5)+"),4)"}},
+    {id:"cc_cnpv",l:"累计资本金净现值",g:(R,y)=>R.capitalCf[y].cumNpv,t:"last",hl:1,xf:{cum:"cc_npv"}},
    ]},
   ];
+  return [tables[0],tables[1],{
+    sheet:"10损益",title:"（十）损益表（59~66，万元）",
+    rows:tables[2].rows.concat([{l:"— 利润及所得税 —",g:()=>null,t:"none"}],tables[4].rows)
+  },tables[3],{
+    sheet:"12现金流",title:"（十二）全投资及资本金现金流量表（68~76，万元）",
+    rows:tables[5].rows.concat([{l:"— 资本金现金流 —",g:()=>null,t:"none"}],tables[6].rows)
+  }];
 }
 
 function calcSpecs(type, R){
@@ -637,7 +668,7 @@ function detailTablesHtml(R, type){
     + calcSpecs(type, R).map((t,i)=>dtable(t.title, R, t.rows, i===0)).join("");
 }
 
-/* 投资估算(一/二/三)按doc原文序号(1、1.1、1.1.1...18)展开成可逐级折叠的大纲表：
+/* 投资估算(一/二/三)按正式公式序号(1、1.1、1.1.1...18)展开成可逐级折叠的完整表：
    顶层(1、2、3...)直接摆开，子项(1.1、1.1.1...)收进<details>，点开才展开，避免一次性铺开上百行。
    不复用dtable的年份列结构——这部分是一次性算出来的成本构成，不按年份分列。 */
 function outlineTreeHtml(rows){
@@ -655,19 +686,169 @@ function outlineTreeHtml(rows){
     if(map[parentNo]) map[parentNo].children.push(map[r.no]); else roots.push(map[r.no]);
   });
   const renderNode=node=>{
+    const level=Number(node.level==null?(String(node.no).split(".").length-1):node.level),font=Math.max(11.5,14-level*.75);
     const head='<span class="outline-no">'+node.no+'.</span> <span class="outline-l">'+escapeHtml(node.label)+'</span>'
       +'　<span class="outline-v">'+fmt(node)+'</span>';
-    if(!node.children.length) return '<div class="outline-row" style="padding:5px 0 5px '+(node.level*16)+'px; border-bottom:1px dashed var(--line); font-size:13px;">'+head+'</div>';
-    return '<details class="outline-node" style="margin-left:'+(node.level*16)+'px;"><summary style="padding:5px 0; font-size:13px; border-bottom:1px dashed var(--line);">'+head+'</summary>'
+    const formula=node.formula?'<div style="margin:3px 0 2px '+(level*18+22)+'px;color:var(--ink-soft);font-size:'+(Math.max(10.5,font-1))+'px;line-height:1.45;">公式：'+escapeHtml(node.formula)+'</div>':'';
+    if(!node.children.length) return '<div class="outline-row" style="padding:6px 0 5px '+(level*18)+'px; border-bottom:1px dashed var(--line); font-size:'+font+'px;">'+head+formula+'</div>';
+    return '<details class="outline-node" style="margin-left:'+(level*18)+'px;"><summary style="padding:7px 0; font-size:'+font+'px; border-bottom:1px dashed var(--line);">'+head+'</summary>'+formula
       + '<div style="margin-left:4px;">' + node.children.map(renderNode).join("") + '</div></details>';
   };
   return roots.map(renderNode).join("");
 }
+
+/* 出售类（一）~（四）、（七）没有年度维度，但仍使用与年度明细表一致的蓝色正式表格。
+   计算基数和单价/费率只从明确的白箱公式中提取；汇总项不反推、不猜造。 */
+function saleStaticFormulaParts(row, est, p){
+  const f=String(row.formula||"").trim(),t=est.technical||{},c=est.construction||{};
+  const candidates=[
+    ["总建筑面积",t.totalBuildArea,"㎡"],["计容建筑面积",t.capacityArea,"㎡"],
+    ["地面核增面积",t.aboveIncreaseArea,"㎡"],["地下室面积",t.basementArea,"㎡"],["住宅面积",t.residentialArea,"㎡"],
+    ["商业面积",t.commercialArea,"㎡"],["公配面积",t.supportArea,"㎡"],
+    ["用地面积",Number(p.landArea||p.landUseArea)||0,"㎡"],
+    ["地上结构面积",Number(t.residentialArea||0)+Number(t.commercialArea||0)+Number(t.aboveIncreaseArea||0)+Number(t.supportArea||0),"㎡"],
+    ["样板房面积",Number(p.showroomArea)||0,"㎡"],["展示面积",Number(p.displayArea)||0,"㎡"],
+    ["充电桩数量",Number(p.chargerCount)||0,"个"],["建安工程费",Number(c.total)||0,"万元"]
+  ];
+  let hit=candidates.find(x=>f.startsWith(x[0]+"×"));
+  if(!hit && f.startsWith("划拨楼面价×住宅面积")){
+    return {base:dtFmt(t.residentialArea)+" ㎡",rate:dtFmt(Number(p.allocatedLandFloorPrice||p.landFloorPrice)||0)+" 元/㎡"};
+  }
+  if(!hit) return {base:"—",rate:"—"};
+  let rate=f.slice(hit[0].length+1).replace(/÷10000.*$/g,"").trim();
+  const ratioUnit=rate.match(/^(\d+(?:\.\d+)?)%×(\d+(?:\.\d+)?)$/);
+  if(ratioUnit && hit[2]==="㎡"){
+    return {base:dtFmt(hit[1]*Number(ratioUnit[1])/100)+" ㎡",rate:Number(ratioUnit[2]).toLocaleString("zh-CN")+" 元/㎡"};
+  }
+  if(!rate) rate="—";
+  else if(/^\d+(?:\.\d+)?$/.test(rate) && hit[2]==="㎡") rate=Number(rate).toLocaleString("zh-CN")+" 元/㎡";
+  return {base:dtFmt(hit[1])+" "+hit[2],rate};
+}
+function toggleSaleStaticBranch(btn){
+  const tr=btn.closest("tr"),table=tr&&tr.closest("table"),no=tr&&tr.dataset.no;
+  if(!table||!no)return;
+  const opening=btn.dataset.open!=="1";btn.dataset.open=opening?"1":"0";btn.innerHTML=opening?"&#9660;":"&#9654;";
+  table.querySelectorAll("tbody tr[data-no]").forEach(row=>{
+    const child=row.dataset.no||"",isDesc=child.startsWith(no+".");
+    if(!isDesc)return;
+    const parent=child.split(".").slice(0,-1).join(".");
+    if(opening && parent===no) row.style.display="";
+    if(!opening){row.style.display="none";const b=row.querySelector("button.sale-tree-toggle");if(b){b.dataset.open="0";b.innerHTML="&#9654;";}}
+  });
+}
+function saleStaticTableHtml(title, rows, est, p, open, partsResolver){
+  const nums=s=>String(s||"").split(".").map(x=>Number(x)||0),ordered=rows.slice().sort((a,b)=>{const aa=nums(a.no),bb=nums(b.no),n=Math.max(aa.length,bb.length);for(let i=0;i<n;i++){if((aa[i]??-1)!==(bb[i]??-1))return (aa[i]??-1)-(bb[i]??-1);}return 0;});
+  const numberSet=new Set(ordered.map(x=>String(x.no))),hasChildren=no=>ordered.some(x=>String(x.no).startsWith(String(no)+".") && String(x.no).split(".").length===String(no).split(".").length+1);
+  const body=ordered.map(r=>{
+    const no=String(r.no||""),rawDepth=no?no.split(".").length-1:0,parent=no.split(".").slice(0,-1).join("."),hasParent=numberSet.has(parent),depth=hasParent?rawDepth:0,parts=(partsResolver||saleStaticFormulaParts)(r,est,p);
+    const toggle=hasChildren(no)?'<button type="button" class="sale-tree-toggle" data-open="0" onclick="toggleSaleStaticBranch(this)" aria-label="展开子项" style="border:0;background:transparent;color:var(--bp-navy);padding:0 5px 0 0;cursor:pointer;font-size:11px;">&#9654;</button>':'<span style="display:inline-block;width:16px;"></span>';
+    return '<tr data-no="'+escapeHtml(no)+'" data-parent="'+escapeHtml(parent)+'"'+(hasParent?' style="display:none;"':'')+'>'
+      +'<td class="dt-l" style="padding-left:'+(12+depth*18)+'px;font-size:'+Math.max(11.5,13-depth*.65)+'px;min-width:235px;">'+toggle+'<b>'+escapeHtml(no)+'</b> '+escapeHtml(r.label||"")+'</td>'
+      +'<td style="white-space:nowrap;">'+parts.base+'</td><td style="white-space:nowrap;">'+escapeHtml(parts.rate)+'</td>'
+      +'<td class="dt-sum'+(depth===0?' dt-hl':'')+'">'+dtFmt(r.value)+'</td><td>'+escapeHtml(r.unit||"")+'</td>'
+      +'<td style="text-align:left;min-width:260px;font-size:11px;color:var(--ink-soft);">'+escapeHtml(r.formula||r.note||"—")+'</td></tr>';
+  }).join("");
+  return '<details class="dt-block sale-chapter"'+(open?' open':'')+'><summary>'+title+'　<span style="font-size:11px;color:var(--ink-soft);">'+rows.length+'项｜点击展开</span></summary>'
+    +'<div class="dt-scroll"><table class="rpt dt sale-static-table" style="min-width:980px;"><thead><tr><th class="dt-l">序号 / 指标</th><th>计算基数（面积/金额）</th><th>单价 / 费率</th><th class="dt-sum">计算结果</th><th>单位</th><th>计算依据</th></tr></thead><tbody>'+body+'</tbody></table></div></details>';
+}
+
+function rentStaticFormulaParts(row, est, p){
+  const f=String(row.formula||row.note||"").replace(/^\s*=\s*/,"").trim(),t=est.technical||{},c=est.construction||{};
+  const support=Number(t.supportArea)||0,struct=Number(p.ie_commArea||0)+Number(p.area||0)+Number(t.aboveIncrease||0)+support;
+  const candidates=[
+    ["总建筑面积",t.totalBuildArea,"㎡"],["计容建筑面积",t.capacityArea,"㎡"],
+    ["地面核增面积",t.aboveIncrease,"㎡"],["地下室面积",Number(p.ie_basementArea)||0,"㎡"],
+    ["住宅面积",Number(p.area)||0,"㎡"],["商业面积",Number(p.ie_commArea)||0,"㎡"],
+    ["公配面积",support,"㎡"],["用地面积",Number(p.landArea)||0,"㎡"],
+    ["围挡面积",Number(p.ie_fenceArea)||0,"㎡"],["设施面积",Number(p.ie_facilityArea)||0,"㎡"],
+    ["占用面积",Number(p.ie_occupyArea)||0,"㎡"],["展示面积",Number(p.ie_displayArea)||0,"㎡"],
+    ["充电桩个数",Number(p.ie_chargerCount)||0,"个"],["开设个数",Number(p.ie_curbCutCount)||0,"个"],
+    ["建安工程费",Number(c.total)||0,"万元"],["地价",Number(est.land&&est.land.landPriceTotal)||0,"万元"],
+    ["建设年数",Number(p.buildYears)||0,"年"]
+  ];
+  if(/^（商业\+住宅\+地上核增\+公共配套面积）×/.test(f)){
+    const rate=f.split("×").slice(1).join("×").replace(/\/10000.*$/g,"").trim();
+    return {base:dtFmt(struct)+" ㎡",rate:(/^\d+(?:\.\d+)?$/.test(rate)?Number(rate).toLocaleString("zh-CN")+" 元/㎡":rate)};
+  }
+  let hit=candidates.find(x=>f.startsWith(x[0]+" × ")||f.startsWith(x[0]+"×"));
+  if(!hit)return {base:"—",rate:"—"};
+  let rate=f.slice(f.indexOf("×")+1).replace(/\/10000.*$/g,"").trim();
+  const ratioUnit=rate.match(/^(\d+(?:\.\d+)?)%\s*×\s*(\d+(?:\.\d+)?)$/);
+  if(ratioUnit&&hit[2]==="㎡")return {base:dtFmt(hit[1]*Number(ratioUnit[1])/100)+" ㎡",rate:Number(ratioUnit[2]).toLocaleString("zh-CN")+" 元/㎡"};
+  if(/^\d+(?:\.\d+)?$/.test(rate)&&hit[2]==="㎡")rate=Number(rate).toLocaleString("zh-CN")+" 元/㎡";
+  else if(/^\d+(?:\.\d+)?%$/.test(rate))rate=rate;
+  return {base:dtFmt(hit[1])+" "+hit[2],rate:rate||"—"};
+}
+
+function saleEstimateSummaryHtml(est){
+  if(!est)return "";const fmt=v=>Number(v||0).toLocaleString("zh-CN",{maximumFractionDigits:4}),A=est.allocation||{},rec=est.reconciliation||{};
+  const status='<span style="color:var(--ok-green);font-weight:700;">正式唯一计算口径</span>';
+  return '<div class="doc-eyebrow" style="margin-top:22px;">1—7 · 出售类前置测算表</div><section class="cf-chart"><div class="cf-head"><span>1技术指标 → 2投资估算 → 3计入配售 → 4不计入配售 → 5工期 → 6投资计划 → 7住房价格</span>'+status+'</div>'
+    +'<div class="metric-grid" style="margin:12px 0;">'
+    +'<div class="metric"><div class="mv">'+fmt(est.technical.totalBuildArea)+'</div><div class="ml">总建筑面积（㎡）</div></div>'
+    +'<div class="metric"><div class="mv">'+fmt(est.baseInvestment)+'</div><div class="ml">不含财务/销售费投资（万元）</div></div>'
+    +'<div class="metric"><div class="mv">'+fmt(A.aBase)+'</div><div class="ml">计入配售A（万元）</div></div>'
+    +'<div class="metric"><div class="mv">'+fmt(A.bBase)+'</div><div class="ml">不计入配售B（万元）</div></div>'
+    +'<div class="metric"><div class="mv">'+fmt(est.housingPrice.total)+'</div><div class="ml">配售住房测算价格（元/㎡）</div></div></div>'
+    +'<div style="padding:9px 11px;border-radius:6px;background:'+(rec.passed?'#F1F8F4':'#FFF3F1')+';font-size:12px;">'+(rec.passed?'✓':'⚠')+' A+B总额、建安及基础设施三组恒等式'+(rec.passed?'全部闭合':'存在差异')+'；差额：'+fmt(rec.totalVsAB)+'万元。</div>'
+    +'<div style="font-size:12px;color:var(--ink-soft);margin:10px 0 4px;">点击各汇总项可展开查看对应叶子公式与金额。</div>'
+    +outlineTreeHtml((est.rows||[]).map(x=>Object.assign({level:String(x.no||"").split(".").length-1},x,{label:x.label||x.name||""})))+'</section>';
+}
+function saleEstimateHtml(est,R,p){
+  if(!est||!R)return "";p=p||{};const A=est.allocation||{},hp=est.housingPrice||{},years=R.allYears||[],sum=k=>years.reduce((s,y)=>s+Number(R.cost[y]&&R.cost[y][k]||0),0);
+  const L=(no,label,value,unit,formula)=>({no,label,value:value==null?null:Number(value),unit:unit===undefined?"万元":unit,formula,level:String(no).split(".").length-1});
+  const base=(est.rows||[]).map(x=>L(x.no,x.name,x.value,x.unit,x.formula)),pick=(a,b)=>base.filter(x=>{const n=parseInt(x.no,10);return n>=a&&n<=b;});
+  const c1=pick(1,4);c1.push(L("2","户型比例规则",null,"","按项目住房需求分解确定"),L("3","停车位数量",Number(p.parkCount)||0,"个","项目规划条件"),L("4","用地面积",Number(p.landArea||p.landUseArea)||0,"㎡","项目用地红线面积"));
+  const total=Number(R.saleEstimateInput&&R.saleEstimateInput.totalInvestment)||0,fin=sum("finBuild"),fee=sum("saleFee"),c2=pick(5,18).filter(x=>![11,12,14,15,16,17,18].includes(Number(x.no)));
+  c2.push(L("11","建设期财务费用",fin,"万元","引用（十一）还本付息表中的建设期利息"),L("12","销售费用",fee,"万元","住房销售收入×1.5%"),L("14","投资计划合计",total,"万元","土地+建安+基础设施+前期+间接+维修基金+财务费用+销售费用+不可预见费"),L("15","住宅单位投资",est.technical.residentialArea?total/est.technical.residentialArea*10000:0,"元/㎡","总投资÷住宅面积×10000"),L("16","总建筑面积单位投资",est.technical.totalBuildArea?total/est.technical.totalBuildArea*10000:0,"元/㎡","总投资÷总建筑面积×10000"),L("17","建安单位投资",est.technical.totalBuildArea?est.construction.total/est.technical.totalBuildArea*10000:0,"元/㎡","建安工程费÷总建筑面积×10000"),L("18","不含装修建安单位投资",est.technical.totalBuildArea?(est.construction.total-est.construction.decorationTotal)/est.technical.totalBuildArea*10000:0,"元/㎡","（建安工程费-装修工程）÷总建筑面积×10000"));
+  const ab=(side)=>{const isA=side==="a",ratio=isA?A.ratioSale:A.ratioComm,start=isA?20:32,rows=[L(String(isA?19:31.1),isA?"住宅分摊比例A":"商业分摊比例B",ratio,"","对应建筑面积÷住宅与商业面积合计")],src=est.allocationRows||[],baseVal=isA?A.aBase:A.bBase,land=isA?A.land.a:A.land.b,totalArea=isA?est.technical.saleTotalBuildArea:est.technical.nonSaleTotalBuildArea;
+    src.slice(0,6).forEach((x,i)=>rows.push(L(String(start+i),x.name,x[side],"万元",x.name+"按"+(isA?"住宅":"商业")+"归属及共用比例分摊")));
+    rows.push(L(String(start+6),"财务费用"+(isA?"A":"B"),fin*ratio,"万元","建设期财务费用×分摊比例"),L(String(start+7),"销售费用"+(isA?"A":"B"),fee*ratio,"万元","销售费用×分摊比例"),L(String(start+8),"不可预见费"+(isA?"A":"B"),Number(src[6]&&src[6][side])||0,"万元","不可预见费×分摊比例"),L(String(start+9),"开发成本（不含地价）"+(isA?"A":"B"),baseVal-land,"万元","本部分除地价外各成本之和"),L(String(start+10),isA?"计入配售部分投资A":"不计入配售部分投资B",baseVal+fin*ratio+fee*ratio,"万元","本部分各项合计"),L(String(start+11),isA?"计入配售单位投资A":"不计入配售单位投资B",totalArea?(baseVal+fin*ratio+fee*ratio)/totalArea*10000:0,"元/㎡","本部分投资÷本部分建筑面积×10000"));return rows;};
+  const sch=p.investSchedule||{},c5=[L("44","项目工期",sch.totalQuarters||0,"季度","按横道图确定")].concat((sch.tasks||[]).map((t,i)=>L("44."+(i+1),t.name,window.InvestmentSchedule?InvestmentSchedule.activePeriods(t,sch.totalQuarters).length:0,"季度","横道图活动格数量")));
+  const plan=R.saleInvestmentPlan||{rows:[]},c6=(plan.rows||[]).map(x=>L(x.no,x.name,x.amount,"万元",x.source||"按投资分摊比例计算"));
+  const c7=[L("46","配售住房测算价格",hp.total,"元/㎡","46.1至46.9之和"),L("46.1","项目土地成本",hp.landUnit,"元/㎡","划拨土地成本楼面价"),L("46.2","工程建设成本",hp.engineeringUnit,"元/㎡","配售工程建设成本÷住宅面积"),L("46.3","其他工程建设成本",hp.otherUnit,"元/㎡","配售前期及间接费÷住宅面积"),L("46.4","物业维修基金",hp.repairUnit,"元/㎡","配售维修基金÷住宅面积"),L("46.5","财务成本",hp.financeUnit,"元/㎡","土地及工程成本按建设周期计息"),L("46.6","利润",hp.profitUnit,"元/㎡","土地+工程+其他成本×5%"),L("46.7","增值税",hp.vatUnit,"元/㎡","销项税额-可抵扣进项税额"),L("46.8","城市维护建设税",hp.cityTaxUnit,"元/㎡","增值税×7%"),L("46.9","所得税",hp.incomeTaxUnit,"元/㎡","利润×25%")];
+  const S=f=>years.reduce((s,y)=>s+Number(f(y)||0),0),c8=[L("47","销售收入",S(y=>R.income[y].sale+R.income[y].transfer),"万元","47.1+47.2"),L("47.1","住房销售收入",S(y=>R.income[y].sale),"万元","住房销售面积×当年销售率×售价÷10000"),L("47.2","成本价移交收入",S(y=>R.income[y].transfer),"万元","移交面积×移交售价÷10000"),L("48","销售回款",S(y=>R.income[y].sale+R.income[y].transfer),"万元","按当年销售计划回款"),L("49","销售税金及附加",S(y=>R.cost[y].saleTax),"万元","增值税+附加，土地增值税及印花税按本项目口径为0"),L("50","土地增值税预征",0,"万元","本项目为0"),L("51","土地增值税清算",0,"万元","本项目为0"),L("52","销售费用",fee,"万元","住房销售收入×1.5%"),L("53","销售净收入",S(y=>R.income[y].sale+R.income[y].transfer-R.cost[y].saleTax-R.cost[y].saleFee),"万元","销售收入-销售税金-销售费用")];
+  const c9=[L("54","商业出租收入",S(y=>R.rental[y]&&R.rental[y].income),"万元","出租面积×租金×出租率×租赁月数÷10000"),L("55","租赁税金",S(y=>R.rental[y]&&R.rental[y].taxTotal),"万元","增值税+附加+印花税"),L("56","租赁运营成本",S(y=>R.rental[y]&&R.rental[y].costTotal),"万元","房产税、管理、维修、空置、保险及土地税等"),L("57","租赁净收入",S(y=>R.rental[y]&&R.rental[y].netIncome),"万元","租赁收入-租赁税金-租赁运营成本"),L("58","租赁净收益现值",R.rentalPvTotal,"万元","逐年租赁净收入折现之和")];
+  const c10=[L("59","总收入",R.summary.totalIncome,"万元","销售、移交、其他及当年租赁收入之和"),L("60","回收固定资产余值",R.recoverFixed,"万元","不计入配售开发成本×20%"),L("61","总成本费用",R.summary.totalCost,"万元","61.1至61.7之和"),L("61.1","销售部分开发成本",S(y=>R.cost[y].devSale),"万元","计入配售开发成本×当年销售率"),L("61.2","非配售折旧摊销成本",S(y=>R.cost[y].devDep),"万元","不计入配售开发成本×80%"),L("61.3","销售费用",fee,"万元","住房销售收入×1.5%"),L("61.4","销售税金",S(y=>R.cost[y].saleTax),"万元","销售税金及附加"),L("61.5","租赁运营成本及税金",S(y=>R.cost[y].rentCost+R.cost[y].rentTax),"万元","租赁运营成本+租赁税金"),L("61.6","建设期财务费用",sum("finBuild"),"万元","建设期利息"),L("61.7","运营期财务费用",sum("finOp"),"万元","运营期利息"),L("62","利润总额",S(y=>R.profit[y].total),"万元","总收入-总成本费用"),L("63","弥补以前年度亏损",S(y=>R.profit[y].makeup),"万元","亏损按FIFO最多结转5年"),L("64","应纳税所得额",S(y=>R.profit[y].taxable),"万元","利润总额+弥补亏损，不低于0"),L("65","所得税",S(y=>R.profit[y].incomeTax),"万元","应纳税所得额×25%"),L("66","净利润",R.summary.totalNetProfit,"万元","利润总额-所得税")];
+  const c11=[L("67","还本付息合计",S(y=>R.loan[y].total),"万元","本期还本+本期付息"),L("67.1","期初借款余额",R.loan[years[0]]&&R.loan[years[0]].begin,"万元","上年期末借款余额"),L("67.2","本期借款",S(y=>R.loan[y].borrow),"万元","借款计划"),L("67.3","本期利息",S(y=>R.loan[y].interest),"万元","（期初余额+本期借款÷2）×利率"),L("67.4","本期还本",S(y=>R.loan[y].repay),"万元","首次3%，以后递增4.5%，末年还清"),L("67.5","本期付息",S(y=>R.loan[y].payInt),"万元","本期利息"),L("67.6","期末借款余额",R.loan[years[years.length-1]]&&R.loan[years[years.length-1]].end,"万元","期初+借款+利息-还本-付息")];
+  const c12=[L("68","全投资现金流入",S(y=>R.cf[y].inflow),"万元","销售+移交+出租+其他+回收余值"),L("69","全投资现金流出",S(y=>R.cf[y].outflow),"万元","投资+销售费用+税金+租赁成本+调整所得税"),L("70","全投资净现金流",S(y=>R.cf[y].net),"万元","现金流入-现金流出"),L("71","累计净现金流",R.cf[years[years.length-1]].cumNet,"万元","逐年净现金流累计"),L("72","净现值",S(y=>R.cf[y].npv),"万元","净现金流÷(1+折现率)^(n+0.5)"),L("73","累计净现值",R.cf[years[years.length-1]].cumNpv,"万元","逐年净现值累计"),L("74","全投资内部收益率",R.summary.irr,"%","使全投资净现值为0的折现率"),L("75","资本金现金流",S(y=>R.capitalCf[y].net),"万元","全投资现金流叠加借款、还本及付息"),L("75.1","资本金现金流入",S(y=>R.capitalCf[y].inflow),"万元","全投资流入+银行借款"),L("75.2","资本金现金流出",S(y=>R.capitalCf[y].outflow),"万元","全投资流出+还本+付息"),L("76","资本金内部收益率",R.summary.capitalIrr,"%","使资本金净现值为0的折现率")];
+  const cn=["一","二","三","四","五","六","七","八","九","十","十一","十二"],chapter=(n,title,rows)=>saleStaticTableHtml('（'+cn[n-1]+'）'+title,rows,est,p,n===1);
+  const gantt='<details class="dt-block sale-chapter"><summary>（五）工期进度表　<span style="font-size:11px;color:var(--ink-soft);">按季度｜点击展开</span></summary><div class="dt-scroll"><table class="rpt dt"><tr><th class="dt-l">44. 工作阶段</th>'+(sch.periods||[]).map(x=>'<th>'+x.label+'</th>').join("")+'</tr>'+(sch.tasks||[]).map((t,i)=>{const active=window.InvestmentSchedule?InvestmentSchedule.activePeriods(t,sch.totalQuarters):[];return '<tr><td class="dt-l" style="padding-left:12px;">44.'+(i+1)+' '+escapeHtml(t.name)+'</td>'+(sch.periods||[]).map((_,q)=>'<td style="background:'+(active.includes(q)?(t.color||'#F2C7A6'):'transparent')+';">'+(active.includes(q)?'■':'')+'</td>').join("")+'</tr>';}).join("")+'</table></div></details>';
+  const planTable='<details class="dt-block sale-chapter"><summary>（六）投资计划表　<span style="font-size:11px;color:var(--ink-soft);">按年度｜点击展开</span></summary><div class="dt-scroll"><table class="rpt dt"><tr><th class="dt-l">指标</th><th class="dt-sum">全周期合计</th>'+(plan.years||[]).map(y=>'<th>'+y+'</th>').join("")+'<th>公式/金额来源</th></tr>'+(plan.rows||[]).map(r=>{const depth=String(r.no).split(".").length-1;return '<tr><td class="dt-l" style="padding-left:'+(12+depth*18)+'px;font-size:'+Math.max(11.5,13-depth*.65)+'px;">'+r.no+' '+escapeHtml(r.name)+'</td><td class="dt-sum">'+dtFmt(r.amount)+'</td>'+(plan.years||[]).map(y=>'<td>'+dtFmt(r.annual[y]||0)+'</td>').join("")+'<td style="text-align:left;min-width:180px;font-size:11px;color:var(--ink-soft);">'+escapeHtml(r.source||"按投资分摊比例计算")+'</td></tr>';}).join("")+'</table></div></details>';
+  return '<div class="doc-eyebrow" style="margin-top:22px;">出售类完整测算目录 · 十二表</div><div style="font-size:12px;color:var(--ink-soft);margin:6px 0 12px;">一次性指标按“计算基数—单价/费率—结果—依据”横表展示并可逐级展开；工期按季度、投资计划及经营测算按年度展示。</div>'+chapter(1,"技术指标",c1)+chapter(2,"投资估算",c2)+chapter(3,"计入配售部分（A）",ab("a"))+chapter(4,"不计入配售部分（B）",ab("b"))+gantt+planTable+chapter(7,"住房价格",c7);
+}
 function investEstimateHtml(est, sch){
   if(!est || !window.InvestEstimate) return "";
-  const rows = window.InvestEstimate.outline(est, sch);
-  return '<details class="dt-block" open><summary>投资估算大纲（一、二、三 · 按doc原文序号，点击展开子项）</summary>'
-    + '<div class="dt-scroll">' + outlineTreeHtml(rows) + '</div></details>';
+  const formulaMap={};(window.CALC_ESTIMATE_OUTLINE||[]).forEach(x=>formulaMap[String(x.no)]=String(x.hint||"").replace(/（[^）]*(?:doc|原文|本版)[^）]*）/gi,"").replace(/doc/gi,"").replace(/原文|本版/g,"").trim());
+  formulaMap["7.5.3"]="=（商业+住宅+地上核增+公共配套面积）×55/10000";
+  const rows=window.InvestEstimate.outline(est,sch).map(x=>({no:String(x.no),label:x.label,value:x.value,unit:x.unit,formula:formulaMap[String(x.no)]||String(x.note||"").replace(/doc/gi,"").trim()}));
+  const tech=rows.filter(x=>{const n=parseInt(x.no,10);return n>=1&&n<=4;}),investment=rows.filter(x=>{const n=parseInt(x.no,10);return n>=5&&n<=14;}),schedule=rows.filter(x=>parseInt(x.no,10)>=15);
+  return '<div class="doc-eyebrow" style="margin-top:22px;">出租类完整测算目录</div><div style="font-size:12px;color:var(--ink-soft);margin:6px 0 10px;">前置测算按“计算基数—单价/费率—结果—依据”完整展示并可逐级展开；经营、贷款、税金、损益和现金流按年度展示。</div>'
+    +saleStaticTableHtml('（一）技术指标',tech,est,scParams||{},true,rentStaticFormulaParts)
+    +saleStaticTableHtml('（二）投资估算',investment,est,scParams||{},false,rentStaticFormulaParts)
+    +saleStaticTableHtml('（三）工期进度',schedule,est,scParams||{},false,rentStaticFormulaParts);
+}
+function rentRuleKpiHtml(R,p){
+  if(!R||!R.summary)return "";
+  const s=R.summary||{},pb=v=>v&&Number.isFinite(Number(v.period))?Number(v.period):null;
+  const rows=[
+    {no:"20",label:"核心参数规则",value:null,unit:"",formula:"运营年限、计租月份、租金递增、出租率及租金折扣等按项目参数与行业规则执行"},
+    {no:"20.1",label:"运营年份",value:Number(p.operateYears)||0,unit:"年",formula:"土地使用年限－建设期年数"},
+    {no:"20.2",label:"计租月份",value:Number(p.firstMonths)||12,unit:"月",formula:"运营首年按实际月份，其余完整年度按12个月"},
+    {no:"20.3",label:"租金递增周期",value:Number(p.rentSpan)||0,unit:"年",formula:"每满一个递增周期按租金递增率调整"},
+    {no:"32",label:"损益核心指标",value:null,unit:"",formula:"基于利润及利润分配表汇总计算"},
+    {no:"32.2",label:"投资回报率",value:s.investReturnRate==null?null:s.investReturnRate*100,unit:"%",formula:"利润总额÷总投资×100%"},
+    {no:"32.3",label:"净投资回报率",value:s.netInvestReturnRate==null?null:s.netInvestReturnRate*100,unit:"%",formula:"净利润÷总投资×100%"},
+    {no:"32.4",label:"经营收入利润率",value:s.opProfitMargin==null?null:s.opProfitMargin*100,unit:"%",formula:"利润总额÷总经营收入×100%"},
+    {no:"43",label:"全投资核心指标",value:null,unit:"",formula:"基于全投资现金流量表计算"},
+    {no:"43.1",label:"全投资内部收益率",value:s.irr,unit:"%",formula:"使全投资净现值为0的折现率"},
+    {no:"43.2",label:"静态投资回收期",value:pb(s.payback),unit:"年",formula:"累计净现金流量由负转正的插值年限"},
+    {no:"43.3",label:"动态投资回收期",value:pb(s.paybackDynamic),unit:"年",formula:"累计净现值由负转正的插值年限"},
+    {no:"45.1",label:"资本金内部收益率",value:s.capitalIrr,unit:"%",formula:"使资本金净现值为0的折现率"},
+    {no:"45.2",label:"资本金静态投资回收期",value:pb(s.capitalPayback),unit:"年",formula:"资本金累计净现金流量由负转正的插值年限"},
+    {no:"45.3",label:"资本金动态投资回收期",value:pb(s.capitalPaybackDynamic),unit:"年",formula:"资本金累计净现值由负转正的插值年限"}
+  ];
+  return saleStaticTableHtml('出租类核心规则与效益指标（公式序号20、32、43、45.1—45.3）',rows,{technical:{},construction:{}},p||{},false,()=>({base:"—",rate:"—"}));
 }
 
 /* ---------- Excel 导出（带真公式引用） ---------- */
@@ -679,6 +860,7 @@ function scStepResult(){
   const pct=x=>x===null||x===undefined?"—":(x*100).toLocaleString("zh-CN",{maximumFractionDigits:2})+"%";
   let extra = (calcType==="rent"||calcType==="sale")? tile("利息保障倍数", s.icr) : "";
   if(calcType==="sale") extra += tile("配保房销售收入合计（万元）", fmt(s.totalSaleIncome)) + tile("出租净收益现值合计（万元）", fmt(s.rentalPvTotal));
+  if(calcType==="sale") extra += tile("年中折现NPV（万元）",fmt(s.totalNpv))+tile("资本金现金流IRR",s.capitalIrr===null?"—":s.capitalIrr+" %");
   const paybackStr=pb=> pb? pb.period+"年" : "未回正";
   if(calcType==="rent"){
     extra += tile("动态投资回收期", paybackStr(s.paybackDynamic))
@@ -704,9 +886,11 @@ function scStepResult(){
     + scoreCardHtml()
     + parameterGovernanceHtml()
     + (calcType==="rent" && scParams && scParams.investEstimate ? investEstimateHtml(scParams.investEstimate, scParams.investSchedule) : "")
+    + (calcType==="rent" ? rentRuleKpiHtml(scResult,scParams||{}) : "")
+    + (calcType==="sale"&&scResult.saleEstimate?saleEstimateHtml(scResult.saleEstimate,scResult,scParams):"")
     + detailTablesHtml()
     + aiChatHtml()
-    +'<div class="actions"><button class="btn ghost" id="scBack1">← 修改参数</button><button class="btn" id="scExcel">导出 Excel</button><button class="btn ghost" id="scWord" style="margin-left:8px;">导出测算说明书（Word）</button></div>';
+    +'<div class="actions"><button class="btn ghost" id="scBack1">← 修改参数</button><button class="btn" id="scExcel">导出 Excel</button><button class="btn ghost" id="scWord" style="margin-left:8px;">导出测算说明书</button></div>';
 }
 
 /* ================= AI 智能问答 ================= */
@@ -855,14 +1039,25 @@ function runCalcEngine(type, params){
   }else if(type === "sale"){
     const opStart = p.buildStart + p.buildYears;
     const ramp = {}; if(p.rate1) ramp[opStart]=p.rate1; if(p.rate2) ramp[opStart+1]=p.rate2; if(p.rate3) ramp[opStart+2]=p.rate3;
-    const repay = {}; for(let i=0;i<p.repayYears;i++) repay[p.repayStart+i]=p.repayAmount;
-    // 优先采用季度横道图汇总出的年度计划；旧项目没有工期数据时才按建设期平摊。
-    let devPlan = (p.devCostPlan&&Object.keys(p.devCostPlan).length)?p.devCostPlan:undefined;
-    if(!devPlan&&p.devInvestTotal>0){ devPlan={};
-      for(let i=0;i<p.buildYears;i++) devPlan[p.buildStart+i]=p.devInvestTotal/p.buildYears; }
-    return window.SaleCalc.calc(Object.assign({}, p, {saleRamp:ramp, customRepay:repay, devCostPlan:devPlan}), CALC_CFG.sale);
+    if(!window.SaleEstimate) throw new Error("出售类正式投资估算引擎未加载");
+    const est=window.SaleEstimate.estimate(p,(CALC_CFG.sale&&CALC_CFG.sale.fullEstimate)||{});
+    const saleFee=est.technical.residentialArea*Number(p.saleAvgPrice||0)*(Number(p.rate1||0)+Number(p.rate2||0)+Number(p.rate3||0))/10000*(Number((CALC_CFG.sale||{}).saleFeeRate)||.015);
+    let input=window.SaleEstimate.bridge(Object.assign({},p,{saleRamp:ramp,repayMode:"escalating"}),est,0,saleFee);
+    const probe=window.SaleCalc.calc(input,CALC_CFG.sale);
+    const buildFin=probe.allYears.filter(y=>y<opStart).reduce((s,y)=>s+(Number(probe.loan[y]&&probe.loan[y].interest)||0),0);
+    input=window.SaleEstimate.bridge(input,est,buildFin,saleFee);
+    if(window.InvestmentSchedule&&p.saleInvestmentCoefficients){
+      const temp={saleEstimate:est,loan:probe.loan,cost:probe.cost};
+      const plan=window.InvestmentSchedule.saleInvestmentPlan(input,temp,p.saleInvestmentCoefficients);
+      const subtotal=plan.rows.find(r=>r.no==="45.1");
+      input.devCostPlan=subtotal?Object.assign({},subtotal.annual):{};
+    }
+    const out=window.SaleCalc.calc(input,CALC_CFG.sale);
+    out.saleEstimate=est;out.saleEstimateInput=input;
+    if(window.InvestmentSchedule&&p.saleInvestmentCoefficients)out.saleInvestmentPlan=window.InvestmentSchedule.saleInvestmentPlan(input,out,p.saleInvestmentCoefficients);
+    return out;
   }else{
-    // investPlan若已由「投资估算自动测算」算出(readRentForm里的p.investPlan)，直接沿用其分年节奏；
+    // investPlan由「投资估算全量公式」算出时，直接沿用其分年节奏；
     // 否则退回原有行为——建设投资全额计入建设期首年
     const investPlan = (p.investPlan && Object.keys(p.investPlan).length) ? p.investPlan
       : (function(){ const o={}; o[p.buildStart]=p.invest; return o; })();

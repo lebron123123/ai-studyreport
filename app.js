@@ -105,7 +105,8 @@ function goHome(){ appMode=null; renderTOC(); renderSheet(); }
 
 function renderSheet(){
   const sheet = document.getElementById("sheet");
-  if(appMode===null){ sheet.innerHTML = stepHome(); bindEvents(); bindCalcEvents(); mountAnchorNav(); return; }
+  if(window.HousingParticles) window.HousingParticles.destroy();
+  if(appMode===null){ sheet.innerHTML = stepHome(); bindEvents(); bindCalcEvents(); mountAnchorNav(); if(window.HousingParticles) window.HousingParticles.mount("housingHero"); return; }
   if(appMode==="calc"){ sheet.innerHTML = renderCalcModule(); bindEvents(); bindCalcEvents(); mountAnchorNav(); return; }
   if(appMode==="review"){ sheet.innerHTML = renderReviewModule(); bindEvents(); bindReviewEvents(); mountAnchorNav(); return; }
   if(appMode==="office"){ sheet.innerHTML = stepOffice(); bindEvents(); bindOfficeEvents(); return; }
@@ -169,6 +170,15 @@ function stepHome(){
   return '<div class="doc-eyebrow">HOME · 欢迎</div>'
     +'<h1 class="doc-title">可研报告工坊</h1>'
     +'<div class="step-desc">请从左侧选择要使用的功能模块：财务测算、可研智能审查、可研生成。</div>'
+    +'<section class="housing-hero" id="housingHero" aria-label="保障房数字化建设场景">'
+    +'<canvas aria-hidden="true"></canvas>'
+    +'<div class="housing-hero-head">'
+    +'<div class="housing-hero-copy"><span>SHENZHEN · HOUSING · DIGITAL</span><b>让每一组项目数据，汇聚成清晰的安居蓝图</b><small>城市蓝图正在生成　·　白箱测算　·　智能可研</small></div>'
+    +'<div class="housing-brand" aria-label="深安居 Shenzhen Public Housing">'
+    +'<svg viewBox="0 0 64 58" aria-hidden="true"><defs><linearGradient id="sajg" x1="0" x2="1"><stop stop-color="#1595D0"/><stop offset="1" stop-color="#70C4D7"/></linearGradient></defs><path fill="url(#sajg)" d="M8 28 32 5l24 23-8 8-16-15-16 15z"/><path fill="url(#sajg)" d="M2 39 22 21v27h8V35l2-3 2 3v13h8V21l20 18v17H40l-8-8-8 8H2z"/></svg>'
+    +'<div><b>深安居</b><span>SHENZHEN PUBLIC HOUSING</span></div>'
+    +'</div></div>'
+    +'</section>'
     // 三个入口按钮仍然渲染(供左侧导航点击复用同一套逻辑)，但不在正文区展示为卡片
     +'<div style="display:none;">'
     +'<div class="domain-card" id="homeAiReport"></div>'
