@@ -622,13 +622,13 @@ function stdRetrieve(chapterName, secTitle, numeric){
   let out = "";
   if(textHits.length){
     out += '\n\n【审查标准】（签发前"AI深度审核"会按同一份公司编制审查标准逐条复核本节，请撰写时直接满足，不要等审核环节再补）\n'
-      + textHits.map((r,i)=>(i+1)+". "+r.rule).join("\n");
+      + textHits.map((r,i)=>"["+(r.id||("KY-"+String(i+1).padStart(3,"0")))+"] "+r.rule+(r.reason?"（依据摘要："+r.reason+"）":"")).join("\n");
   }
   if(numeric){
     const calcHits = stdCalcRetrieve(chapterName, secTitle);
     if(calcHits.length){
       out += '\n\n【测算取值标准】（以下为公司《可研报告编制与审查指引》里本节涉及的取值标准，须优先遵循；缺项目属性信息（如项目性质分类/所在区域）无法判断具体应适用哪一档时，须在正文标注"以下按XX档估算，具体以主管部门/相关部门意见为准"，不得凭空选一个档次冒充确定结论）\n'
-        + calcHits.map((e,i)=>(i+1)+". "+(e.item?e.item+"：":"")+(e.standard||"")).join("\n");
+        + calcHits.map((e,i)=>"["+(e.id||("CS-"+String(i+1).padStart(3,"0")))+"] "+(e.item?e.item+"：":"")+(e.standard||"")+(e.reason?"（依据摘要："+e.reason+"）":"")).join("\n");
     }
   }
   return out;

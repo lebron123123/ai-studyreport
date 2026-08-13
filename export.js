@@ -68,6 +68,38 @@ function buildCalcWorkbook(){
     ws["!cols"]=[{wch:30},{wch:14}].concat(ys.map(()=>({wch:12})));
     X.utils.book_append_sheet(wb, ws, t.sheet);
   });
+  const sch=scParams&&scParams.investSchedule;
+  if(sch&&Array.isArray(sch.periods)&&sch.periods.length){
+    const taskRows=[["序号","工作阶段"].concat(sch.periods.map(p=>p.label))];
+    (sch.tasks||[]).forEach((t,i)=>taskRows.push([i+1,t.name].concat(sch.periods.map((p,q)=>InvestmentSchedule.activePeriods(t,sch.totalQuarters).includes(q)?"■":""))));
+    const wsG=X.utils.aoa_to_sheet(taskRows);wsG["!cols"]=[{wch:7},{wch:22}].concat(sch.periods.map(()=>({wch:8})));
+    X.utils.book_append_sheet(wb,wsG,"工期横道图");
+    const total=Number(sch.totalInvestment)||0,planRows=[["费用科目","合计（万元）"].concat(sch.periods.map(p=>p.label))];
+    (sch.rows||[]).forEach(r=>planRows.push([r.name,r.amount].concat(r.amounts)));
+    planRows.push(["季度投资合计",total].concat(sch.quarterTotals||[]));
+    planRows.push(["季度投资比例",total?1:0].concat((sch.quarterTotals||[]).map(v=>total?v/total:0)));
+    const wsI=X.utils.aoa_to_sheet(planRows);wsI["!cols"]=[{wch:24},{wch:15}].concat(sch.periods.map(()=>({wch:12})));
+    X.utils.book_append_sheet(wb,wsI,"季度投资计划");
+    const annualRows=[["年度","投资额（万元）","占总投资比例"]].concat(Object.entries(sch.annualPlan||{}).map(([y,v])=>[Number(y),v,total?v/total:0]));
+    const wsA=X.utils.aoa_to_sheet(annualRows);wsA["!cols"]=[{wch:12},{wch:18},{wch:18}];X.utils.book_append_sheet(wb,wsA,"年度投资计划");
+    if(calcType==="sale"){
+      const cp=(scParams&&scParams.saleInvestmentCoefficients)||InvestmentSchedule.coefficientPlan(sch.tasks,sch.periods,isScheduleCfg("sale").coefficientRows,sch.totalQuarters);
+      const coeffRows=[["序号","项目名称","合计"].concat(cp.years.map(y=>y+"年"))].concat(cp.rows.map(r=>[r.no,r.name,(r.annualPattern||[]).length?1:null].concat(cp.years.map(y=>r.annualCoefficients[y]||null))));
+      const wsC=X.utils.aoa_to_sheet(coeffRows);wsC["!cols"]=[{wch:8},{wch:28},{wch:12}].concat(cp.years.map(()=>({wch:12})));X.utils.book_append_sheet(wb,wsC,"出售类投资计划系数");
+      const plan=InvestmentSchedule.saleInvestmentPlan(scParams,scResult,cp),yearStart=3,sourceCol=yearStart+plan.years.length,planRows=[["序号","项目名称","合计（万元）"].concat(plan.years.map(y=>y+"年"),["金额来源/当前口径"])];
+      plan.rows.forEach(r=>planRows.push([r.no,r.name,r.amount].concat(plan.years.map(y=>r.annual[y]||0),[r.source||""])));
+      const ws45=X.utils.aoa_to_sheet(planRows),rowNo=Object.fromEntries(plan.rows.map((r,i)=>[r.no,i+2])),coeffRow=Object.fromEntries(cp.rows.map((r,i)=>[r.no,i+2])),coeffYear=Object.fromEntries(cp.years.map((y,i)=>[y,3+i]));
+      plan.rows.forEach((r,i)=>{const excelRow=i+2,totalRef="C"+excelRow;if(r.children){ws45[totalRef].f="ROUND("+r.children.map(no=>"C"+rowNo[no]).join("+")+",4)";plan.years.forEach((y,yi)=>{const c=X.utils.encode_col(yearStart+yi)+excelRow;c in ws45&&(ws45[c].f="ROUND("+r.children.map(no=>X.utils.encode_col(yearStart+yi)+rowNo[no]).join("+")+",4)");});return;}
+        plan.years.forEach((y,yi)=>{const ref=X.utils.encode_col(yearStart+yi)+excelRow;if(r.annualMode==="direct"){const yearIndex=ys.indexOf(y),loanRow=reg.l_int;if(yearIndex>=0&&loanRow)ws45[ref].f="'"+loanRow.sheet+"'!"+col(yearIndex)+loanRow.row;}
+          else if(r.coeffNo&&coeffRow[r.coeffNo]&&coeffYear[y]!=null)ws45[ref].f="ROUND("+totalRef+"*'出售类投资计划系数'!"+X.utils.encode_col(coeffYear[y])+coeffRow[r.coeffNo]+",4)";
+          else ws45[ref].f="0";
+        });
+      });
+      ws45["!cols"]=[{wch:12},{wch:28},{wch:16}].concat(plan.years.map(()=>({wch:13})),[{wch:42}]);
+      ws45["!freeze"]={xSplit:2,ySplit:1};
+      X.utils.book_append_sheet(wb,ws45,"45出售类投资计划表");
+    }
+  }
   return wb;
 }
 
@@ -454,7 +486,7 @@ async function exportCalcWord(){
 
   // ---- 一、主要输入参数 ----
   kids.push(para("一、主要输入参数",{font:"黑体",size:24},{spacing:{line:380,lineRule:"exact",before:160,after:60}}));
-  const PL = {buildStart:"建设期起始年", buildYears:"建设期年数", operateYears:"运营期年数",
+  const PL = {buildStart:"建设期起始年", buildStartQuarter:"建设期起始季度", buildYears:"建设期年数", operateYears:"运营期年数",
     firstMonths:"运营首年计租月数", area:"住宅面积（㎡）", rent:"起始租金（元/㎡/月）",
     rentDiscount:"租金折扣系数", subsidyArea:"政府补贴对应面积（㎡）", subsidyPrice:"补贴单价（元/㎡/月）",
     subsidyDiscount:"补贴折扣系数", subsidyStableOcc:"补贴部分出租率",
@@ -471,9 +503,16 @@ async function exportCalcWord(){
     if(v===undefined || v===null || v==="" || v===0) return;   // 未填或为0的参数不列出，避免干扰阅读
     kids.push(para("　"+PL[k]+"："+v,null,{spacing:{line:320,lineRule:"exact"}}));
   });
+  if(P.investSchedule&&P.investSchedule.periods){
+    const sch=P.investSchedule,total=Number(sch.totalInvestment)||0;
+    kids.push(para("二、工期进度与投资计划",{font:"黑体",size:24},{spacing:{line:380,lineRule:"exact",before:200,after:60}}));
+    (sch.tasks||[]).forEach(t=>{const qs=InvestmentSchedule.activePeriods(t,sch.totalQuarters).map(q=>sch.periods[q]&&sch.periods[q].label).filter(Boolean);kids.push(para("　"+t.name+"："+(qs.length?qs.join("、"):"未安排"),null,{spacing:{line:320,lineRule:"exact"}}));});
+    Object.entries(sch.annualPlan||{}).forEach(([y,v])=>kids.push(para("　"+y+"年投资："+Number(v).toLocaleString("zh-CN",{maximumFractionDigits:2})+"万元（"+(total?v/total*100:0).toFixed(1)+"%）",null,{spacing:{line:320,lineRule:"exact"}})));
+    kids.push(para("　季度、年度与映射费用合计校验："+(sch.validation&&sch.validation.ok?"通过":"存在待核查问题"),{bold:true,color:sch.validation&&sch.validation.ok?"27734A":"A23B2A"}));
+  }
 
-  // ---- 二、各科目计算公式与合计 ----
-  const CN=["二","三","四","五","六","七","八","九","十"];
+  // ---- 各科目计算公式与合计 ----
+  const CN=["三","四","五","六","七","八","九","十","十一"];
   specs.forEach((t,ti)=>{
     kids.push(para((CN[ti]||"")+"、"+t.title,{font:"黑体",size:24},
       {spacing:{line:380,lineRule:"exact",before:200,after:60}}));
@@ -511,7 +550,7 @@ async function exportCalcWord(){
   });
 
   // ---- 财务指标 ----
-  kids.push(para("十一、主要财务指标",{font:"黑体",size:24},{spacing:{line:380,lineRule:"exact",before:200,after:60}}));
+  kids.push(para("十二、主要财务指标",{font:"黑体",size:24},{spacing:{line:380,lineRule:"exact",before:200,after:60}}));
   const S=R.summary||{};
   const fmt=v=>Number(v).toLocaleString("zh-CN",{maximumFractionDigits:2});
   const put=(k,v,u)=>{ if(v===undefined||v===null) return;
@@ -556,9 +595,11 @@ async function exportAiRulesWord(list){
   kids.push(new D.Paragraph({children:[run("导出时间："+new Date().toLocaleString("zh-CN")+"　｜　共"+list.length+"条　｜　与后台「AI审核规则、逻辑」页面当前状态一致（含未保存的编辑）",
     {font:"楷体_GB2312", size:19, color:"808080"})], alignment:D.AlignmentType.CENTER, spacing:{line:340,lineRule:"exact", after:240}}));
   list.forEach((e,i)=>{
-    kids.push(new D.Paragraph({children:[run((i+1)+". 匹配关键词："+(e.match||"*"),{bold:true})],
-      spacing:{line:340,lineRule:"exact", before:180}}));
-    kids.push(para("　　"+(e.rule||""), null, {spacing:{line:320,lineRule:"exact"}}));
+      kids.push(new D.Paragraph({children:[run((e.id||("KY-"+String(i+1).padStart(3,"0")))+"　匹配关键词："+(e.match||"*"),{bold:true})],
+        spacing:{line:340,lineRule:"exact", before:180}}));
+      kids.push(para("　　"+(e.rule||""), null, {spacing:{line:320,lineRule:"exact"}}));
+      if(e.reason) kids.push(para("　　为什么这样规定："+e.reason, {font:"楷体_GB2312",size:20,color:"555555"}, {spacing:{line:300,lineRule:"exact"}}));
+      if(e.evidenceRefs&&e.evidenceRefs.length) kids.push(para("　　关联Wiki依据："+e.evidenceRefs.map(x=>(x.title||x.id)+(x.version?" v"+x.version:"")).join("；"), {font:"楷体_GB2312",size:19,color:"1F4E79"}, {spacing:{line:300,lineRule:"exact"}}));
   });
   const doc=new D.Document({sections:[{properties:{page:{size:{width:11906,height:16838},
     margin:{top:1500,right:1400,bottom:1500,left:1400}}}, children:kids}]});
@@ -585,10 +626,12 @@ async function exportCalcStdWord(list){
     kids.push(para(cat, {font:"黑体",size:24}, {spacing:{line:380,lineRule:"exact", before:200, after:60}}));
     list.filter(e=>(e.category||"未分类")===cat).forEach(e=>{
       kids.push(new D.Paragraph({children:[
-        run("● "+(e.item||"（未命名）"), {bold:true}),
+          run("● "+(e.id?e.id+"　":"")+(e.item||"（未命名）"), {bold:true}),
         run("　["+(CS_CHECK_TYPE_LABELS[e.checkType]||e.checkType||"info")+"　适用："+(e.calcType||"all")+(e.value!=null&&e.value!==""?"　参考值："+e.value:"")+"]", {bold:true, color:"1F4E79", size:19}),
       ], spacing:{line:340,lineRule:"exact", before:80}}));
-      if(e.standard) kids.push(para("　　"+e.standard, {font:"楷体_GB2312", size:21, color:"262626"}, {spacing:{line:320,lineRule:"exact"}}));
+        if(e.standard) kids.push(para("　　"+e.standard, {font:"楷体_GB2312", size:21, color:"262626"}, {spacing:{line:320,lineRule:"exact"}}));
+        if(e.reason) kids.push(para("　　为什么这样规定："+e.reason, {font:"楷体_GB2312", size:19, color:"555555"}, {spacing:{line:300,lineRule:"exact"}}));
+        if(e.evidenceRefs&&e.evidenceRefs.length) kids.push(para("　　关联Wiki依据："+e.evidenceRefs.map(x=>(x.title||x.id)+(x.version?" v"+x.version:"")).join("；"), {font:"楷体_GB2312", size:19, color:"1F4E79"}, {spacing:{line:300,lineRule:"exact"}}));
       if(e.note) kids.push(para("　　备注："+e.note, {font:"楷体_GB2312", size:19, color:"808080"}, {spacing:{line:300,lineRule:"exact"}}));
     });
   });

@@ -5,7 +5,7 @@ import { verifyAuth, json } from "./_auth.js";
 
 import { adaptEnv } from "./_adapters.js";
 import { configTrigger,recordReviewEvent } from "./_paramreview.js";
-const KEYS = ["gaibao","rent","sale","invest","metrics","score","examples","airules","calclogic","sensitivity","calcstd","paramrules","paramdefaults"];
+const KEYS = ["gaibao","rent","sale","invest","schedule","metrics","score","examples","airules","calclogic","sensitivity","calcstd","paramrules","paramdefaults"];
 function isAdmin(env, user){
   const admins = (env.ADMIN_USERS || "").split(",").map(s=>s.trim()).filter(Boolean);
   return admins.includes(user.username) || admins.includes(String(user.userId));

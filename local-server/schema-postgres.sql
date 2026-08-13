@@ -241,6 +241,19 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
 );
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_status_updated ON wiki_pages(status, updated_at DESC);
 
+-- ---------- 前台知识协作投稿（提交后不可原地修改） ----------
+CREATE TABLE IF NOT EXISTS knowledge_contributions (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '', source_ref TEXT DEFAULT '', file_name TEXT DEFAULT '',
+  region TEXT DEFAULT '', project_type TEXT DEFAULT '', meta TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending', review_note TEXT DEFAULT '',
+  target_module TEXT DEFAULT '', target_ref TEXT DEFAULT '', parent_id TEXT DEFAULT '',
+  user_id INTEGER NOT NULL, username TEXT DEFAULT '', created_at BIGINT NOT NULL,
+  reviewed_at BIGINT, reviewed_by TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_contributions_status ON knowledge_contributions(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_contributions_user ON knowledge_contributions(user_id, created_at DESC);
+
 -- ---------- Agent ----------
 CREATE TABLE IF NOT EXISTS agent_traces (
   id           SERIAL PRIMARY KEY,

@@ -31,6 +31,14 @@ test("calcconfig未配置时paramdefaults和paramrules均返回空对象",async(
   const env={DB:mockDb(),SESSION_SECRET:"secret",ADMIN_USERS:"admin",ADMIN_PASS:"pass"};
   const request=await authRequest(env,"GET"); const d=await (await onRequestGet({request,env})).json();
   assert.deepEqual(d.config.paramdefaults,{}); assert.deepEqual(d.config.paramrules,{});
+  assert.deepEqual(d.config.schedule,{});
+});
+
+test("季度工期模板与费用映射可持久化并完整读取",async()=>{
+  const env={DB:mockDb(),SESSION_SECRET:"secret",ADMIN_USERS:"admin",ADMIN_PASS:"pass"};
+  const schedule={types:{rent:{startQuarter:2,template:{id:"x",tasks:[{id:"land",name:"土地",startRatio:0,durationRatio:.1,color:"#F4D889"}]},mappings:[{id:"m1",name:"土地成本",costPath:"land.landCostTotal",taskIds:["land"],curve:"once_start"}]}}};
+  let request=await authRequest(env,"POST",{key:"schedule",data:schedule}),d=await (await onRequestPost({request,env})).json();assert.equal(d.ok,true);
+  request=await authRequest(env,"GET");d=await (await onRequestGet({request,env})).json();assert.deepEqual(d.config.schedule,schedule);
 });
 
 test("治理版本只在生效日期区间内进入测算",()=>{

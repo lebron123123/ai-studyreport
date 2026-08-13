@@ -65,6 +65,7 @@ function renderTOC(){
       {id:"homeReview",ic:"🔍", label:"可研智能审查"},
       {id:"homeReport",ic:"📄", label:"可研生成"},
       {id:"homeOffice",ic:"💬", label:"AI办公助手"},
+      {id:"homeCollab",ic:"🧭", label:"知识与规则"},
     ];
     items += HM.map(m=>'<div class="toc-item" data-home="'+m.id+'" style="cursor:pointer;"><span class="num">'+m.ic+'</span><span>'+m.label+'</span></div>').join("");
   }
@@ -109,6 +110,7 @@ function renderSheet(){
   if(appMode==="review"){ sheet.innerHTML = renderReviewModule(); bindEvents(); bindReviewEvents(); mountAnchorNav(); return; }
   if(appMode==="office"){ sheet.innerHTML = stepOffice(); bindEvents(); bindOfficeEvents(); return; }
   if(appMode==="aireport"){ sheet.innerHTML = renderAiReportModule(); bindEvents(); bindAiReportEvents(); return; }
+  if(appMode==="collaboration"){ sheet.innerHTML=renderCollaboration(); bindEvents(); bindCollaborationEvents(); return; }
   if(currentStep===0) sheet.innerHTML = stepDomain();
   if(currentStep===1) sheet.innerHTML = stepProjectInfo();
   if(currentStep===2) sheet.innerHTML = stepCalc();
@@ -174,6 +176,7 @@ function stepHome(){
     +'<div class="domain-card" id="homeReview"></div>'
     +'<div class="domain-card" id="homeReport"></div>'
     +'<div class="domain-card" id="homeOffice"></div>'
+    +'<div class="domain-card" id="homeCollab"></div>'
     +'</div>';
 }
 

@@ -4,7 +4,15 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { calcStdHardChecks, excelMappingChecks } = require("../review.js");
+const { calcStdHardChecks, excelMappingChecks, normalizeAiAuditIssue } = require("../review.js");
+
+test("AI审核结果按检查项、规则、依据和修改建议形成可追溯路径",()=>{
+  const rule={id:"KY-SC-003",rule:"市场分析须包含周边3公里成交数据",reason:"保证市场判断有真实供需数据支撑",evidenceRefs:[{id:"wiki:market",title:"深圳保障房市场分析数据口径",version:3}]};
+  const out=normalizeAiAuditIssue({point:"缺少成交数据",ruleId:"KY-SC-003",suggestion:"补充近12个月成交价和成交量"},[rule],[]);
+  assert.equal(out.ruleId,"KY-SC-003");
+  assert.match(out.point,/检查了什么/); assert.match(out.point,/依据哪条规则/); assert.match(out.point,/为什么这么规定/); assert.match(out.point,/应该怎样修改/);
+  assert.match(out.evidence,/市场分析数据口径 v3/); assert.equal(out.suggestion,"补充近12个月成交价和成交量");
+});
 
 // 一组完全合规的测算参数：贷款利率3%、建设期4年、首年出租率75%（边界内）、
 // 稳定期出租率95%（边界内）、管理费系数取标准7档之一、自有资金比例20%（≤30%）

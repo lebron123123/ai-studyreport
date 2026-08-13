@@ -134,19 +134,29 @@ function calcStdFor(chName, secTitle){
     return kw.split(",").some(k=>k && q.includes(k));
   }).slice(0,8);
 }
+function auditEvidenceLabel(entry){
+  const refs=Array.isArray(entry&&entry.evidenceRefs)?entry.evidenceRefs:[];
+  return refs.map(x=>String(x.title||x.label||x.id||"")+(x.version?" v"+x.version:"")).filter(Boolean).join("；");
+}
+function normalizeAiAuditIssue(issue,rules,calcStds){
+  const all=[...(rules||[]).map((x,i)=>Object.assign({id:x.id||("KY-"+String(i+1).padStart(3,"0")),check:x.rule||""},x)),...(calcStds||[]).map((x,i)=>Object.assign({id:x.id||("CS-"+String(i+1).padStart(3,"0")),check:(x.item?x.item+"：":"")+(x.standard||"")},x))];
+  const hit=all.find(x=>x.id===issue.ruleId)||all.find(x=>issue.rule&&String(issue.rule).includes(x.id))||all[0]||{};
+  const check=String(issue.point||issue.check||"发现审核问题"),ruleId=String(hit.id||issue.ruleId||"通用检查"),rule=String(hit.check||issue.rule||"签发前审核检查"),reason=String(issue.reason||hit.reason||"依据当前已发布审核标准判断"),evidence=auditEvidenceLabel(hit)||String(issue.evidence||"未关联Wiki，按规则原文执行");
+  return {point:"检查了什么："+check+"｜依据哪条规则："+ruleId+" "+rule+"｜为什么这么规定："+reason+"（关联依据："+evidence+"）｜应该怎样修改",ruleId,rule,reason,evidence,suggestion:String(issue.suggestion||"请按该规则补充或修正")};
+}
 async function aiAuditOne(c, s){
   const rules = aiRulesFor(c.name, s.t);
   const calcStds = s.numeric ? calcStdFor(c.name, s.t) : [];
   const src = s.editedHtml? blocksToSource(s.editedHtml) : (s.content||"");
-  const sys = '你是政府投资项目可研报告评审专家。请依据【审核要点】'+(calcStds.length?'与【测算取值标准】':'')+'评审给定小节，只输出一个JSON对象（不要markdown代码块、不要任何其他文字），格式：{"score":0到100整数,"issues":[{"point":"问题(15字内)","suggestion":"具体修改建议(40字内)"}]}。测算取值标准里带"分档"性质的条目，若小节内容未写清楚适用哪一档或未说明依据，应视为问题；达标项不要列入issues；最多列3条最重要的问题；写得好就给高分、issues可为空数组。';
+  const sys = '你是政府投资项目可研报告评审专家。请依据【审核要点】'+(calcStds.length?'与【测算取值标准】':'')+'评审给定小节。Wiki仅用于解释为什么，不得另行制造审核项或重复扣分。只输出一个JSON对象（不要markdown代码块、不要任何其他文字），格式：{"score":0到100整数,"issues":[{"point":"检查发现的问题(20字内)","ruleId":"命中的规则编号","reason":"为什么不符合(40字内)","suggestion":"具体修改建议(60字内)"}]}。每个问题必须对应输入中的一个规则编号；带分档性质的条目若未写清适用档位或依据，应视为问题；达标项不要列入issues；最多列3条最重要的问题。';
   const user = '【小节】第'+c.cn+'章 '+c.name+' — '+s.t
-    +'\n【审核要点】\n'+rules.map((r,i)=>(i+1)+'. '+r.rule).join('\n')
-    +(calcStds.length? '\n【测算取值标准】\n'+calcStds.map((e,i)=>(i+1)+'. '+(e.item?e.item+'：':'')+(e.standard||'')).join('\n') : '')
+    +'\n【审核要点】\n'+rules.map((r,i)=>'['+(r.id||('KY-'+String(i+1).padStart(3,'0')))+'] '+r.rule+(r.reason?'｜依据摘要：'+r.reason:'')+(auditEvidenceLabel(r)?'｜关联Wiki：'+auditEvidenceLabel(r):'')).join('\n')
+    +(calcStds.length? '\n【测算取值标准】\n'+calcStds.map((e,i)=>'['+(e.id||('CS-'+String(i+1).padStart(3,'0')))+'] '+(e.item?e.item+'：':'')+(e.standard||'')+(e.reason?'｜依据摘要：'+e.reason:'')+(auditEvidenceLabel(e)?'｜关联Wiki：'+auditEvidenceLabel(e):'')).join('\n') : '')
     +'\n【小节内容】\n'+src.slice(0,3000);
   const text = await callGen(sys, user);
   const clean = text.replace(/```json|```/g,"").trim();
   const j = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}")+1));
-  return { score: Math.max(0,Math.min(100, parseInt(j.score)||0)), issues: Array.isArray(j.issues)? j.issues.slice(0,3):[] };
+  return { score: Math.max(0,Math.min(100, parseInt(j.score)||0)), issues: Array.isArray(j.issues)? j.issues.slice(0,3).map(x=>normalizeAiAuditIssue(x,rules,calcStds)):[] };
 }
 async function runAiAudit(){
   const active = appMode==="review"? rvChapters : chapters.filter(c=>c.checked);
@@ -165,7 +175,17 @@ async function runAiAudit(){
     done++; box.innerHTML = 'AI评审中… '+done+'/'+tasks.length;
   }
   await runWorkerPool(tasks.slice(), one, 3);
-  renderAiAudit(results);
+  renderAiAuditTrace(results);
+}
+function renderAiAuditTrace(results){
+  window.__lastAuditResults=results;
+  const box=document.getElementById("aiAuditBox"),scored=results.filter(r=>r.score!==null),avg=scored.length?Math.round(scored.reduce((s,r)=>s+r.score,0)/scored.length):0,dot=v=>v>=80?"var(--ok-green)":v>=60?"#C99A2E":"var(--seal-red)";
+  let html='<div style="font-weight:700;margin:8px 0;">AI评审完成：全篇平均 <span style="color:'+dot(avg)+';font-size:18px;">'+avg+'</span> 分</div>';
+  results.sort((a,b)=>(a.score===null?-1:a.score)-(b.score===null?-1:b.score));
+  html+=results.map(r=>'<div class="audit-row" style="display:block;"><div><b style="color:'+dot(r.score||0)+';margin-right:10px;">'+(r.score===null?'—':r.score)+'</b><span data-aigoto="'+r.cn+'_'+r.si+'" style="color:var(--ink-soft);cursor:pointer;">第'+r.cn+'章 · '+escapeHtml(r.secTitle)+'</span></div>'+(r.err?'<div style="color:var(--seal-red);">'+escapeHtml(r.err)+'</div>':'')+r.issues.map(it=>'<div style="padding:9px 11px;margin:7px 0 2px 34px;border-left:3px solid var(--seal-red);background:#fff;"><div><b>检查了什么：</b>'+escapeHtml(String(it.point||'').replace(/^检查了什么：|｜依据哪条规则：[\s\S]*$/g,''))+'</div><div style="margin-top:4px;"><b>依据哪条规则：</b><code>'+escapeHtml(it.ruleId||'')+'</code> '+escapeHtml(it.rule||'')+'</div><div style="margin-top:4px;"><b>为什么这么规定：</b>'+escapeHtml(it.reason||'')+'<span style="color:var(--soft);">（关联依据：'+escapeHtml(it.evidence||'未关联Wiki')+'）</span></div><div style="margin-top:4px;"><b>应该怎样修改：</b>'+escapeHtml(it.suggestion||'')+' <button class="ub-btn" data-adopt="'+r.cn+'_'+r.si+'" data-sug="'+escapeHtml(it.suggestion||'')+'">采纳→AI修改</button></div></div>').join('')+'</div>').join('');
+  box.innerHTML=html;
+  box.querySelectorAll("[data-aigoto]").forEach(el=>el.onclick=()=>locateSection(el.dataset.aigoto));
+  box.querySelectorAll("[data-adopt]").forEach(btn=>btn.onclick=()=>{const blk=locateSection(btn.dataset.adopt),bar=blk&&blk.querySelector(".revise-bar");if(!bar)return;bar.style.display="flex";const inp=bar.querySelector(".rev-input");inp.value=btn.dataset.sug;inp.focus();});
 }
 function renderAiAudit(results){
   window.__lastAuditResults = results;   // 暴露给悬浮助手的工具读取，不改变原有渲染行为
@@ -420,4 +440,4 @@ function findSection(cn, si){ const r = findChapterSection(cn, si); return r? r.
 // 浏览器里这个文件是普通<script>（非CommonJS），顶层函数声明本来就会挂到window上，不需要这段；
 // 只有在Node测试环境里require()本文件时（被CommonJS包一层函数作用域）才需要显式导出，
 // 否则calcStdHardChecks这类纯函数在测试文件里require()不到。不影响浏览器端任何行为。
-if(typeof module==="object" && module.exports){ module.exports = { calcStdHardChecks, excelMappingChecks }; }
+if(typeof module==="object" && module.exports){ module.exports = { calcStdHardChecks, excelMappingChecks, auditEvidenceLabel, normalizeAiAuditIssue }; }

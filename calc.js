@@ -7,12 +7,12 @@ let scParams = null;
 let pgSelectedKey = null;    // 白箱IRR滑块/单参数曲线当前参数
 let pgJointCache = null;
 let aiChat = [];             // AI问答历史 [{role, content}]
-let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, invest:{}, metrics:[], score:[], examples:[], airules:[], calclogic:{}, sensitivity:{}, paramrules:{}, paramdefaults:{}};   // 后台测算参数配置
+let CALC_CFG = {gaibao:{}, rent:{}, sale:{}, invest:{}, schedule:{}, metrics:[], score:[], examples:[], airules:[], calclogic:{}, sensitivity:{}, paramrules:{}, paramdefaults:{}};   // 后台测算参数配置
 async function fetchCalcConfig(){
   try{
     const r = await fetch("/api/calcconfig", {headers:authHeaders()});
     const d = await r.json();
-    if(d.ok && d.config) CALC_CFG = Object.assign({gaibao:{},rent:{},sale:{},invest:{},metrics:[],score:[],examples:[],airules:[],calclogic:{},sensitivity:{},paramrules:{},paramdefaults:{}}, d.config);
+    if(d.ok && d.config) CALC_CFG = Object.assign({gaibao:{},rent:{},sale:{},invest:{},schedule:{},metrics:[],score:[],examples:[],airules:[],calclogic:{},sensitivity:{},paramrules:{},paramdefaults:{}}, d.config);
   }catch(e){}
 }
 let calcResult = null;   // 财务测算结果（null表示跳过测算，走"待填"模式）
@@ -37,7 +37,7 @@ function scStepForm(){
   const inner = calcType==="gaibao"? calcFormHtml() : (calcType==="sale"? saleFormHtml() : rentFormHtml());
   return '<div class="doc-eyebrow">财务测算 · STEP 02 · '+(calcType==="gaibao"?"非居改保":(calcType==="sale"?"出售类":"出租类"))+'</div>'
     +'<h1 class="doc-title">录入测算参数</h1>'+inner
-    +'<div class="actions"><button class="btn ghost" id="scBack0">← 上一步</button><button class="btn" id="scRun">执行测算 →</button></div>';
+    +'<div id="scRunError" style="display:none;margin-top:12px;padding:9px 11px;border-radius:6px;background:#fff3f1;color:#8b3a2d;font-size:12px;"></div><div class="actions"><button class="btn ghost" id="scBack0">← 上一步</button><button class="btn" id="scRun">执行测算 →</button></div>';
 }
 
 /* 出租类/出售类的"运营期年数"不是独立猜测项——住宅用地使用年限是确定的政策常量(默认70年)，
@@ -49,13 +49,72 @@ function syncOperateYears(buildId, termId, opId){
   const opEl = document.getElementById(opId);
   if(opEl) opEl.value = Math.max(0, t - b);
 }
+let isScheduleDrafts={rent:null,sale:null};
+function isScheduleCfg(type){
+  const all=(CALC_CFG&&CALC_CFG.schedule)||{},one=(all.types&&all.types[type])||{};
+  let coefficientRows=one.coefficientRows||(type==="sale"?window.InvestmentSchedule.SALE_COEFFICIENT_ROWS:null);
+  if(type==="sale"){
+    coefficientRows=window.InvestmentSchedule.clone(coefficientRows||[]);
+    window.InvestmentSchedule.SALE_COEFFICIENT_ROWS.forEach(def=>{if(!coefficientRows.some(r=>r.no===def.no))coefficientRows.push(window.InvestmentSchedule.clone(def));});
+  }
+  return {template:one.template||all.template||window.InvestmentSchedule.DEFAULT_TEMPLATE,mappings:one.mappings||all.mappings||null,coefficientRows,startQuarter:Number(one.startQuarter||all.startQuarter)||1};
+}
+function isEnsureDraft(type,totalQuarters){
+  const cfg=isScheduleCfg(type),old=isScheduleDrafts[type],buildTotal=Math.max(1,Math.round(totalQuarters||4)),saleTpl=type==="sale"?window.InvestmentSchedule.ensureSaleTemplate(cfg.template,buildTotal):null,total=type==="sale"?saleTpl.baseQuarters:buildTotal;
+  if(!old||old.totalQuarters!==total||(type==="sale"&&!(old.tasks||[]).some(t=>t.id==="sales"))){
+    let tasks=old&&old.tasks?old.tasks.map(t=>Object.assign({},t,{activeQuarters:window.InvestmentSchedule.activePeriods(t,total)})):window.InvestmentSchedule.defaultTasks(total,saleTpl||cfg.template);
+    if(type==="sale"&&!tasks.some(t=>t.id==="sales"))tasks=window.InvestmentSchedule.defaultTasks(total,saleTpl);
+    isScheduleDrafts[type]={totalQuarters:total,tasks,plan:null};
+  }
+  return isScheduleDrafts[type];
+}
+function isMoney(v){return Number(v||0).toLocaleString("zh-CN",{maximumFractionDigits:2});}
+function saleCoefficientTableHtml(plan){
+  if(!plan||!plan.periods)return "";const cp=window.InvestmentSchedule.coefficientPlan(plan.tasks,plan.periods,isScheduleCfg("sale").coefficientRows,plan.totalQuarters);
+  return '<div class="is-sale-coeff"><div class="is-sale-coeff-head"><div><b>出售类投资计划系数表</b><div>根据上方横道图自动生成；每行单独合计100%，用于按年度拆分对应投资科目。</div></div><span class="'+(cp.valid?'ok':'err')+'">'+(cp.valid?'✓ 全部科目100%':'⚠ 存在无有效工期科目')+'</span></div><div class="is-plan-scroll"><table class="is-plan"><thead><tr><th>序号</th><th>项目名称</th><th>合计</th>'+cp.years.map(y=>'<th>'+y+'年</th>').join('')+'</tr></thead><tbody>'
+    +cp.rows.map(r=>{const allocated=(r.annualPattern||[]).length>0;return '<tr class="'+(r.level?'is-subrow':'')+'"><td>'+r.no+'</td><th>'+escapeHtml(r.name)+'</th><td><b>'+(allocated?(r.valid?'100%':'—'):'')+'</b></td>'+cp.years.map(y=>{const v=r.annualCoefficients[y]||0;return '<td class="'+(v?'has-value':'')+'">'+(v?(v*100).toFixed(Math.abs(v*100-Math.round(v*100))<1e-8?0:1)+'%':'')+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div></div>';
+}
+function investmentScheduleEditorHtml(type,startYear,startQuarter,buildYears,plan){
+  const buildTotal=Math.max(1,Math.round((Number(buildYears)||1)*4)),draft=isEnsureDraft(type,buildTotal),total=draft.totalQuarters;if(plan)draft.plan=plan;plan=draft.plan;
+  const periods=Array.from({length:total},(_,i)=>window.InvestmentSchedule.periodLabel(startYear,startQuarter,i));
+  const cells=draft.tasks.map(t=>'<tr><th title="'+escapeHtml(t.name)+'">'+escapeHtml(t.name)+'</th>'+periods.map((p,q)=>{const on=window.InvestmentSchedule.activePeriods(t,total).includes(q);return '<td><button type="button" class="is-qcell '+(on?'active':'')+'" data-is-task="'+escapeHtml(t.id)+'" data-is-q="'+q+'" aria-label="'+escapeHtml(t.name+' '+p.label+(on?'已安排':'未安排'))+'" style="--is-color:'+(t.color||'#F2C7A6')+'"></button></td>';}).join("")+'</tr>').join("");
+  let planHtml=type==="sale"?saleCoefficientTableHtml({periods,tasks:draft.tasks,totalQuarters:total}):'<div class="is-empty">涂好工期后点击“刷新投资计划”，系统会按当前测算金额自动生成季度和年度投资比例。</div>';
+  if(plan&&plan.periods){
+    const totalMoney=Number(plan.totalInvestment)||0,errs=(plan.validation&&plan.validation.errors)||[];
+    planHtml='<div class="is-plan-scroll"><table class="is-plan"><thead><tr><th>项目</th>'+plan.periods.map(p=>'<th>'+p.label+'</th>').join('')+'<th>合计</th></tr></thead><tbody>'
+      +'<tr><th>投资额（万元）</th>'+plan.quarterTotals.map(v=>'<td>'+isMoney(v)+'</td>').join('')+'<td><b>'+isMoney(totalMoney)+'</b></td></tr>'
+      +'<tr><th>投资比例</th>'+plan.quarterTotals.map(v=>'<td>'+(totalMoney?v/totalMoney*100:0).toFixed(1)+'%</td>').join('')+'<td><b>'+(totalMoney?'100.0':'0.0')+'%</b></td></tr></tbody></table></div>'
+      +'<div class="is-annual">'+Object.entries(plan.annualPlan||{}).map(([y,v])=>'<span><b>'+y+'年</b> '+isMoney(v)+'万元 · '+(totalMoney?v/totalMoney*100:0).toFixed(1)+'%</span>').join('')+'</div>'
+      +(errs.length?'<div class="is-errors">'+errs.map(e=>'⚠ '+escapeHtml(e.message)).join('<br>')+'</div>':'<div class="is-ok">✓ 工期有效，季度/年度/总投资金额一致，投资比例合计100%</div>')+(type==="sale"?saleCoefficientTableHtml(plan):'');
+  }
+  return '<section class="is-editor"><div class="is-head"><div><b>季度工期横道图与投资计划</b><div>直接涂色：每个格子代表1个季度；涂色变化会重新分配投资，但不会改动投资总额。</div></div><div class="is-tools"><button type="button" class="btn sm ghost" data-is-shift="-1">整体前移</button><button type="button" class="btn sm ghost" data-is-shift="1">整体后移</button><button type="button" class="btn sm ghost" id="isReset">恢复默认</button>'+(type==="sale"?'':'<button type="button" class="btn sm" id="isRefresh">刷新投资计划</button>')+'</div></div>'
+    +'<div class="is-gantt-scroll"><table class="is-gantt"><thead><tr><th>工作阶段</th>'+periods.map(p=>'<th>'+p.label+'</th>').join('')+'</tr></thead><tbody>'+cells+'</tbody></table></div><div id="isPlanBody">'+planHtml+'</div></section>';
+}
+function isRenderCurrentPlan(){
+  const mount=document.getElementById("isScheduleMount");if(!mount)return;
+  const p=calcType==="sale"?readSaleForm():readRentForm();scParams=p;
+  mount.innerHTML=investmentScheduleEditorHtml(calcType,p.buildStart,p.buildStartQuarter,p.buildYears,p.investSchedule);bindInvestmentScheduleEvents();
+}
+function bindInvestmentScheduleEvents(){
+  const total=isScheduleDrafts[calcType]&&isScheduleDrafts[calcType].totalQuarters;if(!total)return;
+  let paint=null,changed=false;
+  document.querySelectorAll(".is-qcell").forEach(cell=>{
+    cell.onpointerdown=e=>{e.preventDefault();paint=!cell.classList.contains("active");changed=true;isScheduleDrafts[calcType].tasks=window.InvestmentSchedule.setTaskQuarter(isScheduleDrafts[calcType].tasks,cell.dataset.isTask,Number(cell.dataset.isQ),paint,total);cell.classList.toggle("active",paint);cell.setPointerCapture&&cell.setPointerCapture(e.pointerId);};
+    cell.onpointerenter=()=>{if(paint===null)return;changed=true;isScheduleDrafts[calcType].tasks=window.InvestmentSchedule.setTaskQuarter(isScheduleDrafts[calcType].tasks,cell.dataset.isTask,Number(cell.dataset.isQ),paint,total);cell.classList.toggle("active",paint);};
+  });
+  document.onpointerup=()=>{const shouldRender=changed&&calcType==="sale";paint=null;changed=false;if(shouldRender)isRenderCurrentPlan();};
+  document.querySelectorAll("[data-is-shift]").forEach(b=>b.onclick=()=>{isScheduleDrafts[calcType].tasks=window.InvestmentSchedule.shiftTasks(isScheduleDrafts[calcType].tasks,Number(b.dataset.isShift),total);isScheduleDrafts[calcType].plan=null;isRenderCurrentPlan();});
+  const reset=document.getElementById("isReset"),refresh=document.getElementById("isRefresh");
+  if(reset)reset.onclick=()=>{const cfg=isScheduleCfg(calcType),tpl=calcType==="sale"?window.InvestmentSchedule.ensureSaleTemplate(cfg.template,Math.max(1,total-12)):cfg.template;isScheduleDrafts[calcType]={totalQuarters:total,tasks:window.InvestmentSchedule.defaultTasks(total,tpl),plan:null};isRenderCurrentPlan();};
+  if(refresh)refresh.onclick=isRenderCurrentPlan;
+}
 function saleFormHtml(){
   const v = scParams||{}; const expert=(CALC_CFG.paramdefaults&&CALC_CFG.paramdefaults.sale)||{};
   const g=(k,d)=>v[k]!==undefined?v[k]:(expert[k]!==undefined?expert[k]:d);
   const F=(label,id,val,step)=>'<div><label>'+label+'</label><input id="'+id+'" type="number" step="'+(step||"any")+'" value="'+val+'"></div>';
   const sBuildYears = g("buildYears",5), sLandTerm = g("landTerm",70);
   return '<div class="step-desc" style="margin-top:14px;"><b>期限与销售</b></div><div class="grid2">'
-    +F("建设期起始年","s_buildStart",g("buildStart",2025))
+    +F("建设期起始年","s_buildStart",g("buildStart",2025))+F("建设期起始季度（1~4）","s_buildStartQuarter",g("buildStartQuarter",isScheduleCfg("sale").startQuarter))
     +'<div><label>建设期年数</label><input id="s_buildYears" type="number" step="any" value="'+sBuildYears+'" oninput="syncOperateYears(\'s_buildYears\',\'s_landTerm\',\'s_operateYears\')"></div>'
     +'<div><label>土地使用年限（年，默认70）</label><input id="s_landTerm" type="number" step="any" value="'+sLandTerm+'" oninput="syncOperateYears(\'s_buildYears\',\'s_landTerm\',\'s_operateYears\')"></div>'
     +'<div><label>运营期年数（=土地使用年限-建设期，自动计算）</label><input id="s_operateYears" type="number" step="any" value="'+g("operateYears", Math.max(0,sLandTerm-sBuildYears))+'" readonly style="background:var(--line-soft);"></div>'
@@ -89,7 +148,7 @@ function saleFormHtml(){
     +F("借款总年数","s_loanTotalYears",g("loanTotalYears",25))+F("还款开始年","s_repayStart",g("repayStart",2030))
     +F("每年还款额（万元）","s_repayAmount",g("repayAmount",0))+F("还款年数","s_repayYears",g("repayYears",0))
     +F("折现率（%）","s_discountPct",g("discountPct",3.5))+'<div></div>'
-    +'</div>';
+    +'</div><div id="isScheduleMount">'+investmentScheduleEditorHtml("sale",g("buildStart",2025),g("buildStartQuarter",isScheduleCfg("sale").startQuarter),sBuildYears,v.investSchedule)+'</div>';
 }
 function readSaleForm(){
   const n=id=>parseFloat(document.getElementById(id).value)||0;
@@ -97,7 +156,7 @@ function readSaleForm(){
   const nOrNull=id=>{ const el=document.getElementById(id); if(!el) return null; const v=el.value; return v===""? null : parseFloat(v); };
   const arr=id=>{ const el=document.getElementById(id); if(!el) return [];
     return String(el.value||"").split(/[,，\s]+/).map(x=>parseFloat(x)).filter(x=>isFinite(x)); };
-  return { buildStart:n("s_buildStart"), buildYears:n("s_buildYears"), landTerm:n("s_landTerm")||70, operateYears:n("s_operateYears"),
+  const p={ buildStart:n("s_buildStart"), buildStartQuarter:Math.min(4,Math.max(1,n("s_buildStartQuarter")||1)), buildYears:n("s_buildYears"), landTerm:n("s_landTerm")||70, operateYears:n("s_operateYears"),
     otherTotal:n("s_otherTotal"), saleArea:n("s_saleArea"), saleAvgPrice:n("s_saleAvgPrice"),
     rate1:n("s_rate1"), rate2:n("s_rate2"), rate3:n("s_rate3"),
     commArea:n("s_commArea"), commRent:n("s_commRent"), commRentSpan:n("s_commRentSpan"), commRentRate:n("s_commRentRate"),
@@ -114,6 +173,14 @@ function readSaleForm(){
     loanAmount:n("s_loanAmount"), loanRate:n("s_loanRate"), loanTotalYears:n("s_loanTotalYears"),
     repayStart:n("s_repayStart"), repayAmount:n("s_repayAmount"), repayYears:n("s_repayYears"),
     discountPct:n("s_discountPct") };
+  if(window.InvestmentSchedule){
+    const total=p.totalInvestment||p.devInvestTotal||0,draft=isEnsureDraft("sale",p.buildYears*4),cfg=isScheduleCfg("sale");
+    const mappings=cfg.mappings||[{id:"sale_total",name:"项目建设投资",costPath:"total",taskIds:draft.tasks.filter(t=>t.id!=="sales").map(t=>t.id),curve:"s_curve"}];
+    p.investSchedule=window.InvestmentSchedule.allocate({total},{startYear:p.buildStart,startQuarter:p.buildStartQuarter,totalQuarters:draft.totalQuarters,tasks:draft.tasks,mappings});
+    p.saleInvestmentCoefficients=window.InvestmentSchedule.coefficientPlan(p.investSchedule.tasks,p.investSchedule.periods,cfg.coefficientRows,p.investSchedule.totalQuarters);
+    p.devCostPlan=p.investSchedule.investPlan;draft.plan=p.investSchedule;
+  }
+  return p;
 }
 
 function rentFormHtml(){
@@ -122,7 +189,7 @@ function rentFormHtml(){
   const F=(label,id,val,step)=>'<div><label>'+label+'</label><input id="'+id+'" type="number" step="'+(step||"any")+'" value="'+val+'"></div>';
   const rBuildYears = g("buildYears",4), rLandTerm = g("landTerm",70);
   return '<div class="grid2">'
-    +F("建设期起始年","r_buildStart",g("buildStart",2026))
+    +F("建设期起始年","r_buildStart",g("buildStart",2026))+F("建设期起始季度（1~4）","r_buildStartQuarter",g("buildStartQuarter",isScheduleCfg("rent").startQuarter))
     +'<div><label>建设期年数</label><input id="r_buildYears" type="number" step="any" value="'+rBuildYears+'" oninput="syncOperateYears(\'r_buildYears\',\'r_landTerm\',\'r_operateYears\')"></div>'
     +'<div><label>土地使用年限（年，默认70）</label><input id="r_landTerm" type="number" step="any" value="'+rLandTerm+'" oninput="syncOperateYears(\'r_buildYears\',\'r_landTerm\',\'r_operateYears\')"></div>'
     +'<div><label>运营期年数（=土地使用年限-建设期，自动计算）</label><input id="r_operateYears" type="number" step="any" value="'+g("operateYears", Math.max(0,rLandTerm-rBuildYears))+'" readonly style="background:var(--line-soft);"></div>'
@@ -169,13 +236,13 @@ function rentFormHtml(){
     +F("环境报告编制费（万元）","r_ie_envReportFee",g("ie_envReportFee",0))+F("地质灾害危险评估费（万元）","r_ie_geoHazardFee",g("ie_geoHazardFee",0))
     +F("充电桩个数","r_ie_chargerCount",g("ie_chargerCount",0))+F("样板展示面积（㎡）","r_ie_displayArea",g("ie_displayArea",0))
     +'<div style="grid-column:1/-1; font-size:12px; color:var(--ink-soft);">住宅地价单价留空(0)时，可改用「标定地价×权重+剩余法×权重」按修正系数折算——该高级用法需通过后台CALC_CFG.rent.landBenchmarkResi等参数传入，此处表单仅覆盖直接填单价的常规场景。</div>'
-    +'</div>';
+    +'</div><div id="isScheduleMount">'+investmentScheduleEditorHtml("rent",g("buildStart",2026),g("buildStartQuarter",isScheduleCfg("rent").startQuarter),rBuildYears,v.investSchedule)+'</div>';
 }
 function readRentForm(){
   const n=id=>parseFloat(document.getElementById(id).value)||0;
   const arr=id=>{ const el=document.getElementById(id); if(!el) return [];
     return String(el.value||"").split(/[,，\s]+/).map(x=>parseFloat(x)).filter(x=>isFinite(x)); };
-  const p = { buildStart:n("r_buildStart"), buildYears:n("r_buildYears"), landTerm:n("r_landTerm")||70, operateYears:n("r_operateYears"), firstMonths:n("r_firstMonths"),
+  const p = { buildStart:n("r_buildStart"), buildStartQuarter:Math.min(4,Math.max(1,n("r_buildStartQuarter")||1)), buildYears:n("r_buildYears"), landTerm:n("r_landTerm")||70, operateYears:n("r_operateYears"), firstMonths:n("r_firstMonths"),
     area:n("r_area"), rent:n("r_rent"), rentSpan:n("r_rentSpan"), rentRate:n("r_rentRate"), rampOcc:n("r_rampOcc"), stableOcc:n("r_stableOcc"),
     occRamp:arr("r_occRamp"), parkOccRamp:arr("r_parkOccRamp"),
     parkCount:n("r_parkCount"), parkPrice:n("r_parkPrice"), parkRatio:n("r_parkRatio"), parkRampOcc:n("r_rampOcc"), parkStableOcc:n("r_stableOcc"),
@@ -212,7 +279,8 @@ function readRentForm(){
     };
     const ieCfg = (CALC_CFG&&CALC_CFG.invest)||{};
     const est = window.InvestEstimate.estimate(iePar, ieCfg);
-    const sch = window.InvestEstimate.schedule(est, p.buildStart, p.buildYears, ieCfg);
+    const scheduleCfg=isScheduleCfg("rent"),draft=isEnsureDraft("rent",p.buildYears*4);
+    const sch = window.InvestEstimate.schedule(est, p.buildStart, p.buildYears, ieCfg,{startQuarter:p.buildStartQuarter,tasks:draft.tasks,template:scheduleCfg.template,mappings:scheduleCfg.mappings||undefined});
     // 自动覆盖：总投资/建安工程费/用地面积/总建筑面积/建设投资年度计划；建设期财务费用仍由RentCalc按还本付息表另算
     p.totalInvestment = est.summary.buildInvestment;
     p.constructionCost = est.summary.constructionCostTotal;
@@ -226,6 +294,7 @@ function readRentForm(){
     }
     p.investEstimate = est;
     p.investSchedule = sch;
+    draft.plan=sch;
   }
   return p;
 }
@@ -787,9 +856,9 @@ function runCalcEngine(type, params){
     const opStart = p.buildStart + p.buildYears;
     const ramp = {}; if(p.rate1) ramp[opStart]=p.rate1; if(p.rate2) ramp[opStart+1]=p.rate2; if(p.rate3) ramp[opStart+2]=p.rate3;
     const repay = {}; for(let i=0;i<p.repayYears;i++) repay[p.repayStart+i]=p.repayAmount;
-    // 开发成本投资：填了总额则在建设期各年平摊，未填则由引擎兜底（平摊项目总投资）
-    let devPlan = undefined;
-    if(p.devInvestTotal>0){ devPlan={};
+    // 优先采用季度横道图汇总出的年度计划；旧项目没有工期数据时才按建设期平摊。
+    let devPlan = (p.devCostPlan&&Object.keys(p.devCostPlan).length)?p.devCostPlan:undefined;
+    if(!devPlan&&p.devInvestTotal>0){ devPlan={};
       for(let i=0;i<p.buildYears;i++) devPlan[p.buildStart+i]=p.devInvestTotal/p.buildYears; }
     return window.SaleCalc.calc(Object.assign({}, p, {saleRamp:ramp, customRepay:repay, devCostPlan:devPlan}), CALC_CFG.sale);
   }else{
@@ -878,17 +947,20 @@ function bindCalcEvents(){
   if(s("scBack0")) s("scBack0").onclick=()=>{ scStep=0; renderTOC(); renderSheet(); };
   if(s("scBack1")) s("scBack1").onclick=()=>{ scStep=1; renderTOC(); renderSheet(); };
   if(s("scRun")) s("scRun").onclick=()=>{
-    if(calcType==="gaibao") scParams = readCalcForm();
-    else if(calcType==="sale") scParams = readSaleForm();
-    else scParams = readRentForm();
-    scResult = runCalcEngine(calcType, scParams);
-    pgSelectedKey=null; pgJointCache=null;
-    aiChat = [];
-    scStep=2; renderTOC(); renderSheet();
+    try{
+      if(calcType==="gaibao") scParams = readCalcForm();
+      else if(calcType==="sale") scParams = readSaleForm();
+      else scParams = readRentForm();
+      scResult = runCalcEngine(calcType, scParams);
+      pgSelectedKey=null; pgJointCache=null;
+      aiChat = [];
+      scStep=2; renderTOC(); renderSheet();
+    }catch(e){const box=s("scRunError");if(box){box.style.display="block";box.textContent="测算失败："+(e&&e.message?e.message:"未知错误");box.title=e&&e.stack||"";}console.error("测算失败",e);}
   };
   if(s("scExcel")) s("scExcel").onclick = exportCalcExcel;
   if(s("scWord")) s("scWord").onclick = exportCalcWord;
   if(s("aiAsk")) s("aiAsk").onclick = askAI;
+  bindInvestmentScheduleEvents();
   bindParameterGovernanceEvents();
   if(s("aiQ")) s("aiQ").addEventListener("keydown", e=>{ if(e.key==="Enter") askAI(); });
   if(s("homeAiReport")) s("homeAiReport").onclick=()=>{ appMode="aireport"; renderTOC(); renderSheet(); };
@@ -896,6 +968,7 @@ function bindCalcEvents(){
   if(s("homeReport")) s("homeReport").onclick=()=>{ appMode="report"; renderTOC(); renderSheet(); };
   if(s("homeReview")) s("homeReview").onclick=()=>{ appMode="review"; rvStep=0; renderTOC(); renderSheet(); };
   if(s("homeOffice")) s("homeOffice").onclick=()=>{ appMode="office"; renderTOC(); renderSheet(); };
+  if(s("homeCollab")) s("homeCollab").onclick=()=>{ appMode="collaboration"; renderTOC(); renderSheet(); };
 }
 
 function calcFormHtml(){

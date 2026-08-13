@@ -258,8 +258,20 @@ function estimate(p, cfgIn){
 /** 三、工期进度：8阶段归并为4个费用归属区段，季度权重2:6:6:2（土地成本→前期工程 / 地下建筑 / 地上建筑→安装→精装修 / 室外工程→竣工验收）。
  *  按 buildYears 等比缩放季度权重后，把 estimate() 算出的各区段费用逐季度均摊、再归入自然年，
  *  产出 RentCalc 已支持的 investPlan{年:万元} 格式（loanPlan 假定与投资节奏一致，可单独传 loanRatio 整体缩放）。 */
-function schedule(est, buildStart, buildYears, cfgIn){
+function schedule(est, buildStart, buildYears, cfgIn, scheduleOpt){
   const K = Object.assign({}, INVEST_DEFAULTS, cfgIn||{});
+  const scheduleEngine=typeof window!=="undefined"&&window.InvestmentSchedule;
+  if(scheduleEngine){
+    const opt=Object.assign({},scheduleOpt||{}, {
+      startYear:buildStart,
+      startQuarter:Number(scheduleOpt&&scheduleOpt.startQuarter)||Number(K.scheduleStartQuarter)||1,
+      buildYears,
+      totalQuarters:Math.max(1,Math.round(buildYears*4)),
+    });
+    if(!opt.template&&K.scheduleTemplate)opt.template=K.scheduleTemplate;
+    if(!opt.mappings&&K.scheduleMappings)opt.mappings=K.scheduleMappings;
+    return scheduleEngine.allocate(est,opt);
+  }
   const weights = [K.scheduleQ1, K.scheduleQ2, K.scheduleQ3, K.scheduleQ4];
   const totalW = weights.reduce((s,w)=>s+w,0);
   const totalQuarters = Math.max(1, Math.round(buildYears*4));
@@ -406,10 +418,12 @@ function outline(est, sch){
     L("14","建设投资", s.buildInvestment),
   ];
   if(sch){
-    const labels=["土地成本→前期工程","地下建筑部分","地上建筑部分→安装工程→精装修","室外工程→竣工验收"];
-    [0,1,2,3].forEach(i=>{
-      rows.push(L(String(15+i), labels[i], sch.phaseQuarters[i], "季度", "对应费用 "+sch.phaseCost[i]+" 万元"));
-    });
+    if(Array.isArray(sch.tasks)&&Array.isArray(sch.periods)){
+      sch.tasks.forEach((task,i)=>{const qs=(sch.totalQuarters?InvestmentSchedule.activePeriods(task,sch.totalQuarters):[]).map(q=>sch.periods[q]&&sch.periods[q].label).filter(Boolean);rows.push(L(String(15+i),task.name,qs.length, "季度",qs.join("、")));});
+    }else{
+      const labels=["土地成本→前期工程","地下建筑部分","地上建筑部分→安装工程→精装修","室外工程→竣工验收"];
+      [0,1,2,3].forEach(i=>{rows.push(L(String(15+i), labels[i], sch.phaseQuarters[i], "季度", "对应费用 "+sch.phaseCost[i]+" 万元"));});
+    }
   }
   return rows;
 }

@@ -53,6 +53,28 @@
   /* 通用小组件复用的表格样式 */
   .tbl{border-collapse:collapse;} .tbl th,.tbl td{padding:6px 8px;border-bottom:1px solid var(--line-soft);}
   .tbl th{color:var(--soft);font-weight:600;}
+  /* 工期后台：紧凑配置表 + 独立可缩放预览 */
+  .sch-config-scroll{overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff;}
+  .sch-config-table{width:100%;table-layout:fixed;font-size:12px;}
+  .sch-config-table th,.sch-config-table td{padding:7px 6px;vertical-align:middle;}
+  .sch-config-table input,.sch-config-table select{font-size:12px;padding:6px 7px;min-width:0;}
+  .sch-stage-tags{display:flex;gap:4px;flex-wrap:wrap;align-items:center;max-width:220px;}
+  .sch-stage-tag{display:inline-flex;align-items:center;max-width:104px;padding:2px 7px;border-radius:99px;background:#EEF4FA;color:var(--bp-deep);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .sch-preview-card{margin-top:12px;border:1px solid var(--line);border-radius:9px;background:#fff;overflow:hidden;box-shadow:0 1px 2px rgba(30,75,114,.04);}
+  .sch-preview-card>summary{cursor:pointer;font-weight:700;color:var(--bp-deep);padding:11px 14px;background:#F8FBFE;list-style-position:inside;}
+  .sch-preview-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line-soft);font-size:11px;color:var(--soft);}
+  .sch-zoom{display:flex;gap:4px;flex-shrink:0;}
+  .sch-zoom button{border:1px solid var(--line);background:#fff;color:var(--soft);border-radius:5px;padding:3px 8px;font-size:10.5px;cursor:pointer;}
+  .sch-zoom button.active{border-color:var(--bp);background:#EAF3FB;color:var(--bp-deep);font-weight:700;}
+  .sch-preview-scroll{overflow:auto;max-height:540px;padding:10px;background:#fff;}
+  .sch-preview-canvas{zoom:var(--sch-zoom,.8);transform-origin:top left;}
+  .sch-gantt{width:100%;table-layout:fixed;font-size:11px;border:1px solid var(--line);}
+  .sch-gantt th,.sch-gantt td{padding:4px 2px;height:27px;border:1px solid var(--line);text-align:center;}
+  .sch-gantt th:first-child{width:118px;text-align:left;padding-left:8px;white-space:nowrap;position:sticky;left:0;background:#F3F7FA;z-index:2;}
+  .sch-gantt tr:first-child th{font-size:10px;white-space:nowrap;}
+  .sch-ratio-preview{width:100%;min-width:720px;font-size:11px;border:1px solid var(--line);}
+  .sch-ratio-preview th,.sch-ratio-preview td{padding:5px 7px;border:1px solid var(--line);text-align:center;white-space:nowrap;}
+  .sch-ratio-preview th:nth-child(2),.sch-ratio-preview td:nth-child(2){text-align:left;min-width:160px;}
   /* ===== 运维看板 stat卡片 —— 参考开源Tabler dashboard(github.com/tabler/tabler)的间距/层级比例，
      配色换成本站既有变量，不引入外部CSS依赖。此前误把行内flex的.card当成通用容器用，
      标题文字被挤成竖排，这里改用专门的块级容器规避同样的问题。 */
@@ -102,6 +124,8 @@
   .subnav a{font-size:12.5px;padding:6px 13px;border-radius:20px;background:var(--line-soft);color:var(--bp-deep);
     text-decoration:none;border:1px solid transparent;transition:background .12s ease-out;}
   .subnav a:hover{background:#DCEBF7;}
+  /* 前台知识投稿审核工作台 */
+  .contrib-filter{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}.contrib-filter button{padding:6px 12px;border:1px solid var(--line);background:#fff;color:var(--soft);border-radius:18px;cursor:pointer}.contrib-filter button.active{background:var(--bp-deep);border-color:var(--bp-deep);color:#fff}.contrib-card{display:block;background:#fff;border:1px solid var(--line);border-radius:9px;padding:15px 17px;margin-bottom:10px}.contrib-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.contrib-title{font-size:15px;font-weight:700}.contrib-meta{font-size:11px;color:var(--soft);margin-top:5px}.contrib-kind{display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:99px;background:#EAF3FB;color:var(--bp-deep);margin-right:6px}.contrib-body{white-space:pre-wrap;max-height:180px;overflow:auto;background:#F8FAFC;border-left:3px solid var(--line);padding:9px 11px;margin:10px 0;font-size:12px;line-height:1.7}.contrib-source{font-size:11px;color:var(--soft)}.contrib-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}.contrib-note{padding:8px 10px;background:#FFF8E8;color:#8B5B10;font-size:12px;margin-top:8px}.contrib-target{padding:8px 10px;background:#EAF6EE;color:var(--ok);font-size:12px;margin-top:8px}
 </style>
 <div class="shell">
   <nav class="side">
@@ -119,6 +143,7 @@
     <div class="nav-item" id="btnPopulation"><span class="ic">👥</span>人口参考表</div>
     <div class="nav-item" id="btnStats"><span class="ic">📊</span>运维看板</div>
     <div class="nav-item" id="btnWiki"><span class="ic">📖</span>知识 Wiki</div>
+    <div class="nav-item" id="btnContrib"><span class="ic">📨</span>知识投稿审核</div>
     <div class="side-foot" id="loginInfo"></div>
   </nav>
   <div class="main">
@@ -135,6 +160,7 @@
 <!-- 「可研测算逻辑」页要能直接生成示例Word/Excel，复用主应用同一套测算引擎与导出逻辑（不是另起一套） -->
 <script src="nrcalc.js"></script>
 <script src="rentcalc.js"></script>
+<script src="investment-schedule.js"></script>
 <script src="investestimate.js"></script>
 <script src="salecalc.js"></script>
 <script src="calc.js"></script>
@@ -250,13 +276,13 @@ async function saveExamples(){
 
 
 /* ================= 公司知识 Wiki（经审核发布后才进入 RAG） ================= */
-const WIKI_KIND_LABEL = {policy:"政策要点",report:"报告编制",rule:"业务规则",case:"案例经验"};
+const WIKI_KIND_LABEL = {policy:"政策要点",report:"报告编制",rule:"业务口径与规则依据",case:"案例经验"};
 const WIKI_STATUS_LABEL = {draft:"草稿",published:"已发布",archived:"已归档"};
 async function wikiApi(body){ const r=await fetch("/api/wiki",{method:"POST",headers:authHeaders(),body:JSON.stringify(body)}); return await r.json(); }
 function wikiDate(ts){ if(!ts)return "—"; const d=new Date(Number(ts)); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 async function openWiki(){
   document.getElementById("listBox").style.display="none"; const box=document.getElementById("editBox"); box.style.display="block";
-  box.innerHTML='<h1>知识 Wiki</h1><div class="sub">把原始资料沉淀成经人工确认的公司知识页：政策要点、报告写法、业务规则与案例经验。<b>只有点击发布的版本才会同步进入 RAG</b>；编辑已发布页会先生成草稿，不会污染线上报告引用。</div><div class="bar"><button class="btn" id="wikiNew">新建 Wiki 页面</button><button class="btn ghost" id="wikiReload">刷新列表</button></div><div id="wikiList" class="empty">读取中…</div>';
+  box.innerHTML='<h1>知识 Wiki</h1><div class="sub">把原始资料沉淀成经人工确认的公司知识页：政策要点、报告写法、业务口径与案例经验。<b>Wiki负责解释与举证，不直接形成审核扣分；真正执行的检查条件仍在“AI审核规则、逻辑”中维护。</b> 只有点击发布的版本才会同步进入 RAG；编辑已发布页会先生成草稿，不会污染线上报告引用。</div><div class="bar"><button class="btn" id="wikiNew">新建 Wiki 页面</button><button class="btn ghost" id="wikiReload">刷新列表</button></div><div id="wikiList" class="empty">读取中…</div>';
   document.getElementById("wikiNew").onclick=()=>openWikiEdit(null); document.getElementById("wikiReload").onclick=openWiki;
   try{
     const d=await wikiApi({action:"list"}); if(!d.ok)throw new Error(d.error||"读取失败"); const pages=d.pages||[],stat={draft:0,published:0,archived:0}; pages.forEach(p=>stat[p.status]=(stat[p.status]||0)+1);
@@ -1336,6 +1362,7 @@ async function openAgentTraces(){
 /* ================= AI审核规则、逻辑 ================= */
 let arList = [];
 let csList = [];   // 测算审核标准(calcstd)：文本部分之外，测算假设/成本/收入/财务结果的结构化数值型审核标准
+let arWikiPages = []; // 仅用于把审核规则关联到“已发布”的Wiki依据；Wiki本身不参与重复扣分
 let clLogic = {gaibao:{}, rent:{}, sale:{}};
 let arTab = "rules";   // "rules" | "logic" | "sensitivity" | "std"
 let clType = "rent";   // 可研测算逻辑页当前查看的测算类型
@@ -1366,6 +1393,9 @@ async function openAiRules(){
     clLogic = Object.assign({gaibao:{},rent:{},sale:{}}, (d.ok && d.config && d.config.calclogic)||{});
     // 敏感性分析要用"测算参数管理"里已保存的系数覆盖(不是永远只测代码内置默认值)，这里一并取一份
     if(d.ok && d.config) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},invest:{},metrics:[],score:[],sensitivity:{},paramrules:{},paramdefaults:{}}, d.config);
+    arList = arList.map((e,i)=>Object.assign({id:"KY-"+String(i+1).padStart(3,"0"),reason:"",evidenceRefs:[]},e));
+    csList = csList.map((e,i)=>Object.assign({id:e.id||("CS-"+String(i+1).padStart(3,"0")),reason:"",evidenceRefs:[]},e));
+    try{ const wd=await wikiApi({action:"list"}); arWikiPages=(wd.pages||[]).filter(p=>p.status==="published"); }catch(e){ arWikiPages=[]; }
   }catch(e){ arList = []; }
   arTab = "rules";
   renderAiRulesTab();
@@ -1390,7 +1420,7 @@ function renderAiRules(){
   box.innerHTML = '<h1 style="font-size:18px;">AI审核规则、逻辑</h1>'
     + arSubnavHtml()
     +'<h2 style="font-size:15px; margin-top:16px;">AI可研审核规则与业务逻辑</h2>'
-    +'<div class="sub">复核页"AI深度审核"按这些要点逐节评审。<b>匹配关键词</b>命中章节标题即适用（多个用逗号分隔；填 <b>*</b> 表示适用所有小节）。要点写给AI看，例如："必须引用具体政策文件名；须包含供需两侧数据；每项风险须有对应对策"。未配置任何规则时使用内置通用规则。</div>'
+    +'<div class="sub">复核页"AI深度审核"按这些要点逐节评审。<b>规则负责执行检查，Wiki只负责解释与举证，不会重复扣分。</b> 匹配关键词命中章节标题即适用；每条规则可关联一条已发布Wiki。审核结果按“检查了什么 → 依据哪条规则 → 为什么这么规定 → 应该怎样修改”展示。</div>'
     +'<div style="margin-top:10px;"><span class="add-link" id="exportArWord">📄 导出Word（含未保存的编辑）</span></div>'
     + (locked? lockBannerHtml("增/删/改规则前需先解锁。") : "")
     +'<div id="arList">'+arList.map((e,i)=>arRowHtml(e,i,locked)).join("")+'</div>'
@@ -1410,7 +1440,7 @@ function renderAiRules(){
   if(locked){
     document.getElementById("unlockStdBtn").onclick = ()=>unlockStdEdit(renderAiRules);
   }else{
-    document.getElementById("addAr").onclick = ()=>{ readArForm(); arList.push({match:"",rule:""}); renderAiRules(); };
+    document.getElementById("addAr").onclick = ()=>{ readArForm(); arList.push({id:"KY-"+Date.now().toString(36).toUpperCase(),match:"",rule:"",reason:"",evidenceRefs:[]}); renderAiRules(); };
     document.getElementById("saveAr").onclick = saveAiRules;
     document.getElementById("lockArBtn").onclick = ()=>{ readArForm(); stdEditUnlocked=false; renderAiRules(); };
     document.querySelectorAll("[data-ardel]").forEach(b=>b.onclick=()=>{
@@ -1757,17 +1787,29 @@ async function evolveRules(){
   }catch(e){ box.innerHTML = '<div style="padding:14px 0; color:var(--red); font-size:13px;">失败：'+esc(e.message)+'</div>'; }
 }
 
+function ruleWikiSelectHtml(e,cls,locked){
+  const selected=((e.evidenceRefs||[])[0]||{}).id||"",dis=locked?" disabled":"";
+  return '<select class="'+cls+'" style="min-width:260px;"'+dis+'><option value="">不关联Wiki（可选）</option>'
+    +arWikiPages.map(p=>'<option value="'+esc(p.id)+'"'+(p.id===selected?' selected':'')+'>'+esc(p.title)+' · v'+(p.version||0)+'</option>').join("")+'</select>';
+}
 function arRowHtml(e,i,locked){
   const ro = locked? " readonly" : "";
-  return '<div style="border:1px solid var(--line); background:'+(locked?"#FAFAFA":"#fff")+'; padding:10px 12px; margin-top:10px;">'
+  return '<div class="ar-row" data-ari="'+i+'" style="border:1px solid var(--line); background:'+(locked?"#FAFAFA":"#fff")+'; padding:10px 12px; margin-top:10px;">'
     +'<div style="display:flex; gap:8px; align-items:center;">'
+    +'<span style="font-family:var(--mono);font-weight:700;color:var(--bp);min-width:70px;">'+esc(e.id||("KY-"+String(i+1).padStart(3,"0")))+'</span>'
     +'<input class="ar-match" placeholder="匹配关键词（如：市场分析,供需 或 *）" value="'+esc(e.match||"")+'" style="width:260px;"'+ro+'>'
+    +ruleWikiSelectHtml(e,"ar-wiki",locked)
     + (locked? "" : '<button class="btn sm red" data-ardel="'+i+'" style="margin-left:auto;">删除</button>')+'</div>'
-    +'<textarea class="ar-rule" placeholder="审核要点（写给AI）…" style="margin-top:8px; min-height:60px;"'+ro+'>'+esc(e.rule||"")+'</textarea></div>';
+    +'<textarea class="ar-rule" placeholder="检查了什么：写清楚合格条件（直接参与审核）…" style="margin-top:8px; min-height:60px;"'+ro+'>'+esc(e.rule||"")+'</textarea>'
+    +'<textarea class="ar-reason" placeholder="为什么这样规定：填写依据摘要；详细原文放在关联Wiki中（不重复参与扣分）…" style="margin-top:6px; min-height:42px;"'+ro+'>'+esc(e.reason||"")+'</textarea></div>';
 }
 function readArForm(){
-  const ms=[...document.querySelectorAll(".ar-match")], rs=[...document.querySelectorAll(".ar-rule")];
-  arList = ms.map((m,i)=>({match:m.value.trim(), rule:rs[i].value.trim()})).filter(e=>e.match&&e.rule);
+  const old=arList;
+  arList = [...document.querySelectorAll(".ar-row")].map(row=>{
+    const i=+row.dataset.ari,orig=old[i]||{},wikiId=row.querySelector(".ar-wiki").value,page=arWikiPages.find(p=>p.id===wikiId);
+    const evidenceRefs=page?[{id:page.id,title:page.title,version:page.version||0,sourceRef:page.source_ref||""}]:[];
+    return Object.assign({},orig,{id:orig.id||("KY-"+String(i+1).padStart(3,"0")),match:row.querySelector(".ar-match").value.trim(),rule:row.querySelector(".ar-rule").value.trim(),reason:row.querySelector(".ar-reason").value.trim(),evidenceRefs});
+  }).filter(e=>e.match&&e.rule);
 }
 async function saveAiRules(){
   readArForm();
@@ -1806,8 +1848,10 @@ function csRowHtml(e,i,locked){
     +'<select class="cs-checktype" style="width:190px;"'+dis+'>'+typeOpts+'</select>'
     +'<input class="cs-calctype" placeholder="适用测算类型(rent,gaibao,sale,all)" value="'+esc(e.calcType||"all")+'" style="width:170px;"'+ro+'>'
     +'<input class="cs-value" placeholder="阈值/取值(可留空)" value="'+esc(e.value==null?"":String(e.value))+'" style="width:150px;"'+ro+'>'
+    +ruleWikiSelectHtml(e,"cs-wiki",locked)
     + (locked? "" : '<button class="btn sm red" data-csdel="'+i+'" style="margin-left:auto;">删除</button>')+'</div>'
     +'<textarea class="cs-standard" placeholder="标准原文（尽量保留指引原表述，供AI审核与生成引用）…" style="margin-top:8px; min-height:52px;"'+ro+'>'+esc(e.standard||"")+'</textarea>'
+    +'<textarea class="cs-reason" placeholder="为什么这样规定：依据摘要；详细内容由关联Wiki解释，不重复形成审核项…" style="margin-top:6px; min-height:34px;"'+ro+'>'+esc(e.reason||"")+'</textarea>'
     +'<textarea class="cs-note" placeholder="备注（如：与现有引擎口径的对照、未覆盖字段说明）…" style="margin-top:6px; min-height:34px;"'+ro+'>'+esc(e.note||"")+'</textarea>'
     +'</div>';
 }
@@ -1844,7 +1888,7 @@ function renderCalcStd(){
   if(locked){
     document.getElementById("unlockStdBtn").onclick = ()=>unlockStdEdit(renderCalcStd);
   }else{
-    document.getElementById("addCs").onclick = ()=>{ readCsForm(); csList.push({category:"", item:"", standard:"", checkType:"info", calcType:"all"}); renderCalcStd(); };
+    document.getElementById("addCs").onclick = ()=>{ readCsForm(); csList.push({id:"CS-"+Date.now().toString(36).toUpperCase(),category:"", item:"", standard:"", checkType:"info", calcType:"all",reason:"",evidenceRefs:[]}); renderCalcStd(); };
     document.getElementById("saveCs").onclick = saveCalcStd;
     document.getElementById("lockCsBtn").onclick = ()=>{ readCsForm(); stdEditUnlocked=false; renderCalcStd(); };
     document.querySelectorAll("[data-csdel]").forEach(b=>b.onclick=()=>{
@@ -1865,8 +1909,11 @@ function readCsForm(){
     const calcType = row.querySelector(".cs-calctype").value.trim() || "all";
     const rawValue = row.querySelector(".cs-value").value.trim();
     const note = row.querySelector(".cs-note").value.trim();
+    const reason = row.querySelector(".cs-reason").value.trim();
+    const wikiId=row.querySelector(".cs-wiki").value, page=arWikiPages.find(p=>p.id===wikiId);
+    const evidenceRefs=page?[{id:page.id,title:page.title,version:page.version||0,sourceRef:page.source_ref||""}]:[];
     const value = rawValue==="" ? undefined : (isNaN(Number(rawValue)) ? rawValue : Number(rawValue));
-    return Object.assign({}, orig, {category, item, standard, checkType, calcType, value, note});
+    return Object.assign({}, orig, {id:orig.id||("CS-"+String(i+1).padStart(3,"0")),category, item, standard, checkType, calcType, value, note, reason, evidenceRefs});
   }).filter(e=>e.category || e.item || e.standard);
 }
 async function saveCalcStd(){
@@ -1956,8 +2003,10 @@ const PARAM_DEFS = {
   ]},
 };
 const METRIC_VARS = "totalIncome(总收入) totalCost(总成本) totalTax(税金) totalNetProfit(净利润) totalNpv(净现值) irr(IRR) icr(利息保障倍数) totalSaleIncome(销售收入合计) rentalPvTotal(出租净收益现值) totalInterest(利息合计)";
-let calcCfg = {gaibao:{}, rent:{}, sale:{}, invest:{}, metrics:[], score:[], sensitivity:{}, paramrules:{}, paramdefaults:{}};
-let calcCfgTab = "coeff";       // coeff | governance | metrics
+let calcCfg = {gaibao:{}, rent:{}, sale:{}, invest:{}, schedule:{}, metrics:[], score:[], sensitivity:{}, paramrules:{}, paramdefaults:{}};
+let calcCfgTab = "coeff";       // coeff | governance | schedule | metrics
+let scheduleCfgType="rent";
+let scheduleEditUnlocked=false;
 let pgCfgType = "rent";
 let paramCatalog = {defaults:{rent:{},sale:{},gaibao:{}},rules:{rent:[],sale:[],gaibao:[]},keyFields:{rent:[],sale:[],gaibao:[]},meta:{rent:{},sale:{},gaibao:{}}};
 let paramGovState = {rent:null,sale:null,gaibao:null};
@@ -1976,7 +2025,7 @@ async function openCalcCfg(){
       fetch("/api/aireport?catalog=1",{headers:authHeaders()}).then(r=>r.json()),
       fetch("/api/paramgovernance?type="+encodeURIComponent(pgCfgType)+"&history=1",{headers:authHeaders()}).then(r=>r.json()),
     ]);
-    if(cfgRes.ok) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},invest:{},metrics:[],score:[],sensitivity:{},paramrules:{},paramdefaults:{}}, cfgRes.config);
+    if(cfgRes.ok) calcCfg = Object.assign({gaibao:{},rent:{},sale:{},invest:{},schedule:{},metrics:[],score:[],sensitivity:{},paramrules:{},paramdefaults:{}}, cfgRes.config);
     if(catRes.ok){paramCatalog = catRes;installCoeffCatalog();}
     if(govRes.ok){paramGovState[pgCfgType]=govRes;paramEvidenceRefs=govRes.references||[];}
   }catch(e){}
@@ -2001,17 +2050,23 @@ function renderCalcCfg(){
   let html = '<h1 style="font-size:18px;">测算参数管理</h1>'
     +'<div class="sub">统一管理计算公式系数、参数初值与来源、结果指标和评分。三类数据用途不同，已分子页展示，保存后所有用户下次测算或AI参数推荐时生效。</div>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;padding-bottom:12px;border-bottom:1px solid var(--line);">'
-    +tabBtn("coeff","① 公式与计算系数")+tabBtn("governance","② 参数初值与来源治理")+tabBtn("metrics","③ 结果指标与评分")+'</div>';
+    +tabBtn("coeff","① 公式与计算系数")+tabBtn("governance","② 参数初值与来源治理")+tabBtn("schedule","③ 工期与投资计划")+tabBtn("metrics","④ 结果指标与评分")+'</div>';
   if(calcCfgTab==="coeff") html += calcCoeffConfigHtml();
   else if(calcCfgTab==="governance") html += paramGovernanceConfigHtml(pgCfgType);
+  else if(calcCfgTab==="schedule") html += scheduleConfigHtml();
   else html += calcMetricConfigHtml();
   if(calcCfgTab==="governance") html += '<div class="bar" style="margin-top:18px;"><button class="btn ghost" id="suggestPgDraft">按现有规则生成待审核草稿</button><button class="btn ghost" id="savePgDraft">保存治理草稿</button><button class="btn" id="publishPg">审核并发布</button><button class="btn ghost" id="cfgBack">返回列表</button></div>';
   else if(calcCfgTab==="metrics") html += '<div class="bar" style="margin-top:18px;"><button class="btn" id="saveCalcCfg">保存指标与评分</button><button class="btn ghost" id="cfgBack">返回列表</button></div>';
+  else if(calcCfgTab==="schedule") html += '<div class="bar" style="margin-top:18px;">'+(scheduleEditUnlocked?'<button class="btn" id="saveScheduleCfg">保存并同步到前台</button><button class="btn ghost" id="cancelScheduleEdit">取消改动</button>':'<button class="btn" id="unlockScheduleEdit">进行改动</button>')+'<button class="btn ghost" id="cfgBack">返回列表</button></div>';
   else html += '<div class="bar" style="margin-top:18px;"><button class="btn ghost" id="cfgBack">返回列表</button></div>';
   box.innerHTML = html;
   document.querySelectorAll("[data-cfgtab]").forEach(b=>b.onclick=()=>{readCfgForm();calcCfgTab=b.dataset.cfgtab;renderCalcCfg();});
   document.querySelectorAll("[data-pgtype]").forEach(b=>b.onclick=async()=>{readCfgForm();pgCfgType=b.dataset.pgtype;try{await loadParamGovType(pgCfgType);}catch(e){msg(e.message,"err");}renderCalcCfg();});
   const saveBtn=document.getElementById("saveCalcCfg"); if(saveBtn) saveBtn.onclick = saveCalcCfg;
+  const saveSchedule=document.getElementById("saveScheduleCfg");if(saveSchedule)saveSchedule.onclick=saveScheduleCfg;
+  const unlockSchedule=document.getElementById("unlockScheduleEdit"),cancelSchedule=document.getElementById("cancelScheduleEdit");
+  if(unlockSchedule)unlockSchedule.onclick=()=>{scheduleEditUnlocked=true;renderCalcCfg();};
+  if(cancelSchedule)cancelSchedule.onclick=()=>{scheduleEditUnlocked=false;openCalcCfg();};
   const draftBtn=document.getElementById("savePgDraft"); if(draftBtn) draftBtn.onclick=saveParamGovernanceDraft;
   const suggestBtn=document.getElementById("suggestPgDraft"); if(suggestBtn) suggestBtn.onclick=applyParamDraftSuggestions;
   const publishBtn=document.getElementById("publishPg"); if(publishBtn) publishBtn.onclick=publishParamGovernance;
@@ -2025,6 +2080,75 @@ function renderCalcCfg(){
   const addS=document.getElementById("addScore"); if(addS) addS.onclick=()=>{readCfgForm();calcCfg.score.push({name:"",expr:"",dir:">=",goodV:"",midV:"",weight:10,scope:"all"});renderCalcCfg();};
   document.querySelectorAll("[data-sdel]").forEach(b=>b.onclick=()=>{readCfgForm();calcCfg.score.splice(+b.dataset.sdel,1);renderCalcCfg();});
   document.querySelectorAll("[data-gocoeff]").forEach(b=>b.onclick=async()=>{pgCfgType="coeff_"+b.dataset.gocoeff;calcCfgTab="governance";try{await loadParamGovType(pgCfgType);}catch(e){msg(e.message,"err");}renderCalcCfg();});
+  document.querySelectorAll("[data-scheduletype]").forEach(b=>b.onclick=()=>{if(scheduleEditUnlocked)readScheduleCfgForm();scheduleCfgType=b.dataset.scheduletype;renderCalcCfg();});
+  const addTask=document.getElementById("addScheduleTask"),addMap=document.getElementById("addScheduleMapping");
+  if(addTask)addTask.onclick=()=>{readScheduleCfgForm();scheduleCfgWorking(scheduleCfgType).template.tasks.push({id:"task_"+Date.now(),name:"新增阶段",startRatio:0,durationRatio:.1,color:"#F2C7A6"});renderCalcCfg();};
+  if(addMap)addMap.onclick=()=>{readScheduleCfgForm();scheduleCfgWorking(scheduleCfgType).mappings.push({id:"map_"+Date.now(),name:"新增费用",costPath:"",taskIds:[],curve:"average"});renderCalcCfg();};
+  document.querySelectorAll("[data-schtaskdel]").forEach(b=>b.onclick=()=>{readScheduleCfgForm();scheduleCfgWorking(scheduleCfgType).template.tasks.splice(+b.dataset.schtaskdel,1);renderCalcCfg();});
+  document.querySelectorAll("[data-schmapdel]").forEach(b=>b.onclick=()=>{readScheduleCfgForm();scheduleCfgWorking(scheduleCfgType).mappings.splice(+b.dataset.schmapdel,1);renderCalcCfg();});
+  document.querySelectorAll("[data-schzoom]").forEach(b=>b.onclick=()=>{const canvas=document.getElementById(b.dataset.schzoom);if(!canvas)return;canvas.style.setProperty("--sch-zoom",b.dataset.zoom);b.parentElement.querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===b));});
+}
+
+function scheduleCfgWorking(type){
+  calcCfg.schedule=calcCfg.schedule||{};calcCfg.schedule.types=calcCfg.schedule.types||{};
+  if(!calcCfg.schedule.types[type])calcCfg.schedule.types[type]={startQuarter:1,template:Object.assign(InvestmentSchedule.clone(InvestmentSchedule.DEFAULT_TEMPLATE),{baseQuarters:16}),mappings:type==="rent"?InvestmentSchedule.clone(InvestmentSchedule.DEFAULT_MAPPINGS):[{id:"sale_total",name:"项目建设投资",costPath:"total",taskIds:InvestmentSchedule.DEFAULT_TEMPLATE.tasks.map(t=>t.id),curve:"s_curve"}],coefficientRows:type==="sale"?InvestmentSchedule.clone(InvestmentSchedule.SALE_COEFFICIENT_ROWS):[]};
+  const working=calcCfg.schedule.types[type],base=Math.max(1,Math.round(Number(working.template&&working.template.baseQuarters)||16));
+  if(type==="sale"){
+    const priorSales=(working.template&&working.template.tasks||[]).find(t=>t.id==="sales"),buildQuarters=Math.max(1,Math.round(Number(working.buildQuarters)||(priorSales?Number(priorSales.startQuarterNo)-1:Math.min(base,16))||16));working.buildQuarters=buildQuarters;working.template=InvestmentSchedule.ensureSaleTemplate(working.template,buildQuarters);
+    if(!Array.isArray(working.coefficientRows))working.coefficientRows=InvestmentSchedule.clone(InvestmentSchedule.SALE_COEFFICIENT_ROWS);
+    InvestmentSchedule.SALE_COEFFICIENT_ROWS.forEach(def=>{if(!working.coefficientRows.some(r=>r.no===def.no))working.coefficientRows.push(InvestmentSchedule.clone(def));});
+  }
+  (working.template&&working.template.tasks||[]).forEach(t=>{
+    const oldRatioDefault=!Object.prototype.hasOwnProperty.call(t,"durationQuarters")&&Number(t.durationRatio)===.42;
+    const oldRoundedDefault=Number(t.startQuarterNo)===5&&Number(t.durationQuarters)===7&&(Number(t.durationRatio)===.4375||Number(t.durationRatio)===.42);
+    if(t.id==="above"&&(oldRatioDefault||oldRoundedDefault)){t.startQuarterNo=5;t.durationQuarters=6;t.startRatio=base>1?4/(base-1):0;t.durationRatio=6/base;}
+  });
+  return working;
+}
+function scheduleMappingRatioText(m,cfg,curves){
+  if(scheduleCfgType==="sale"){
+    const taskSet=new Set(m.taskIds||[]),rows=(cfg.coefficientRows||[]).filter(r=>(r.annualPattern||[]).length&&(r.taskIds||[]).some(id=>taskSet.has(id)));
+    if(rows.length===1)return rows[0].name+"："+rows[0].annualPattern.map(v=>Math.round(v*100)+"%").join(" / ");
+    if(rows.length>1)return "关联 "+rows.length+" 个比例科目（见下表）";
+  }
+  const notes={once_start:"首个有效季度100%",once_end:"最后有效季度100%",average:"有效季度平均分摊",front_loaded:"前期较高、逐季递减",back_loaded:"前期较低、逐季递增",s_curve:"中期较高的S形分摊"};
+  return notes[m.curve]||curves[m.curve]||m.curve||"未设置";
+}
+function scheduleStageTags(ids,cfg){
+  const names=Object.fromEntries(((cfg.template&&cfg.template.tasks)||[]).map(t=>[t.id,t.name]));
+  return '<div class="sch-stage-tags">'+(ids||[]).map(id=>'<span class="sch-stage-tag" title="'+esc(id+' · '+(names[id]||id))+'">'+esc(names[id]||id)+'</span>').join('')+'</div>';
+}
+function scheduleConfigHtml(){
+  const cfg=scheduleCfgWorking(scheduleCfgType),curves={once_start:"期初一次",once_end:"期末一次",average:"平均",front_loaded:"前高后低",back_loaded:"前低后高",s_curve:"S曲线"};
+  const ro=scheduleEditUnlocked?'':' disabled',lockedBanner='<div style="margin:12px 0;padding:10px 12px;border-radius:7px;background:'+(scheduleEditUnlocked?'#FFF8E8':'#EEF4F8')+';color:'+(scheduleEditUnlocked?'#8A5A00':'#38546B')+';font-size:12px;">'+(scheduleEditUnlocked?'编辑状态：改动尚未进入前台，只有点击底部“保存并同步到前台”后才生效。':'🔒 当前为只读状态，避免误改。需要调整时请点击底部“进行改动”。')+'</div>';
+  const baseQuarters=Math.max(1,Math.round(Number(cfg.template.baseQuarters)||16));
+  const tabs=["rent","sale"].map(t=>'<button class="btn sm '+(t===scheduleCfgType?'':'ghost')+'" data-scheduletype="'+t+'">'+(t==="rent"?'出租类':'出售类')+'</button>').join('');
+  const taskRows=(cfg.template.tasks||[]).map((t,i)=>{const startNo=Number.isFinite(Number(t.startQuarterNo))?Math.max(1,Math.round(Number(t.startQuarterNo))):Math.round(Number(t.startRatio||0)*(baseQuarters-1))+1,duration=Number.isFinite(Number(t.durationQuarters))?Math.max(1,Math.round(Number(t.durationQuarters))):Math.max(1,Math.round(Number(t.durationRatio||.1)*baseQuarters));return '<tr class="sch-task"><td><input class="sch-task-id" value="'+esc(t.id)+'"'+ro+'></td><td><input class="sch-task-name" value="'+esc(t.name)+'"'+ro+'></td><td><input class="sch-task-start" type="number" step="1" min="1" max="'+baseQuarters+'" value="'+startNo+'"'+ro+'></td><td><input class="sch-task-duration" type="number" step="1" min="1" max="'+baseQuarters+'" value="'+duration+'"'+ro+'></td><td><input class="sch-task-color" type="color" value="'+esc(t.color||'#F2C7A6')+'"'+ro+'></td><td>'+(scheduleEditUnlocked?'<button class="btn sm red" data-schtaskdel="'+i+'">×</button>':'')+'</td></tr>';}).join('');
+  const mapRows=(cfg.mappings||[]).map((m,i)=>'<tr class="sch-map"><td><input class="sch-map-name" value="'+esc(m.name)+'"'+ro+'></td><td><input class="sch-map-path" value="'+esc(m.costPath)+'"'+ro+'></td><td>'+(scheduleEditUnlocked?'<input class="sch-map-tasks" value="'+esc((m.taskIds||[]).join(','))+'">':scheduleStageTags(m.taskIds,cfg)+'<input class="sch-map-tasks" type="hidden" value="'+esc((m.taskIds||[]).join(','))+'">')+'</td><td><select class="sch-map-curve"'+ro+'>'+Object.entries(curves).map(([v,l])=>'<option value="'+v+'" '+(m.curve===v?'selected':'')+'>'+l+'</option>').join('')+'</select></td><td style="font-size:11px;color:var(--soft);line-height:1.4;">'+esc(scheduleMappingRatioText(m,cfg,curves))+'</td><td>'+(scheduleEditUnlocked?'<button class="btn sm red" data-schmapdel="'+i+'">×</button>':'')+'</td></tr>').join('');
+  const coeffRows=(cfg.coefficientRows||[]).map((r,i)=>'<tr class="sch-coeff"><td>'+esc(r.no)+'</td><td>'+esc(r.name)+'</td><td>'+scheduleStageTags(r.taskIds,cfg)+'</td><td><input class="sch-coeff-offset" type="number" min="0" step="1" value="'+(Number(r.yearOffset)||0)+'"'+ro+'></td><td><input class="sch-coeff-pattern" value="'+esc((r.annualPattern||[]).map(v=>Math.round(v*100)).join(','))+'" placeholder="如60,40"'+ro+'></td><td>'+((r.annualPattern||[]).length?(r.annualPattern||[]).map(v=>Math.round(v*100)+'%').join(' / '):'父级展示行（不分摊）')+'</td></tr>').join('');
+  const preview=scheduleCfgType==="sale"?scheduleAdminPreviewHtml(cfg,baseQuarters):'';
+  return '<div class="sub" style="margin-top:14px;">这里维护网页横道图的默认阶段和投资科目分摊。出售类包含建设阶段及销售阶段；销售阶段默认紧接竣工验收，持续12个季度。</div>'+lockedBanner+'<div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;">'+tabs+'<label style="margin-left:12px;display:flex;gap:6px;align-items:center;">默认起始季度 <input id="schStartQuarter" type="number" min="1" max="4" value="'+cfg.startQuarter+'" style="width:70px;"'+ro+'></label><label style="display:flex;gap:6px;align-items:center;">'+(scheduleCfgType==="sale"?'横道图总周期':'模板基准建设期')+' <input id="schBaseQuarters" type="number" min="1" max="80" value="'+baseQuarters+'" style="width:76px;"'+ro+'> 个季度</label></div>'
+    +'<h3>工期阶段模板</h3><div class="sub">“总季度数”就是横道图连续涂色的格子总数，包含开始季度。例如第5季度开始、总季度数6，对应第5至第10季度，共6格。</div><div style="overflow:auto"><table class="tbl"><tr><th>阶段键</th><th>中文名称</th><th>第几个季度开始</th><th>总季度数</th><th>颜色</th><th></th></tr>'+taskRows+'</table></div>'+(scheduleEditUnlocked?'<span class="add-link" id="addScheduleTask">+ 添加阶段</span>':'')
+    +'<h3 style="margin-top:22px;">费用科目→工期阶段映射</h3><div class="sub">关联阶段默认显示中文标签；进入编辑状态后才显示技术键，减少横向占用。</div><div class="sch-config-scroll"><table class="tbl sch-config-table"><colgroup><col style="width:16%"><col style="width:21%"><col style="width:21%"><col style="width:14%"><col style="width:23%"><col style="width:5%"></colgroup><tr><th>费用名称</th><th>金额路径</th><th>关联阶段</th><th>季度曲线</th><th>实际采用比例</th><th></th></tr>'+mapRows+'</table></div>'+(scheduleEditUnlocked?'<span class="add-link" id="addScheduleMapping">+ 添加费用映射</span>':'')
+    +(scheduleCfgType==="sale"?'<h3 style="margin-top:22px;">出售类年度投资比例配置</h3><div class="sub">年度偏移0代表建设期起始年；比例按百分数填写并用逗号分隔。前台、测算快照和Excel均读取本表。</div><div class="sch-config-scroll"><table class="tbl sch-config-table"><colgroup><col style="width:7%"><col style="width:23%"><col style="width:24%"><col style="width:11%"><col style="width:17%"><col style="width:18%"></colgroup><tr><th>序号</th><th>科目</th><th>关联阶段</th><th>年度偏移</th><th>比例配置(%)</th><th>实际采用比例</th></tr>'+coeffRows+'</table></div>'+preview:'');
+}
+function scheduleAdminPreviewHtml(cfg,baseQuarters){
+  const tasks=InvestmentSchedule.defaultTasks(baseQuarters,cfg.template),periods=Array.from({length:baseQuarters},(_,i)=>InvestmentSchedule.periodLabel(2025,cfg.startQuarter||1,i)),cp=InvestmentSchedule.coefficientPlan(tasks,periods,cfg.coefficientRows||InvestmentSchedule.SALE_COEFFICIENT_ROWS,baseQuarters);
+  const gantt='<table class="tbl sch-gantt"><tr><th>工作阶段</th>'+periods.map(p=>{const parts=String(p.label).split('Q');return '<th>'+esc(parts[0])+'<br>Q'+esc(parts[1]||'')+'</th>';}).join('')+'</tr>'+tasks.map(t=>'<tr><th>'+esc(t.name)+'</th>'+periods.map((p,q)=>'<td style="background:'+(InvestmentSchedule.activePeriods(t,baseQuarters).includes(q)?(t.color||'#F2C7A6'):'#fff')+'"></td>').join('')+'</tr>').join('')+'</table>';
+  const coeff='<table class="tbl sch-ratio-preview"><tr><th>序号</th><th>项目名称</th><th>合计</th>'+cp.years.map(y=>'<th>'+y+'年</th>').join('')+'</tr>'+cp.rows.map(r=>'<tr><td>'+r.no+'</td><td>'+esc(r.name)+'</td><td>'+((r.annualPattern||[]).length?'100%':'—')+'</td>'+cp.years.map(y=>'<td>'+((r.annualCoefficients[y]||0)?Math.round(r.annualCoefficients[y]*100)+'%':'')+'</td>').join('')+'</tr>').join('')+'</table>';
+  const zoom=(id,active)=>'<div class="sch-zoom"><button type="button" data-schzoom="'+id+'" data-zoom=".65" class="'+(active==='.65'?'active':'')+'">65%</button><button type="button" data-schzoom="'+id+'" data-zoom=".8" class="'+(active==='.8'?'active':'')+'">80%</button><button type="button" data-schzoom="'+id+'" data-zoom="1" class="'+(active==='1'?'active':'')+'">100%</button></div>';
+  return '<details class="sch-preview-card"><summary>工期横道图预览</summary><div class="sch-preview-head"><span>默认缩小展示完整工期，可切换原始尺寸查看细节</span>'+zoom('schGanttCanvas','.65')+'</div><div class="sch-preview-scroll"><div class="sch-preview-canvas" id="schGanttCanvas" style="--sch-zoom:.65">'+gantt+'</div></div></details>'
+    +'<details class="sch-preview-card"><summary>年度投资计划比例预览</summary><div class="sch-preview-head"><span>与前台和Excel使用同一份已发布比例</span>'+zoom('schRatioCanvas','.8')+'</div><div class="sch-preview-scroll"><div class="sch-preview-canvas" id="schRatioCanvas" style="--sch-zoom:.8">'+coeff+'</div></div></details>';
+}
+function readScheduleCfgForm(){
+  if(!document.getElementById("schStartQuarter"))return;const cfg=scheduleCfgWorking(scheduleCfgType),baseQuarters=Math.max(1,Math.round(Number(document.getElementById("schBaseQuarters").value)||16));cfg.startQuarter=Math.min(4,Math.max(1,Number(document.getElementById("schStartQuarter").value)||1));
+  cfg.template={id:(cfg.template&&cfg.template.id)||scheduleCfgType+"-template",name:(cfg.template&&cfg.template.name)||"项目工期模板",baseQuarters,tasks:[...document.querySelectorAll(".sch-task")].map(tr=>{const startQuarterNo=Math.min(baseQuarters,Math.max(1,Math.round(Number(tr.querySelector('.sch-task-start').value)||1))),durationQuarters=Math.max(1,Math.round(Number(tr.querySelector('.sch-task-duration').value)||1));return {id:tr.querySelector('.sch-task-id').value.trim(),name:tr.querySelector('.sch-task-name').value.trim(),startQuarterNo,durationQuarters,startRatio:baseQuarters>1?(startQuarterNo-1)/(baseQuarters-1):0,durationRatio:durationQuarters/baseQuarters,color:tr.querySelector('.sch-task-color').value};}).filter(t=>t.id&&t.name)};
+  cfg.mappings=[...document.querySelectorAll(".sch-map")].map((tr,i)=>({id:"mapping_"+i,name:tr.querySelector('.sch-map-name').value.trim(),costPath:tr.querySelector('.sch-map-path').value.trim(),taskIds:tr.querySelector('.sch-map-tasks').value.split(/[,，\s]+/).filter(Boolean),curve:tr.querySelector('.sch-map-curve').value})).filter(m=>m.name&&m.costPath&&m.taskIds.length);
+  if(scheduleCfgType==="sale")cfg.coefficientRows=(cfg.coefficientRows||[]).map((r,i)=>{const tr=document.querySelectorAll('.sch-coeff')[i],raw=tr.querySelector('.sch-coeff-pattern').value.trim(),vals=raw?raw.split(/[,，\s]+/).map(Number).filter(Number.isFinite).map(v=>v/100):[];return Object.assign({},r,{yearOffset:Math.max(0,Math.round(Number(tr.querySelector('.sch-coeff-offset').value)||0)),annualPattern:vals});});
+}
+async function saveScheduleCfg(){
+  readScheduleCfgForm();const btn=document.getElementById("saveScheduleCfg");btn.disabled=true;btn.textContent="保存中…";
+  try{const sale=scheduleCfgWorking("sale"),bad=(sale.coefficientRows||[]).filter(x=>(x.annualPattern||[]).length&&Math.abs((x.annualPattern||[]).reduce((a,b)=>a+b,0)-1)>.000001);if(bad.length)throw new Error("以下出售类比例合计不等于100%："+bad.map(x=>x.name).join("、"));const r=await fetch("/api/calcconfig",{method:"POST",headers:authHeaders(),body:JSON.stringify({key:"schedule",data:calcCfg.schedule})}),d=await r.json();if(!d.ok)throw new Error(d.error||"保存失败");scheduleEditUnlocked=false;msg("工期、费用映射和投资比例已保存并同步到前台","ok");renderCalcCfg();}catch(e){msg(e.message||"保存失败","err");}finally{if(btn&&document.body.contains(btn)){btn.disabled=false;btn.textContent="保存并同步到前台";}}
 }
 
 function calcCoeffConfigHtml(){
@@ -2358,6 +2482,33 @@ async function seedDefaults(){
 
 function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
+/* ================= 前台知识投稿审核 ================= */
+let contribStatus="pending";
+const CONTRIB_KIND_LABEL={material:"正式资料",wiki:"Wiki知识页",rule:"审核规则建议",example:"黄金范例",correction:"数据/功能纠错"};
+const CONTRIB_STATUS_LABEL={pending:"待审核",needs_changes:"待补充",approved:"已通过",rejected:"已驳回"};
+async function contribApi(body){const r=await fetch("/api/contributions",{method:"POST",headers:authHeaders(),body:JSON.stringify(body)});return r.json();}
+window.openContributions=async function(){
+  document.getElementById("editBox").style.display="none";const box=document.getElementById("listBox");box.style.display="block";
+  box.innerHTML='<h1 style="font-size:18px;">知识投稿审核</h1><div class="sub">前台用户只能提交、不能修改正式库。管理员在这里核对来源、正文和适用范围；通过后系统自动分流，但 Wiki 与资料仍须走各自的发布步骤才会参与 RAG。</div><div class="contrib-filter">'+Object.entries(CONTRIB_STATUS_LABEL).map(([k,v])=>'<button data-cstatus="'+k+'">'+v+'</button>').join("")+'</div><div id="contribList">读取中…</div>';
+  document.querySelectorAll("[data-cstatus]").forEach(b=>b.onclick=()=>{contribStatus=b.dataset.cstatus;refreshContributions();});await refreshContributions();
+};
+async function refreshContributions(){
+  document.querySelectorAll("[data-cstatus]").forEach(b=>b.classList.toggle("active",b.dataset.cstatus===contribStatus));const box=document.getElementById("contribList");if(!box)return;box.innerHTML='<div class="empty">读取中…</div>';
+  try{const d=await contribApi({action:"listReview",status:contribStatus});if(!d.ok)throw new Error(d.error||"读取失败");const rows=d.items||[];
+    box.innerHTML=rows.length?rows.map(x=>'<article class="contrib-card"><div class="contrib-head"><div><div class="contrib-title"><span class="contrib-kind">'+esc(CONTRIB_KIND_LABEL[x.kind]||x.kind)+'</span>'+esc(x.title)+'</div><div class="contrib-meta">提交人：'+esc(x.username||("#"+x.user_id))+'　·　'+new Date(x.created_at).toLocaleString("zh-CN")+(x.file_name?'　·　文件 '+esc(x.file_name):'')+'</div></div><span class="contrib-kind">'+esc(CONTRIB_STATUS_LABEL[x.status]||x.status)+'</span></div><div class="contrib-body">'+esc(x.content)+'</div><div class="contrib-source"><b>原始依据：</b>'+esc(x.source_ref||"未填写")+'　　<b>区域/类型：</b>'+esc(x.region||"不限")+' / '+esc(x.project_type||"不限")+'</div>'+(x.review_note?'<div class="contrib-note">审核意见：'+esc(x.review_note)+'</div>':'')+(x.target_module?'<div class="contrib-target">已分流：'+esc(x.target_module)+'　编号 '+esc(x.target_ref)+'</div>':'')+(x.status==="pending"?'<div class="contrib-actions"><button class="btn sm" data-capprove="'+x.id+'">通过并分流</button><button class="btn sm ghost" data-creturn="'+x.id+'">退回补充</button><button class="btn sm red" data-creject="'+x.id+'">驳回</button></div>':'')+'</article>').join(""):'<div class="empty">当前没有'+esc(CONTRIB_STATUS_LABEL[contribStatus])+'的投稿</div>';
+    document.querySelectorAll("[data-capprove]").forEach(b=>b.onclick=()=>reviewContribution(b.dataset.capprove,"approve",""));document.querySelectorAll("[data-creturn]").forEach(b=>b.onclick=()=>openContributionNote(b.dataset.creturn,"return"));document.querySelectorAll("[data-creject]").forEach(b=>b.onclick=()=>openContributionNote(b.dataset.creject,"reject"));
+  }catch(e){box.innerHTML='<div class="msg err">'+esc(e.message)+'</div>';}
+}
+function openContributionNote(id,decision){
+  const old=document.getElementById("contribNoteModal");if(old)old.remove();const isReturn=decision==="return";
+  document.body.insertAdjacentHTML("beforeend",'<div class="pg-modal" id="contribNoteModal"><div class="pg-modal-box" style="max-width:560px;"><h1 style="font-size:17px;">'+(isReturn?'退回补充':'驳回投稿')+'</h1><div class="sub">'+(isReturn?'请明确列出缺少的来源、范围或正文；用户会复制形成新提交，原记录不改写。':'请写明不予采纳的原因，便于提交人查看。')+'</div><textarea id="contribNoteText" rows="6" placeholder="请输入审核意见"></textarea><div class="bar" style="margin-top:14px;"><button class="btn" id="contribNoteOk">确认'+(isReturn?'退回':'驳回')+'</button><button class="btn ghost" id="contribNoteCancel">取消</button></div></div></div>');
+  const modal=document.getElementById("contribNoteModal"),ta=document.getElementById("contribNoteText");ta.focus();document.getElementById("contribNoteCancel").onclick=()=>modal.remove();document.getElementById("contribNoteOk").onclick=async()=>{const note=ta.value.trim();if(!note){ta.style.borderColor="var(--red)";return;}modal.remove();await reviewContribution(id,decision,note);};
+}
+async function reviewContribution(id,decision,note){
+  if(decision==="approve"&&!confirm("确认内容与来源已经核对？通过后将按类型写入正式资料台账、Wiki草稿、审核规则或黄金范例。"))return;
+  try{const d=await contribApi({action:"review",id,decision,note});if(!d.ok)throw new Error(d.error||"审核失败");msg(d.message,"ok");await refreshContributions();}catch(e){msg(e.message,"err");}
+}
+
 // 初始化
 if(!getToken()){ document.getElementById("app").innerHTML='<div class="empty">请先在主站登录后再访问此页面（登录态通过浏览器共享）。</div>'; }
 else{
@@ -2374,6 +2525,7 @@ else{
   document.getElementById("btnExamples").onclick = ()=>{ setActiveNav("btnExamples"); openExamples(); };
   document.getElementById("btnAiRules").onclick = ()=>{ setActiveNav("btnAiRules"); openAiRules(); };
   document.getElementById("btnWiki").onclick = ()=>{ setActiveNav("btnWiki"); openWiki(); };
+  document.getElementById("btnContrib").onclick = ()=>{ setActiveNav("btnContrib"); openContributions(); };
   document.getElementById("btnRag").onclick = ()=>{ setActiveNav("btnRag"); openRag(); };
   // 独立资料台账入口：动态插入可避免旧版静态导航缓存时出现重复菜单。
   const materialsNav = document.createElement("div");

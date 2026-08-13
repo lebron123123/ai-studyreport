@@ -73,6 +73,13 @@ async function selfCheck() {
     line(true,"项目级AI可研会话表已就绪");
   }catch(e){ line(false,"项目级AI可研会话表初始化失败："+e.message); }
 
+  try{
+    await db.prepare("CREATE TABLE IF NOT EXISTS knowledge_contributions (id TEXT PRIMARY KEY,kind TEXT NOT NULL,title TEXT NOT NULL,content TEXT NOT NULL DEFAULT '',source_ref TEXT DEFAULT '',file_name TEXT DEFAULT '',region TEXT DEFAULT '',project_type TEXT DEFAULT '',meta TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'pending',review_note TEXT DEFAULT '',target_module TEXT DEFAULT '',target_ref TEXT DEFAULT '',parent_id TEXT DEFAULT '',user_id INTEGER NOT NULL,username TEXT DEFAULT '',created_at BIGINT NOT NULL,reviewed_at BIGINT,reviewed_by TEXT DEFAULT '')").run();
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_knowledge_contributions_status ON knowledge_contributions(status,created_at DESC)").run();
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_knowledge_contributions_user ON knowledge_contributions(user_id,created_at DESC)").run();
+    line(true,"知识协作投稿审核表已就绪");
+  }catch(e){ line(false,"知识协作投稿审核表初始化失败："+e.message); }
+
   try {
     const info = await ai._ping();
     const has = info.models.some((m) => m.startsWith(ai._embedModel));

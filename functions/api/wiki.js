@@ -5,7 +5,7 @@ import { verifyAuth, json } from "./_auth.js";
 import { adaptEnv } from "./_adapters.js";
 
 const KINDS = ["policy", "report", "rule", "case"];
-const KIND_LABEL = { policy:"政策要点", report:"报告编制", rule:"业务规则", case:"案例经验" };
+const KIND_LABEL = { policy:"政策要点", report:"报告编制", rule:"业务口径与规则依据", case:"案例经验" };
 let wikiSchemaReady = false;
 let wikiExactSchemaReady = false;
 
@@ -84,10 +84,16 @@ export async function onRequestPost(context){
   const {request}=context; const env=adaptEnv(context.env);
   const user=await verifyAuth(request,env);
   if(!user) return json({ok:false,error:"未登录"},401);
-  if(!isAdmin(env,user)) return json({ok:false,error:"仅管理员可管理 Wiki"},403);
   try{ await ensureWikiSchema(env); }catch(e){ return json({ok:false,error:"Wiki 数据表初始化失败："+e.message},500); }
   let body; try{ body=await request.json(); }catch(e){ return json({ok:false,error:"格式有误"},400); }
   const action=clean(body.action,32);
+
+  // 前台知识中心只展示已经发布、低密级且面向全部门的页面；草稿、归档页绝不外露。
+  if(action==="publicList"){
+    const rows=await env.DB.prepare("SELECT id,title,kind,content,tags,region,project_type,doc_no,issuer,source_ref,effective_date,expiry_date,version,published_at FROM wiki_pages WHERE status='published' AND security=1 AND (dept_scope='' OR dept_scope='全部门') ORDER BY published_at DESC LIMIT 200").all();
+    return json({ok:true,pages:(rows.results||[]).map(toPage)});
+  }
+  if(!isAdmin(env,user)) return json({ok:false,error:"仅管理员可管理 Wiki"},403);
 
   if(action==="list"){
     const rows=await env.DB.prepare("SELECT id,title,kind,status,tags,region,project_type,doc_no,issuer,source_ref,security,dept_scope,effective_date,expiry_date,version,created_name,created_at,updated_at,published_at FROM wiki_pages ORDER BY updated_at DESC LIMIT 300").all();
