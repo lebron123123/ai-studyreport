@@ -21,22 +21,22 @@ function authHeaders(){ const t=getToken(); return t? {"Authorization":"Bearer "
 function showLoginModal(msg){
   if(document.getElementById("gate")) return;
   document.body.insertAdjacentHTML("beforeend",
-    '<div id="gate" style="position:fixed; inset:0; background:rgba(14,28,44,.62); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; z-index:999;">'
-    +'<div style="background:var(--paper-card); border:1px solid var(--line-strong); border-top:5px solid var(--bp-navy); border-radius:2px; box-shadow:0 24px 60px -18px rgba(0,0,0,.5); padding:30px 34px; width:340px;">'
+    '<div id="gate" class="auth-gate">'
+    +'<div class="auth-card">'
     +'<div class="auth-tabs"><button class="at-btn active" data-m="login">登 录</button><button class="at-btn" data-m="register">注 册</button></div>'
-    +(msg?'<div style="font-size:12px; color:var(--seal-red); margin-bottom:10px;">'+msg+'</div>':'')
-    +'<label style="margin-top:4px;">用户名</label><input id="auName" type="text" placeholder="2-20位中英文/数字">'
+    +(msg?'<div class="auth-message">'+msg+'</div>':'')
+    +'<label>用户名</label><input id="auName" type="text" placeholder="2-20位中英文/数字">'
     +'<label>密码</label><input id="auPass" type="password" placeholder="至少6位">'
-    +'<div id="auInviteWrap" style="display:none;"><label>注册邀请码</label><input id="auInvite" type="text" placeholder="向管理员索取"></div>'
-    +'<button class="btn" style="width:100%; margin-top:18px;" id="auSubmit">登 录</button>'
-    +'<div id="auErr" style="color:var(--seal-red); font-size:12px; margin-top:10px; display:none;"></div>'
+    +'<div id="auInviteWrap" class="auth-invite" aria-hidden="true"><label>注册邀请码</label><input id="auInvite" type="text" placeholder="向管理员索取"></div>'
+    +'<button class="btn auth-submit" id="auSubmit">登 录</button>'
+    +'<div id="auErr" class="auth-error"></div>'
     +'</div></div>');
   let mode = "login";
   document.querySelectorAll(".at-btn").forEach(b=>{
     b.onclick = ()=>{
       mode = b.dataset.m;
       document.querySelectorAll(".at-btn").forEach(x=>x.classList.toggle("active", x===b));
-      document.getElementById("auInviteWrap").style.display = mode==="register"? "block":"none";
+      const invite=document.getElementById("auInviteWrap");invite.classList.toggle("shown",mode==="register");invite.setAttribute("aria-hidden",mode==="register"?"false":"true");
       document.getElementById("auSubmit").textContent = mode==="register"? "注 册":"登 录";
     };
   });

@@ -339,6 +339,20 @@ CREATE TABLE IF NOT EXISTS population_ref (
 );
 CREATE INDEX IF NOT EXISTS idx_population_ref_lookup ON population_ref(city, district);
 
+-- 项目人口、职住、需求和配套分析（结构与 migrations/0005_project_analysis.sql 一致）
+CREATE TABLE IF NOT EXISTS analysis_metric_catalog (metric_key TEXT PRIMARY KEY,metric_name TEXT NOT NULL,domain TEXT NOT NULL,unit TEXT DEFAULT '',value_type TEXT NOT NULL DEFAULT 'number',definition TEXT DEFAULT '',formula TEXT DEFAULT '',direction TEXT DEFAULT 'neutral',required_level TEXT DEFAULT 'general',default_scope DOUBLE PRECISION DEFAULT 3,default_period TEXT DEFAULT '',enabled INTEGER NOT NULL DEFAULT 1,updated_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS project_analysis_scopes (project_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,longitude DOUBLE PRECISION,latitude DOUBLE PRECISION,scope_type TEXT NOT NULL DEFAULT 'radius',scope_value TEXT NOT NULL DEFAULT '1,3,5',scope_geojson TEXT DEFAULT '',confirmed_by TEXT DEFAULT '',confirmed_at BIGINT DEFAULT 0,updated_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS analysis_observations (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,metric_key TEXT NOT NULL,scope_type TEXT NOT NULL DEFAULT 'radius',scope_value DOUBLE PRECISION DEFAULT 3,period_start TEXT DEFAULT '',period_end TEXT DEFAULT '',value_num DOUBLE PRECISION,value_text TEXT DEFAULT '',value_json TEXT DEFAULT '',unit TEXT DEFAULT '',source_asset_id TEXT DEFAULT '',source_version_id TEXT DEFAULT '',workbook_id TEXT DEFAULT '',sheet_name TEXT DEFAULT '',cell_address TEXT DEFAULT '',source_label TEXT DEFAULT '',quality_grade TEXT DEFAULT 'C',review_status TEXT NOT NULL DEFAULT 'pending',reviewed_by TEXT DEFAULT '',reviewed_at BIGINT DEFAULT 0,created_by TEXT DEFAULT '',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_analysis_observations_project ON analysis_observations(project_id,review_status,metric_key,scope_value);
+CREATE TABLE IF NOT EXISTS project_pois (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,name TEXT NOT NULL,category TEXT NOT NULL,subcategory TEXT DEFAULT '',longitude DOUBLE PRECISION,latitude DOUBLE PRECISION,distance_m DOUBLE PRECISION,level TEXT DEFAULT '',level_weight DOUBLE PRECISION DEFAULT 1,status TEXT DEFAULT '',address TEXT DEFAULT '',source_asset_id TEXT DEFAULT '',source_version_id TEXT DEFAULT '',workbook_id TEXT DEFAULT '',sheet_name TEXT DEFAULT '',cell_address TEXT DEFAULT '',source_label TEXT DEFAULT '',review_status TEXT NOT NULL DEFAULT 'pending',observed_at TEXT DEFAULT '',reviewed_by TEXT DEFAULT '',reviewed_at BIGINT DEFAULT 0,created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_project_pois_project ON project_pois(project_id,review_status,category);
+CREATE TABLE IF NOT EXISTS project_od_flows (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,origin_id TEXT DEFAULT '',origin_name TEXT NOT NULL,destination_id TEXT DEFAULT '',destination_name TEXT NOT NULL,flow_type TEXT NOT NULL DEFAULT 'home_to_work',population DOUBLE PRECISION NOT NULL,distance_km DOUBLE PRECISION,period_start TEXT DEFAULT '',period_end TEXT DEFAULT '',source_asset_id TEXT DEFAULT '',source_version_id TEXT DEFAULT '',workbook_id TEXT DEFAULT '',sheet_name TEXT DEFAULT '',cell_address TEXT DEFAULT '',source_label TEXT DEFAULT '',review_status TEXT NOT NULL DEFAULT 'pending',reviewed_by TEXT DEFAULT '',reviewed_at BIGINT DEFAULT 0,created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_project_od_project ON project_od_flows(project_id,review_status,flow_type);
+CREATE TABLE IF NOT EXISTS analysis_rules (rule_key TEXT PRIMARY KEY,domain TEXT NOT NULL,draft_data TEXT NOT NULL DEFAULT '{}',published_data TEXT NOT NULL DEFAULT '{}',draft_version INTEGER NOT NULL DEFAULT 1,published_version INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'published',updated_by TEXT DEFAULT '',updated_at BIGINT NOT NULL,published_by TEXT DEFAULT '',published_at BIGINT DEFAULT 0);
+CREATE TABLE IF NOT EXISTS project_analysis_snapshots (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,version INTEGER NOT NULL,scope_value DOUBLE PRECISION NOT NULL DEFAULT 3,input_data TEXT NOT NULL DEFAULT '{}',result_data TEXT NOT NULL DEFAULT '{}',result_hash TEXT NOT NULL,rule_versions TEXT NOT NULL DEFAULT '{}',source_summary TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL DEFAULT 'official',created_by TEXT DEFAULT '',created_at BIGINT NOT NULL,UNIQUE(project_id,user_id,version));
+CREATE INDEX IF NOT EXISTS idx_analysis_snapshots_project ON project_analysis_snapshots(project_id,user_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS analysis_chapter_mappings (domain TEXT NOT NULL,chapter_keyword TEXT NOT NULL,section_keyword TEXT DEFAULT '',enabled INTEGER NOT NULL DEFAULT 1,updated_at BIGINT NOT NULL,PRIMARY KEY(domain,chapter_keyword,section_keyword));
+
 -- ---------- 向量表（替代 Cloudflare Vectorize） ----------
 -- 1024 维对应 bge-m3，必须与 Cloudflare 上用的模型一致，否则历史向量作废
 CREATE TABLE IF NOT EXISTS rag_vectors (
@@ -352,3 +366,19 @@ CREATE TABLE IF NOT EXISTS rag_vectors (
 -- 需要时执行下面这句：
 -- CREATE INDEX IF NOT EXISTS idx_rag_vectors_hnsw
 --   ON rag_vectors USING hnsw (embedding vector_cosine_ops);
+
+-- ---------- 个人知识库（与部门 Wiki/RAG 隔离） ----------
+CREATE TABLE IF NOT EXISTS personal_notes (id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,parent_id TEXT NOT NULL DEFAULT '',kind TEXT NOT NULL DEFAULT 'note',title TEXT NOT NULL,content TEXT NOT NULL DEFAULT '',tags TEXT NOT NULL DEFAULT '[]',favorite INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'active',source_name TEXT DEFAULT '',source_type TEXT DEFAULT '',revision INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL DEFAULT 0,created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL,deleted_at BIGINT DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_personal_notes_user_status ON personal_notes(user_id,status,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_personal_notes_parent ON personal_notes(user_id,parent_id,status,sort_order,title);
+CREATE TABLE IF NOT EXISTS personal_note_versions (id TEXT PRIMARY KEY,note_id TEXT NOT NULL,user_id INTEGER NOT NULL,revision INTEGER NOT NULL,title TEXT NOT NULL,content TEXT NOT NULL DEFAULT '',tags TEXT NOT NULL DEFAULT '[]',created_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_personal_versions_note ON personal_note_versions(user_id,note_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS personal_note_links (id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,from_note_id TEXT NOT NULL,to_note_id TEXT DEFAULT '',target_title TEXT NOT NULL,link_text TEXT DEFAULT '',created_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_personal_links_from ON personal_note_links(user_id,from_note_id);
+CREATE INDEX IF NOT EXISTS idx_personal_links_to ON personal_note_links(user_id,to_note_id,target_title);
+
+-- AI办公固定模板PPT工作台
+CREATE TABLE IF NOT EXISTS ppt_projects (id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,title TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'draft',template_id TEXT NOT NULL DEFAULT 'anju-blue',data TEXT NOT NULL DEFAULT '{}',revision INTEGER NOT NULL DEFAULT 1,created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ppt_projects_user ON ppt_projects(user_id,updated_at DESC);
+CREATE TABLE IF NOT EXISTS ppt_project_versions (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,revision INTEGER NOT NULL,label TEXT DEFAULT '',data TEXT NOT NULL,created_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ppt_versions_project ON ppt_project_versions(user_id,project_id,created_at DESC);

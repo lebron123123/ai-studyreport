@@ -721,7 +721,7 @@ async function generateSection(c, s, onChunk){
     if(v && String(v).trim() && provCollector) provCollector.projectFields.push(k);
   });
   const excelContext=s.numeric?(excelSourceRetrieve()+await mappedExcelSourceRetrieve()):"";
-  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t) + kbRetrieve(c.name, s.t) + excelContext + await ragRetrieve(c.name, s.t);
+  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t) + kbRetrieve(c.name, s.t) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t);
 
   const text = await callGen(sys, user, onChunk);
   // 生成完成：把溯源档案挂到该小节上（含模型与时间，即L3模型溯源）
@@ -729,6 +729,7 @@ async function generateSection(c, s, onChunk){
   if(prov){
     prov.model = "deepseek-v4-flash";
     prov.generatedAt = new Date().toISOString();
+    if(projectWorkflow&&projectWorkflow.currentAnalysisSnapshotId){prov.analysisSnapshotId=projectWorkflow.currentAnalysisSnapshotId;prov.analysisSnapshotVersion=projectWorkflow.currentAnalysisSnapshotVersion||null;}
     prov.confidence = provConfidence(prov);
     s.prov = prov;
   }

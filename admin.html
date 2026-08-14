@@ -144,6 +144,8 @@
     <div class="nav-item" id="btnStats"><span class="ic">📊</span>运维看板</div>
     <div class="nav-item" id="btnWiki"><span class="ic">📖</span>知识 Wiki</div>
     <div class="nav-item" id="btnContrib"><span class="ic">📨</span>知识投稿审核</div>
+    <div class="nav-item" id="btnAnalysisReview"><span class="ic">◎</span>项目数据审核</div>
+    <div class="nav-item" id="btnAnalysisLogic"><span class="ic">◇</span>数据研判逻辑中心</div>
     <div class="side-foot" id="loginInfo"></div>
   </nav>
   <div class="main">
@@ -2509,6 +2511,30 @@ async function reviewContribution(id,decision,note){
   try{const d=await contribApi({action:"review",id,decision,note});if(!d.ok)throw new Error(d.error||"审核失败");msg(d.message,"ok");await refreshContributions();}catch(e){msg(e.message,"err");}
 }
 
+/* 项目人口/职住/需求数据审核：前台只能提交，审核通过后才进入正式白箱分析。 */
+window.openAnalysisReview=async function(){
+  const box=document.getElementById("listBox");document.getElementById("editBox").style.display="none";box.style.display="block";
+  box.innerHTML='<h1>项目数据审核</h1><div class="sub">审核人口指标、POI和OD通勤数据。待审核数据不会进入分析、可研正文或正式快照。</div><div class="bar"><button class="btn sm" id="anrReload">刷新待审核</button></div><div id="anrBox" class="list"><div class="empty">加载中…</div></div>';
+  document.getElementById("anrReload").onclick=loadAnalysisReview;await loadAnalysisReview();
+};
+async function analysisReviewApi(body){const r=await fetch('/api/projectanalysis',{method:'POST',headers:authHeaders(),body:JSON.stringify(body)}),d=await r.json();if(!d.ok)throw new Error(d.error||'操作失败');return d;}
+function analysisReviewLabel(x){if(x.kind==='observation')return (x.metric_key||'指标')+'｜'+(x.scope_value||3)+'km｜'+(x.value_num??x.value_text??'');if(x.kind==='poi')return (x.name||'POI')+'｜'+(x.category||'');return (x.origin_name||'')+' → '+(x.destination_name||'')+'｜'+(x.population||0)+'人';}
+async function loadAnalysisReview(){const box=document.getElementById('anrBox');try{const d=await analysisReviewApi({action:'reviewQueue',status:'pending'}),items=d.items||[];box.innerHTML=items.length?items.map(x=>'<article class="contrib-card"><div class="contrib-head"><div><span class="contrib-kind">'+esc(x.kind)+'</span><span class="contrib-title">'+esc(analysisReviewLabel(x))+'</span><div class="contrib-meta">项目 '+esc(x.project_id||'')+'　提交人 '+esc(x.created_by||x.user_id||'')+'</div></div></div><div class="contrib-source">来源：'+esc(x.source_label||'未填写')+(x.sheet_name?'｜Sheet '+esc(x.sheet_name):'')+(x.cell_address?'｜单元格 '+esc(x.cell_address):'')+'</div><div class="contrib-actions"><button class="btn sm anr-decision" data-id="'+esc(x.id)+'" data-kind="'+esc(x.kind)+'" data-decision="approve">审核通过</button><button class="btn sm ghost anr-decision" data-id="'+esc(x.id)+'" data-kind="'+esc(x.kind)+'" data-decision="reject">驳回</button></div></article>').join(''):'<div class="empty">当前没有待审核数据</div>';document.querySelectorAll('.anr-decision').forEach(b=>b.onclick=async()=>{const word=b.dataset.decision==='approve'?'通过':'驳回';if(!confirm('确认'+word+'这条数据？'))return;try{await analysisReviewApi({action:'review',id:b.dataset.id,kind:b.dataset.kind,decision:b.dataset.decision});await loadAnalysisReview();}catch(e){msg(e.message,'err');}});}catch(e){box.innerHTML='<div class="msg err">'+esc(e.message)+'</div>';}}
+
+/* 数据研判逻辑中心：无项目数据时先维护方法；只有已发布版本才参与前台分析和正式快照。 */
+let analysisLogicRules=[];
+window.openAnalysisLogic=async function(){
+  const box=document.getElementById("listBox");document.getElementById("editBox").style.display="none";box.style.display="block";
+  box.innerHTML='<h1>数据研判逻辑中心</h1><div class="sub">集中维护项目1/3/5km圈层、人口画像、职住平衡、通勤、住房需求、周边设施、数字溯源、可研写入、影响预演和Provider接入共10项逻辑。<b>现在没有真实数据也有用：</b>先确定输入、公式、阈值、缺数处理和章节关联；以后接入数据直接按已发布版本执行。</div><div class="msg" style="background:#edf6ff;border-color:#bed8f2;color:#315f8e;">规则采用“草稿 → 发布”机制。保存草稿不会影响前台；发布后，新分析结果和新快照才采用该版本，历史快照不会被改写。</div><div class="bar"><button class="btn sm" id="anlReload">刷新10项逻辑</button></div><div id="anlBox"><div class="empty">加载中…</div></div>';
+  document.getElementById("anlReload").onclick=loadAnalysisLogic;await loadAnalysisLogic();
+};
+async function loadAnalysisLogic(){const box=document.getElementById("anlBox");try{const d=await analysisReviewApi({action:"listRules"});analysisLogicRules=(d.rules||[]).sort((a,b)=>(a.draft.order||99)-(b.draft.order||99));box.innerHTML=analysisLogicRules.map((x,i)=>analysisLogicCard(x,i)).join("");document.querySelectorAll("[data-anl-save]").forEach(b=>b.onclick=()=>saveAnalysisLogic(+b.dataset.anlSave));document.querySelectorAll("[data-anl-publish]").forEach(b=>b.onclick=()=>publishAnalysisLogic(+b.dataset.anlPublish));}catch(e){box.innerHTML='<div class="msg err">'+esc(e.message)+'</div>';}}
+function analysisLogicCard(x,i){const r=x.draft||x.published||{},dirty=x.status==="draft"||x.draftVersion!==x.publishedVersion,arr=v=>(Array.isArray(v)?v:[]).join("、"),cfg=JSON.stringify(r.config||{},null,2);return '<details class="contrib-card" '+(i===0?'open':'')+'><summary style="cursor:pointer;list-style:none;"><div class="contrib-head"><div><span class="contrib-kind">第'+esc(r.order||i+1)+'项</span><span class="contrib-title">'+esc(r.name||x.key)+'</span><div class="contrib-meta">领域 '+esc(r.domain||x.domain)+'　·　发布版 v'+x.publishedVersion+'　·　草稿 v'+x.draftVersion+'</div></div><span class="contrib-kind" style="background:'+(dirty?'#fff1d6':'#e8f7ee')+';color:'+(dirty?'#946200':'#227447')+';">'+(dirty?'有未发布修改':'已发布生效')+'</span></div></summary><div style="padding-top:14px;border-top:1px solid var(--line);"><label>研判目标<textarea data-anl="purpose" rows="2">'+esc(r.purpose||'')+'</textarea></label><div class="grid2"><label>所需输入（用顿号分隔）<textarea data-anl="inputs" rows="3">'+esc(arr(r.inputs))+'</textarea></label><label>输出结果（用顿号分隔）<textarea data-anl="outputs" rows="3">'+esc(arr(r.outputs))+'</textarea></label></div><label>白箱公式/统计方法<textarea data-anl="formula" rows="3">'+esc(r.formula||'')+'</textarea></label><div class="grid2"><label>阈值及分类标准<textarea data-anl="thresholds" rows="3">'+esc(r.thresholds||'')+'</textarea></label><label>缺失数据处理<textarea data-anl="missingPolicy" rows="3">'+esc(r.missingPolicy||'')+'</textarea></label></div><label>关联可研章节（用顿号分隔）<textarea data-anl="chapters" rows="2">'+esc(arr(r.chapters))+'</textarea></label><label>机器执行配置（JSON，谨慎修改）<textarea data-anl="config" rows="5" style="font-family:Consolas,monospace;">'+esc(cfg)+'</textarea></label><div class="bar"><button class="btn sm ghost" data-anl-save="'+i+'">保存为草稿</button><button class="btn sm" data-anl-publish="'+i+'" '+(dirty?'':'disabled')+'>发布并用于后续分析</button></div></div></details>';}
+function splitLogicText(v){return String(v||"").split(/[、,，;；\n]+/).map(x=>x.trim()).filter(Boolean);}
+function readAnalysisLogic(i){const card=document.querySelectorAll("#anlBox details")[i],old=analysisLogicRules[i].draft||analysisLogicRules[i].published,q=n=>card.querySelector('[data-anl="'+n+'"]');let config;try{config=JSON.parse(q("config").value||"{}");}catch(e){throw new Error("机器执行配置不是合法JSON："+e.message);}return{...old,key:analysisLogicRules[i].key,name:old.name,domain:old.domain,purpose:q("purpose").value.trim(),inputs:splitLogicText(q("inputs").value),outputs:splitLogicText(q("outputs").value),formula:q("formula").value.trim(),thresholds:q("thresholds").value.trim(),missingPolicy:q("missingPolicy").value.trim(),chapters:splitLogicText(q("chapters").value),config};}
+async function saveAnalysisLogic(i){try{const d=await analysisReviewApi({action:"saveRuleDraft",key:analysisLogicRules[i].key,rule:readAnalysisLogic(i)});msg(d.message,"ok");await loadAnalysisLogic();}catch(e){msg(e.message,"err");}}
+async function publishAnalysisLogic(i){if(!confirm("确认发布这项研判逻辑？发布后，新形成的项目分析和快照将采用新版本；历史快照保持不变。"))return;try{const d=await analysisReviewApi({action:"publishRule",key:analysisLogicRules[i].key});msg(d.message,"ok");await loadAnalysisLogic();}catch(e){msg(e.message,"err");}}
+
 // 初始化
 if(!getToken()){ document.getElementById("app").innerHTML='<div class="empty">请先在主站登录后再访问此页面（登录态通过浏览器共享）。</div>'; }
 else{
@@ -2526,6 +2552,8 @@ else{
   document.getElementById("btnAiRules").onclick = ()=>{ setActiveNav("btnAiRules"); openAiRules(); };
   document.getElementById("btnWiki").onclick = ()=>{ setActiveNav("btnWiki"); openWiki(); };
   document.getElementById("btnContrib").onclick = ()=>{ setActiveNav("btnContrib"); openContributions(); };
+  document.getElementById("btnAnalysisReview").onclick = ()=>{ setActiveNav("btnAnalysisReview"); openAnalysisReview(); };
+  document.getElementById("btnAnalysisLogic").onclick = ()=>{ setActiveNav("btnAnalysisLogic"); openAnalysisLogic(); };
   document.getElementById("btnRag").onclick = ()=>{ setActiveNav("btnRag"); openRag(); };
   // 独立资料台账入口：动态插入可避免旧版静态导航缓存时出现重复菜单。
   const materialsNav = document.createElement("div");

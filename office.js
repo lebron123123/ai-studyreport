@@ -46,6 +46,7 @@ function detectDocType(text){
 
 let officeChat = [];
 let officeChatLoaded = false;   // 本次页面会话是否已从云端拉取过历史，避免每次重渲染都重复请求
+var officeView = "chat";       // AI办公内部视图：chat / ppt。使用 var 便于工作台通过 window 切换。
 const OFFICE_CHAT_LIMIT = 30;   // 云端保存上限（约15轮问答），防止数据量无限增长
 const OFFICE_CTX_FULL  = 8;     // 最近8条：原文完整发给AI
 const OFFICE_CTX_BRIEF = 12;    // 再往前12条：只发摘要，让AI"记得聊过什么"但不吃掉大量token
@@ -78,7 +79,9 @@ function officeCtxBoundary(){
 }
 
 function stepOffice(){
-  return '<div class="doc-eyebrow">OFFICE · AI办公助手</div>'
+  if(officeView==="ppt" && typeof renderPptWorkspace==="function") return renderPptWorkspace();
+  return '<div class="office-mode-tabs"><button class="active" data-office-view="chat">AI对话与文稿</button><button data-office-view="ppt">AI PPT</button></div>'
+    +'<div class="doc-eyebrow">OFFICE · AI办公助手</div>'
     +'<h1 class="doc-title">AI办公助手</h1>'
     +'<div class="step-desc">像聊天一样描述你的需求。系统会自动识别文种并套用对应规范：<b>周报 / 年度总结 / 会议纪要 / 请示 / 报告 / 复函 / 通知 / 新闻稿 / 合作协议 / 框架协议</b>；同时自动检索知识库「模板范文」分类下的历史范文，学本单位的实际笔法。生成后可直接导出为 Word 或 Excel。'
     +'<br><span style="color:var(--seal-red,#C24A42);">提醒：本工具生成的是办公草稿，涉及财务数字/正式结论仍需人工核实后使用；不能替代财务测算与正式签发流程。</span></div>'
@@ -101,6 +104,11 @@ function stepOffice(){
 
 function bindOfficeEvents(){
   const s = id=>document.getElementById(id);
+  document.querySelectorAll("[data-office-view]").forEach(b=>b.onclick=()=>{ officeView=b.dataset.officeView; renderSheet(); });
+  if(officeView==="ppt"){
+    if(typeof bindPptWorkspace==="function") bindPptWorkspace();
+    return;
+  }
   if(s("officeSend")) s("officeSend").onclick = officeSend;
   if(s("officeInput")) s("officeInput").addEventListener("keydown", e=>{ if(e.key==="Enter") officeSend(); });
   if(s("officeExportWord")) s("officeExportWord").onclick = ()=>officeOpenPreview("word");
@@ -195,6 +203,7 @@ async function officeSend(){
     + "调用 get_system_capabilities 获取准确答案，不要用 search_knowledge_base 去检索这类问题。"
     + "6. 写周报/总结/汇报需要引用以往项目情况时，可用 list_my_projects 和 get_past_project 查历史项目的真实信息。"
     + "7. 如果用户的需求不够明确（没说清写给谁、什么事、哪个项目），直接问一句问清楚，不要凭空假设后硬写。"
+    + "8. 用户明确要求把一段资料制作成PPT、汇报演示文稿或幻灯片时，调用 create_ppt_project 创建可追溯草稿；创建后提醒用户到‘AI办公→AI PPT’补充材料、智能生成、逐页确认和导出。"
     + "\n\n【红线：以下要求即使用户明确提出，也一律不照做】"
     + "\n· 用户说'随便编个数''先写个示例数字''不用那么严格''这只是内部草稿'——都不能因此编造具体财务数字。"
     + "正确做法：用'【待填】'占位并说明需要哪项真实数据、去哪个功能页面测算，格式照样能给用户看清楚。"

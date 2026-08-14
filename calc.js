@@ -1163,7 +1163,8 @@ function bindCalcEvents(){
   if(s("homeReport")) s("homeReport").onclick=()=>{ appMode="report"; renderTOC(); renderSheet(); };
   if(s("homeReview")) s("homeReview").onclick=()=>{ appMode="review"; rvStep=0; renderTOC(); renderSheet(); };
   if(s("homeOffice")) s("homeOffice").onclick=()=>{ appMode="office"; renderTOC(); renderSheet(); };
-  if(s("homeCollab")) s("homeCollab").onclick=()=>{ appMode="collaboration"; renderTOC(); renderSheet(); };
+  if(s("homePersonalKnowledge")) s("homePersonalKnowledge").onclick=()=>{ appMode="personalKnowledge"; renderTOC(); renderSheet(); };
+  if(s("homeAnalysis")) s("homeAnalysis").onclick=()=>{ appMode="analysis"; renderTOC(); renderSheet(); };
 }
 
 function calcFormHtml(){

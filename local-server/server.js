@@ -23,6 +23,7 @@ import { createAIAdapter } from "./ai-ollama.js";
 import { createWorker } from "tesseract.js";
 import chiSimData from "@tesseract.js-data/chi_sim";
 import { verifyAuth } from "../functions/api/_auth.js";
+import { buildPptxBuffer } from "./ppt-export.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");          // 仓库根目录（网页文件在这里）
@@ -120,6 +121,18 @@ app.post("/api/local-ocr", async c=>{
     const job=ocrQueue.then(()=>worker.recognize(image)); ocrQueue=job.catch(()=>{}); const result=await job;
     const text=String(result.data&&result.data.text||"").trim(); return c.json({ok:true,text,confidence:Number(result.data&&result.data.confidence||0)});
   }catch(e){return c.json({ok:false,error:"本地OCR失败："+(e.message||e)},500);}
+});
+
+// 本地 AI PPT 导出：品牌模板约束主题，SlideSpec 动态选择原生可编辑组件。
+app.post("/api/ppt-export", async c=>{
+  const user=await verifyAuth(c.req.raw,ENV);if(!user)return c.json({ok:false,error:"未登录"},401);
+  try{
+    const body=await c.req.json(),plan=body&&body.plan;
+    if(!plan||!Array.isArray(plan.slides)||plan.slides.length<1)return c.json({ok:false,error:"没有可导出的PPT页面"},400);
+    if(plan.slides.length>40)return c.json({ok:false,error:"单份PPT暂不支持超过40页"},400);
+    const buffer=await buildPptxBuffer(plan),name=String(plan.title||"项目汇报").replace(/[\\/:*?\"<>|]/g,"_").slice(0,80)+".pptx";
+    return new Response(buffer,{status:200,headers:{"Content-Type":"application/vnd.openxmlformats-officedocument.presentationml.presentation","Content-Disposition":"attachment; filename*=UTF-8''"+encodeURIComponent(name),"Cache-Control":"no-store"}});
+  }catch(e){console.error("[ppt-export]",e);return c.json({ok:false,error:"PPT导出失败："+(e.message||e)},500);}
 });
 
 // 可用的接口名单（从目录扫描，下划线开头的是内部模块，不对外）

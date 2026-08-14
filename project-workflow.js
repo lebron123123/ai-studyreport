@@ -11,6 +11,14 @@
   const BUILD_WORDS = /建设|实施|进度|工期|工程|施工|招标|计划/;
   const SCALE_WORDS = /规模|用地|面积|建筑|户型|车位|方案|总平面/;
   const CONCLUSION_WORDS = /结论|建议|可行性|风险|综合评价/;
+  const ANALYSIS_DOMAIN_WORDS = {
+    population:/人口|区域概况|客群|需求|建设必要性/,
+    employment:/产业|就业|需求|建设必要性/,
+    commute:/职住|通勤|区位|需求|建设必要性/,
+    demand:/需求|建设规模|项目定位|结论|建议|可行性/,
+    market:/市场|价格|租金|售价|风险|需求/,
+    poi:/配套|交通|教育|医疗|商业|产业|区位|建设条件|社会效益|风险/,
+  };
 
   const METRIC_LABELS = {
     irr:"全投资IRR", capitalIrr:"资本金IRR", totalNpv:"累计净现值",
@@ -72,6 +80,11 @@
     });
     return hits;
   }
+  function impactedAnalysisSections(chapters,domains){
+    const ds=[...new Set((domains||[]).filter(x=>ANALYSIS_DOMAIN_WORDS[x]))],out=[],unrelated=/消防|结构|电气|给排水|暖通|节能|施工安全|抗震|海绵城市/;
+    (chapters||[]).forEach(c=>(c.sections||[]).forEach((s,si)=>{const title=String(s.t||"");if(unrelated.test(title))return;const q=String(c.name||"")+" "+title,why=ds.filter(d=>ANALYSIS_DOMAIN_WORDS[d].test(q));if(why.length)out.push({cn:c.cn,si,title:s.t,chapter:c.name,domains:why,locked:!!s.locked});}));return out;
+  }
+  function markAnalysisImpacted(chapters,domains,reason){const hits=impactedAnalysisSections(chapters,domains);hits.forEach(h=>{const c=(chapters||[]).find(x=>String(x.cn)===String(h.cn)),s=c&&c.sections[h.si];if(!s)return;s.syncStatus=s.locked?"locked-stale":"stale";s.staleReason=reason||("分析数据变化："+h.domains.join("、"));s.staleKeys=h.domains.slice();});return hits;}
   function clearSectionStale(section){
     if(!section)return; section.syncStatus="current"; section.staleReason=""; section.staleKeys=[];
   }
@@ -96,9 +109,9 @@
     const body=(chapters||[]).map(c=>({cn:c.cn,name:c.name,checked:c.checked,sections:(c.sections||[]).map(s=>({t:s.t,numeric:!!s.numeric,content:s.content||"",editedHtml:s.editedHtml||null,locked:!!s.locked,syncStatus:s.syncStatus||"current",prov:clone(s.prov||null)}))}));
     const nextVersion=state.reportVersions.reduce((n,x)=>Math.max(n,Number(x.version)||0),0)+1;
     const ver={id:uid("report"),version:nextVersion,createdAt:new Date().toISOString(),
-      calcSnapshotId:state.currentCalcSnapshotId||null,reason:String(meta&&meta.reason||"报告保存"),chapters:body,hash:hash(body)};
+      calcSnapshotId:state.currentCalcSnapshotId||null,analysisSnapshotId:state.currentAnalysisSnapshotId||null,reason:String(meta&&meta.reason||"报告保存"),chapters:body,hash:hash(body)};
     const prev=state.reportVersions[state.reportVersions.length-1];
-    if(prev&&prev.hash===ver.hash&&prev.calcSnapshotId===ver.calcSnapshotId)return prev;
+    if(prev&&prev.hash===ver.hash&&prev.calcSnapshotId===ver.calcSnapshotId&&prev.analysisSnapshotId===ver.analysisSnapshotId)return prev;
     state.reportVersions.push(ver);if(state.reportVersions.length>5)state.reportVersions.splice(0,state.reportVersions.length-5);state.currentReportVersionId=ver.id; return ver;
   }
   function setCandidate(section,newText,instruction){
@@ -126,6 +139,7 @@
   function ensureState(raw){
     const s=raw&&typeof raw==="object"?raw:{};
     if(!Array.isArray(s.calcSnapshots))s.calcSnapshots=[];
+    if(!Array.isArray(s.analysisSnapshots))s.analysisSnapshots=[];
     if(!Array.isArray(s.reportVersions))s.reportVersions=[];
     return s;
   }
@@ -186,7 +200,8 @@
 
   const api={clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,
     createCalcSnapshot,createReportVersion,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,ensureState,bulkConfirm,
-    aiReportStage,aiReportStageRank,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,METRIC_LABELS};
+    aiReportStage,aiReportStageRank,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
+    impactedAnalysisSections,markAnalysisImpacted,METRIC_LABELS,ANALYSIS_DOMAIN_WORDS};
   root.ProjectWorkflow=api;
   if(typeof module==="object"&&module.exports)module.exports=api;
 })(typeof window!=="undefined"?window:globalThis);

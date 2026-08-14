@@ -403,7 +403,7 @@ function workflowVersionCardHtml(){
   const cs=projectWorkflow&&projectWorkflow.calcSnapshots||[],rs=projectWorkflow&&projectWorkflow.reportVersions||[];
   const curC=cs.find(x=>x.id===projectWorkflow.currentCalcSnapshotId)||cs[cs.length-1],curR=rs.find(x=>x.id===projectWorkflow.currentReportVersionId)||rs[rs.length-1];
   const opts=rs.slice().reverse().map(v=>'<option value="'+v.id+'" '+(curR&&v.id===curR.id?'selected':'')+'>报告V'+v.version+' · '+new Date(v.createdAt).toLocaleString('zh-CN')+' · '+escapeHtml(v.reason||'')+'</option>').join('');
-  return '<div class="wf-version-card"><div><b>当前版本</b><div>测算 '+(curC?'V'+curC.version+' · '+escapeHtml(curC.reason):'尚未建立')+'｜报告 '+(curR?'V'+curR.version+' · 绑定测算'+(curR.calcSnapshotId?(cs.find(x=>x.id===curR.calcSnapshotId)?.version||'—'):'—'):'尚未建立')+'</div></div>'
+  return '<div class="wf-version-card"><div><b>当前版本</b><div>测算 '+(curC?'V'+curC.version+' · '+escapeHtml(curC.reason):'尚未建立')+'｜分析 '+(projectWorkflow.currentAnalysisSnapshotVersion?'V'+projectWorkflow.currentAnalysisSnapshotVersion:'尚未建立')+'｜报告 '+(curR?'V'+curR.version+' · 绑定测算'+(curR.calcSnapshotId?(cs.find(x=>x.id===curR.calcSnapshotId)?.version||'—'):'—')+' · 绑定分析'+(curR.analysisSnapshotId||'—'):'尚未建立')+'</div></div>'
     +(opts?'<div class="wf-version-restore"><select id="wfReportVersion">'+opts+'</select><button class="ub-btn" id="wfRestoreVersion">恢复所选报告版本</button></div>':'')+'</div>';
 }
 
@@ -411,6 +411,9 @@ function restoreReportVersion(id){
   const v=(projectWorkflow.reportVersions||[]).find(x=>x.id===id);if(!v)return false;
   v.chapters.forEach(vc=>{const c=chapters.find(x=>String(x.cn)===String(vc.cn));if(!c)return;(vc.sections||[]).forEach((vs,i)=>{if(c.sections[i])Object.assign(c.sections[i],ProjectWorkflow.clone(vs));});});
   projectWorkflow.currentReportVersionId=v.id;
+  projectWorkflow.currentAnalysisSnapshotId=v.analysisSnapshotId||null;
+  const analysisSnap=(projectWorkflow.analysisSnapshots||[]).find(x=>x.id===v.analysisSnapshotId);
+  if(analysisSnap){projectWorkflow.analysisSnapshot=ProjectWorkflow.clone(analysisSnap.result);projectWorkflow.analysisSnapshotStatus=analysisSnap.status;projectWorkflow.currentAnalysisSnapshotVersion=analysisSnap.version;}
   const snap=(projectWorkflow.calcSnapshots||[]).find(x=>x.id===v.calcSnapshotId);
   if(snap){calcType=snap.calcType;rptCtype=calcType==="sale"?"sale":"rent";calcParams=ProjectWorkflow.clone(snap.params);calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;projectWorkflow.currentCalcSnapshotId=snap.id;}
   return true;

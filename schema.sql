@@ -59,6 +59,30 @@ CREATE TABLE IF NOT EXISTS aireport_project_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_aireport_project_sessions_user ON aireport_project_sessions(user_id, updated_at DESC);
 
+-- AI办公固定模板PPT工作台
+CREATE TABLE IF NOT EXISTS ppt_projects (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  template_id TEXT NOT NULL DEFAULT 'anju-blue',
+  data TEXT NOT NULL DEFAULT '{}',
+  revision INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ppt_projects_user ON ppt_projects(user_id,updated_at DESC);
+CREATE TABLE IF NOT EXISTS ppt_project_versions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  revision INTEGER NOT NULL,
+  label TEXT DEFAULT '',
+  data TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ppt_versions_project ON ppt_project_versions(user_id,project_id,created_at DESC);
+
 -- 人口参考表：街道/乡镇一级人口没有官方免费API，人工整理真实统计公报数据维护
 CREATE TABLE IF NOT EXISTS population_ref (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

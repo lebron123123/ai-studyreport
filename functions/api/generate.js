@@ -92,10 +92,12 @@ export async function onRequestPost(context) {
   // ①思考模式会多吐大量推理token，拖慢速度、拉高成本；②本站Agent多轮工具调用在思考模式下容易触发
   // "reasoning_content must be passed back"报错。显式关闭thinking，行为和之前的deepseek-chat完全一致。
   const dsModel = env.DEEPSEEK_MODEL || "deepseek-v4-flash";
+  // 普通问答1200 token足够；AI PPT等结构化长输出可显式申请更高上限，但服务器封顶4000，避免失控。
+  const maxTokens = Math.max(200, Math.min(4000, Number(body.max_tokens) || 1200));
   const dsPayload = {
     model: dsModel,
     messages: dsMessages,
-    max_tokens: 1200,
+    max_tokens: maxTokens,
     temperature: 0.3,
     stream: wantStream,
     thinking: { type: "disabled" },

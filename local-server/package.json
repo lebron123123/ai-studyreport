@@ -12,6 +12,7 @@
     "@tesseract.js-data/chi_sim": "^1.0.0",
     "hono": "^4.6.14",
     "pg": "^8.13.1",
+    "pptxgenjs": "^4.0.1",
     "tesseract.js": "^7.0.0"
   }
 }
