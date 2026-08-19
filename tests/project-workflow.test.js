@@ -57,8 +57,9 @@ test("AI可研流程阶段由已形成的业务结果决定，刷新后不会倒
   assert.equal(WF.aiReportStage({}),"empty");
   assert.equal(WF.aiReportStage({extracted:{projectName:"A"}}),"info");
   assert.equal(WF.aiReportStage({extracted:{},suggested:{params:{rent:50}}}),"suggested");
-  assert.equal(WF.aiReportStage({suggested:{},calcParams:{rent:50}}),"calculated");
-  assert.equal(WF.aiReportStage({hasDoc:true,suggested:{},calcParams:{}}),"generating");
+  assert.equal(WF.aiReportStage({suggested:{},paramsConfirmed:true,calcParams:{rent:50}}),"calculated");
+  assert.equal(WF.aiReportStage({hasDoc:true,suggested:{},paramsConfirmed:true,calcParams:{}}),"generating");
+  assert.equal(WF.aiReportStage({suggested:{},calcParams:{rent:50}}),"suggested");
   assert.equal(WF.aiReportStage({chat:[{kind:"genProgress",total:3,done:3,active:false,stopped:false}]}),"delivered");
 });
 
@@ -68,7 +69,7 @@ test("传统财务测算结果不能污染AI可研流程阶段",()=>{
 });
 
 test("AI可研暂停生成与最终交付能区分，确保只展示正确的继续按钮",()=>{
-  assert.equal(WF.aiReportStage({suggested:{},chat:[{kind:"genProgress",total:8,done:3,active:false,stopped:true}]}),"paused");
+  assert.equal(WF.aiReportStage({suggested:{},paramsConfirmed:true,chat:[{kind:"genProgress",total:8,done:3,active:false,stopped:true}]}),"paused");
   assert.equal(WF.aiReportStage({suggested:{},chat:[{kind:"deliver"}],calcParams:{}}),"delivered");
   assert.ok(WF.aiReportStageRank("calculated")>WF.aiReportStageRank("suggested"));
 });

@@ -33,10 +33,11 @@ let aiReportHasDoc = false;      // 本轮是否已经有可预览的报告内�
 let aiReportDocVisible = false;  // 报告预览面板当前是否展开（用户可关/开）
 let aiReportPendingCalcChange = null; // AgentCore只生成预演，用户确认后才写入
 let aiReportAgentRegistered = false;
+let aiReportParamsConfirmed = false; // 只表示本次AI可研会话已通过人工确认；不得复用其他测算模块的全局calcParams
 
 function airCurrentStage(){
   const state={chat:aiReportChat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,
-    calcParams:aiReportSuggested&&calcParams||null,calcSummary:aiReportSuggested&&calcResult&&calcResult.summary||null};
+    paramsConfirmed:aiReportParamsConfirmed,calcParams:aiReportSuggested&&aiReportParamsConfirmed&&calcParams||null,calcSummary:aiReportSuggested&&aiReportParamsConfirmed&&calcResult&&calcResult.summary||null};
   return window.ProjectWorkflow?ProjectWorkflow.aiReportStage(state):(calcParams&&calcResult?"calculated":aiReportSuggested?"suggested":aiReportExtracted?"info":"empty");
 }
 function airStageAtLeast(stage){
@@ -50,7 +51,7 @@ function airClearLocalState(){try{localStorage.removeItem(airLocalStateKey());}c
 
 function airSwitchProjectSession(){
   aiReportStopFlag=true;aiReportChat=[];aiReportExtracted=null;aiReportSuggested=null;aiReportProgressMsg=null;aiReportPendingTasks=null;
-  aiReportHasDoc=false;aiReportDocVisible=false;aiReportPendingCalcChange=null;aiReportBusy=false;aiReportChatLoaded=false;
+  aiReportHasDoc=false;aiReportDocVisible=false;aiReportPendingCalcChange=null;aiReportBusy=false;aiReportChatLoaded=false;aiReportParamsConfirmed=false;
 }
 
 function airDocPaneEmptyHtml(){
@@ -89,6 +90,7 @@ function airRestartChat(){
   aiReportProgressMsg = null;
   aiReportPendingTasks = null;
   aiReportHasDoc = false;
+  aiReportParamsConfirmed = false;
   const pane = document.getElementById("airDocPane");
   if(pane){ pane.className = "air-doc-pane empty"; pane.innerHTML = airDocPaneEmptyHtml(); }
   airSetDocVisible(false);
@@ -389,6 +391,7 @@ async function airRunSuggest(){
       return;
     }
     aiReportSuggested = { calcType, params:d.params, sources:d.sources, keyFields:d.keyFields, paramMeta:d.paramMeta||{}, sourceHierarchy:d.sourceHierarchy||[] };
+    aiReportParamsConfirmed = false;
     const caseNote = d.caseCount? ("案例库中共有 "+d.caseCount+" 个「"+AI_TYPE_CN[calcType]+"」历史案例，其中 "+d.regionCaseCount+" 个与本项目同区域。")
       : "案例库中暂无「"+AI_TYPE_CN[calcType]+"」的已确认历史案例，以下参数为行业默认值，请务必人工核实。";
     airResolve(loading, {kind:"text", content:"已自动填好全套测算参数（约"+Object.keys(d.params).length+"项）。"+caseNote+" 下面这7项对结果影响最大，请重点确认（点「查看依据」能看到具体是哪几个历史项目）："});
@@ -483,6 +486,7 @@ async function aiReportConfirmParams(){
       try{ calcResult.modeCompare = computeModeCompare(calcParams); }catch(e){}
     }
     scParams = calcParams; scResult = calcResult;   // 供导出/审查等共享部件读取
+    aiReportParamsConfirmed = true;
     if(!currentProjectId){currentProjectId=genProjectId();rememberActiveProjectId(currentProjectId);}
     if(window.ProjectWorkflow)window.ProjectWorkflow.createCalcSnapshot(projectWorkflow,calcType,calcParams,calcResult,{reason:"AI可研参数人工确认",confirmedBy:typeof getUser==="function"?getUser():""});
     saveDraft();
@@ -499,11 +503,19 @@ async function aiReportConfirmParams(){
   airSetBusy(false);
 }
 
+function airSyncConfirmButtonState(){
+  const btn=document.getElementById("airConfirmParams");if(!btn)return;
+  const pending=document.querySelectorAll(".air-kf-confirm:not(:checked)").length;
+  btn.disabled=pending>0;btn.title=pending?"请先完成人工确认（尚有 "+pending+" 项）":"全部参数已确认，可以开始测算";
+}
+
 async function aiReportStartGenerate(){
   if(aiReportBusy) return;
+  if(!aiReportParamsConfirmed || !calcResult){ alert("请先完成人工确认并成功生成财务测算，再开始可研生成。"); return; }
   airSetBusy(true);
-  await aiReportRunGenerate();
-  airSetBusy(false);
+  try{ await aiReportRunGenerate(); }
+  catch(e){ airPush({role:"assistant",kind:"text",content:"可研生成未能启动："+e.message+"。按钮已恢复，可检查参数或稍后重试。"}); }
+  finally{ airSetBusy(false); }
 }
 
 /* ================= 阶段⑤ 生成：复用 report.js 的 generateSection()（接上流式），实时写入右侧预览面板 ================= */
@@ -784,13 +796,16 @@ function renderAiReportMsgs(){
   const s = id=>document.getElementById(id);
   if(s("airConfirmInfo")) s("airConfirmInfo").onclick = aiReportConfirmInfo;
   if(s("airConfirmParams")) s("airConfirmParams").onclick = aiReportConfirmParams;
+  document.querySelectorAll(".air-kf-confirm").forEach(box=>box.addEventListener("change",airSyncConfirmButtonState));
   if(s("airConfirmAll")) s("airConfirmAll").onclick = ()=>{
     const boxes=document.querySelectorAll(".air-kf-confirm");
     const result=window.ProjectWorkflow?window.ProjectWorkflow.bulkConfirm(boxes):(Array.from(boxes).forEach(x=>x.checked=true),{total:boxes.length,changed:boxes.length});
     const btn=s("airConfirmAll"),state=s("airConfirmAllState");
     btn.textContent="已批量确认 "+result.total+" 项";btn.classList.add("done");
     if(state)state.textContent=result.changed?"请最后点击下方“确认，开始测算”":"全部项目此前已经确认";
+    airSyncConfirmButtonState();
   };
+  airSyncConfirmButtonState();
   if(s("airStartGen")) s("airStartGen").onclick = aiReportStartGenerate;
   if(s("airApplyCalc"))s("airApplyCalc").onclick=airApplyCalcPreview;
   if(s("airRejectCalc"))s("airRejectCalc").onclick=()=>{aiReportPendingCalcChange=null;aiReportChat=aiReportChat.filter(m=>m.kind!=="calcPreview");airPush({role:"assistant",kind:"text",content:"已取消本次参数修改，当前正式测算和报告没有变化。"});airSaveState();};
@@ -916,7 +931,7 @@ function airSerializableState(){
     if(m.kind==="typeTag"){ chat.push({role:m.role, kind:"typeTag", content:m.content||"", calcType:m.calcType}); return; }
     chat.push({role:m.role, kind:m.kind, content:m.content||""});
   });
-  return { savedAt:Date.now(),stage:airCurrentStage(),chat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,
+  return { savedAt:Date.now(),stage:airCurrentStage(),chat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,paramsConfirmed:aiReportParamsConfirmed,
     calcType:calcType||(calcResult&&calcResult.__ctype)||null,calcParams:calcParams||null,calcSummary:calcResult&&calcResult.summary||null,
     currentCalcSnapshotId:projectWorkflow&&projectWorkflow.currentCalcSnapshotId||null,currentReportVersionId:projectWorkflow&&projectWorkflow.currentReportVersionId||null,
     pendingTaskKeys:(aiReportPendingTasks||[]).map(t=>({cn:t.c.cn,si:t.si})) };
@@ -929,6 +944,13 @@ function airSaveState(){
       headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
       body: JSON.stringify({action:"saveState",projectId:currentProjectId||undefined,state})});
   }catch(e){ /* 保存失败不影响当前对话，下次关键节点会重试 */ }
+}
+function airRestoredConfirmation(state){
+  if(!state)return false;
+  if(state.paramsConfirmed===true)return true;
+  if(state.paramsConfirmed===false)return false;
+  const chat=Array.isArray(state.chat)?state.chat:[];
+  return !!(state.calcParams&&chat.some(m=>m&&["genProgress","deliver"].includes(m.kind)));
 }
 async function airLoadState(){
   if(aiReportChatLoaded) return;
@@ -947,8 +969,9 @@ async function airLoadState(){
       aiReportExtracted = state.extracted || null;
       aiReportSuggested = state.suggested || null;
       aiReportHasDoc=!!state.hasDoc;
+      aiReportParamsConfirmed=airRestoredConfirmation(state);
       if(state.calcType)calcType=state.calcType;
-      if(state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;}catch(e){}}
+      if(aiReportParamsConfirmed&&state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;}catch(e){aiReportParamsConfirmed=false;}}
       airRepairFlowCards();
       aiReportProgressMsg=aiReportChat.find(m=>m.kind==="genProgress")||null;
       if(Array.isArray(state.pendingTaskKeys)&&state.pendingTaskKeys.length&&chapters.length){
@@ -961,8 +984,8 @@ async function airLoadState(){
   }catch(e){
     const state=airLoadLocalState();
     if(state){
-      aiReportChat=(state.chat||[]).map(m=>Object.assign({id:++aiReportMsgSeq},m));aiReportExtracted=state.extracted||null;aiReportSuggested=state.suggested||null;aiReportHasDoc=!!state.hasDoc;
-      if(state.calcType)calcType=state.calcType;if(state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;}catch(_){} }
+      aiReportChat=(state.chat||[]).map(m=>Object.assign({id:++aiReportMsgSeq},m));aiReportExtracted=state.extracted||null;aiReportSuggested=state.suggested||null;aiReportHasDoc=!!state.hasDoc;aiReportParamsConfirmed=airRestoredConfirmation(state);
+      if(state.calcType)calcType=state.calcType;if(aiReportParamsConfirmed&&state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;}catch(_){aiReportParamsConfirmed=false;} }
       airRepairFlowCards();renderAiReportMsgs();
     }
   }

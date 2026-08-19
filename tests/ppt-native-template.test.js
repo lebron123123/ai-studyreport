@@ -1,0 +1,55 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import JSZip from "../local-server/node_modules/jszip/lib/index.js";
+import { buildNativeTemplatePptx, fillNativeSlideXml, nativeTemplateEligible, replacePresentationSlideList, resolveNativeTemplatePath, selectNativePages } from "../local-server/ppt-native-template.js";
+import { validatePptxBuffer } from "../local-server/ppt-export.js";
+
+test("真实模板页面选择会按版式分配并避免常用页重复",()=>{
+  const plan={templateId:"business-blue-160",nativeTemplate:true,slides:[
+    {layoutId:"cover"},{layoutId:"agenda"},{layoutId:"timeline"},{layoutId:"timeline"},{layoutId:"risk"},{layoutId:"conclusion"}
+  ]};
+  assert.equal(nativeTemplateEligible(plan),true);
+  const pages=selectNativePages(plan).map(x=>x.page);
+  assert.equal(pages.length,6);
+  assert.equal(new Set(pages).size,6);
+  assert.equal(pages[0],1);
+  assert.equal(pages[1],8);
+});
+
+test("图表和表格页在完成原生数据槽位前不会误用静态模板数据",()=>{
+  const plan={templateId:"business-blue-160",nativeTemplate:true,slides:[{layoutId:"cover"},{layoutId:"chart-bar"}]};
+  assert.equal(nativeTemplateEligible(plan),false);
+});
+
+test("演示文稿页列表可按真实模板源页重新排序",()=>{
+  const presentation='<p:presentation xmlns:p="p" xmlns:r="r"><p:sldIdLst><p:sldId id="256" r:id="rId1"/><p:sldId id="257" r:id="rId2"/></p:sldIdLst></p:presentation>';
+  const rels='<Relationships><Relationship Id="rId1" Target="slides/slide1.xml"/><Relationship Id="rId2" Target="slides/slide8.xml"/></Relationships>';
+  const out=replacePresentationSlideList(presentation,rels,[8,1]);
+  assert.ok(out.indexOf('r:id="rId2"')<out.indexOf('r:id="rId1"'));
+});
+
+test("真实模板文字槽位替换保留形状结构",()=>{
+  const xml='<p:sld><p:cSld><p:spTree><p:sp><p:spPr><a:xfrm><a:off x="0" y="0"/></a:xfrm></p:spPr><p:txBody><a:p><a:r><a:rPr sz="3200"/><a:t>工作汇报</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:spPr><a:xfrm><a:off x="0" y="1000000"/></a:xfrm></p:spPr><p:txBody><a:p><a:r><a:rPr sz="1600"/><a:t>Here you can describe the main work report content.</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>';
+  const out=fillNativeSlideXml(xml,{layoutId:"cover",title:"项目决策汇报",subtitle:"经营班子审议"},{title:"项目决策汇报",purpose:"经营班子审议"},1);
+  assert.match(out,/项目决策汇报/);
+  assert.match(out,/经营班子审议/);
+  assert.equal((out.match(/<p:sp>/g)||[]).length,2);
+});
+
+const templatePath=resolveNativeTemplatePath();
+test("本机160页模板可生成只展示工程页数的原生PPTX",{skip:!templatePath},async()=>{
+  const plan={title:"真实模板回归",templateId:"business-blue-160",nativeTemplate:true,purpose:"验证真实母页",audience:"项目决策人员",designSpec:{brandName:"深安居"},slides:[
+    {layoutId:"cover",title:"真实模板回归",subtitle:"直接复用母页"},
+    {layoutId:"agenda",title:"汇报结构",content:{items:[{text:"项目背景"},{text:"测算结论"},{text:"风险与行动"}]}},
+    {layoutId:"timeline",title:"实施路径",content:{steps:[{label:"资料",text:"完成归集"},{label:"复核",text:"确认口径"},{label:"决策",text:"形成结论"}]}},
+    {layoutId:"conclusion",title:"下一步行动",bullets:["确认参数","提交审议"]}
+  ]};
+  const buffer=await buildNativeTemplatePptx(plan,{templatePath});
+  const zip=await JSZip.loadAsync(buffer),presentation=await zip.file("ppt/presentation.xml").async("string");
+  assert.equal((presentation.match(/<p:sldId\b/g)||[]).length,4);
+  assert.ok(Object.keys(zip.files).filter(x=>x.startsWith("ppt/media/")).length>20);
+  const qa=await validatePptxBuffer(buffer,plan);
+  assert.equal(qa.ok,true);
+  assert.equal(qa.slideCount,4);
+  assert.equal(qa.nativeTemplate,true);
+});

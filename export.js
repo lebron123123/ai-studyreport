@@ -12,6 +12,7 @@ async function exportCalcExcel(){
 }
 function buildSaleWordWorkbook(X,R,p){
   const wb=X.utils.book_new(),E=R.saleEstimate,A=E.allocation||{},ys=R.allYears||[],sch=p.investSchedule||{},plan=R.saleInvestmentPlan||{years:[],rows:[]};
+  const at=(obj,y)=>(obj&&obj[y])||{};
   const add=(name,rows,widths)=>{const ws=X.utils.aoa_to_sheet(rows);ws["!cols"]=(widths||[12,30,16,16,42]).map(w=>({wch:w}));ws["!freeze"]={xSplit:2,ySplit:1};X.utils.book_append_sheet(wb,ws,name);};
   const yearTable=(title,rows)=>[[title,"全周期合计"].concat(ys)].concat(rows.map(r=>{
     const vals=ys.map(y=>Number(r.get(y)||0));return [r.name,r.last?vals[vals.length-1]||0:vals.reduce((s,v)=>s+v,0)].concat(vals);
@@ -21,22 +22,22 @@ function buildSaleWordWorkbook(X,R,p){
   const ab=(side)=>[["公式序号","费用项目","金额（万元）","分摊依据"]].concat((E.allocationRows||[]).map(x=>[side==="a"?String(x.no).split("/")[0]:String(x.no).split("/")[1],x.name,x[side],side==="a"?"计入配售A":"不计入配售B"]));
   add("3计入配售部分",ab("a"));add("4不计入配售部分",ab("b"));
   add("5工期进度",[["序号","工作阶段"].concat((sch.periods||[]).map(x=>x.label))].concat((sch.tasks||[]).map((t,i)=>[i+1,t.name].concat((sch.periods||[]).map((_,q)=>InvestmentSchedule.activePeriods(t,sch.totalQuarters).includes(q)?"■":"")))),[8,22].concat((sch.periods||[]).map(()=>8)));
-  add("6投资计划",[["序号","项目名称","合计（万元）"].concat((plan.years||[]).map(y=>y+"年"),["金额来源/公式口径"])].concat((plan.rows||[]).map(r=>[r.no,r.name,r.amount].concat((plan.years||[]).map(y=>r.annual[y]||0),[r.source||""]))),[12,30,18].concat((plan.years||[]).map(()=>14),[42]));
+  add("6投资计划",[["序号","项目名称","合计（万元）"].concat((plan.years||[]).map(y=>y+"年"),["金额来源/公式口径"])].concat((plan.rows||[]).map(r=>[r.no,r.name,r.amount].concat((plan.years||[]).map(y=>(r.annual||{})[y]||0),[r.source||""]))),[12,30,18].concat((plan.years||[]).map(()=>14),[42]));
   const hp=E.housingPrice||{};add("7住房价格",[["序号","价格构成","元/㎡","公式口径"],["46.1","项目地价",hp.landUnit,"公式46"],["46.2","工程建设",hp.engineeringUnit,"公式46"],["46.3","其他工程建设",hp.otherUnit,"公式46"],["46.4","物业维修基金",hp.repairUnit,"公式46"],["46.5","财务成本",hp.financeUnit,"公式46"],["46.6","利润",hp.profitUnit,"公式46"],["46.7","增值税",hp.vatUnit,"公式46"],["46.8","城市维护建设税",hp.cityTaxUnit,"公式46"],["46.9","所得税",hp.incomeTaxUnit,"公式46"],["46","配售住房测算价格",hp.total,"以上各项之和"]]);
   add("8销售收入",yearTable("47~53 销售收入",[
-    {name:"47 配保房销售收入",get:y=>R.income[y].sale},{name:"47.2 成本价移交收入",get:y=>R.income[y].transfer},{name:"48 销售回款",get:y=>R.income[y].sale+R.income[y].transfer},{name:"49 销售税金及附加",get:y=>R.cost[y].saleTax},{name:"52 销售费用",get:y=>R.cost[y].saleFee},{name:"53 销售净收入",get:y=>R.income[y].sale+R.income[y].transfer-R.cost[y].saleTax-R.cost[y].saleFee}
+    {name:"47 配保房销售收入",get:y=>at(R.income,y).sale},{name:"47.2 成本价移交收入",get:y=>at(R.income,y).transfer},{name:"48 销售回款",get:y=>(at(R.income,y).sale||0)+(at(R.income,y).transfer||0)},{name:"49 销售税金及附加",get:y=>at(R.cost,y).saleTax},{name:"52 销售费用",get:y=>at(R.cost,y).saleFee},{name:"53 销售净收入",get:y=>(at(R.income,y).sale||0)+(at(R.income,y).transfer||0)-(at(R.cost,y).saleTax||0)-(at(R.cost,y).saleFee||0)}
   ]),[32,16].concat(ys.map(()=>13)));
   add("9租赁收入",yearTable("54~58 租赁收入",[
     {name:"54 商业出租收入",get:y=>R.rental[y]&&R.rental[y].income},{name:"55 租赁税金",get:y=>R.rental[y]&&R.rental[y].taxTotal},{name:"56 租赁运营成本",get:y=>R.rental[y]&&R.rental[y].costTotal},{name:"57 租赁净收入",get:y=>R.rental[y]&&R.rental[y].netIncome},{name:"58 租赁净收益现值",get:y=>R.rental[y]&&R.rental[y].pv}
   ]),[32,16].concat(ys.map(()=>13)));
   add("10损益",yearTable("59~66 损益",[
-    {name:"59 总收入",get:y=>R.income[y].total},{name:"61 总成本费用",get:y=>R.cost[y].total},{name:"62 利润总额",get:y=>R.profit[y].total},{name:"63 弥补以前年度亏损",get:y=>R.profit[y].makeup},{name:"64 应纳税所得额",get:y=>R.profit[y].taxable},{name:"65 所得税",get:y=>R.profit[y].incomeTax},{name:"66 净利润",get:y=>R.profit[y].net}
+    {name:"59 总收入",get:y=>at(R.income,y).total},{name:"61 总成本费用",get:y=>at(R.cost,y).total},{name:"62 利润总额",get:y=>at(R.profit,y).total},{name:"63 弥补以前年度亏损",get:y=>at(R.profit,y).makeup},{name:"64 应纳税所得额",get:y=>at(R.profit,y).taxable},{name:"65 所得税",get:y=>at(R.profit,y).incomeTax},{name:"66 净利润",get:y=>at(R.profit,y).net}
   ]),[32,16].concat(ys.map(()=>13)));
   add("11还本付息",yearTable("67 还本付息",[
-    {name:"67.1 期初借款余额",get:y=>R.loan[y].begin},{name:"67.2 本期借款",get:y=>R.loan[y].borrow},{name:"67.3 本期利息",get:y=>R.loan[y].interest},{name:"67.4 本期还本",get:y=>R.loan[y].repay},{name:"67.5 还本付息合计",get:y=>R.loan[y].total},{name:"67.6 期末借款余额",get:y=>R.loan[y].end,last:true}
+    {name:"67.1 期初借款余额",get:y=>at(R.loan,y).begin},{name:"67.2 本期借款",get:y=>at(R.loan,y).borrow},{name:"67.3 本期利息",get:y=>at(R.loan,y).interest},{name:"67.4 本期还本",get:y=>at(R.loan,y).repay},{name:"67.5 还本付息合计",get:y=>at(R.loan,y).total},{name:"67.6 期末借款余额",get:y=>at(R.loan,y).end,last:true}
   ]),[32,16].concat(ys.map(()=>13)));
   add("12现金流",yearTable("68~76 全投资及资本金现金流",[
-    {name:"68 全投资现金流入",get:y=>R.cf[y].inflow},{name:"69 全投资现金流出",get:y=>R.cf[y].outflow},{name:"70 全投资净现金流",get:y=>R.cf[y].net},{name:"71 累计净现金流",get:y=>R.cf[y].cumNet,last:true},{name:"72 年中折现净现值",get:y=>R.cf[y].npv},{name:"73 累计净现值",get:y=>R.cf[y].cumNpv,last:true},{name:"75 资本金现金流入",get:y=>R.capitalCf[y].inflow},{name:"75.2 资本金现金流出",get:y=>R.capitalCf[y].outflow},{name:"76 资本金净现金流",get:y=>R.capitalCf[y].net},{name:"76.1 累计资本金净现金流",get:y=>R.capitalCf[y].cumNet,last:true}
+    {name:"68 全投资现金流入",get:y=>at(R.cf,y).inflow},{name:"69 全投资现金流出",get:y=>at(R.cf,y).outflow},{name:"70 全投资净现金流",get:y=>at(R.cf,y).net},{name:"71 累计净现金流",get:y=>at(R.cf,y).cumNet,last:true},{name:"72 年中折现净现值",get:y=>at(R.cf,y).npv},{name:"73 累计净现值",get:y=>at(R.cf,y).cumNpv,last:true},{name:"75 资本金现金流入",get:y=>at(R.capitalCf,y).inflow},{name:"75.2 资本金现金流出",get:y=>at(R.capitalCf,y).outflow},{name:"76 资本金净现金流",get:y=>at(R.capitalCf,y).net},{name:"76.1 累计资本金净现金流",get:y=>at(R.capitalCf,y).cumNet,last:true}
   ]),[34,16].concat(ys.map(()=>13)));
   return wb;
 }
@@ -129,7 +130,7 @@ function buildCalcWorkbook(){
       const coeffRows=[["序号","项目名称","合计"].concat(cp.years.map(y=>y+"年"))].concat(cp.rows.map(r=>[r.no,r.name,(r.annualPattern||[]).length?1:null].concat(cp.years.map(y=>r.annualCoefficients[y]||null))));
       const wsC=X.utils.aoa_to_sheet(coeffRows);wsC["!cols"]=[{wch:8},{wch:28},{wch:12}].concat(cp.years.map(()=>({wch:12})));X.utils.book_append_sheet(wb,wsC,"出售类投资计划系数");
       const plan=InvestmentSchedule.saleInvestmentPlan(scParams,scResult,cp),yearStart=3,sourceCol=yearStart+plan.years.length,planRows=[["序号","项目名称","合计（万元）"].concat(plan.years.map(y=>y+"年"),["金额来源/当前口径"])];
-      plan.rows.forEach(r=>planRows.push([r.no,r.name,r.amount].concat(plan.years.map(y=>r.annual[y]||0),[r.source||""])));
+      plan.rows.forEach(r=>planRows.push([r.no,r.name,r.amount].concat(plan.years.map(y=>(r.annual||{})[y]||0),[r.source||""])));
       const ws45=X.utils.aoa_to_sheet(planRows),rowNo=Object.fromEntries(plan.rows.map((r,i)=>[r.no,i+2])),coeffRow=Object.fromEntries(cp.rows.map((r,i)=>[r.no,i+2])),coeffYear=Object.fromEntries(cp.years.map((y,i)=>[y,3+i]));
       plan.rows.forEach((r,i)=>{const excelRow=i+2,totalRef="C"+excelRow;if(r.children){ws45[totalRef].f="ROUND("+r.children.map(no=>"C"+rowNo[no]).join("+")+",4)";plan.years.forEach((y,yi)=>{const c=X.utils.encode_col(yearStart+yi)+excelRow;c in ws45&&(ws45[c].f="ROUND("+r.children.map(no=>X.utils.encode_col(yearStart+yi)+rowNo[no]).join("+")+",4)");});return;}
         plan.years.forEach((y,yi)=>{const ref=X.utils.encode_col(yearStart+yi)+excelRow;if(r.annualMode==="direct"){const yearIndex=ys.indexOf(y),loanRow=reg.l_int;if(yearIndex>=0&&loanRow)ws45[ref].f="'"+loanRow.sheet+"'!"+col(yearIndex)+loanRow.row;}

@@ -157,8 +157,8 @@
     const progress=chat.find(x=>x&&x.kind==="genProgress");
     const delivered=chat.some(x=>x&&x.kind==="deliver");
     if(delivered || (progress&&progress.active===false&&progress.stopped===false&&Number(progress.done)>=Number(progress.total))) return "delivered";
-    if((state.hasDoc || progress)&&state.suggested) return progress&&progress.stopped?"paused":"generating";
-    if(state.suggested&&(state.calcParams || state.calcSummary)) return "calculated";
+    if(state.paramsConfirmed&&(state.hasDoc || progress)&&state.suggested) return progress&&progress.stopped?"paused":"generating";
+    if(state.paramsConfirmed&&state.suggested&&(state.calcParams || state.calcSummary)) return "calculated";
     if(state.suggested) return "suggested";
     if(state.extracted) return "info";
     return "empty";

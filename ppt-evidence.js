@@ -3,7 +3,7 @@
   "use strict";
   const clean=(v,n=200000)=>String(v==null?"":v).replace(/\r/g,"").trim().slice(0,n);
   const hash=s=>{let h=2166136261;for(const c of String(s)){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}return (h>>>0).toString(16).padStart(8,"0");};
-  const kindOf=name=>{const x=String(name||"").toLowerCase().split(".").pop();return ({docx:"word",pdf:"pdf",xlsx:"excel",xls:"excel",csv:"excel",txt:"text",md:"markdown"})[x]||"text";};
+  const kindOf=name=>{const x=String(name||"").toLowerCase().split(".").pop();return ({docx:"word",pdf:"pdf",xlsx:"excel",xls:"excel",csv:"excel",txt:"text",md:"markdown",png:"image",jpg:"image",jpeg:"image",webp:"image"})[x]||"text";};
   function numericFacts(text,sourceId,label){
     const out=[],seen=new Set(),lines=clean(text).split(/\n+/);
     lines.forEach((line,li)=>{
@@ -18,14 +18,15 @@
   function normalizeAsset(item,index){
     const name=clean(item&&item.name,160)||("材料"+(index+1)),text=clean(item&&item.text),id=clean(item&&item.id,80)||("src_"+hash(name+"|"+text.slice(0,2000)));
     const sheets=Array.isArray(item&&item.sheets)?item.sheets.slice(0,80).map(s=>({name:clean(s.name,80),range:clean(s.range,80),rows:Array.isArray(s.rows)?s.rows.slice(0,120):[]})):[];
-    return{id,name,kind:clean(item&&item.kind,30)||kindOf(name),size:Number(item&&item.size)||text.length,text,sheets,version:clean(item&&item.version,40)||"本次导入",period:clean(item&&item.period,60),importedAt:Number(item&&item.importedAt)||Date.now()};
+    const dataUrl=String(item&&item.dataUrl||"");
+    return{id,name,kind:clean(item&&item.kind,30)||kindOf(name),size:Number(item&&item.size)||text.length,text,sheets,dataUrl:dataUrl.startsWith("data:image/")?dataUrl:"",width:Number(item&&item.width)||0,height:Number(item&&item.height)||0,version:clean(item&&item.version,40)||"本次导入",period:clean(item&&item.period,60),importedAt:Number(item&&item.importedAt)||Date.now()};
   }
   function buildEvidencePack(items,opts={}){
-    const assets=(Array.isArray(items)?items:[]).map(normalizeAsset).filter(x=>x.text||x.sheets.length);
+    const assets=(Array.isArray(items)?items:[]).map(normalizeAsset).filter(x=>x.text||x.sheets.length||x.dataUrl);
     const facts=assets.flatMap(x=>numericFacts(x.text,x.id,x.name));
     const tables=[];assets.forEach(x=>x.sheets.forEach((s,i)=>tables.push({id:"table_"+x.id+"_"+i,title:s.name||x.name,sourceId:x.id,sourceLabel:x.name,locator:(s.name||"Sheet")+(s.range?"!"+s.range:""),rows:s.rows})));
     const sourceRefs=assets.map(x=>({id:x.id,label:x.name,kind:x.kind,version:x.version,period:x.period||"未标注",locator:x.sheets.length?x.sheets.map(s=>s.name).join("、"):"全文"}));
-    return{schemaVersion:1,title:clean(opts.title,120)||"PPT材料证据包",assets,facts,tables,sourceRefs,summary:{assetCount:assets.length,factCount:facts.length,tableCount:tables.length,totalChars:assets.reduce((n,x)=>n+x.text.length,0)},createdAt:Date.now()};
+    return{schemaVersion:2,title:clean(opts.title,120)||"PPT材料证据包",assets,facts,tables,sourceRefs,summary:{assetCount:assets.length,imageCount:assets.filter(x=>x.kind==="image").length,factCount:facts.length,tableCount:tables.length,totalChars:assets.reduce((n,x)=>n+x.text.length,0)},createdAt:Date.now()};
   }
   function evidenceText(pack,maxChars=60000){
     let used=0,out=[];for(const a of (pack&&pack.assets)||[]){const head="\n\n[来源 "+a.name+"｜"+a.kind+"｜"+(a.version||"本次导入")+"]\n",left=Math.max(0,maxChars-used-head.length);if(left<=0)break;const body=a.text.slice(0,left);out.push(head+body);used+=head.length+body.length;}return out.join("").trim();

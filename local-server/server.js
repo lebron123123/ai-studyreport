@@ -14,7 +14,7 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
-import { readdirSync, existsSync } from "node:fs";
+import { readdirSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { createD1Shim } from "./d1-shim.js";
@@ -23,7 +23,8 @@ import { createAIAdapter } from "./ai-ollama.js";
 import { createWorker } from "tesseract.js";
 import chiSimData from "@tesseract.js-data/chi_sim";
 import { verifyAuth } from "../functions/api/_auth.js";
-import { buildPptxBuffer } from "./ppt-export.js";
+import { buildPptxBuffer, validatePptxBuffer } from "./ppt-export.js";
+import { analyzeTemplateBuffer } from "./ppt-template-analyzer.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");          // 仓库根目录（网页文件在这里）
@@ -130,9 +131,23 @@ app.post("/api/ppt-export", async c=>{
     const body=await c.req.json(),plan=body&&body.plan;
     if(!plan||!Array.isArray(plan.slides)||plan.slides.length<1)return c.json({ok:false,error:"没有可导出的PPT页面"},400);
     if(plan.slides.length>40)return c.json({ok:false,error:"单份PPT暂不支持超过40页"},400);
-    const buffer=await buildPptxBuffer(plan),name=String(plan.title||"项目汇报").replace(/[\\/:*?\"<>|]/g,"_").slice(0,80)+".pptx";
-    return new Response(buffer,{status:200,headers:{"Content-Type":"application/vnd.openxmlformats-officedocument.presentationml.presentation","Content-Disposition":"attachment; filename*=UTF-8''"+encodeURIComponent(name),"Cache-Control":"no-store"}});
+    const buffer=await buildPptxBuffer(plan),qa=await validatePptxBuffer(buffer,plan),name=String(plan.title||"项目汇报").replace(/[\\/:*?\"<>|]/g,"_").slice(0,80)+".pptx";
+    if(!qa.ok)return c.json({ok:false,error:"PPT结构质检失败："+qa.errors.join("；"),qa},500);
+    return new Response(buffer,{status:200,headers:{"Content-Type":"application/vnd.openxmlformats-officedocument.presentationml.presentation","Content-Disposition":"attachment; filename*=UTF-8''"+encodeURIComponent(name),"Cache-Control":"no-store","X-PPT-QA":"passed","X-PPT-QA-Warnings":String(qa.warnings.length),"X-PPT-Slides":String(qa.slideCount),"X-PPT-Native":String(qa.nativeTemplate===true)}});
   }catch(e){console.error("[ppt-export]",e);return c.json({ok:false,error:"PPT导出失败："+(e.message||e)},500);}
+});
+
+// Reference PPT template induction: local-only parsing and storage, never uploads the source file.
+app.post("/api/ppt-template-analyze", async c=>{
+  const user=await verifyAuth(c.req.raw,ENV);if(!user)return c.json({ok:false,error:"未登录"},401);
+  try{
+    const body=await c.req.json(),name=String(body.name||"reference.pptx").replace(/[\\/:*?\"<>|]/g,"_").slice(0,120),b64=String(body.dataBase64||"");
+    if(!/\.(pptx|potx)$/i.test(name))return c.json({ok:false,error:"只支持PPTX/POTX参考模板"},400);
+    if(!b64||b64.length>90*1024*1024)return c.json({ok:false,error:"参考模板为空或超过约65MB"},400);
+    const buffer=Buffer.from(b64,"base64"),profile=await analyzeTemplateBuffer(buffer,name),dir=path.join(ROOT,"local-data","ppt-templates","user-"+user.userId);mkdirSync(dir,{recursive:true});
+    const file=profile.fingerprint.slice(0,24)+path.extname(name).toLowerCase();writeFileSync(path.join(dir,file),buffer);
+    return c.json({ok:true,profile,storageKey:"user-"+user.userId+"/"+file,cached:false});
+  }catch(e){console.error("[ppt-template-analyze]",e);return c.json({ok:false,error:"参考PPT解析失败："+(e.message||e)},500);}
 });
 
 // 可用的接口名单（从目录扫描，下划线开头的是内部模块，不对外）

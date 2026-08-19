@@ -18,7 +18,26 @@ test("AI SlideSpec解析并保留动态组件和来源",()=>{
     {type:"content",layoutId:"metric",title:"关键指标支撑项目推进",content:{metrics:[{label:"总投资",value:"5.2亿元"}]},sources:["测算.xlsx｜Sheet1!B2"]},
     {type:"conclusion",layoutId:"conclusion",title:"建议完成复核后推进",bullets:["复核参数"]}
   ]});
-  const plan=globalThis.PptCore.parseAiPlan(raw,{templateId:"anju-blue"});assert.equal(plan.generationMode,"ai");assert.equal(plan.slides[1].layoutId,"metric");assert.equal(plan.slides[1].sources.length,1);
+  const plan=globalThis.PptCore.parseAiPlan(raw,{templateId:"anju-blue"});assert.equal(plan.generationMode,"ai");assert.equal(plan.slides[1].layoutId,"metric");assert.equal(plan.slides[1].contentStatus,"evidence-gap");assert.equal(plan.slides[1].sources.length,1);
+});
+
+test("视觉导演会纠正非数字指标卡且不修改人工锁定页",()=>{
+  const plan=globalThis.PptCore.buildDeckPlan({slides:[
+    {type:"cover",layoutId:"cover",title:"测试"},
+    {layoutId:"metric",title:"投资比例",bullets:["土地成本、竣工阶段","平均分摊","前高后低","S型分摊"],content:{metrics:[{label:"一次性投入",value:"土地成本、竣工阶段"},{label:"平均分摊",value:"25%×4季度"},{label:"前高后低",value:"40/30/20/10"},{label:"S型分摊",value:"5/15/30/30/15/5"}]}},
+    {layoutId:"metric",title:"人工锁定",locked:true,content:{metrics:[{label:"说明",value:"不是数字"}]}},
+    {type:"conclusion",layoutId:"conclusion",title:"结束"}
+  ]});
+  assert.equal(plan.slides[1].layoutId,"matrix");assert.equal(plan.slides[1].content.items.length,4);
+  assert.equal(plan.slides[2].layoutId,"metric");
+  assert.ok(globalThis.PptComponents.inspect(plan.slides[2],2).some(x=>x.code==="metric_value_not_numeric"));
+});
+
+test("图片材料会保留到证据包并自动配置给图片页",()=>{
+  const dataUrl="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z4x8AAAAASUVORK5CYII=";
+  const pack=globalThis.PptEvidence.buildEvidencePack([{name:"项目效果图.png",kind:"image",text:"图片素材",dataUrl,width:1,height:1}]);
+  const plan=globalThis.PptCore.buildDeckPlan({evidencePack:pack,slides:[{type:"cover",layoutId:"cover",title:"测试"},{layoutId:"image-hero",title:"项目效果图",content:{}},{type:"conclusion",layoutId:"conclusion",title:"结束"}]});
+  assert.equal(pack.summary.imageCount,1);assert.equal(plan.slides[1].content.image,dataUrl);assert.equal(plan.slides[1].content.imageAssetId,pack.assets[0].id);
 });
 
 test("AI不可用时仍能从证据包生成多组件可追溯方案",()=>{

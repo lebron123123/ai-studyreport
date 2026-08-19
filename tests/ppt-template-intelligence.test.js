@@ -1,0 +1,4 @@
+const test=require("node:test");const assert=require("node:assert/strict");
+const T=require("../ppt-template-intelligence.js");
+test("Top-3 retrieval ranks role, capacity and data shape",()=>{const slide={title:"方案对比与选择",layoutId:"comparison",bullets:["A","B","C"]},good={id:"x",name:"双方案",role:"comparison",layoutId:"comparison",capacity:4,status:"approved"},bad={id:"y",name:"封面",role:"cover",layoutId:"cover",capacity:2,status:"approved"},r=T.retrieveCandidates(slide,[good,bad],{topK:3});assert.equal(r.candidates.length,3);assert.equal(r.candidates[0].id,"x");assert.ok(r.candidates[0].score>=r.candidates[1].score);assert.ok(T.score(T.normalizeProfile(good),slide)>T.score(T.normalizeProfile(bad),slide));});
+test("template fingerprint is stable and input-sensitive",()=>{assert.equal(T.fingerprint("abc","a.pptx"),T.fingerprint("abc","a.pptx"));assert.notEqual(T.fingerprint("abc","a.pptx"),T.fingerprint("abd","a.pptx"));});

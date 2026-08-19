@@ -1,0 +1,4 @@
+const test=require("node:test");const assert=require("node:assert/strict");
+const P=require("../ppt-agent-pipeline.js");
+test("new material project goes through brief and outline gate",()=>{const plan={title:"项目汇报",sourceText:"材料",slides:[]};assert.equal(P.stageOf(plan),"brief");assert.equal(P.buildBrief(plan).title,"项目汇报");const rows=P.buildOutline(plan);assert.ok(rows.length>=5);const next=P.applyOutline(plan,rows);assert.equal(next.workflow.stage,"design");assert.equal(next.slides.length,rows.length);});
+test("outline move split merge and undo preserve a recoverable workflow",()=>{let rows=P.buildOutline({slideCount:6});const first=rows[0].id;rows=P.move(rows,0,1);assert.equal(rows[1].id,first);rows=P.split(rows,1);assert.equal(rows.length,7);rows=P.merge(rows,1);assert.equal(rows.length,6);let plan=P.applyOutline({slides:[]},rows);plan=P.snapshot(plan,"before");plan.slides[0].title="changed";plan=P.undo(plan);assert.notEqual(plan.slides[0].title,"changed");});

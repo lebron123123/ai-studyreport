@@ -9,7 +9,24 @@ local-server/.env
 # Claude Code 本地会话配置（含权限缓存，可能带调试用的临时token），机器本地专用
 .claude/
 
+# DeepSeek Harness 本地递归备份；仅用于人工回溯，禁止参与扫描、修改和提交
+.dsh-filess/
+
 # 常见系统/编辑器噪音文件
 .DS_Store
 Thumbs.db
 *.log
+
+# 本地用户上传的PPT模板与运行期资料，不进入源码仓库
+local-data/
+
+# PPT自动化验收生成物；保留实现文档和清单JSON，忽略二进制及渲染目录
+outputs/*.pptx
+outputs/*.json
+outputs/*.html
+outputs/*-render/
+outputs/ppt-export-current/
+outputs/ppt-native-samples/
+outputs/ppt-template-timeline-pages/
+outputs/ppt-web-native-render/
+outputs/ppt-wysiwyg-render/

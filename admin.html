@@ -142,6 +142,7 @@
     <div class="nav-item" id="btnCases"><span class="ic">📁</span>历史项目案例库</div>
     <div class="nav-item" id="btnPopulation"><span class="ic">👥</span>人口参考表</div>
     <div class="nav-item" id="btnStats"><span class="ic">📊</span>运维看板</div>
+    <div class="nav-item" id="btnPptTemplates"><span class="ic">▰</span>PPT模板审核</div>
     <div class="nav-item" id="btnWiki"><span class="ic">📖</span>知识 Wiki</div>
     <div class="nav-item" id="btnContrib"><span class="ic">📨</span>知识投稿审核</div>
     <div class="nav-item" id="btnAnalysisReview"><span class="ic">◎</span>项目数据审核</div>
@@ -2747,4 +2748,25 @@ else{
     }catch(e){ el.textContent="加载失败："+e.message; }
   }
 }
+</script>
+<script>
+/* AI PPT template approval console: kept separate from the legacy admin script to reduce coupling. */
+async function pptTemplateAdminApi(body){
+  const r=await fetch("/api/ppttemplates",{method:"POST",headers:authHeaders(),body:JSON.stringify(body)}),d=await r.json();
+  if(!r.ok||!d.ok)throw new Error(d.error||"PPT模板操作失败");return d;
+}
+async function openPptTemplates(){
+  const list=document.getElementById("listBox"),edit=document.getElementById("editBox");edit.style.display="none";list.style.display="block";
+  list.innerHTML='<h1 style="font-size:18px;">PPT模板审核与发布</h1><div class="sub">用户上传的参考PPT只在本机解析并以草稿保存；管理员发布后才进入全员模板检索。原始PPT不直接暴露给其他用户，前台只读取已审核的页面角色、容量和视觉特征。</div><div class="bar"><button class="btn ghost" id="pptTplReload">刷新</button></div><div id="pptTplBody" class="empty">读取中…</div>';
+  document.getElementById("pptTplReload").onclick=openPptTemplates;
+  try{
+    const d=await pptTemplateAdminApi({action:"adminList"}),items=d.items||[],statusName={draft:"草稿",pending:"待审核",published:"已发布",rejected:"已驳回"};
+    document.getElementById("pptTplBody").innerHTML=items.length?items.map(x=>{const p=x.profile||{},pages=p.pages||[],roles=[...new Set(pages.map(v=>v.role).filter(Boolean))].slice(0,8);return '<div class="card" style="display:block;margin-top:10px;padding:15px 17px;"><div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;"><div><b style="font-size:15px;">'+esc(x.name)+'</b><div class="hint" style="margin-top:5px;">用户 #'+esc(x.user_id)+'　·　'+(p.slideCount||pages.length||0)+' 页　·　v'+esc(x.version)+'　·　指纹 '+esc(String(x.fingerprint||"").slice(0,16))+'</div></div><span class="stat-badge '+(x.status==="published"?"ok":x.status==="pending"?"warn":"")+'">'+esc(statusName[x.status]||x.status)+'</span></div><div style="margin-top:10px;font-size:12px;color:var(--soft);">页面角色：'+esc(roles.join(" / ")||"尚未识别")+'<br>存储标识：'+esc(x.storage_key||"仅元数据")+'</div>'+(x.review_note?'<div class="msg warn" style="margin-top:9px;">审核意见：'+esc(x.review_note)+'</div>':'')+'<div style="display:flex;gap:7px;margin-top:11px;">'+(x.status!=="published"?'<button class="btn sm" data-ppt-publish="'+esc(x.id)+'">审核通过并发布</button>':'')+(x.status!=="rejected"?'<button class="btn sm red" data-ppt-reject="'+esc(x.id)+'">驳回</button>':'')+(x.status==="published"?'<button class="btn sm" data-ppt-return="'+esc(x.id)+'">撤回为草稿</button>':'')+'</div></div>';}).join(""):'<div class="empty">暂无用户参考PPT模板。</div>';
+    document.querySelectorAll("[data-ppt-publish]").forEach(b=>b.onclick=async()=>{const note=prompt("审核说明（可选）","")||"";try{await pptTemplateAdminApi({action:"review",id:b.dataset.pptPublish,decision:"publish",note});msg("模板已发布，全员可在AI PPT中检索","ok");openPptTemplates();}catch(e){msg(e.message,"err");}});
+    document.querySelectorAll("[data-ppt-reject]").forEach(b=>b.onclick=async()=>{const note=prompt("请填写驳回原因","");if(note===null||!note.trim())return;try{await pptTemplateAdminApi({action:"review",id:b.dataset.pptReject,decision:"reject",note});msg("模板已驳回","ok");openPptTemplates();}catch(e){msg(e.message,"err");}});
+    document.querySelectorAll("[data-ppt-return]").forEach(b=>b.onclick=async()=>{if(!confirm("撤回后该模板将不再供全员使用，是否继续？"))return;try{await pptTemplateAdminApi({action:"review",id:b.dataset.pptReturn,decision:"draft",note:"管理员撤回为草稿"});msg("模板已撤回为草稿","ok");openPptTemplates();}catch(e){msg(e.message,"err");}});
+  }catch(e){document.getElementById("pptTplBody").innerHTML='<div class="msg err">'+esc(e.message)+'</div>';}
+}
+const pptTemplateNav=document.getElementById("btnPptTemplates");
+if(pptTemplateNav)pptTemplateNav.onclick=()=>{document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));pptTemplateNav.classList.add("active");openPptTemplates();};
 </script>
