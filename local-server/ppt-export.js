@@ -1,9 +1,10 @@
 import PptxGenJS from "pptxgenjs";
 import JSZip from "jszip";
 import { createRequire } from "node:module";
-import { buildNativeTemplatePptx, nativeTemplateEligible, resolveNativeTemplatePath } from "./ppt-native-template.js";
+import { buildNativeTemplatePptx, buildHybridTemplatePptx, nativeTemplateEligible, resolveNativeTemplatePath } from "./ppt-native-template.js";
 
 const require=createRequire(import.meta.url);
+const PptDesignTokens=require("../ppt-design-tokens.js");
 require("../ppt-design-ir.js");
 require("../ppt-design-ir-v2.js");
 const PptDesignIR=require("../ppt-premium-design.js");
@@ -20,7 +21,7 @@ const textOf=x=>safe(typeof x==="string"?x:(x&&x.text)||"",260);
 const items=s=>Array.isArray(s.content&&s.content.items)?s.content.items:(s.bullets||[]).map((text,i)=>({label:"要点 "+(i+1),text}));
 const num=v=>{const n=Number(String(v==null?"":v).replace(/[^\d.-]/g,""));return Number.isFinite(n)?n:0;};
 const font=(item,size,min=8)=>Math.max(min,Math.round(size*((item&&item.qa&&item.qa.compact)?.86:1)));
-function themeOf(plan){const base=PRESETS[plan.templateId]||PRESETS["anju-blue"],d=plan.designSpec||{};return{...base,accent:safe(d.accent,6)||base.accent,secondary:safe(d.secondary,6)||base.secondary,bg:safe(d.background,6)||base.bg,dark:safe(d.text,6)||base.dark,titleFont:safe(d.titleFont,80)||"Microsoft YaHei",bodyFont:safe(d.bodyFont,80)||"Microsoft YaHei",chartColors:Array.isArray(d.chartColors)&&d.chartColors.length?d.chartColors.slice(0,8):base.chartColors};}
+function themeOf(plan){const raw=PptDesignTokens.get(plan.templateId),base=raw?{accent:raw.colors.accent,secondary:raw.colors.secondary,dark:raw.colors.dark,bg:raw.colors.background,soft:raw.colors.pale,muted:raw.colors.muted,chartColors:raw.chartColors,titleFont:raw.fonts.title,bodyFont:raw.fonts.body,shape:raw.shape}:PRESETS[plan.templateId]||PRESETS["anju-blue"],d=plan.designSpec||{};return{...base,accent:safe(d.accent,6)||base.accent,secondary:safe(d.secondary,6)||base.secondary,bg:safe(d.background,6)||base.bg,dark:safe(d.text,6)||base.dark,titleFont:safe(d.titleFont,80)||base.titleFont||"Microsoft YaHei",bodyFont:safe(d.bodyFont,80)||base.bodyFont||"Microsoft YaHei",chartColors:Array.isArray(d.chartColors)&&d.chartColors.length?d.chartColors.slice(0,8):base.chartColors};}
 function shadow(){return{type:"outer",color:"29485E",opacity:.12,blur:1.5,angle:45,distance:1};}
 function renderDesignIr(slide,scene,pptx){
   if(!scene)return false;slide.background={color:scene.background||"FFFFFF"};
@@ -67,7 +68,7 @@ export async function buildPptxBuffer(plan){
   if(nativeTemplateEligible(plan)&&resolveNativeTemplatePath())return buildNativeTemplatePptx(plan);
   const pptx=new PptxGenJS(),t=themeOf(plan),slides=Array.isArray(plan.slides)?plan.slides:[];pptx.layout="LAYOUT_WIDE";pptx.author="AI可研报告生成系统";pptx.subject=safe(plan.purpose,200);pptx.title=safe(plan.title,120);pptx.company="深圳市安居集团";pptx.lang="zh-CN";pptx.theme={headFontFace:t.titleFont,bodyFontFace:t.bodyFont,lang:"zh-CN"};
   slides.forEach((item,i)=>{const slide=pptx.addSlide();slide.background={color:t.bg};const usedIr=renderSlide(slide,item,plan,t,pptx,i);if(!usedIr&&!["cover","section","statement","conclusion"].includes(item.layoutId||item.type))addFooter(slide,i+1,slides.length,t,item.sources);const refs=(item.sources||[]).map(x=>typeof x==="string"?x:(x.label||x.ref||JSON.stringify(x))).filter(Boolean);slide.addNotes("[Sources]\n"+(refs.length?refs.join("\n"):"本页内容由用户材料或项目数据库生成，未引用外部来源。"));});
-  const out=await pptx.write({outputType:"nodebuffer",compression:true});return Buffer.from(out);
+  const out=Buffer.from(await pptx.write({outputType:"nodebuffer",compression:true}));if(plan.hybridTemplate&&resolveNativeTemplatePath())return buildHybridTemplatePptx(plan,out);return out;
 }
 
 export async function validatePptxBuffer(buffer,plan={}){

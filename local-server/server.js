@@ -25,8 +25,13 @@ import chiSimData from "@tesseract.js-data/chi_sim";
 import { verifyAuth } from "../functions/api/_auth.js";
 import { buildPptxBuffer, validatePptxBuffer } from "./ppt-export.js";
 import { analyzeTemplateBuffer } from "./ppt-template-analyzer.js";
+import { createLimiter, generatePptImage, imageProviderStatus } from "./ppt-image-generation.js";
+import { providerStatus as llmProviderStatus } from "../functions/api/_llm-providers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// 公司内网模型与第三方生图单独放在.env.company，避免改写原.env中的数据库及云端兜底密钥。
+const companyEnvPath = path.join(__dirname, ".env.company");
+if (existsSync(companyEnvPath) && typeof process.loadEnvFile === "function") process.loadEnvFile(companyEnvPath);
 const ROOT = path.resolve(__dirname, "..");          // 仓库根目录（网页文件在这里）
 const API_DIR = path.join(ROOT, "functions", "api");
 
@@ -94,17 +99,45 @@ async function selfCheck() {
   try { const d = await vectorize.describe(); line(true, "向量库可访问（当前 " + d.vectorsCount + " 条向量）"); }
   catch (e) { line(false, "向量表读取失败，请确认已执行 schema-postgres.sql 且装了 pgvector 扩展"); }
 
-  if (!process.env.DEEPSEEK_API_KEY) {
-    console.log("  ⚠️  未配置 DEEPSEEK_API_KEY，AI 生成会失败");
+  const llmStatus = llmProviderStatus(ENV);
+  for (const provider of llmStatus.providers) {
+    line(provider.available, "大模型 " + provider.label + (provider.id === llmStatus.defaultProvider ? "（默认）" : ""));
   }
   if (!process.env.SESSION_SECRET) {
     console.log("  ⚠️  未配置 SESSION_SECRET，登录会失败");
+  }
+  const imageStatus=imageProviderStatus(ENV);
+  for(const provider of imageStatus.providers){
+    line(provider.available,"PPT生图："+provider.name+(provider.available?" 已就绪":" 未启用"));
   }
   console.log("");
 }
 
 /* ---------- 3. 路由 ---------- */
 const app = new Hono();
+const runImageGeneration = createLimiter(process.env.PPT_IMAGE_MAX_CONCURRENCY || 1);
+
+// PPT图片服务统一网关：浏览器不直接接触云端密钥或ComfyUI地址。
+app.get("/api/ppt-image-status", async c=>{
+  const user=await verifyAuth(c.req.raw,ENV);if(!user)return c.json({ok:false,error:"未登录"},401);
+  return c.json({ok:true,...imageProviderStatus(ENV)});
+});
+
+app.post("/api/ppt-image-generate", async c=>{
+  const user=await verifyAuth(c.req.raw,ENV);if(!user)return c.json({ok:false,error:"未登录"},401);
+  try{
+    const body=await c.req.json();
+    const prompt=String(body&&body.prompt||"");
+    if(!prompt||prompt.length>4000)return c.json({ok:false,error:"提示词为空或超过4000字"},400);
+    const image=await runImageGeneration(()=>generatePptImage(body,ENV));
+    return c.json({ok:true,image});
+  }catch(e){
+    console.error("[ppt-image-generate]",e);
+    const message=String(e&&e.message||e||"图片生成失败");
+    const status=/尚未启用|尚未配置|不支持/.test(message)?503:500;
+    return c.json({ok:false,error:message},status);
+  }
+});
 
 // 本地离线 OCR：中文训练数据随本地服务安装，不把扫描件上传到任何云端。
 let ocrWorkerPromise = null;

@@ -9,12 +9,13 @@
   const textOf=x=>clean(typeof x==="string"?x:(x&&x.text)||"",260);
   function palette(plan={}){
     const d=plan.designSpec||{},id=plan.templateId||"anju-blue";
+    const token=root.PptDesignTokens&&root.PptDesignTokens.get?root.PptDesignTokens.get(id):null;
     const presets={
       "anju-blue":{accent:"2387C7",secondary:"70C5DE",dark:"173F63",bg:"F4F9FD",surface:"FFFFFF",muted:"65839A",pale:"DDECF7"},
       "gov-clean":{accent:"1F4E78",secondary:"A77728",dark:"1E2F3D",bg:"FFFFFF",surface:"FFFFFF",muted:"61778A",pale:"E5EEF5"},
       "data-light":{accent:"167D8D",secondary:"E09F3E",dark:"20384B",bg:"F3F8F9",surface:"FFFFFF",muted:"668397",pale:"DCECEE"},
       "business-blue-160":{accent:"003591",secondary:"5385C5",dark:"24292F",bg:"F7F9FC",surface:"FFFFFF",muted:"687786",pale:"DCE7F5"}
-    },b=presets[id]||presets["anju-blue"];
+    },fallback=presets[id]||presets["anju-blue"],b=token?{accent:token.colors.accent,secondary:token.colors.secondary,dark:token.colors.dark,bg:token.colors.background,surface:token.colors.surface,muted:token.colors.muted,pale:token.colors.pale,titleFont:token.fonts.title,bodyFont:token.fonts.body,chartColors:token.chartColors,shape:token.shape}:fallback;
     return {...b,accent:clean(d.accent,6)||b.accent,secondary:clean(d.secondary,6)||b.secondary,dark:clean(d.text,6)||b.dark,bg:clean(d.background,6)||b.bg,titleFont:clean(d.titleFont,80)||"Microsoft YaHei",bodyFont:clean(d.bodyFont,80)||"Microsoft YaHei"};
   }
   const el=(type,x,y,w,h,props={})=>({type,x,y,w,h,...props});

@@ -46,7 +46,7 @@
     out.slides.forEach((original,index)=>{
       const s=original;if(s.locked){slides.push(s);return;}const before=JSON.stringify([s.layoutId,s.title,s.subtitle,s.bullets,s.content]);shortenTitle(s);s.bullets=splitLongBullets(s.bullets);
       const cap=root.PptComponents&&root.PptComponents.contract?root.PptComponents.contract(s.layoutId).maxItems:6;
-      if(cap&&s.bullets.length>cap){const keep=s.bullets.slice(0,cap),rest=s.bullets.slice(cap);s.bullets=keep;slides.push(s);const more=clone(s);more.id=s.id+"_qa_"+(index+1);more.title=s.title+"（续）";more.subtitle="";more.bullets=rest;more.layoutId=rest.length===3?"three-cards":"bullets";more.order=0;more.locked=false;more.notes=(more.notes?more.notes+"\n":"")+"[视觉QA] 内容超出单页容量，已自动拆页";slides.push(more);changed.push(index+1);return;}
+      if(cap&&s.bullets.length>cap&&!(s.qa&&s.qa.capacitySplit)){const keep=s.bullets.slice(0,cap),rest=s.bullets.slice(cap);s.bullets=keep;s.qa=Object.assign({},s.qa,{capacitySplit:true});slides.push(s);const more=clone(s);more.id=s.id+"_qa_"+(index+1);more.title=s.title+"（续）";more.subtitle="";more.bullets=rest;more.layoutId=rest.length===3?"three-cards":"bullets";more.order=0;more.locked=false;more.qa=Object.assign({},more.qa,{capacitySplit:true});more.notes=(more.notes?more.notes+"\n":"")+"[视觉QA] 内容超出单页容量，已自动拆页";slides.push(more);changed.push(index+1);return;}
       if(JSON.stringify([s.layoutId,s.title,s.subtitle,s.bullets,s.content])!==before)changed.push(index+1);slides.push(s);
     });
     out.slides=slides;out.slides.forEach((s,i)=>s.order=i+1);out.rhythmPlan=root.PptCore&&root.PptCore.buildRhythmPlan?root.PptCore.buildRhythmPlan(out.slides):out.rhythmPlan;

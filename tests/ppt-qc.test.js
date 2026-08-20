@@ -41,3 +41,14 @@ test("人工锁定页即使超载也保持原样",()=>{
   const fixed=PptQC.repair(plan).plan;
   assert.equal(JSON.stringify(fixed.slides[1]),before);
 });
+
+test("视觉QA重复执行不会反复制造续页",()=>{
+  const plan=PptCore.buildDeckPlan({title:"QA",slides:[
+    {type:"cover",layoutId:"cover",title:"QA"},
+    {layoutId:"three-cards",title:"超载页",bullets:["一","二","三","四","五","六"],sources:["测试"]},
+    {type:"conclusion",layoutId:"conclusion",title:"结论"}
+  ]});
+  const once=PptQC.repair(plan).plan,twice=PptQC.repair(once).plan;
+  assert.equal(twice.slides.length,once.slides.length);
+  assert.equal(twice.slides.filter(x=>String(x.id).includes("_qa_")).length,1);
+});

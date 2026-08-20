@@ -178,4 +178,25 @@ export async function buildNativeTemplatePptx(plan,{templatePath=""}={}){
   return Buffer.from(await zip.generateAsync({type:"nodebuffer",compression:"DEFLATE",compressionOptions:{level:6}}));
 }
 
-export const NativeTemplate={PAGE_POOLS,DATA_LAYOUTS};
+function hybridTrack(slide={},plan={}){
+  const wanted=slide.renderTrack||"auto",eligible=plan.templateId===NATIVE_TEMPLATE_ID&&!DATA_LAYOUTS.has(slide.layoutId||slide.type);
+  if(wanted==="editable")return"editable";
+  if(wanted==="native")return eligible?"native":"editable";
+  return eligible&&["cover","section","agenda"].includes(slide.layoutId||slide.type)?"native":"editable";
+}
+
+async function nativeSlideRelationships(templateZip,sourcePage,editableZip,destPage){
+  const name=`ppt/slides/_rels/slide${sourcePage}.xml.rels`,file=templateZip.file(name);
+  if(!file)return{ok:true,xml:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>'};
+  let unsupported=false,xml=await file.async("string");const tags=[...xml.matchAll(/<Relationship\b[^>]*\/?>(?:<\/Relationship>)?/g)].map(x=>x[0]),replacements=new Map();
+  for(const tag of tags){const type=(tag.match(/Type="([^"]+)"/)||[])[1]||"",target=(tag.match(/Target="([^"]+)"/)||[])[1]||"",external=/TargetMode="External"/.test(tag);if(type.endsWith("/slideLayout")){replacements.set(tag,tag.replace(/Target="[^"]+"/,'Target="../slideLayouts/slideLayout1.xml"'));continue;}if(type.endsWith("/notesSlide")){replacements.set(tag,"");continue;}if(external){replacements.set(tag,tag);continue;}const sourcePart=path.posix.normalize(path.posix.join("ppt/slides",target));if(sourcePart.startsWith("ppt/media/")&&templateZip.file(sourcePart)){const ext=path.posix.extname(sourcePart),destName=`native_s${destPage}_${sourcePage}_${path.posix.basename(sourcePart,ext)}${ext}`;editableZip.file("ppt/media/"+destName,await templateZip.file(sourcePart).async("nodebuffer"));replacements.set(tag,tag.replace(/Target="[^"]+"/,'Target="../media/'+destName+'"'));continue;}unsupported=true;}
+  if(unsupported)return{ok:false,xml:""};replacements.forEach((value,key)=>{xml=xml.replace(key,value);});return{ok:true,xml};
+}
+
+export async function buildHybridTemplatePptx(plan,editableBuffer,{templatePath=""}={}){
+  const source=resolveNativeTemplatePath(templatePath);if(!source)throw new Error("未找到160页高级商务蓝模板");const templateZip=await JSZip.loadAsync(fs.readFileSync(source)),editableZip=await JSZip.loadAsync(editableBuffer),selection=selectNativePages(plan);let nativePages=0;
+  for(let i=0;i<(plan.slides||[]).length;i++){const item=plan.slides[i];if(hybridTrack(item,plan)!=="native")continue;const sourcePage=selection[i].page,sourceXmlFile=templateZip.file(`ppt/slides/slide${sourcePage}.xml`);if(!sourceXmlFile)continue;const rels=await nativeSlideRelationships(templateZip,sourcePage,editableZip,i+1);if(!rels.ok)continue;const sourceXml=await sourceXmlFile.async("string");editableZip.file(`ppt/slides/slide${i+1}.xml`,fillNativeSlideXml(sourceXml,item,plan,sourcePage));editableZip.file(`ppt/slides/_rels/slide${i+1}.xml.rels`,rels.xml);nativePages++;}
+  if(!nativePages)throw new Error("没有符合真实模板轨条件的页面");return Buffer.from(await editableZip.generateAsync({type:"nodebuffer",compression:"DEFLATE",compressionOptions:{level:6}}));
+}
+
+export const NativeTemplate={PAGE_POOLS,DATA_LAYOUTS,hybridTrack};

@@ -53,3 +53,14 @@ test("本机160页模板可生成只展示工程页数的原生PPTX",{skip:!temp
   assert.equal(qa.slideCount,4);
   assert.equal(qa.nativeTemplate,true);
 });
+
+test("真实模板页和可编辑图表页可混合导出",{skip:!templatePath},async()=>{
+  const plan={title:"混合双轨验收",templateId:"business-blue-160",hybridTemplate:true,purpose:"验证逐页双轨",slides:[
+    {id:"s1",type:"cover",layoutId:"cover",title:"混合双轨验收",renderTrack:"native"},
+    {id:"s2",type:"content",layoutId:"chart-bar",title:"年度投资计划",renderTrack:"editable",content:{series:[{label:"2027",value:40},{label:"2028",value:60}]},sources:["测算引擎"]},
+    {id:"s3",type:"conclusion",layoutId:"conclusion",title:"建议推进",renderTrack:"native",bullets:["确认参数","提交审议"]}
+  ]};
+  const buffer=await (await import("../local-server/ppt-export.js")).buildPptxBuffer(plan),zip=await JSZip.loadAsync(buffer),slide1=await zip.file("ppt/slides/slide1.xml").async("string");
+  assert.match(slide1,/混合双轨验收/);assert.ok(Object.keys(zip.files).some(x=>x.startsWith("ppt/charts/chart")));
+  const qa=await validatePptxBuffer(buffer,plan);assert.equal(qa.ok,true);assert.equal(qa.slideCount,3);assert.ok(qa.chartCount>=1);
+});

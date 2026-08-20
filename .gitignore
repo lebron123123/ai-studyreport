@@ -5,6 +5,8 @@ node_modules/
 local-server/.env
 .env
 .env.*
+!local-server/.env.image.example
+!local-server/.env.llm.example
 
 # Claude Code 本地会话配置（含权限缓存，可能带调试用的临时token），机器本地专用
 .claude/
@@ -16,6 +18,7 @@ local-server/.env
 .DS_Store
 Thumbs.db
 *.log
+集团大模型检测结果.txt
 
 # 本地用户上传的PPT模板与运行期资料，不进入源码仓库
 local-data/
@@ -25,6 +28,7 @@ outputs/*.pptx
 outputs/*.json
 outputs/*.html
 outputs/*-render/
+outputs/*-render*/
 outputs/ppt-export-current/
 outputs/ppt-native-samples/
 outputs/ppt-template-timeline-pages/

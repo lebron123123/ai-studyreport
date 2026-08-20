@@ -34,6 +34,11 @@
   }
   function outline(plan={}){
     const slides=Array.isArray(plan.slides)?plan.slides:[],total=Math.max(5,Number(plan.slideCount)||slides.length||8);
+    if(plan.sceneId&&root.PptScenePresets){
+      const rows=root.PptScenePresets.buildOutline(plan.sceneId,total),calc=slides.filter(s=>s&&s.calcGenerated).map((s,i)=>({id:s.id,order:0,title:clean(s.title,120),role:"finance",layoutId:s.layoutId||"metric",claim:clean(s.claim,220),locked:!!s.locked,calcGenerated:true}));
+      if(calc.length){const at=Math.max(1,rows.findIndex(x=>x.layoutId==="conclusion"));rows.splice(at<1?rows.length:at,0,...calc);}
+      return normalizeOutline(rows);
+    }
     if(slides.length)return slides.map((s,i)=>({id:s.id||uid("ol_"),order:i+1,title:clean(s.title,120)||"第"+(i+1)+"页",role:clean(s.pageRole||s.type,30)||"analysis",layoutId:clean(s.layoutId,40)||inferLayout(s.title,i,slides.length),claim:clean(s.claim||s.takeaway||(s.bullets||[])[0],220),locked:!!s.locked}));
     const names=["封面","汇报结构","项目概况与核心判断","关键数据与指标","主要问题与原因","方案比较与选择","实施路径与里程碑","结论、建议与下一步"];
     return Array.from({length:total},(_,i)=>({id:uid("ol_"),order:i+1,title:names[i]||("补充分析 "+(i+1)),role:i===0?"cover":i===1?"agenda":i===total-1?"conclusion":"analysis",layoutId:inferLayout(names[i]||"",i,total),claim:"",locked:false}));

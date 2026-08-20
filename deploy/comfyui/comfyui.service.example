@@ -1,0 +1,17 @@
+[Unit]
+Description=ComfyUI local image generation service
+After=network.target
+
+[Service]
+Type=simple
+User=comfyui
+Group=comfyui
+WorkingDirectory=/opt/ComfyUI
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/ComfyUI/venv/bin/python main.py --listen 127.0.0.1 --port 8188 --disable-api-nodes
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

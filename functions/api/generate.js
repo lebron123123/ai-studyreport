@@ -2,6 +2,7 @@
 import { verifyAuth, json } from "./_auth.js";
 
 import { adaptEnv } from "./_adapters.js";
+import { callConfiguredLlm, providerStatus } from "./_llm-providers.js";
 /* ===== 限额设计 =====
    为什么分池：Agent回答"一个问题"要调用本接口2~5次（作答/调工具/自我核查/收尾），
    而生成一篇完整可研报告要调用约40次。若共用一个池子，用户生成两三篇报告
@@ -91,16 +92,13 @@ export async function onRequestPost(context) {
   // 改成显式的新模型名。V4系列默认开启"思考模式"——如果只改模型名不管这个，会带来两个问题：
   // ①思考模式会多吐大量推理token，拖慢速度、拉高成本；②本站Agent多轮工具调用在思考模式下容易触发
   // "reasoning_content must be passed back"报错。显式关闭thinking，行为和之前的deepseek-chat完全一致。
-  const dsModel = env.DEEPSEEK_MODEL || "deepseek-v4-flash";
   // 普通问答1200 token足够；AI PPT等结构化长输出可显式申请更高上限，但服务器封顶4000，避免失控。
   const maxTokens = Math.max(200, Math.min(4000, Number(body.max_tokens) || 1200));
   const dsPayload = {
-    model: dsModel,
     messages: dsMessages,
     max_tokens: maxTokens,
     temperature: 0.3,
     stream: wantStream,
-    thinking: { type: "disabled" },
   };
   if(Array.isArray(body.tools) && body.tools.length){
     dsPayload.tools = body.tools;
@@ -110,17 +108,12 @@ export async function onRequestPost(context) {
   // 大模型地址抽成环境变量：DeepSeek 用的是 OpenAI 标准格式，而 vLLM / Ollama / LM Studio
   // 等本地推理服务同样提供 OpenAI 兼容端点。将来要把AI换成本地跑，只需在部署时改这个变量
   // 指向内网地址即可，本文件及全部业务代码一行都不用动。
-  const llmUrl = env.LLM_BASE_URL || "https://api.deepseek.com/chat/completions";
   let upstream;
+  let usedProvider = "";
   try{
-    upstream = await fetch(llmUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + env.DEEPSEEK_API_KEY,
-      },
-      body: JSON.stringify(dsPayload),
-    });
+    const called = await callConfiguredLlm(env, body.provider, dsPayload);
+    upstream = called.response;
+    usedProvider = called.provider;
   }catch(e){
     if (counted) await refund(env, userKey, globalKey);
     return json({ error: "上游AI接口连接失败：" + e.message }, 502);
@@ -149,7 +142,7 @@ export async function onRequestPost(context) {
     const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
     const text = msg.content || "";
     // 有工具调用时一并返回,前端据此执行工具、回填结果、再次调用(ReAct循环)
-    return json({ content: [{ type: "text", text }], tool_calls: msg.tool_calls || null, usage: data.usage || null });
+    return json({ content: [{ type: "text", text }], tool_calls: msg.tool_calls || null, usage: data.usage || null, provider: usedProvider });
   }
 }
 
@@ -170,5 +163,6 @@ export async function onRequestGet(context){
   const batch = await read("u:batch:" + user.userId + ":" + today);
   return json({ ok:true, today,
     chat:  { used: chat,  limit: LIMITS.chat,  left: Math.max(0, LIMITS.chat  - chat)  },
-    batch: { used: batch, limit: LIMITS.batch, left: Math.max(0, LIMITS.batch - batch) } });
+    batch: { used: batch, limit: LIMITS.batch, left: Math.max(0, LIMITS.batch - batch) },
+    models: providerStatus(env) });
 }
