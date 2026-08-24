@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import seed from "../functions/api/_reportlogic-seed.js";
+import gaibaoSeed from "../functions/api/_reportlogic-gaibao-seed.js";
 import { validateSet, appendEnhancementData } from "../functions/api/reportlogic.js";
 
 test("出租类逐小节逻辑以137条和14章为正式基线并连续重编号", () => {
@@ -10,6 +11,17 @@ test("出租类逐小节逻辑以137条和14章为正式基线并连续重编号
   assert.equal(new Set(seed.rules.map(rule => rule.id)).size, 137);
   assert.equal(seed.rules[116].legacySourceNo, "158");
   assert.equal(seed.rules[27].writingLogic, seed.rules[26].writingLogic, "纵向合并的共用写作逻辑应继承到后续行");
+});
+
+test("非居改保逐小节逻辑以165条和14章独立成库", () => {
+  assert.equal(gaibaoSeed.projectType, "gaibao");
+  assert.equal(gaibaoSeed.rules.length, 165);
+  assert.equal(gaibaoSeed.structure.chapterCount, 14);
+  assert.deepEqual(gaibaoSeed.rules.map(rule => rule.sourceNo), Array.from({length:165}, (_, index) => index + 1));
+  assert.equal(new Set(gaibaoSeed.rules.map(rule => rule.id)).size, 165);
+  assert.ok(gaibaoSeed.rules.every(rule => rule.projectType === "gaibao"));
+  assert.ok(gaibaoSeed.rules.some(rule => rule.sourceKinds.includes("calculation_engine")), "测算规则引擎应被识别为测算来源");
+  assert.ok(gaibaoSeed.rules.some(rule => rule.sourceKinds.includes("system_rule")), "规则默认填入项不应误报为材料缺口");
 });
 
 test("发布前校验会按现有顺序重编号且拒绝重复规则ID", () => {
@@ -27,7 +39,10 @@ test("发布前校验会按现有顺序重编号且拒绝重复规则ID", () => 
 
 test("前端运行时可把粗粒度报告小节匹配到多条细分逻辑并过滤项目特例", async () => {
   globalThis.window = {};
-  globalThis.fetch = async () => new Response(JSON.stringify({ok:true,set:{id:"set1",version:1,projectType:"rent",data:seed}}), {status:200,headers:{"content-type":"application/json"}});
+  globalThis.fetch = async url => {
+    const isGaibao=String(url).includes("projectType=gaibao"),data=isGaibao?gaibaoSeed:seed,type=isGaibao?"gaibao":"rent";
+    return new Response(JSON.stringify({ok:true,set:{id:"set-"+type,version:1,projectType:type,data}}), {status:200,headers:{"content-type":"application/json"}});
+  };
   await import("../report-logic-core.js?reportlogic-test=" + Date.now());
   const core = window.ReportLogicCore;
   await core.load("rent");
@@ -85,6 +100,17 @@ test("前端运行时可把粗粒度报告小节匹配到多条细分逻辑并�
   const links=core.suggestMaterialRuleLinks("rent","项目用地批复.pdf","本文件明确项目规划指标、用地面积和容积率",5);
   assert.ok(links.length>0);
   assert.ok(links.every(item=>item.ruleId&&item.title&&Number.isFinite(item.score)));
+
+  await core.load("gaibao");
+  const gaibaoOverview=core.overview("gaibao"),gaibaoOutline=core.outline("gaibao"),gaibaoInventory=core.materialInventory("gaibao",{hasCalculation:true});
+  assert.equal(gaibaoOverview.ruleCount,165);
+  assert.equal(gaibaoOutline.chapters.length,14);
+  assert.equal(gaibaoInventory.total,165);
+  assert.ok(gaibaoInventory.summary.calculation_engine>2);
+  assert.ok(gaibaoInventory.summary.system_rule>0);
+  const systemRule=gaibaoSeed.rules.find(rule=>rule.sourceKinds.includes("system_rule"));
+  assert.equal(core.requirementStatus(systemRule,{}).ready,true);
+  assert.ok(core.match("gaibao","投资估算与资金筹措","投资估算",{projectText:"非居改保项目"}).length>0);
 });
 
 test("管理员增强只追加子规则并保留137条原逻辑",()=>{

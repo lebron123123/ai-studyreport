@@ -87,8 +87,8 @@
   }
   function materialInventory(projectType, context){
     const set=current(projectType),rules=set?.data?.rules||[],ctx=context||{};
-    const channelKeys=["knowledge_base","web_search","provider","calculation_engine","manual_upload","derived_section"];
-    const emptyCounts=()=>({ready:0,knowledge_base:0,web_search:0,provider:0,calculation_engine:0,manual_upload:0,derived_section:0,unclassified:0,pendingKnowledge:0,pendingWeb:0,pendingProvider:0,pendingCalculation:0,pendingManual:0,pendingDerived:0,blocking:0});
+    const channelKeys=["knowledge_base","web_search","provider","calculation_engine","manual_upload","derived_section","system_rule"];
+    const emptyCounts=()=>({ready:0,knowledge_base:0,web_search:0,provider:0,calculation_engine:0,manual_upload:0,derived_section:0,system_rule:0,unclassified:0,pendingKnowledge:0,pendingWeb:0,pendingProvider:0,pendingCalculation:0,pendingManual:0,pendingDerived:0,blocking:0});
     const pendingKey={knowledge_base:"pendingKnowledge",web_search:"pendingWeb",provider:"pendingProvider",calculation_engine:"pendingCalculation",manual_upload:"pendingManual",derived_section:"pendingDerived",unclassified:"unclassified"};
     const summary=emptyCounts(),groups=new Map();
     const items=rules.map(rule=>{

@@ -555,12 +555,12 @@ async function aiReportRunGenerate(){
   const domainKey_ = AI_DOMAIN_OF[sug.calcType];
   await fetchOutlines();
   let logicOutline = null;
-  if(sug.calcType==="rent" && window.ReportLogicCore){
-    try{ await ReportLogicCore.load("rent"); logicOutline=ReportLogicCore.outline("rent"); }catch(e){}
+  if(window.ReportLogicCore){
+    try{ await ReportLogicCore.load(sug.calcType); logicOutline=ReportLogicCore.outline(sug.calcType); }catch(e){}
   }
   if(logicOutline) reportLoadDomainSource(domainKey_,logicOutline);
   else loadDomain(domainKey_);
-  rptCtype = sug.calcType === "sale" ? "sale" : "rent";
+  rptCtype = sug.calcType;
 
   const today = new Date().toLocaleDateString("zh-CN");
   const who = (typeof getUser==="function" && getUser()) || "当前用户";
@@ -679,7 +679,7 @@ function airSectionMaterialState(chapter,section){
   return {rules,statuses,missing,criticalRules,frameworkRules,ready:!!rules.length&&!missing.length,level:criticalRules.length?"critical":frameworkRules.length?"framework":"ready"};
 }
 function airSectionMaterialHtml(chapter,section,si){
-  const st=airSectionMaterialState(chapter,section),label={knowledge_base:"知识库检索",web_search:"网上检索",provider:"数据接口",calculation_engine:"测算引擎",manual_upload:"人工上传",derived_section:"其他章节",unclassified:"确认材料来源"};
+  const st=airSectionMaterialState(chapter,section),label={knowledge_base:"知识库检索",web_search:"网上检索",provider:"数据接口",calculation_engine:"测算引擎",manual_upload:"人工上传",derived_section:"其他章节",system_rule:"系统规则",unclassified:"确认材料来源"};
   const enhance=aiReportCanEnhanceLogic&&st.rules.length?'<button type="button" class="air-logic-enhance air-section-enhance" data-cn="'+chapter.cn+'" data-si="'+si+'">🛠 从本节成稿提炼增强规则</button>':'';
   if(st.ready)return '<div class="air-section-material ok"><b>✓ 本节依据已找到</b><span>测算或项目材料已经匹配，可据此生成并保留来源。</span>'+(enhance?'<div class="air-section-material-actions">'+enhance+'</div>':'')+'</div>';
   const needed=st.missing.map(x=>label[x]||x),sourcePool=st.level==="critical"?st.criticalRules:st.rules,sources=sourcePool.map(r=>String(r.requiredSources||"").trim()).filter(Boolean).slice(0,3).map(x=>x.length>120?x.slice(0,120)+"…":x);
@@ -793,13 +793,13 @@ async function airCheckWholeReportMaterials(){
   aiReportChat=aiReportChat.filter(m=>m.kind!=="materialCheck");airPush({role:"assistant",kind:"materialCheck",inventory});airSaveState();
 }
 function airMaterialCheckHtml(m){
-  const inv=m.inventory||{summary:{},chapters:[]},sum=inv.summary||{},labels={knowledge_base:"知识库检索",web_search:"网上检索",provider:"数据接口",calculation_engine:"测算引擎",manual_upload:"人工上传",derived_section:"其他章节",unclassified:"来源待确认"};
+  const inv=m.inventory||{summary:{},chapters:[]},sum=inv.summary||{},labels={knowledge_base:"知识库检索",web_search:"网上检索",provider:"数据接口",calculation_engine:"测算引擎",manual_upload:"人工上传",derived_section:"其他章节",system_rule:"系统规则",unclassified:"来源待确认"};
   const stat=(num,label,color)=>'<div style="border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:#fff;"><b style="display:block;font-size:18px;color:'+color+';">'+(num||0)+'</b><span style="font-size:11px;color:var(--ink-soft);">'+label+'</span></div>';
   const rowHtml=item=>{const status=item.ready?'<span style="color:var(--ok-green);">✓ 已确认找到</span>':'<span style="color:var(--red);">● 待补充/待检索</span>';const kinds=(item.sourceKinds||[]).length?item.sourceKinds:["unclassified"];const channels=kinds.map(kind=>'<span style="display:inline-block;border:1px solid '+(item.missing.includes(kind)?'#e6a5a0':'#b7ddc6')+';background:'+(item.missing.includes(kind)?'#fff0ef':'#edf8f1')+';color:'+(item.missing.includes(kind)?'var(--red)':'var(--ok-green)')+';padding:1px 5px;border-radius:8px;margin:1px;font-size:10.5px;">'+escapeHtml(labels[kind]||kind)+'</span>').join("");return '<tr><td style="white-space:nowrap;">第'+item.sourceNo+'项</td><td><b>'+escapeHtml(item.title)+'</b><div style="color:var(--ink-soft);margin-top:3px;white-space:pre-line;">'+escapeHtml(item.requiredSources)+'</div></td><td>'+channels+'</td><td><div class="air-material-row-actions">'+status+(item.blocking?'<span style="font-size:10px;color:var(--red);">重要阻断</span>':'')+'<button type="button" class="air-material-upload" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'">＋ 上传补充</button></div></td></tr>';};
   return '<div class="air-card"><div class="air-step-done" style="margin-bottom:10px;"><b>材料完整性台账 · 逻辑 v'+inv.version+'</b><span>共'+inv.total+'项、'+inv.chapters.length+'章。以下来源数量允许交叉，例如同一小节可能同时需要知识库和人工材料。</span></div>'
     +(aiReportCanEnhanceLogic?'<div class="air-enhance-entry-tip"><b>管理员增强模式已开启</b><span>请先生成右侧正文并持续修改；定稿后从对应小节点击“从本节成稿提炼增强规则”，AI会比较版本并交由管理员审定。</span></div>':'')
-    +'<div style="display:grid;grid-template-columns:repeat(6,minmax(90px,1fr));gap:7px;margin-bottom:10px;">'+stat(sum.ready,"已确认找到","var(--ok-green)")+stat(sum.pendingKnowledge,"需从知识库检索","var(--red)")+stat(sum.pendingWeb,"需网上检索","var(--red)")+stat(sum.pendingProvider,"需调用数据接口","var(--red)")+stat(sum.pendingCalculation,"需从测算引擎取得","var(--red)")+stat(sum.pendingManual,"需人工上传","var(--red)")+'</div>'
-    +'<div style="display:flex;gap:7px;margin-bottom:8px;flex-wrap:wrap;"><button type="button" class="btn sm ghost" id="airMaterialExpandAll">展开全部</button><button type="button" class="btn sm ghost" id="airMaterialCollapseAll">收起全部</button><button type="button" class="btn sm ghost air-material-ask" data-prompt="请把全报告137项材料需求按章节列成完整Markdown表格，列出序号、材料名称、获取渠道、当前状态和是否阻断，不要省略。">让AI列完整材料表</button><button type="button" class="btn sm air-batch-material-upload" id="airBatchMaterialUpload">＋ 批量上传材料</button></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(7,minmax(86px,1fr));gap:7px;margin-bottom:10px;">'+stat(sum.ready,"已确认找到","var(--ok-green)")+stat(sum.system_rule,"系统规则直接生成","var(--bp)")+stat(sum.pendingKnowledge,"需从知识库检索","var(--red)")+stat(sum.pendingWeb,"需网上检索","var(--red)")+stat(sum.pendingProvider,"需调用数据接口","var(--red)")+stat(sum.pendingCalculation,"需从测算引擎取得","var(--red)")+stat(sum.pendingManual,"需人工上传","var(--red)")+'</div>'
+    +'<div style="display:flex;gap:7px;margin-bottom:8px;flex-wrap:wrap;"><button type="button" class="btn sm ghost" id="airMaterialExpandAll">展开全部</button><button type="button" class="btn sm ghost" id="airMaterialCollapseAll">收起全部</button><button type="button" class="btn sm ghost air-material-ask" data-prompt="请把全报告'+inv.total+'项材料需求按章节列成完整Markdown表格，列出序号、材料名称、获取渠道、当前状态和是否阻断，不要省略。">让AI列完整材料表</button><button type="button" class="btn sm air-batch-material-upload" id="airBatchMaterialUpload">＋ 批量上传材料</button></div>'
     +'<div style="max-height:470px;overflow:auto;border:1px solid var(--line);border-radius:8px;">'+inv.chapters.map(g=>'<details class="air-material-chapter" style="border-bottom:1px solid var(--line);"><summary style="cursor:pointer;padding:11px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b style="min-width:210px;">'+escapeHtml(g.chapter)+'</b><span style="color:var(--ok-green);">已找到 '+g.counts.ready+'/'+g.total+'</span><span style="color:var(--red);">需知识库检索 '+g.counts.pendingKnowledge+'</span><span style="color:var(--red);">需网搜 '+g.counts.pendingWeb+'</span><span style="color:var(--red);">需接口 '+g.counts.pendingProvider+'</span><span style="color:var(--red);">需测算 '+g.counts.pendingCalculation+'</span><span style="color:var(--red);">需上传 '+g.counts.pendingManual+'</span></summary><div style="padding:0 10px 11px;"><table class="air-material-table" style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr style="text-align:left;background:#f5f8fb;"><th style="padding:7px;">序号</th><th style="padding:7px;">具体需要的内容/材料</th><th style="padding:7px;">获取渠道</th><th style="padding:7px;min-width:150px;">当前状态/补充</th></tr></thead><tbody>'+g.items.map(rowHtml).join("")+'</tbody></table><button type="button" class="btn sm ghost air-material-ask" style="margin-top:8px;" data-prompt="请把'+escapeHtml(g.chapter)+'全部材料需求列成表格，并告诉我应该先补哪几项。">询问本章补充顺序</button></div></details>').join("")+'</div>'
     +'<input type="file" id="airMaterialFile" accept=".txt,.md,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;"><button class="btn air-start-gen">确认，带缺口标记开始生成 →</button><button class="btn ghost air-material-ask" data-prompt="请按重要程度汇总全报告必须由我人工补充的材料清单，并列成表格">仅汇总人工材料</button></div><div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">红色表示系统当前尚未取得真实依据；这里只说明“需上传/需检索”，不承诺知识库或网络一定能找到。上传材料只关联你选择的逻辑项，不会误判为全报告材料齐全。</div></div>';
@@ -856,7 +856,7 @@ async function airHandleMaterialFiles(files){
 }
 
 /* 批量材料先解析、再由用户确认每份文件对应哪些逻辑项。未经确认不写入资料库，
-   避免把一份材料误判成全报告137项均已具备。 */
+   避免把一份材料误判成当前项目类型的全部逻辑项均已具备。 */
 async function airPrepareBatchMaterialFiles(files){
   if(!files||!files.length)return;
   const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent";
@@ -972,9 +972,9 @@ async function airPublishLogicEnhancement(){
     airPush({role:"assistant",kind:"text",content:"✓ 已保留第"+state.base.sourceNo+"项原逻辑，并追加一条增强子规则，发布为生成逻辑 v"+data.set.version+"。下一次生成或补写相关小节时会自动采用增强内容。"});
   }catch(error){state.busy=false;airRenderLogicEnhancementModal();alert("增强规则发布失败："+error.message);}
 }
-function airWantsFullMaterialTable(text){return /(?:全报告|全部|完整|137项).*(?:材料|资料).*(?:表|清单)|(?:材料|资料).*(?:全报告|全部|完整|137项).*(?:表|清单)/.test(String(text||""));}
+function airWantsFullMaterialTable(text){return /(?:全报告|全部|完整|\d+项).*(?:材料|资料).*(?:表|清单)|(?:材料|资料).*(?:全报告|全部|完整|\d+项).*(?:表|清单)/.test(String(text||""));}
 async function airFullMaterialTableMarkdown(){
-  const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent";await ReportLogicCore.load(type);const inv=ReportLogicCore.materialInventory(type,airMaterialContext()),labels={knowledge_base:"需知识库检索",web_search:"需网上检索",provider:"需数据接口取得",calculation_engine:"需测算引擎取得",manual_upload:"需人工上传",derived_section:"需引用其他章节",unclassified:"需确认来源"},cell=value=>String(value||"").replace(/\|/g,"｜").replace(/\r?\n/g,"；");
+  const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent";await ReportLogicCore.load(type);const inv=ReportLogicCore.materialInventory(type,airMaterialContext()),labels={knowledge_base:"需知识库检索",web_search:"需网上检索",provider:"需数据接口取得",calculation_engine:"需测算引擎取得",manual_upload:"需人工上传",derived_section:"需引用其他章节",system_rule:"系统规则自动填入",unclassified:"需确认来源"},cell=value=>String(value||"").replace(/\|/g,"｜").replace(/\r?\n/g,"；");
   const rows=inv.items.map(item=>"|"+[item.sourceNo,cell(item.chapter),cell(item.title),cell(item.requiredSources),((item.sourceKinds||[]).length?item.sourceKinds:["unclassified"]).map(x=>labels[x]||x).join("、"),item.ready?"已确认找到":"待补充/待检索",item.blocking?"是":"否"].join("|")+"|").join("\n");
   return "已按当前发布的逐小节逻辑 v"+inv.version+"列出全报告 "+inv.total+" 项材料台账（不省略）：\n\n|序号|章节|逻辑项|具体材料/数据|所需动作|当前状态|重要阻断|\n|---:|---|---|---|---|---|---|\n"+rows+"\n\n说明：‘需检索’只表示获取路径，不代表知识库或网络一定能找到；只有已取得并关联到具体规则的真实材料才显示‘已确认找到’。";
 }
@@ -1196,11 +1196,11 @@ function airRegisterAgentTools(){
     const targets=hits.length?hits.slice(0,5):chapters.flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).slice(0,0);
     return JSON.stringify({ok:true,version:ReportLogicCore.overview(type),sections:targets.map(x=>({chapter:x.c.name,title:x.s.t,rules:ReportLogicCore.match(type,x.c.name,x.s.t,{projectText:[project.name,project.type,project.location,project.desc].filter(Boolean).join(" ")}).map(r=>({id:r.id,sourceNo:r.sourceNo,subsection:r.subsection,pointTitle:r.pointTitle,requiredSources:r.requiredSources,writingLogic:r.writingLogic,outputForm:r.outputForm,importance:r.importance,generationMode:r.generationMode}))}))});
   }});
-  AC.registerTool("check_section_material_requirements",{schema:{type:"function",function:{name:"check_section_material_requirements",description:"检查单个章节或全报告需要哪些材料和数据，区分已确认找到、需知识库检索、需网上检索、需数据接口、需测算引擎和需人工上传。‘需检索’不等于一定能找到。用户要求全表时必须返回全部137项，不得省略。",parameters:{type:"object",properties:{title:{type:"string",description:"章节标题、关键词；填写‘全报告’可取得完整137项台账"}}}}},run:async a=>{
+  AC.registerTool("check_section_material_requirements",{schema:{type:"function",function:{name:"check_section_material_requirements",description:"检查单个章节或全报告需要哪些材料和数据，区分已确认找到、系统规则、需知识库检索、需网上检索、需数据接口、需测算引擎和需人工上传。‘需检索’不等于一定能找到。用户要求全表时必须返回当前项目类型的全部逻辑项，不得省略。",parameters:{type:"object",properties:{title:{type:"string",description:"章节标题、关键词；填写‘全报告’可取得当前逻辑库完整台账"}}}}},run:async a=>{
     if(!window.ReportLogicCore)return JSON.stringify({ok:false,error:"逐小节生成逻辑模块未加载"});
     const type=(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent");await ReportLogicCore.load(type);
     const context=airMaterialContext();
-    const inventory=ReportLogicCore.materialInventory(type,context),q=String(a&&a.title||"").trim(),all=!q||/全报告|全部|所有|完整|137/.test(q),nq=ReportLogicCore.normalize(q);
+    const inventory=ReportLogicCore.materialInventory(type,context),q=String(a&&a.title||"").trim(),all=!q||/全报告|全部|所有|完整|\d+项/.test(q),nq=ReportLogicCore.normalize(q);
     const compact=item=>({sourceNo:item.sourceNo,chapter:item.chapter,title:item.title,requiredSources:item.requiredSources,sourceKinds:item.sourceKinds,missing:item.missing,ready:item.ready,blocking:item.blocking});
     if(all)return JSON.stringify({ok:true,scope:"all",version:inventory.version,total:inventory.total,summary:inventory.summary,chapters:inventory.chapters.map(g=>({chapter:g.chapter,total:g.total,counts:g.counts,items:g.items.map(compact)}))});
     const hits=inventory.items.filter(item=>[item.chapter,item.section,item.title].some(text=>ReportLogicCore.normalize(text).includes(nq)||nq.includes(ReportLogicCore.normalize(text))));
@@ -1214,7 +1214,8 @@ async function airRunAgent(text){
     if(window.ReportLogicCore&&airWantsFullMaterialTable(text)){const table=await airFullMaterialTableMarkdown();airResolve(loading,{kind:"text",content:table});airSaveState();return;}
     const meta=Object.entries(aiReportSuggested&&aiReportSuggested.paramMeta||{}).map(([k,m])=>k+"="+m.label+(m.unit?'('+m.unit+')':'')).join("；");
     const history=aiReportChat.filter(m=>m.kind==="text"&&(m.role==="user"||m.role==="assistant")).slice(-10).map(m=>({role:m.role,content:m.content}));
-    const res=await AgentCore.run({system:"你是当前可研项目的持续协作助手。项目已有白箱测算和报告。用户询问某节怎么写、需要什么表格/材料时，必须调用get_section_generation_logic；用户询问还缺什么资料、为什么不能直接生成时，必须调用check_section_material_requirements，按‘已确认找到、需知识库检索、需网上检索、需数据接口取得、需测算引擎取得、需人工上传、重要阻断项’说明。‘需检索’只表示路径，不代表一定能找到；不得把缺失资料说成已有。用户要求全报告材料表、完整清单或全部137项时，调用工具时title传‘全报告’，必须按章节输出完整Markdown表格，不得只给摘要或省略后续行。用户问‘项目怎么样’‘测算是否合理’‘哪里可以提升’‘主要风险/改进优先级’等开放式综合判断时，必须首先调用diagnose_feasibility_project，并严格按诊断底稿回答：先给总体判断，再按高/中/提示列建议，每条说明依据类型；财务数字只能引用metrics，硬规则只能引用hardRuleAnomalies，行业比较只能引用knowledgeEvidence；数据缺失必须直说暂无，AI推断必须明确标为判断。用户要求修改测算参数时，必须调用preview_feasibility_parameter_change，只能预演，绝不能声称已修改。用户只问影响范围时调用find_feasibility_impacted_sections。用户明确要求修改某个小节文字时，先用get_feasibility_section_content核对，再调用propose_feasibility_section_revision生成候选稿；候选稿不等于已采用，必须提示用户到复核页接受或拒绝。不要自行计算IRR/NPV。参数中文与key目录："+meta+"。比例参数工具值必须用0到1，例如90%传0.9。",messages:history,tools:["diagnose_feasibility_project","get_current_feasibility_project","preview_feasibility_parameter_change","find_feasibility_impacted_sections","get_feasibility_section_status","get_feasibility_section_content","get_section_generation_logic","check_section_material_requirements","propose_feasibility_section_revision","get_calc_summary","search_knowledge_base","get_review_issues"],maxRounds:4,selfCheck:false,traceQuery:text});
+    const logicTotal=window.ReportLogicCore?.overview(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent")?.ruleCount||0;
+    const res=await AgentCore.run({system:"你是当前可研项目的持续协作助手。项目已有白箱测算和报告。用户询问某节怎么写、需要什么表格/材料时，必须调用get_section_generation_logic；用户询问还缺什么资料、为什么不能直接生成时，必须调用check_section_material_requirements，按‘已确认找到、系统规则、需知识库检索、需网上检索、需数据接口取得、需测算引擎取得、需人工上传、重要阻断项’说明。‘需检索’只表示路径，不代表一定能找到；不得把缺失资料说成已有。用户要求全报告材料表、完整清单或当前全部"+logicTotal+"项时，调用工具时title传‘全报告’，必须按章节输出完整Markdown表格，不得只给摘要或省略后续行。用户问‘项目怎么样’‘测算是否合理’‘哪里可以提升’‘主要风险/改进优先级’等开放式综合判断时，必须首先调用diagnose_feasibility_project，并严格按诊断底稿回答：先给总体判断，再按高/中/提示列建议，每条说明依据类型；财务数字只能引用metrics，硬规则只能引用hardRuleAnomalies，行业比较只能引用knowledgeEvidence；数据缺失必须直说暂无，AI推断必须明确标为判断。用户要求修改测算参数时，必须调用preview_feasibility_parameter_change，只能预演，绝不能声称已修改。用户只问影响范围时调用find_feasibility_impacted_sections。用户明确要求修改某个小节文字时，先用get_feasibility_section_content核对，再调用propose_feasibility_section_revision生成候选稿；候选稿不等于已采用，必须提示用户到复核页接受或拒绝。不要自行计算IRR/NPV。参数中文与key目录："+meta+"。比例参数工具值必须用0到1，例如90%传0.9。",messages:history,tools:["diagnose_feasibility_project","get_current_feasibility_project","preview_feasibility_parameter_change","find_feasibility_impacted_sections","get_feasibility_section_status","get_feasibility_section_content","get_section_generation_logic","check_section_material_requirements","propose_feasibility_section_revision","get_calc_summary","search_knowledge_base","get_review_issues"],maxRounds:4,selfCheck:false,traceQuery:text});
     airResolve(loading,{kind:"text",content:res.text||"已处理。"});
     if(aiReportPendingCalcChange)airPush({role:"assistant",kind:"calcPreview"});
     airSaveState();

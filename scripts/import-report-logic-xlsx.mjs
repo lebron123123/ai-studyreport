@@ -23,7 +23,7 @@ function textNodes(xml) {
   return [...String(xml || "").matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(match => xmlDecode(match[1])).join("");
 }
 
-async function readWorkbook(filePath) {
+async function readWorkbook(filePath, projectType) {
   const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
   const sharedXml = await zip.file("xl/sharedStrings.xml")?.async("string") || "";
   const shared = [...sharedXml.matchAll(/<si(?:\s[^>]*)?>([\s\S]*?)<\/si>/g)].map(match => textNodes(match[1]));
@@ -38,8 +38,9 @@ async function readWorkbook(filePath) {
     const target = relationships.get(attrs["r:id"]);
     return { name: attrs.name, target: target?.startsWith("/") ? target.slice(1) : `xl/${String(target || "").replace(/^\.\.\//, "")}` };
   });
-  const selected = sheets.find(sheet => sheet.name.includes("出租类可研")) || sheets[0];
-  if (!selected?.target || !zip.file(selected.target)) throw new Error("未找到出租类可研逻辑工作表");
+  const hints = projectType === "gaibao" ? ["非居改保", "改保"] : projectType === "sale" ? ["出售", "配售"] : ["出租类可研", "出租"];
+  const selected = sheets.find(sheet => hints.some(hint => sheet.name.includes(hint))) || sheets[0];
+  if (!selected?.target || !zip.file(selected.target)) throw new Error("未找到可研逻辑工作表");
   const sheetXml = await zip.file(selected.target).async("string");
   const rows = [...sheetXml.matchAll(/<row\b[^>]*\br="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)].map(match => {
     const values = [];
@@ -71,11 +72,14 @@ async function readWorkbook(filePath) {
 }
 
 const input = process.argv[2];
-if (!input) throw new Error("用法：node scripts/import-report-logic-xlsx.mjs <xlsx路径> [输出json路径]");
-const workbook = await readWorkbook(path.resolve(input));
+if (!input) throw new Error("用法：node scripts/import-report-logic-xlsx.mjs <xlsx路径> [输出json/js路径] [rent|gaibao|sale] [期望有效行数]");
+const inferredType = /非居改保|改保/i.test(path.basename(input)) ? "gaibao" : /出售|配售/i.test(path.basename(input)) ? "sale" : "rent";
+const projectType = ["rent", "gaibao", "sale"].includes(process.argv[4]) ? process.argv[4] : inferredType;
+const expectedRows = Number(process.argv[5] || (projectType === "rent" ? 137 : 0));
+const workbook = await readWorkbook(path.resolve(input), projectType);
 const populated = workbook.rows.filter(row => row.values.some(Boolean));
 const sourceRows = populated.slice(1);
-if (sourceRows.length !== 137) throw new Error(`主表应为137条，实际读取${sourceRows.length}条；为避免错导入已停止`);
+if (expectedRows && sourceRows.length !== expectedRows) throw new Error(`主表应为${expectedRows}条，实际读取${sourceRows.length}条；为避免错导入已停止`);
 
 const sourceKinds = value => {
   const text = String(value || ""), kinds = [];
@@ -83,7 +87,7 @@ const sourceKinds = value => {
   if (/网上搜索|互联网|网站/.test(text)) kinds.push("web_search");
   if (/平台数据|数据调用|API|接口/.test(text)) kinds.push("provider");
   if (/手动填入|人工填入|找集团|有关部门/.test(text)) kinds.push("manual_upload");
-  if (/测算引擎|测算逻辑|测算结果/.test(text)) kinds.push("calculation_engine");
+  if (/测算引擎|测算规则引擎|测算逻辑|测算结果|测算规则/.test(text)) kinds.push("calculation_engine");
   if (/见具体章节|见后文|同\d|表述同/.test(text)) kinds.push("derived_section");
   return [...new Set(kinds)];
 };
@@ -106,12 +110,13 @@ const rules = sourceRows.map((source, index) => {
   const rawTitle = String(pointTitle || "").trim();
   const title = /^\d+$/.test(rawTitle) ? "" : rawTitle;
   const kinds = sourceKinds(requiredSources);
+  if (!kinds.length && String(requiredSources || "").trim() === "/" && /规则默认填入/.test(String(writingLogic || ""))) kinds.push("system_rule");
   const rule = {
-    id: `rent-v1-${String(index + 1).padStart(3, "0")}`,
+    id: `${projectType}-v1-${String(index + 1).padStart(3, "0")}`,
     sourceNo: index + 1,
     legacySourceNo: String(legacySourceNo || ""),
     sourceRow: source.rowNo,
-    projectType: "rent",
+    projectType,
     chapter: currentChapter,
     section: currentSection,
     subsection,
@@ -140,14 +145,15 @@ const rules = sourceRows.map((source, index) => {
 
 const chapterNames = [...new Set(rules.map(rule => rule.chapter).filter(Boolean))];
 const malformed = rules.filter(rule => !rule.chapter || !rule.section || !rule.writingLogic);
+const typeNames = { rent: "出租类", gaibao: "非居改保", sale: "出售类" };
 const seed = {
   schemaVersion: 1,
-  setId: "report-logic-rent-v1",
-  name: "出租类可研逐小节生成逻辑",
-  projectType: "rent",
+  setId: `report-logic-${projectType}-v1`,
+  name: `${typeNames[projectType] || projectType}可研逐小节生成逻辑`,
+  projectType,
   version: 1,
   status: "published",
-  source: { fileName: path.basename(input), sheetName: workbook.sheetName, importedAt: new Date().toISOString(), authoritativeRows: 137 },
+  source: { fileName: path.basename(input), sheetName: workbook.sheetName, importedAt: new Date().toISOString(), authoritativeRows: rules.length },
   structure: { chapterCount: chapterNames.length, chapterNames, ruleCount: rules.length },
   rules
 };

@@ -2,6 +2,9 @@
 import { verifyAuth, json } from "./_auth.js";
 import { adaptEnv } from "./_adapters.js";
 import rentSeed from "./_reportlogic-seed.js";
+import gaibaoSeed from "./_reportlogic-gaibao-seed.js";
+
+const REPORT_LOGIC_SEEDS = { rent: rentSeed, gaibao: gaibaoSeed };
 
 const clean = (value, max = 200) => String(value == null ? "" : value).trim().slice(0, max);
 const parse = (value, fallback = null) => { try { return JSON.parse(value || ""); } catch (_) { return fallback; } };
@@ -75,17 +78,20 @@ function appendEnhancementData(baseData, input, actor = "", now = Date.now()) {
   return validateSet(data, data.projectType);
 }
 
-async function ensureSeed(env) {
-  const data = validateSet(rentSeed, "rent"), now = Date.now();
-  const existing = await env.DB.prepare("SELECT id,created_by,data FROM report_logic_sets WHERE project_type='rent' AND status='published' ORDER BY version DESC LIMIT 1").first();
-  if (existing) {
-    if (existing.id === (data.setId || "report-logic-rent-v1") && existing.created_by === "system-seed" && existing.data !== JSON.stringify(data)) {
-      await env.DB.prepare("UPDATE report_logic_sets SET data=?,source_name=?,published_at=? WHERE id=?").bind(JSON.stringify(data), data.source?.fileName || "", now, existing.id).run();
+async function ensureSeeds(env) {
+  const now = Date.now();
+  for (const [projectType, sourceSeed] of Object.entries(REPORT_LOGIC_SEEDS)) {
+    const data = validateSet(sourceSeed, projectType), seedId = data.setId || `report-logic-${projectType}-v1`;
+    const existing = await env.DB.prepare("SELECT id,created_by,data FROM report_logic_sets WHERE project_type=? AND status='published' ORDER BY version DESC LIMIT 1").bind(projectType).first();
+    if (existing) {
+      if (existing.id === seedId && existing.created_by === "system-seed" && existing.data !== JSON.stringify(data)) {
+        await env.DB.prepare("UPDATE report_logic_sets SET data=?,source_name=?,published_at=? WHERE id=?").bind(JSON.stringify(data), data.source?.fileName || "", now, existing.id).run();
+      }
+      continue;
     }
-    return;
+    await env.DB.prepare("INSERT INTO report_logic_sets(id,project_type,name,version,status,data,source_name,created_at,created_by,published_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
+      .bind(seedId, projectType, data.name || `${projectType}可研逐小节生成逻辑`, 1, "published", JSON.stringify(data), data.source?.fileName || "", now, "system-seed", now).run();
   }
-  await env.DB.prepare("INSERT INTO report_logic_sets(id,project_type,name,version,status,data,source_name,created_at,created_by,published_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
-    .bind(data.setId || "report-logic-rent-v1", "rent", data.name || "出租类可研逐小节生成逻辑", 1, "published", JSON.stringify(data), data.source?.fileName || "", now, "system-seed", now).run();
 }
 
 function rowOut(row, includeData = true) {
@@ -103,7 +109,7 @@ function rowOut(row, includeData = true) {
 export async function onRequestGet(context) {
   const env = adaptEnv(context.env), user = await verifyAuth(context.request, env);
   if (!user) return json({ ok: false, error: "未登录" }, 401);
-  try { await ensureSchema(env); await ensureSeed(env); } catch (error) { return json({ ok: false, error: "生成逻辑库初始化失败：" + error.message }, 500); }
+  try { await ensureSchema(env); await ensureSeeds(env); } catch (error) { return json({ ok: false, error: "生成逻辑库初始化失败：" + error.message }, 500); }
   const url = new URL(context.request.url), projectType = clean(url.searchParams.get("projectType") || "rent", 30);
   const row = await env.DB.prepare("SELECT * FROM report_logic_sets WHERE project_type=? AND status='published' ORDER BY version DESC LIMIT 1").bind(projectType).first();
   return row ? json({ ok: true, set: rowOut(row, true) }) : json({ ok: true, set: null });
@@ -112,7 +118,7 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   const env = adaptEnv(context.env), user = await verifyAuth(context.request, env);
   if (!user) return json({ ok: false, error: "未登录" }, 401);
-  try { await ensureSchema(env); await ensureSeed(env); } catch (error) { return json({ ok: false, error: "生成逻辑库初始化失败：" + error.message }, 500); }
+  try { await ensureSchema(env); await ensureSeeds(env); } catch (error) { return json({ ok: false, error: "生成逻辑库初始化失败：" + error.message }, 500); }
   let body;
   try { body = await context.request.json(); } catch (_) { return json({ ok: false, error: "请求格式有误" }, 400); }
   const action = clean(body.action, 30);
@@ -122,11 +128,13 @@ export async function onRequestPost(context) {
     const rows = await env.DB.prepare("SELECT * FROM report_logic_sets ORDER BY project_type,version DESC LIMIT 100").all();
     return json({ ok: true, items: (rows.results || []).map(row => rowOut(row, false)) });
   }
-  if (action === "restoreRentSeed" || action === "publish") {
+  if (action === "restoreRentSeed" || action === "restoreSeed" || action === "publish") {
     if (!isAdmin(env, user) || !passOk(env, context.request)) return json({ ok: false, error: "仅管理员可发布生成逻辑" }, 403);
     try {
-      const projectType = clean(body.projectType || body.data?.projectType || "rent", 30);
-      const data = validateSet(action === "restoreRentSeed" ? rentSeed : body.data, projectType);
+      const projectType = clean(action === "restoreRentSeed" ? "rent" : (body.projectType || body.data?.projectType || "rent"), 30);
+      const seed = REPORT_LOGIC_SEEDS[projectType];
+      if (action === "restoreSeed" && !seed) throw new Error("当前项目类型没有内置基线");
+      const data = validateSet(action === "restoreRentSeed" ? rentSeed : action === "restoreSeed" ? seed : body.data, projectType);
       const latest = await env.DB.prepare("SELECT version FROM report_logic_sets WHERE project_type=? ORDER BY version DESC LIMIT 1").bind(projectType).first();
       const version = Number(latest?.version || 0) + 1, now = Date.now(), id = `report-logic-${projectType}-v${version}-${now.toString(36)}`;
       await env.DB.prepare("UPDATE report_logic_sets SET status='archived' WHERE project_type=? AND status='published'").bind(projectType).run();
