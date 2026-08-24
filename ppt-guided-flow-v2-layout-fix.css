@@ -1,0 +1,144 @@
+/* Template canvases render at 4x then scale down. Remove the 4x canvas from
+   normal flow so each card keeps the intended 16:9 preview height. */
+.ppt-v2-template {
+  display: block;
+  min-width: 0;
+}
+
+.ppt-v2-template-preview {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.ppt-v2-template-preview .ppt-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* The workspace has a fixed-height shell. Keep the guided flow as the
+   scrollable flex child so the composer remains visible at the bottom. */
+.ppt-agent-shell.ppt-v2.ppt-conversation {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 4px 20px;
+  scrollbar-gutter: stable;
+}
+
+.ppt-v2-progress {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding: 7px 2px;
+  background: rgba(247, 250, 252, .96);
+  backdrop-filter: blur(8px);
+}
+
+.ppt-v2-conversation {
+  padding: 12px;
+  border: 1px solid #d6e3ec;
+  border-radius: 10px;
+  background: #f8fbfd;
+}
+
+.ppt-v2-conversation-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: #244d6c;
+  font-size: 11px;
+}
+
+.ppt-v2-conversation-head span {
+  color: #8093a1;
+  font-size: 9px;
+}
+
+.ppt-v2-conversation .ppt-thread-feed {
+  max-height: 210px;
+  margin: 0;
+  overflow: auto;
+  background: #fff;
+}
+
+.ppt-v2-conversation .ppt-runtime-thread {
+  max-height: none;
+  margin: 0;
+  border: 0;
+}
+
+.ppt-v2-context-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  color: #6f8697;
+  font-size: 9px;
+}
+
+.ppt-v2-context-empty b {
+  color: #315e7e;
+  font-size: 10px;
+}
+
+.ppt-v2-material-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.ppt-v2-material-stats span {
+  padding: 12px 14px;
+  border: 1px solid #d9e7f0;
+  border-radius: 9px;
+  color: #688196;
+  background: linear-gradient(145deg, #fff, #f4f9fc);
+  font-size: 10px;
+}
+
+.ppt-v2-material-stats b {
+  display: block;
+  margin-bottom: 2px;
+  color: #176ca7;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+@media (max-width: 900px) {
+  .ppt-v2-material-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Completed workflow steps are navigation controls, not decorative labels. */
+.ppt-v2-progress button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 5px;
+  border: 0;
+  border-radius: 18px;
+  color: #7890a2;
+  background: #edf3f7;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+.ppt-v2-progress button i {
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #fff;
+  font-style: normal;
+}
+
+.ppt-v2-progress button.done { color: #3d7754; background: #e7f4ec; }
+.ppt-v2-progress button.done:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(40, 100, 70, .12); }
+.ppt-v2-progress button.active { color: #17639d; background: #d9eaf8; font-weight: 700; }
+.ppt-v2-progress button:disabled { cursor: not-allowed; opacity: .7; }

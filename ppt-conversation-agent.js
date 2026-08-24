@@ -18,6 +18,7 @@
     let attachments=composer.querySelector(".ppt-composer-attachments"),html=attachmentHtml(p);if(html&&!attachments){composer.insertAdjacentHTML("afterbegin",html);attachments=composer.querySelector(".ppt-composer-attachments");if(attachments)attachments.dataset.signature=attachmentSignature;}else if(html&&attachments&&attachments.dataset.signature!==attachmentSignature){attachments.outerHTML=html;attachments=composer.querySelector(".ppt-composer-attachments");if(attachments)attachments.dataset.signature=attachmentSignature;}else if(!html&&attachments)attachments.remove();
     const messageSignature=conversation(p).slice(-8).map(x=>[x.role,x.at,x.content]).join("|");
     const feed=document.querySelector(".ppt-thread-feed"),runtimeHost=feed||compose;let runtime=document.querySelector(".ppt-runtime-thread"),runtimeHtml=messagesHtml(p);if(runtimeHtml&&!runtime){runtimeHost.insertAdjacentHTML(feed?"beforeend":"afterbegin",runtimeHtml);runtime=document.querySelector(".ppt-runtime-thread");if(runtime)runtime.dataset.signature=messageSignature;}else if(runtimeHtml&&runtime&&runtime.dataset.signature!==messageSignature){runtime.outerHTML=runtimeHtml;runtime=document.querySelector(".ppt-runtime-thread");if(runtime)runtime.dataset.signature=messageSignature;}else if(!runtimeHtml&&runtime)runtime.remove();
+    if(messageSignature&&S._pptConversationRenderedSignature!==messageSignature){S._pptConversationRenderedSignature=messageSignature;queueMicrotask(()=>{const activeFeed=document.querySelector(".ppt-v2-conversation .ppt-thread-feed"),shell=document.querySelector(".ppt-agent-shell.ppt-v2");if(activeFeed)activeFeed.scrollTop=activeFeed.scrollHeight;if(shell)shell.scrollTop=shell.scrollHeight;});}
     if(oldButton.dataset.pptConversationBound==="yes")return;const button=oldButton.cloneNode(true);button.dataset.pptConversationBound="yes";button.__pptChatAgentBound=true;oldButton.replaceWith(button);
     button.addEventListener("click",event=>{event.preventDefault();sendConversation().catch(error=>{notify("PPT对话处理失败："+error.message);S.busy=false;rerender();});});
     textarea.addEventListener("keydown",event=>{if(event.isComposing)return;if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();button.click();}});
@@ -25,6 +26,7 @@
   function hasMaterials(p){return !!((((p.evidencePack&&p.evidencePack.assets)||[]).length)||String(p.sourceText||"").trim());}
   function currentInput(){const el=get("pptChatCommand")||get("pptSource");return el?el.value.trim():"";}
   function setCurrentInput(value){const el=get("pptChatCommand")||get("pptSource");if(el)el.value=value;}
+  function scrollToLatest(){const run=()=>{const feed=document.querySelector(".ppt-v2-conversation .ppt-thread-feed"),shell=document.querySelector(".ppt-agent-shell.ppt-v2");if(feed)feed.scrollTop=feed.scrollHeight;if(shell)shell.scrollTop=shell.scrollHeight;};if(root.requestAnimationFrame)root.requestAnimationFrame(()=>root.requestAnimationFrame(run));else setTimeout(run,0);}
   function needsInitialGeneration(p){return hasMaterials(p)&&!(p.workflow&&p.workflow.materialPlanGeneratedAt);}
   async function automaticImages(p,pages=[]){
     const providers=root.PptImageProviders;if(!providers||typeof providers.search!=="function")return{generated:0,reason:"图片Provider未加载"};
@@ -38,6 +40,12 @@
       const slide=(current.slides||[])[target.page-1],query=target.query||slide.title||current.title;
       const rows=await providers.search(query,{plan:current,style:current.templateId,accent:(current.designSpec||{}).accent,imageProviderOptions:{mode:current.imageProviderMode||"standard",aspectRatio:"16:9",imageSize:"1K"}},[preferred.id]);
       const image=rows.find(x=>x&&x.dataUrl),failed=rows.find(x=>x&&x.error);
+      if(image&&root.PptAssetCenter&&typeof root.PptAssetCenter.saveGenerated==="function"){
+        try{
+          const saved=await root.PptAssetCenter.saveGenerated(image,{title:(slide.title||current.title||"PPT")+"主视觉",description:"AI自动生成并应用于第"+target.page+"页",tags:["AI生成","PPT主视觉","第"+target.page+"页"],prompt:query,projectId:S.current&&S.current.id||""});
+          if(saved){image.libraryAssetId=saved.id;image.id=saved.id;}
+        }catch(assetError){errors.push("第"+target.page+"页素材已应用，但入库失败："+assetError.message);}
+      }
       if(!image){errors.push("第"+target.page+"页："+(failed&&failed.error||"未返回图片"));continue;}
       const applied=C.applyGeneratedImage(current,target.page,image);if(applied.ok){current=applied.plan;generated++;}
     }
@@ -70,11 +78,11 @@
     return{ok:true,message:"已实际更新第"+result.page+"页"+(args.title?"标题":"")+(args.title&&args.layoutId?"和":"")+(args.layoutId?"版式":"")+"，原有未指定内容保持不变。"};
   }
   async function continueWithAgent(text){
-    if(!text){notify("请输入修改要求或问题");return;}const p=plan();push("user",text,{kind:"conversation"});setCurrentInput("");const direct=applyDirectCommand(text);if(direct){push("assistant",direct.message,{kind:"direct-command"});rerender();await W.saveProject("PPT对话直接修改");return;}rerender();S.busy=true;
-    const context=C.deckContext(p),history=conversation(p).slice(-10).map(x=>({role:x.role,content:x.content})),system=["你是当前PPT项目的专属智能体。你能理解整套材料、汇报目标和逐页结构，并持续回答、诊断和修改。","用户只是咨询时直接回答；用户明确要求修改时调用工具。不得声称已经修改却不调用工具。","不得编造材料里没有的数字；涉及数字时保留来源。人工锁定页未经用户明确要求不得修改。","当前PPT上下文："+JSON.stringify(context)].join("\n");
-    const result=await root.AgentCore.run({system,messages:history,tools:["ppt_update_slide_content","ppt_change_template","ppt_open_review","ppt_generate_images","ppt_regenerate_current_slide","ppt_undo_last_change","ppt_split_current_slide","ppt_merge_with_next_slide"],maxRounds:3,maxSelfCheck:0,useMemory:false,traceQuery:text});
+    if(!text){notify("请输入修改要求或问题");return;}const p=plan();push("user",text,{kind:"conversation"});setCurrentInput("");const direct=applyDirectCommand(text);if(direct){push("assistant",direct.message,{kind:"direct-command"});rerender();await W.saveProject("PPT对话直接修改");return;}const local=C.localProjectAnswer&&C.localProjectAnswer(p,text);if(local){push("assistant",local,{kind:"local-project-answer"});rerender();await W.saveProject("PPT本地项目问答");return;}rerender();S.busy=true;notify("AI正在结合整套材料与PPT回答…");
+    const context=C.deckContext(p),history=conversation(p).slice(-10).map(x=>({role:x.role,content:x.content})),system=["你是当前PPT项目的专属智能体。你能理解整套材料、汇报目标和逐页结构，并持续回答、诊断和修改。","用户只是咨询时直接回答且不得调用工具；只有用户明确要求修改时才能调用修改工具。只有用户明确说生图、图片或配图时才能调用图片工具。","用户说文字不够或内容太少时，应分析并扩充有来源的文字与结构，禁止擅自调用生图工具。","不得编造材料里没有的数字；涉及数字时保留来源。人工锁定页未经用户明确要求不得修改。","当前PPT上下文："+JSON.stringify(context)].join("\n"),isChange=/修改|改成|调整|删除|新增|拆分|合并|生成|切换|换成|应用|撤销|复核|导出/.test(text),wantsImage=/生图|图片|配图|主视觉|banana/i.test(text),allTools=["ppt_update_slide_content","ppt_change_template","ppt_open_review","ppt_regenerate_current_slide","ppt_undo_last_change","ppt_split_current_slide","ppt_merge_with_next_slide"],tools=isChange?(wantsImage?allTools.concat("ppt_generate_images"):allTools):[];
+    let result;try{result=await Promise.race([root.AgentCore.run({system,messages:history,tools,maxRounds:3,maxSelfCheck:0,useMemory:false,traceQuery:text}),new Promise((_,reject)=>setTimeout(()=>reject(new Error("模型响应超时")),15000))]);}catch(error){const fallback="当前模型暂未在15秒内返回，但你的问题已经保留。你可以重试，或先问页数、材料来源、内容是否偏少、哪些页面需要提升，这些问题可以由本地项目数据立即回答。";push("assistant",fallback,{kind:"model-timeout",error:error.message});notify(fallback);rerender();await W.saveProject("PPT对话超时兜底");return;}
     const latest=plan();latest.workflow={...(latest.workflow||{}),pptConversation:conversation(p)};push("assistant",result.text||"已处理你的要求。",{kind:"conversation",toolCalls:(result.toolCalls||[]).map(x=>x.name)});S.busy=false;await W.saveProject("PPT持续对话修改");
   }
-  async function sendConversation(){if(S.busy)return;const p=plan(),text=currentInput();if(!p)return;if(!hasMaterials(p)){notify("请先上传至少一份材料，或在对话框中粘贴材料与汇报要求");return;}S.busy=true;try{if(needsInitialGeneration(p))await generateFromMaterials(text);else await continueWithAgent(text);}finally{S.busy=false;rerender();}}
+  async function sendConversation(){if(S.busy)return;const p=plan(),text=currentInput();if(!p)return;if(!hasMaterials(p)){notify("请先上传至少一份材料，或在对话框中粘贴材料与汇报要求");return;}S.busy=true;try{if(needsInitialGeneration(p))await generateFromMaterials(text);else await continueWithAgent(text);}finally{S.busy=false;rerender();scrollToLatest();}}
   replaceMaterialPrompt();registerTools();let queued=false;const observer=new MutationObserver(()=>{if(queued)return;queued=true;queueMicrotask(()=>{queued=false;installComposerUi();});});observer.observe(document.documentElement,{childList:true,subtree:true});queueMicrotask(installComposerUi);root.PptConversationAgent={send:sendConversation,install:installComposerUi};
 })(window);

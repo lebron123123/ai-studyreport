@@ -34,6 +34,10 @@ let aiReportDocVisible = false;  // 报告预览面板当前是否展开（用�
 let aiReportPendingCalcChange = null; // AgentCore只生成预演，用户确认后才写入
 let aiReportAgentRegistered = false;
 let aiReportParamsConfirmed = false; // 只表示本次AI可研会话已通过人工确认；不得复用其他测算模块的全局calcParams
+let aiReportMaterialTarget = null; // 当前项目材料上传要补到哪一条规则/哪个小节
+let aiReportBatchFiles = []; // 批量材料解析后的待确认映射，不确认不写入项目资料
+let aiReportCanEnhanceLogic = false; // 仅控制管理员增强入口显示；真正发布仍由服务端校验密码
+let aiReportLogicEnhanceState = null; // 当前逐项增强会话
 
 function airCurrentStage(){
   const state={chat:aiReportChat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,
@@ -51,7 +55,7 @@ function airClearLocalState(){try{localStorage.removeItem(airLocalStateKey());}c
 
 function airSwitchProjectSession(){
   aiReportStopFlag=true;aiReportChat=[];aiReportExtracted=null;aiReportSuggested=null;aiReportProgressMsg=null;aiReportPendingTasks=null;
-  aiReportHasDoc=false;aiReportDocVisible=false;aiReportPendingCalcChange=null;aiReportBusy=false;aiReportChatLoaded=false;aiReportParamsConfirmed=false;
+  aiReportHasDoc=false;aiReportDocVisible=false;aiReportPendingCalcChange=null;aiReportBusy=false;aiReportChatLoaded=false;aiReportParamsConfirmed=false;aiReportMaterialTarget=null;aiReportBatchFiles=[];aiReportLogicEnhanceState=null;
 }
 
 function airDocPaneEmptyHtml(){
@@ -116,13 +120,19 @@ function bindAiReportEvents(){
     docPane.addEventListener("click", e=>{
       const retry = e.target.closest(".air-retry-btn");
       if(retry){ airRetrySection(retry.dataset.cn, +retry.dataset.si); return; }
+      const upload=e.target.closest(".air-material-upload");
+      if(upload){airOpenMaterialUpload(upload);return;}
+      const enhance=e.target.closest(".air-section-enhance");
+      if(enhance){airOpenSectionLogicEnhancement(enhance.dataset.cn,+enhance.dataset.si);return;}
       const close = e.target.closest(".air-doc-close");
       if(close){ airSetDocVisible(false); return; }
       const chip = e.target.closest(".air-doc-outline .chip");
       if(chip) airScrollToChapter(chip.dataset.cn);
     });
+    docPane.addEventListener("change",e=>{if(e.target&&e.target.id==="airDocMaterialFile")airHandleMaterialFiles([...e.target.files]);});
   }
   renderAiReportMsgs();
+  airCheckAdminLogicCapability();
   airRenderDocToggle();
   airLoadState();
   airRestoreDocPaneIfNeeded();
@@ -402,14 +412,32 @@ async function airRunSuggest(){
   }
 }
 
+function airFormatParamValue(value,meta){
+  const unit=String(meta&&meta.unit||"");
+  if(value==null||value==="")return "—";
+  const numberText=n=>Number(n).toLocaleString("zh-CN",{maximumFractionDigits:4});
+  if(Array.isArray(value)){
+    if(unit==="比例")return value.map(x=>Number.isFinite(+x)?numberText(+x*100)+"%":String(x)).join("、");
+    return value.map(x=>Number.isFinite(+x)?numberText(+x):String(x)).join("、")+(unit&&unit!=="—"?" "+unit:"");
+  }
+  if(typeof value==="object")return JSON.stringify(value);
+  if(typeof value==="number"){
+    if(unit==="比例")return numberText(value*100)+"%";
+    if(unit==="%")return numberText(value)+"%";
+    if(unit==="年"||unit==="月")return String(value)+unit;
+    return numberText(value)+(unit&&unit!=="—"?" "+unit:"");
+  }
+  return String(value);
+}
+
 function airConfirmCardHtml(){
   const sug = aiReportSuggested;
   if(!sug) return "";
   const alreadyCalculated=airStageAtLeast("calculated");
+  const shownParams=alreadyCalculated&&calcParams?calcParams:sug.params;
   const confCls = c => c==="高"?"air-conf-hi":c==="中"?"air-conf-mid":"air-conf-lo";
   const rows = sug.keyFields.map(f=>{
     const src = sug.sources[f.key] || {};
-    const shownParams=alreadyCalculated&&calcParams?calcParams:sug.params;
     const val = (shownParams[f.key]!=null? shownParams[f.key] : "");
     const disp = f.pct ? (val!==""? Math.round(val*100): "") : val;
     const evid = (src.evidence||[]).length
@@ -432,8 +460,9 @@ function airConfirmCardHtml(){
   Object.values(sug.sources||{}).forEach(src=>{ const k=src.sourceCode||"unknown"; sourceCounts[k]=(sourceCounts[k]||0)+1; });
   const sourceNames={project_excel:"项目Excel",project_document:"项目正式资料",binding_rule:"适用硬规则",regional_case:"同区域案例",general_case:"其他案例",industry_fallback:"行业兜底",expert_default:"专家默认"};
   const sourceSummary=Object.entries(sourceCounts).map(([k,n])=>(sourceNames[k]||k)+" "+n+"项").join("｜");
-  const otherDetails=otherKeys.length?'<details style="margin-top:10px;"><summary style="font-size:12px;cursor:pointer;">查看其余 '+otherKeys.length+' 项参数来源</summary><div style="max-height:220px;overflow:auto;margin-top:7px;">'
-    +otherKeys.map(k=>{const s=sug.sources[k]||{},m=(sug.paramMeta&&sug.paramMeta[k])||{};return '<div style="display:grid;grid-template-columns:170px 1fr auto;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line);font-size:11px;"><span><b>'+escapeHtml(m.label||k)+'</b><br><code>'+escapeHtml(k)+'</code></span><span>'+escapeHtml(s.from||"")+'</span><span>'+(s.requiresManualConfirmation?'待批量确认':'资料已给定')+'</span></div>';}).join("")+'</div></details>':'';
+  const otherDetails=otherKeys.length?'<details style="margin-top:10px;"><summary style="font-size:12px;cursor:pointer;">查看其余 '+otherKeys.length+' 项参数及来源</summary><div class="air-other-param-list">'
+    +'<div class="air-other-param-row head"><span>参数</span><span>当前值</span><span>来源/依据</span><span>确认状态</span></div>'
+    +otherKeys.map(k=>{const s=sug.sources[k]||{},m=(sug.paramMeta&&sug.paramMeta[k])||{},value=shownParams[k];return '<div class="air-other-param-row"><span><b>'+escapeHtml(m.label||k)+'</b><br><code>'+escapeHtml(k)+'</code></span><span class="air-other-param-value">'+escapeHtml(airFormatParamValue(value,m))+'</span><span>'+escapeHtml(s.from||"来源待确认")+'</span><span>'+(s.requiresManualConfirmation?'待批量确认':'资料已给定')+'</span></div>';}).join("")+'</div></details>':'';
   return '<div class="air-card">'
     +'<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">来源层级：'+escapeHtml((sug.sourceHierarchy||[]).join(" → "))+'</div>'
     +'<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">本次全量来源：'+escapeHtml(sourceSummary)+'</div>'
@@ -443,7 +472,7 @@ function airConfirmCardHtml(){
     +(!alreadyCalculated&&otherManual.length?'<label style="display:block;margin-top:10px;font-size:11.5px;"><input class="air-kf-confirm" data-key="__other_batch" type="checkbox"> 已批量核对其余 '+otherManual.length+' 项案例/兜底/默认参数（低影响项后续还会做联合扰动验证）</label>':'')
     +'<div style="margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
     +(alreadyCalculated?'<span class="air-complete-pill">测算步骤已完成</span>':'<button class="btn" id="airConfirmParams">确认，开始测算 →</button>')
-    +'<span style="font-size:11.5px; color:var(--ink-soft);">其余约'+(Object.keys(sug.params).length-sug.keyFields.length)+'项参数已按上方来源自动填好，不在此重复列出</span>'
+    +'<span style="font-size:11.5px; color:var(--ink-soft);">其余约'+(Object.keys(sug.params).length-sug.keyFields.length)+'项参数的当前值、单位和来源已列在上方折叠区</span>'
     +'</div></div>';
 }
 
@@ -486,6 +515,7 @@ async function aiReportConfirmParams(){
       try{ calcResult.modeCompare = computeModeCompare(calcParams); }catch(e){}
     }
     scParams = calcParams; scResult = calcResult;   // 供导出/审查等共享部件读取
+    if(window.ReportLogicCore){try{await ReportLogicCore.load(calcType);}catch(e){}}
     aiReportParamsConfirmed = true;
     if(!currentProjectId){currentProjectId=genProjectId();rememberActiveProjectId(currentProjectId);}
     if(window.ProjectWorkflow)window.ProjectWorkflow.createCalcSnapshot(projectWorkflow,calcType,calcParams,calcResult,{reason:"AI可研参数人工确认",confirmedBy:typeof getUser==="function"?getUser():""});
@@ -524,7 +554,12 @@ async function aiReportRunGenerate(){
   const sug = aiReportSuggested;
   const domainKey_ = AI_DOMAIN_OF[sug.calcType];
   await fetchOutlines();
-  loadDomain(domainKey_);
+  let logicOutline = null;
+  if(sug.calcType==="rent" && window.ReportLogicCore){
+    try{ await ReportLogicCore.load("rent"); logicOutline=ReportLogicCore.outline("rent"); }catch(e){}
+  }
+  if(logicOutline) reportLoadDomainSource(domainKey_,logicOutline);
+  else loadDomain(domainKey_);
   rptCtype = sug.calcType === "sale" ? "sale" : "rent";
 
   const today = new Date().toLocaleDateString("zh-CN");
@@ -636,21 +671,42 @@ async function airRetrySection(cn, si){
 }
 
 /* ================= 右侧报告预览面板 ================= */
+function airSectionMaterialState(chapter,section){
+  if(!window.ReportLogicCore)return {rules:[],missing:[],ready:false};
+  const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",rules=ReportLogicCore.match(type,chapter.name,section.t,{projectText:[project.name,project.type,project.location,project.desc].filter(Boolean).join(" ")}),ctx=airMaterialContext();
+  const statuses=rules.map(rule=>ReportLogicCore.generationReadiness?ReportLogicCore.generationReadiness(rule,ctx):ReportLogicCore.requirementStatus(rule,ctx)),missing=[...new Set(statuses.flatMap(x=>x.missing||[]))];
+  const criticalRules=rules.filter((rule,index)=>statuses[index]&&statuses[index].level==="critical"),frameworkRules=rules.filter((rule,index)=>statuses[index]&&statuses[index].level==="framework");
+  return {rules,statuses,missing,criticalRules,frameworkRules,ready:!!rules.length&&!missing.length,level:criticalRules.length?"critical":frameworkRules.length?"framework":"ready"};
+}
+function airSectionMaterialHtml(chapter,section,si){
+  const st=airSectionMaterialState(chapter,section),label={knowledge_base:"知识库检索",web_search:"网上检索",provider:"数据接口",calculation_engine:"测算引擎",manual_upload:"人工上传",derived_section:"其他章节",unclassified:"确认材料来源"};
+  const enhance=aiReportCanEnhanceLogic&&st.rules.length?'<button type="button" class="air-logic-enhance air-section-enhance" data-cn="'+chapter.cn+'" data-si="'+si+'">🛠 从本节成稿提炼增强规则</button>':'';
+  if(st.ready)return '<div class="air-section-material ok"><b>✓ 本节依据已找到</b><span>测算或项目材料已经匹配，可据此生成并保留来源。</span>'+(enhance?'<div class="air-section-material-actions">'+enhance+'</div>':'')+'</div>';
+  const needed=st.missing.map(x=>label[x]||x),sourcePool=st.level==="critical"?st.criticalRules:st.rules,sources=sourcePool.map(r=>String(r.requiredSources||"").trim()).filter(Boolean).slice(0,3).map(x=>x.length>120?x.slice(0,120)+"…":x);
+  const css=st.level==="critical"?"missing":"pending",title=st.level==="critical"?"框架将先生成，以下关键依据待补":"可先生成通用框架，项目事实后续核实";
+  const upload='<button type="button" class="air-material-upload" data-rule-id="'+escapeHtml(st.rules.map(r=>r.id).join(","))+'" data-chapter="'+escapeHtml(chapter.name)+'" data-section="'+escapeHtml(section.t)+'" data-cn="'+chapter.cn+'" data-si="'+si+'">＋ 上传材料并补强本节</button>';
+  return '<div class="air-section-material '+css+'"><b>↳ '+title+'</b><span>'+(st.level==="critical"?'重要来源：'+escapeHtml(sources.join("；")||"与本节对应的批复、说明、表格或原始数据"):'待核实渠道：'+escapeHtml(needed.join("、")||"确认材料来源"))+'</span><div class="air-section-material-actions">'+upload+enhance+'</div></div>';
+}
+function airChapterMaterialLevel(chapter){const levels=chapter.sections.map(s=>airSectionMaterialState(chapter,s).level);return levels.includes("critical")?"missing":levels.includes("framework")?"pending":"ok";}
+function airApplyDocMaterialStatuses(){
+  chapters.filter(c=>c.checked).forEach(c=>{c.sections.forEach((s,si)=>{const el=document.querySelector('#sec_'+c.cn+'_'+si+' .air-section-material');if(el)el.outerHTML=airSectionMaterialHtml(c,s,si);});const dot=document.querySelector('.air-doc-outline .chip[data-cn="'+c.cn+'"] .air-material-dot');if(dot){const level=airChapterMaterialLevel(c);dot.className="air-material-dot "+level;dot.title=level==="ok"?"本章材料已确认齐全":level==="missing"?"本章有关键依据待补":"本章可先生成，部分来源待核实";}});
+}
 function airBuildDocPane(){
   const pane = document.getElementById("airDocPane");
   if(!pane) return;
   pane.classList.remove("empty");
   const active = chapters.filter(c=>c.checked);
   const totalSec = active.reduce((n,c)=>n+c.sections.length,0);
-  const outline = active.map(c=>'<span class="chip" data-cn="'+c.cn+'">'+c.cn+'·'+c.name+'</span>').join("");
+  const outline = active.map(c=>{const level=airChapterMaterialLevel(c);return '<span class="chip" data-cn="'+c.cn+'"><i class="air-material-dot '+level+'" title="'+(level==='ok'?'本章材料已确认齐全':level==='missing'?'本章有关键依据待补':'本章可先生成，部分来源待核实')+'"></i>'+c.cn+'·'+c.name+'</span>';}).join("");
   const body = active.map(c=>'<div class="chapter-block" id="block_'+c.cn+'"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
-    + c.sections.map((s,si)=>'<div class="section-block pending" id="sec_'+c.cn+'_'+si+'" data-status="pending"><h4>'+s.t+(s.numeric?' ⚠数据':'')+'</h4>'
+    + c.sections.map((s,si)=>'<div class="section-block pending" id="sec_'+c.cn+'_'+si+'" data-status="pending"><h4>'+s.t+(s.numeric?' ⚠数据':'')+'</h4>'+airSectionMaterialHtml(c,s,si)
       +'<div class="body"><span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:70%"></span></div></div>').join("")
     +'</div>').join("");
   pane.innerHTML = '<div class="air-doc-head"><button type="button" class="air-doc-close" title="收起预览">✕</button>'
     +'<div class="air-doc-title">'+escapeHtml(project.name||"未命名项目")+'</div>'
     +'<div class="air-doc-meta">'+escapeHtml(project.industry||"")+' · 共 '+active.length+' 章 / '+totalSec+' 个子标题</div></div>'
     +'<div class="air-doc-outline">'+outline+'</div>'
+    +'<input type="file" id="airDocMaterialFile" accept=".txt,.md,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
     +'<div class="air-doc-scroll" id="airDocScroll">'+body+'</div>';
   aiReportHasDoc = true;
   airSetDocVisible(true);
@@ -670,11 +726,19 @@ function airScrollToChapter(cn){
   const el = document.getElementById("block_"+cn);
   if(el) el.scrollIntoView({behavior:"smooth", block:"start"});
 }
+function airSectionDisplayContent(chapter,section){
+  if(!window.ReportLogicCore?.ensureMissingMarkers)return section.content||"";
+  const state=airSectionMaterialState(chapter,section);
+  return ReportLogicCore.ensureMissingMarkers(section.content||"",state.rules,airMaterialContext());
+}
 // 从首页/其它模块切回本模块时，如果本轮已经生成过内容（chapters里有正文），把预览面板重建为"已完成"态
-function airRestoreDocPaneIfNeeded(){
+async function airRestoreDocPaneIfNeeded(){
   if(!aiReportSuggested || !chapters.length) return;
   const hasContent = chapters.some(c=>c.sections.some(s=>s.content));
   if(!hasContent) return;
+  if(window.ReportLogicCore){
+    try{await ReportLogicCore.load(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent");}catch(e){}
+  }
   airBuildDocPane();
   chapters.filter(c=>c.checked).forEach(c=>{
     c.sections.forEach((s,si)=>{
@@ -682,7 +746,7 @@ function airRestoreDocPaneIfNeeded(){
       if(!el || !s.content) return;
       el.dataset.status = "done";
       el.classList.remove("pending");
-      el.querySelector(".body").innerHTML = renderContent(s.content);
+      el.querySelector(".body").innerHTML = renderContent(airSectionDisplayContent(c,s));
       el.querySelector("h4").insertAdjacentHTML("beforeend", '<span class="done-stamp">已拟</span>');
     });
     airUpdateChapterChipStatus(c.cn);
@@ -704,8 +768,215 @@ function airProgressCardHtml(m){
 /* 测算和起草报告是两步：这张卡片是测算和生成之间的停顿点，人工确认数字没问题了再往下点。 */
 function airGenConfirmHtml(){
   if(airStageAtLeast("generating")) return '<div class="air-card air-step-done"><b>✓ 已进入可研生成阶段</b><span>请查看当前生成进度或右侧报告预览，无需再次启动。</span></div>';
-  return '<div class="air-card"><button class="btn" id="airStartGen">确认，开始可研生成 →</button>'
-    +'<div style="margin-top:8px; font-size:11.5px; color:var(--ink-soft);">测算结果已经在上面，确认无误后再点这里——会逐章撰写报告正文（约40次AI调用，需要一点时间，可随时停止）。</div></div>';
+  const logic=window.ReportLogicCore?ReportLogicCore.overview(calcType||(calcResult&&calcResult.__ctype)||rptCtype):null;
+  return '<div class="air-card">'+(logic?'<div class="air-step-done" style="margin-bottom:10px;"><b>✓ 已接入公司逐小节生成逻辑 v'+logic.version+'</b><span>'+logic.chapterCount+'章 / '+logic.ruleCount+'项；生成、材料提示和复核共用同一规则ID。</span></div>':'')
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;">'+(logic?'<button class="btn" id="airCheckMaterials">先检查'+logic.chapterCount+'章所需材料 →</button><button class="btn ghost air-start-gen">资料暂缺，带缺口标记生成</button>':'<button class="btn air-start-gen">确认，开始可研生成 →</button>')+'</div>'
+    +'<div style="margin-top:8px; font-size:11.5px; color:var(--ink-soft);">建议先检查材料完整性。知识库、网上检索、数据接口和测算结果由系统尽量补齐；必须人工提供的资料会按章列出。即使继续生成，缺失处也只会标“待补”，不会编造。</div></div>';
+}
+
+function airMaterialContext(){
+  const evidenceByRule={};
+  (Array.isArray(kbEntries)?kbEntries:[]).forEach(entry=>{
+    const ids=Array.isArray(entry.ruleIds)?entry.ruleIds:[];
+    ids.forEach(id=>{
+      if(!evidenceByRule[id])evidenceByRule[id]=[];
+      evidenceByRule[id].push({kind:"all",title:entry.title||entry.fileName||"项目上传材料",source:"project_upload"});
+    });
+  });
+  return {hasKnowledge:false,hasWebEvidence:false,hasProviderData:false,hasManualMaterial:false,hasCalculation:!!(calcParams&&calcResult),hasDerivedSection:chapters.some(c=>c.sections.some(s=>!!(s.content||s.editedHtml))),evidenceByRule};
+}
+async function airCheckWholeReportMaterials(){
+  if(!window.ReportLogicCore)return airPush({role:"assistant",kind:"text",content:"逐小节生成逻辑模块未加载，暂时无法检查材料。"});
+  const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent";await ReportLogicCore.load(type);
+  const inventory=ReportLogicCore.materialInventory(type,airMaterialContext());
+  if(!inventory.total)return airPush({role:"assistant",kind:"text",content:"当前项目类型还没有已发布的逐小节生成逻辑，可先按原流程生成。"});
+  aiReportChat=aiReportChat.filter(m=>m.kind!=="materialCheck");airPush({role:"assistant",kind:"materialCheck",inventory});airSaveState();
+}
+function airMaterialCheckHtml(m){
+  const inv=m.inventory||{summary:{},chapters:[]},sum=inv.summary||{},labels={knowledge_base:"知识库检索",web_search:"网上检索",provider:"数据接口",calculation_engine:"测算引擎",manual_upload:"人工上传",derived_section:"其他章节",unclassified:"来源待确认"};
+  const stat=(num,label,color)=>'<div style="border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:#fff;"><b style="display:block;font-size:18px;color:'+color+';">'+(num||0)+'</b><span style="font-size:11px;color:var(--ink-soft);">'+label+'</span></div>';
+  const rowHtml=item=>{const status=item.ready?'<span style="color:var(--ok-green);">✓ 已确认找到</span>':'<span style="color:var(--red);">● 待补充/待检索</span>';const kinds=(item.sourceKinds||[]).length?item.sourceKinds:["unclassified"];const channels=kinds.map(kind=>'<span style="display:inline-block;border:1px solid '+(item.missing.includes(kind)?'#e6a5a0':'#b7ddc6')+';background:'+(item.missing.includes(kind)?'#fff0ef':'#edf8f1')+';color:'+(item.missing.includes(kind)?'var(--red)':'var(--ok-green)')+';padding:1px 5px;border-radius:8px;margin:1px;font-size:10.5px;">'+escapeHtml(labels[kind]||kind)+'</span>').join("");return '<tr><td style="white-space:nowrap;">第'+item.sourceNo+'项</td><td><b>'+escapeHtml(item.title)+'</b><div style="color:var(--ink-soft);margin-top:3px;white-space:pre-line;">'+escapeHtml(item.requiredSources)+'</div></td><td>'+channels+'</td><td><div class="air-material-row-actions">'+status+(item.blocking?'<span style="font-size:10px;color:var(--red);">重要阻断</span>':'')+'<button type="button" class="air-material-upload" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'">＋ 上传补充</button></div></td></tr>';};
+  return '<div class="air-card"><div class="air-step-done" style="margin-bottom:10px;"><b>材料完整性台账 · 逻辑 v'+inv.version+'</b><span>共'+inv.total+'项、'+inv.chapters.length+'章。以下来源数量允许交叉，例如同一小节可能同时需要知识库和人工材料。</span></div>'
+    +(aiReportCanEnhanceLogic?'<div class="air-enhance-entry-tip"><b>管理员增强模式已开启</b><span>请先生成右侧正文并持续修改；定稿后从对应小节点击“从本节成稿提炼增强规则”，AI会比较版本并交由管理员审定。</span></div>':'')
+    +'<div style="display:grid;grid-template-columns:repeat(6,minmax(90px,1fr));gap:7px;margin-bottom:10px;">'+stat(sum.ready,"已确认找到","var(--ok-green)")+stat(sum.pendingKnowledge,"需从知识库检索","var(--red)")+stat(sum.pendingWeb,"需网上检索","var(--red)")+stat(sum.pendingProvider,"需调用数据接口","var(--red)")+stat(sum.pendingCalculation,"需从测算引擎取得","var(--red)")+stat(sum.pendingManual,"需人工上传","var(--red)")+'</div>'
+    +'<div style="display:flex;gap:7px;margin-bottom:8px;flex-wrap:wrap;"><button type="button" class="btn sm ghost" id="airMaterialExpandAll">展开全部</button><button type="button" class="btn sm ghost" id="airMaterialCollapseAll">收起全部</button><button type="button" class="btn sm ghost air-material-ask" data-prompt="请把全报告137项材料需求按章节列成完整Markdown表格，列出序号、材料名称、获取渠道、当前状态和是否阻断，不要省略。">让AI列完整材料表</button><button type="button" class="btn sm air-batch-material-upload" id="airBatchMaterialUpload">＋ 批量上传材料</button></div>'
+    +'<div style="max-height:470px;overflow:auto;border:1px solid var(--line);border-radius:8px;">'+inv.chapters.map(g=>'<details class="air-material-chapter" style="border-bottom:1px solid var(--line);"><summary style="cursor:pointer;padding:11px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b style="min-width:210px;">'+escapeHtml(g.chapter)+'</b><span style="color:var(--ok-green);">已找到 '+g.counts.ready+'/'+g.total+'</span><span style="color:var(--red);">需知识库检索 '+g.counts.pendingKnowledge+'</span><span style="color:var(--red);">需网搜 '+g.counts.pendingWeb+'</span><span style="color:var(--red);">需接口 '+g.counts.pendingProvider+'</span><span style="color:var(--red);">需测算 '+g.counts.pendingCalculation+'</span><span style="color:var(--red);">需上传 '+g.counts.pendingManual+'</span></summary><div style="padding:0 10px 11px;"><table class="air-material-table" style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr style="text-align:left;background:#f5f8fb;"><th style="padding:7px;">序号</th><th style="padding:7px;">具体需要的内容/材料</th><th style="padding:7px;">获取渠道</th><th style="padding:7px;min-width:150px;">当前状态/补充</th></tr></thead><tbody>'+g.items.map(rowHtml).join("")+'</tbody></table><button type="button" class="btn sm ghost air-material-ask" style="margin-top:8px;" data-prompt="请把'+escapeHtml(g.chapter)+'全部材料需求列成表格，并告诉我应该先补哪几项。">询问本章补充顺序</button></div></details>').join("")+'</div>'
+    +'<input type="file" id="airMaterialFile" accept=".txt,.md,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;"><button class="btn air-start-gen">确认，带缺口标记开始生成 →</button><button class="btn ghost air-material-ask" data-prompt="请按重要程度汇总全报告必须由我人工补充的材料清单，并列成表格">仅汇总人工材料</button></div><div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">红色表示系统当前尚未取得真实依据；这里只说明“需上传/需检索”，不承诺知识库或网络一定能找到。上传材料只关联你选择的逻辑项，不会误判为全报告材料齐全。</div></div>';
+}
+
+async function airParseProjectMaterial(file){
+  const lower=String(file.name||"").toLowerCase();let text="";
+  if(/\.(txt|md)$/.test(lower)) text=await file.text();
+  else if(lower.endsWith(".docx")){
+    if(!window.mammoth)await loadScript("mammoth.min.js");
+    text=(await window.mammoth.extractRawText({arrayBuffer:await file.arrayBuffer()})).value||"";
+  }else if(lower.endsWith(".pdf")){
+    if(!window.pdfjsLib)await loadScript("pdf.min.js");
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc="pdf.worker.min.js";
+    const pdf=await window.pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise,parts=[];
+    for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p),tc=await page.getTextContent();parts.push("[第"+p+"页]\n"+tc.items.map(x=>x.str).join(" "));}
+    text=parts.join("\n\n");
+  }else if(/\.(xlsx|xls|csv)$/.test(lower)){
+    if(!window.XLSX)await loadScript("xlsx.full.min.js");
+    const wb=window.XLSX.read(await file.arrayBuffer(),{type:"array",cellFormula:true,cellDates:true});
+    text=wb.SheetNames.map(name=>"[工作表 "+name+"]\n"+window.XLSX.utils.sheet_to_csv(wb.Sheets[name])).join("\n\n");
+  }else throw new Error("暂不支持该格式，请上传 Word、PDF、Excel、CSV、TXT 或 Markdown");
+  text=String(text||"").replace(/\n{4,}/g,"\n\n").trim();
+  if(!text)throw new Error("未提取到文字；若为扫描件PDF，请先OCR后上传");
+  return text.slice(0,80000)+(text.length>80000?"\n…（超长材料已保留前8万字）":"");
+}
+function airOpenMaterialUpload(button){
+  aiReportMaterialTarget={ruleIds:String(button.dataset.ruleId||"").split(",").filter(Boolean),chapter:button.dataset.chapter||"",section:button.dataset.section||"",cn:button.dataset.cn||"",si:button.dataset.si===""||button.dataset.si==null?null:+button.dataset.si};
+  const input=document.getElementById("airMaterialFile")||document.getElementById("airDocMaterialFile");
+  if(input){input.value="";input.click();}
+}
+async function airHandleMaterialFiles(files){
+  const target=aiReportMaterialTarget;if(!target||!files||!files.length)return;
+  const loading=airPushLoading("正在本地解析材料并关联到“"+(target.section||target.chapter||"所选逻辑项")+"”…");
+  try{
+    for(const file of files){
+      const text=await airParseProjectMaterial(file),title=String(file.name||"项目补充材料").replace(/\.[^.]+$/,"");
+      kbEntries.push({title,content:text,fileName:file.name,sourceType:"project_upload",ruleIds:[...target.ruleIds],chapter:target.chapter,section:target.section,uploadedAt:Date.now()});
+    }
+    saveDraft();
+    const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent";
+    const inv=ReportLogicCore.materialInventory(type,airMaterialContext()),card=aiReportChat.find(m=>m.kind==="materialCheck");
+    if(card)card.inventory=inv;
+    airResolve(loading,{kind:"text",content:"✓ 已上传并关联 "+files.length+" 份材料到“"+(target.section||target.chapter||"所选逻辑项")+"”。对应缺口已重新核验；绿色表示已找到，其他红色来源仍需补充。"});
+    renderAiReportMsgs();airApplyDocMaterialStatuses();airSaveState();
+    if(target.cn&&target.si!==null){
+      const info=findChapterSection(target.cn,target.si);
+      if(info&&info.section.content){
+        const rerun=airPushLoading("新材料已到位，正在只补写受影响小节“"+info.section.t+"”…");
+        await airDriveSectionGen(info.chapter,info.section,target.si,{clearFirst:true,failLabel:"材料补写失败",onDone:()=>{saveDraft();airResolve(rerun,{kind:"text",content:"✓ “"+info.section.t+"”已根据新上传材料实时补写完成。"});},onFail:()=>airResolve(rerun,{kind:"text",content:"材料已保存，但“"+info.section.t+"”自动补写失败；可在右侧点击重试，材料不会丢失。"})});
+      }
+    }
+  }catch(error){airResolve(loading,{kind:"text",content:"材料补充失败："+error.message});}
+}
+
+/* 批量材料先解析、再由用户确认每份文件对应哪些逻辑项。未经确认不写入资料库，
+   避免把一份材料误判成全报告137项均已具备。 */
+async function airPrepareBatchMaterialFiles(files){
+  if(!files||!files.length)return;
+  const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent";
+  await ReportLogicCore.load(type);
+  const loading=airPushLoading("正在本地解析 "+files.length+" 份材料，并智能建议对应小节…");
+  try{
+    aiReportBatchFiles=[];
+    for(const file of files){
+      const content=await airParseProjectMaterial(file);
+      aiReportBatchFiles.push({fileName:file.name,title:String(file.name||"项目补充材料").replace(/\.[^.]+$/,""),content,
+        suggestions:ReportLogicCore.suggestMaterialRuleLinks(type,file.name,content,8)});
+    }
+    airResolve(loading,{kind:"text",content:"✓ 已解析 "+aiReportBatchFiles.length+" 份材料。请在弹窗中确认每份文件对应的小节后再入库；系统不会自动把它们判定为全报告材料。"});
+    airShowBatchMaterialModal(type);
+  }catch(error){airResolve(loading,{kind:"text",content:"批量材料解析失败："+error.message});}
+}
+function airShowBatchMaterialModal(type){
+  document.getElementById("airBatchMaterialModal")?.remove();
+  const rules=(ReportLogicCore.current(type)?.data?.rules)||[],ruleById=Object.fromEntries(rules.map(rule=>[rule.id,rule]));
+  const rows=aiReportBatchFiles.map((entry,index)=>{
+    const suggestedIds=new Set((entry.suggestions||[]).map(x=>x.ruleId)),ordered=[...(entry.suggestions||[]).map(x=>ruleById[x.ruleId]).filter(Boolean),...rules.filter(x=>!suggestedIds.has(x.id))];
+    const options=['<option value="">仅存入项目资料，不标记具体小节</option>'].concat(ordered.map((rule,pos)=>'<option value="'+escapeHtml(rule.id)+'" '+(pos===0&&suggestedIds.has(rule.id)?'selected':'')+'>'+escapeHtml((suggestedIds.has(rule.id)?'★ 建议｜':'')+'第'+rule.sourceNo+'项｜'+rule.chapter+'｜'+(rule.displayTitle||rule.section))+'</option>')).join("");
+    return '<div class="air-batch-file"><div><b>'+escapeHtml(entry.fileName)+'</b><span>已提取 '+entry.content.length.toLocaleString("zh-CN")+' 字</span></div><label>关联逻辑项（可按 Ctrl/Shift 多选）</label><select class="air-batch-rule-select" data-index="'+index+'" multiple size="5">'+options+'</select></div>';
+  }).join("");
+  const modal=document.createElement("div");modal.id="airBatchMaterialModal";modal.className="air-modal-overlay";
+  modal.innerHTML='<div class="air-modal-card air-batch-modal"><div class="air-modal-head"><div><b>批量上传材料 · 确认小节映射</b><span>智能匹配只是建议；确认后才写入项目资料并更新绿色/红色状态。</span></div><button type="button" class="air-modal-close" aria-label="关闭">×</button></div><div class="air-batch-list">'+rows+'</div><div class="air-modal-actions"><button type="button" class="btn ghost air-modal-close">取消</button><button type="button" class="btn" id="airCommitBatchMaterials">确认映射并入库</button></div></div>';
+  document.body.appendChild(modal);
+  modal.querySelectorAll(".air-modal-close").forEach(button=>button.onclick=()=>modal.remove());
+  document.getElementById("airCommitBatchMaterials").onclick=()=>airCommitBatchMaterials(type);
+}
+function airCommitBatchMaterials(type){
+  const modal=document.getElementById("airBatchMaterialModal");if(!modal)return;
+  const rules=(ReportLogicCore.current(type)?.data?.rules)||[],ruleById=Object.fromEntries(rules.map(rule=>[rule.id,rule]));let linked=0;
+  modal.querySelectorAll(".air-batch-rule-select").forEach(select=>{
+    const entry=aiReportBatchFiles[+select.dataset.index];if(!entry)return;
+    const ruleIds=[...select.selectedOptions].map(x=>x.value).filter(Boolean),first=ruleById[ruleIds[0]];
+    kbEntries.push({title:entry.title,content:entry.content,fileName:entry.fileName,sourceType:"project_upload",ruleIds,
+      chapter:first?.chapter||"",section:first?.section||"",uploadedAt:Date.now()});
+    linked+=ruleIds.length;
+  });
+  modal.remove();aiReportBatchFiles=[];saveDraft();
+  const inventory=ReportLogicCore.materialInventory(type,airMaterialContext()),card=aiReportChat.find(m=>m.kind==="materialCheck");if(card)card.inventory=inventory;
+  airPush({role:"assistant",kind:"text",content:"✓ 批量材料已入库：共 "+modal.querySelectorAll(".air-batch-rule-select").length+" 份文件，确认关联 "+linked+" 个逻辑项。台账已重新核验；未关联的小节仍保持待补状态。"});
+  airApplyDocMaterialStatuses();airSaveState();
+}
+
+function airAdminLogicHeaders(adminPass){return Object.assign({"Content-Type":"application/json"},authHeaders(),adminPass?{"x-admin-pass":adminPass}:{});}
+async function airCheckAdminLogicCapability(){
+  if(aiReportCanEnhanceLogic)return;
+  try{
+    const response=await fetch("/api/reportlogic",{method:"POST",headers:airAdminLogicHeaders(),body:JSON.stringify({action:"adminCapability"})}),data=await response.json();
+    if(data.ok&&data.isAdmin){aiReportCanEnhanceLogic=true;renderAiReportMsgs();airApplyDocMaterialStatuses();}
+  }catch(_){/* 普通用户或离线时不显示管理员入口，不影响可研生成 */}
+}
+function airEnhancementCandidate(base){return {requiredSources:"",sourceKinds:[...(base.sourceKinds||[])],writingLogic:"",outputForm:base.outputForm||"",missingPolicy:base.missingPolicy||"资料缺失时标注待补，不得虚构",changeReason:""};}
+function airSectionRevisionContext(info){
+  const snapshots=(projectWorkflow&&Array.isArray(projectWorkflow.reportVersions)?projectWorkflow.reportVersions:[]).map(version=>{
+    const chapter=(version.chapters||[]).find(item=>String(item.cn)===String(info.chapter.cn));
+    const section=chapter&&(chapter.sections||[]).find((item,index)=>index===info.si||item.t===info.section.t);
+    if(!section)return null;
+    const content=section.editedHtml?(typeof blocksToSource==="function"?blocksToSource(section.editedHtml):section.editedHtml):(section.content||"");
+    return content?{version:version.version,reason:version.reason||"报告版本",content}:null;
+  }).filter(Boolean);
+  const current=info.section.editedHtml?(typeof blocksToSource==="function"?blocksToSource(info.section.editedHtml):info.section.editedHtml):(info.section.content||"");
+  const unique=[];snapshots.concat(current?[{version:"当前",reason:"当前成稿",content:current}]:[]).forEach(item=>{if(item.content&&!unique.some(x=>x.content===item.content))unique.push(item);});
+  return {chapter:info.chapter.name,section:info.section.t,versions:unique,first:unique[0]?.content||current,current:current||unique[unique.length-1]?.content||""};
+}
+function airOpenSectionLogicEnhancement(cn,si){
+  const info=findChapterSection(cn,si);if(!info)return alert("未找到该小节，请刷新后重试");
+  const st=airSectionMaterialState(info.chapter,info.section),base=st.rules[0];if(!base)return alert("本节尚未匹配已发布的生成规则");
+  aiReportLogicEnhanceState={type:calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",base,candidate:airEnhancementCandidate(base),history:[],busy:false,sectionContext:airSectionRevisionContext({chapter:info.chapter,section:info.section,si})};airRenderLogicEnhancementModal();
+}
+function airOpenLogicEnhancement(ruleId){
+  const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",base=(ReportLogicCore.current(type)?.data?.rules||[]).find(rule=>rule.id===ruleId);if(!base)return alert("未找到该逻辑项，请刷新后重试");
+  aiReportLogicEnhanceState={type,base,candidate:airEnhancementCandidate(base),history:[],busy:false};airRenderLogicEnhancementModal();
+}
+function airRenderLogicEnhancementModal(){
+  const state=aiReportLogicEnhanceState;if(!state)return;document.getElementById("airLogicEnhanceModal")?.remove();const base=state.base,c=state.candidate;
+  const modal=document.createElement("div");modal.id="airLogicEnhanceModal";modal.className="air-modal-overlay";
+  const sc=state.sectionContext,revisionBlock=sc?'<details open><summary>本节成稿演进（'+sc.versions.length+'个有效版本）</summary><div class="air-enhance-base"><b>第一版</b><p>'+escapeHtml((sc.first||"尚无第一版正文").slice(0,1800))+'</p><b>当前定稿</b><p>'+escapeHtml((sc.current||"尚无当前正文").slice(0,1800))+'</p></div></details>':'';
+  modal.innerHTML='<div class="air-modal-card air-enhance-modal"><div class="air-modal-head"><div><b>管理员审定本节增强 · 第'+base.sourceNo+'项</b><span>'+escapeHtml(base.chapter+'｜'+(base.displayTitle||base.section))+'</span></div><button type="button" class="air-modal-close">×</button></div>'
+    +'<div class="air-enhance-guard">本次操作只会在原规则后追加“增强子规则”并发布新版本，不删除、不覆盖原有逻辑。</div>'
+    +revisionBlock
+    +'<details open><summary>查看现行基础逻辑</summary><div class="air-enhance-base"><b>现有所需材料</b><p>'+escapeHtml(base.requiredSources||"未指定")+'</p><b>现有写作逻辑</b><p>'+escapeHtml(base.writingLogic||"未指定")+'</p></div></details>'
+    +'<div class="air-enhance-grid"><label>新增/细化的数据与材料来源<textarea id="airEnhanceSources" rows="4" placeholder="只写需要追加的内容，不必重复原规则">'+escapeHtml(c.requiredSources)+'</textarea></label><label>新增/细化的生成逻辑<textarea id="airEnhanceWriting" rows="4" placeholder="说明怎样核验、引用、分析和输出">'+escapeHtml(c.writingLogic)+'</textarea></label><label>来源渠道（逗号分隔）<input id="airEnhanceKinds" value="'+escapeHtml((c.sourceKinds||[]).join(","))+'"></label><label>输出形式<input id="airEnhanceOutput" value="'+escapeHtml(c.outputForm||"")+'"></label><label class="wide">缺失材料时的处理<input id="airEnhanceMissing" value="'+escapeHtml(c.missingPolicy||"")+'"></label><label class="wide">本次增强原因<input id="airEnhanceReason" value="'+escapeHtml(c.changeReason||"")+'" placeholder="例如：细化规划批复来源和指标勾稽方式"></label></div>'
+    +'<div class="air-enhance-chat">'+(state.history.length?state.history.map(x=>'<div><b>'+escapeHtml(x.role==='user'?'管理员':'AI建议')+'：</b>'+escapeHtml(x.content)+'</div>').join(""):'<div class="muted">AI会比较本节第一版与当前成稿，提炼新增的材料要求、论证方法和输出方式；候选仍可人工增减，确认后才发布。</div>')+'</div>'
+    +'<textarea id="airEnhanceInstruction" rows="2" placeholder="可补充你的判断；留空则由AI自动比较第一版与当前成稿并汇总增强经验"></textarea>'
+    +'<div class="air-modal-actions"><button type="button" class="btn ghost air-modal-close">取消</button><button type="button" class="btn ghost" id="airAskEnhancement" '+(state.busy?'disabled':'')+'>AI汇总本节增强经验</button><button type="button" class="btn" id="airPublishEnhancement" '+(state.busy?'disabled':'')+'>管理员审定并追加发布</button></div></div>';
+  document.body.appendChild(modal);modal.querySelectorAll(".air-modal-close").forEach(button=>button.onclick=()=>{modal.remove();aiReportLogicEnhanceState=null;});
+  document.getElementById("airAskEnhancement").onclick=airAskLogicEnhancement;document.getElementById("airPublishEnhancement").onclick=airPublishLogicEnhancement;
+}
+function airReadEnhancementFields(){
+  const s=id=>document.getElementById(id);return {requiredSources:s("airEnhanceSources")?.value.trim()||"",writingLogic:s("airEnhanceWriting")?.value.trim()||"",
+    sourceKinds:(s("airEnhanceKinds")?.value||"").split(/[,，]/).map(x=>x.trim()).filter(Boolean),outputForm:s("airEnhanceOutput")?.value.trim()||"",missingPolicy:s("airEnhanceMissing")?.value.trim()||"",changeReason:s("airEnhanceReason")?.value.trim()||""};
+}
+function airParseEnhancementJson(text){const cleaned=String(text||"").replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,""),start=cleaned.indexOf("{"),end=cleaned.lastIndexOf("}");if(start<0||end<start)throw new Error("AI未返回可识别的JSON候选");return JSON.parse(cleaned.slice(start,end+1));}
+async function airAskLogicEnhancement(){
+  const state=aiReportLogicEnhanceState;if(!state||state.busy)return;const instruction=(document.getElementById("airEnhanceInstruction")?.value||"").trim()||(state.sectionContext?"请比较第一版与当前成稿，自动提炼本节可复用的增量材料要求、生成方法和输出结构。":"请在保留原规则的前提下，细化材料来源、核验方法和生成逻辑。");
+  state.candidate=airReadEnhancementFields();state.history.push({role:"user",content:instruction});state.busy=true;airRenderLogicEnhancementModal();
+  try{
+    const answer=await callGen("你是保障房可研逐小节规则工程师。只输出JSON对象，字段为requiredSources、sourceKinds数组、writingLogic、outputForm、missingPolicy、changeReason。只能提炼第一版到当前成稿之间真正新增且可复用的经验，并在原规则基础上补充增强；不得把某个项目的专属数值写成通用规则，不得删除、替换或弱化原逻辑。材料来源要细到文件名、数据字段、统计期、版本和核验方法。","原规则：\n"+JSON.stringify(state.base)+"\n\n本节成稿演进：\n"+JSON.stringify(state.sectionContext||{})+"\n\n当前候选：\n"+JSON.stringify(state.candidate)+"\n\n管理员要求：\n"+instruction);
+    const next=airParseEnhancementJson(answer);state.candidate=Object.assign({},state.candidate,next,{sourceKinds:Array.isArray(next.sourceKinds)?next.sourceKinds:state.candidate.sourceKinds});state.history.push({role:"assistant",content:"已形成一版增强候选，可继续修改或确认发布。"});
+  }catch(error){state.history.push({role:"assistant",content:"本轮完善失败："+error.message});}finally{state.busy=false;airRenderLogicEnhancementModal();}
+}
+async function airPublishLogicEnhancement(){
+  const state=aiReportLogicEnhanceState;if(!state||state.busy)return;const enhancement=airReadEnhancementFields();if(!enhancement.requiredSources&&!enhancement.writingLogic)return alert("至少补充一项材料来源或写作逻辑");
+  const adminPass=prompt("请输入后台管理员密码以发布增强版本（密码只用于本次请求）：");if(adminPass===null)return;
+  state.candidate=enhancement;state.busy=true;airRenderLogicEnhancementModal();
+  try{
+    const response=await fetch("/api/reportlogic",{method:"POST",headers:airAdminLogicHeaders(adminPass),body:JSON.stringify({action:"appendEnhancement",projectType:state.type,baseRuleId:state.base.id,enhancement})}),data=await response.json();
+    if(!data.ok)throw new Error(data.error||"发布失败");
+    document.getElementById("airLogicEnhanceModal")?.remove();aiReportLogicEnhanceState=null;await ReportLogicCore.load(state.type,true);await airCheckWholeReportMaterials();
+    airPush({role:"assistant",kind:"text",content:"✓ 已保留第"+state.base.sourceNo+"项原逻辑，并追加一条增强子规则，发布为生成逻辑 v"+data.set.version+"。下一次生成或补写相关小节时会自动采用增强内容。"});
+  }catch(error){state.busy=false;airRenderLogicEnhancementModal();alert("增强规则发布失败："+error.message);}
+}
+function airWantsFullMaterialTable(text){return /(?:全报告|全部|完整|137项).*(?:材料|资料).*(?:表|清单)|(?:材料|资料).*(?:全报告|全部|完整|137项).*(?:表|清单)/.test(String(text||""));}
+async function airFullMaterialTableMarkdown(){
+  const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent";await ReportLogicCore.load(type);const inv=ReportLogicCore.materialInventory(type,airMaterialContext()),labels={knowledge_base:"需知识库检索",web_search:"需网上检索",provider:"需数据接口取得",calculation_engine:"需测算引擎取得",manual_upload:"需人工上传",derived_section:"需引用其他章节",unclassified:"需确认来源"},cell=value=>String(value||"").replace(/\|/g,"｜").replace(/\r?\n/g,"；");
+  const rows=inv.items.map(item=>"|"+[item.sourceNo,cell(item.chapter),cell(item.title),cell(item.requiredSources),((item.sourceKinds||[]).length?item.sourceKinds:["unclassified"]).map(x=>labels[x]||x).join("、"),item.ready?"已确认找到":"待补充/待检索",item.blocking?"是":"否"].join("|")+"|").join("\n");
+  return "已按当前发布的逐小节逻辑 v"+inv.version+"列出全报告 "+inv.total+" 项材料台账（不省略）：\n\n|序号|章节|逻辑项|具体材料/数据|所需动作|当前状态|重要阻断|\n|---:|---|---|---|---|---|---|\n"+rows+"\n\n说明：‘需检索’只表示获取路径，不代表知识库或网络一定能找到；只有已取得并关联到具体规则的真实材料才显示‘已确认找到’。";
 }
 
 /* ================= 阶段⑥ 交付：全部复用现成的导出/审查/存档逻辑 ================= */
@@ -717,6 +988,8 @@ function airDeliverHtml(){
     +'<button type="button" class="air-prompt" data-prompt="你觉得这个项目整体怎么样？请做一次综合诊断">评价这个项目</button>'
     +'<button type="button" class="air-prompt" data-prompt="这个项目还有哪些地方可以提升？请按优先级给建议">寻找提升点</button>'
     +'<button type="button" class="air-prompt" data-prompt="哪些章节会受当前参数影响？">查看参数影响章节</button>'
+    +'<button type="button" class="air-prompt" data-prompt="项目背景这一节应该按什么逻辑写？需要什么输出形式？">查看小节生成逻辑</button>'
+    +'<button type="button" class="air-prompt" data-prompt="项目背景这一节目前还缺哪些材料？请区分可自动检索和必须人工上传的内容">检查小节材料缺口</button>'
     +'<button type="button" class="air-prompt" data-prompt="帮我修改项目建设必要性这一节，先给候选稿">修改某一章节文字</button></div></div>'
     +'<div class="air-deliver-actions">'
     +'<button class="btn ghost air-act air-act-btn" data-act="exportWord">📄 导出可研报告（Word）</button>'
@@ -781,6 +1054,7 @@ function renderAiReportMsgs(){
     if(m.kind==="infoCard") body = airInfoCardHtml();
     else if(m.kind==="confirmCard") body = airConfirmCardHtml();
     else if(m.kind==="genConfirm") body = airGenConfirmHtml();
+    else if(m.kind==="materialCheck") body = airMaterialCheckHtml(m);
     else if(m.kind==="deliver") body = airDeliverHtml();
     else if(m.kind==="genProgress") body = airProgressCardHtml(m);
     else if(m.kind==="calcPreview") body = airCalcPreviewHtml(m);
@@ -806,11 +1080,20 @@ function renderAiReportMsgs(){
     airSyncConfirmButtonState();
   };
   airSyncConfirmButtonState();
-  if(s("airStartGen")) s("airStartGen").onclick = aiReportStartGenerate;
+  document.querySelectorAll(".air-start-gen").forEach(button=>button.onclick=aiReportStartGenerate);
+  if(s("airCheckMaterials")) s("airCheckMaterials").onclick = airCheckWholeReportMaterials;
   if(s("airApplyCalc"))s("airApplyCalc").onclick=airApplyCalcPreview;
   if(s("airRejectCalc"))s("airRejectCalc").onclick=()=>{aiReportPendingCalcChange=null;aiReportChat=aiReportChat.filter(m=>m.kind!=="calcPreview");airPush({role:"assistant",kind:"text",content:"已取消本次参数修改，当前正式测算和报告没有变化。"});airSaveState();};
   document.querySelectorAll(".air-act").forEach(b=>{ b.onclick = ()=>airDeliverAction(b.dataset.act); });
   document.querySelectorAll(".air-prompt").forEach(b=>{b.onclick=()=>{const inp=s("airInput");if(!inp)return;inp.value=b.dataset.prompt||"";airAutosize(inp);inp.focus();}});
+  document.querySelectorAll(".air-material-ask").forEach(b=>{b.onclick=()=>{const inp=s("airInput");if(!inp)return;inp.value=b.dataset.prompt||"";airAutosize(inp);inp.focus();}});
+  if(s("airMaterialExpandAll"))s("airMaterialExpandAll").onclick=()=>document.querySelectorAll(".air-material-chapter").forEach(x=>x.open=true);
+  if(s("airMaterialCollapseAll"))s("airMaterialCollapseAll").onclick=()=>document.querySelectorAll(".air-material-chapter").forEach(x=>x.open=false);
+  if(s("airBatchMaterialUpload"))s("airBatchMaterialUpload").onclick=()=>{
+    aiReportMaterialTarget={batch:true};const input=s("airMaterialFile");if(input){input.value="";input.click();}
+  };
+  box.querySelectorAll(".air-material-upload").forEach(button=>button.onclick=()=>airOpenMaterialUpload(button));
+  if(s("airMaterialFile"))s("airMaterialFile").onchange=e=>aiReportMaterialTarget?.batch?airPrepareBatchMaterialFiles([...e.target.files]):airHandleMaterialFiles([...e.target.files]);
   document.querySelectorAll(".air-msg-copy").forEach(b=>{
     b.onclick = ()=>{
       const m = aiReportChat.find(x=>x.id===+b.dataset.copy);
@@ -906,14 +1189,32 @@ function airRegisterAgentTools(){
   AC.registerTool("find_feasibility_impacted_sections",{schema:{type:"function",function:{name:"find_feasibility_impacted_sections",description:"查询一个或多个测算参数会影响哪些可研章节，不修改报告",parameters:{type:"object",properties:{keys:{type:"array",items:{type:"string"}}},required:["keys"]}}},run:a=>JSON.stringify(ProjectWorkflow.impactedSections(chapters,a.keys||[]))});
   AC.registerTool("get_feasibility_section_status",{schema:{type:"function",function:{name:"get_feasibility_section_status",description:"查看当前报告每节的最新、待同步、人工锁定和候选修改状态",parameters:{type:"object",properties:{}}}},run:()=>JSON.stringify(chapters.flatMap(c=>c.sections.map((s,si)=>({cn:c.cn,chapter:c.name,si,title:s.t,status:s.syncStatus||"current",locked:!!s.locked,pendingRevision:!!s.pendingRevision}))))});
   AC.registerTool("get_feasibility_section_content",{schema:{type:"function",function:{name:"get_feasibility_section_content",description:"按小节标题读取当前可研正文，不修改内容",parameters:{type:"object",properties:{title:{type:"string"}},required:["title"]}}},run:a=>{const q=String(a.title||"");const hits=chapters.flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).filter(x=>x.s.t.includes(q)||q.includes(x.s.t));return JSON.stringify(hits.slice(0,5).map(x=>({cn:x.c.cn,chapter:x.c.name,si:x.si,title:x.s.t,content:x.s.editedHtml?blocksToSource(x.s.editedHtml):x.s.content,locked:!!x.s.locked})));}});
+  AC.registerTool("get_section_generation_logic",{schema:{type:"function",function:{name:"get_section_generation_logic",description:"查询某个可研小节应按什么逻辑写、需要什么材料、输出什么表格或图示。只读取已发布公司逻辑，不修改规则。",parameters:{type:"object",properties:{title:{type:"string",description:"小节标题或关键词"}},required:["title"]}}},run:async a=>{
+    if(!window.ReportLogicCore)return JSON.stringify({ok:false,error:"逐小节生成逻辑模块未加载"});
+    const type=(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent");await ReportLogicCore.load(type);
+    const q=String(a.title||""),hits=chapters.flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).filter(x=>x.s.t.includes(q)||q.includes(x.s.t)||x.c.name.includes(q));
+    const targets=hits.length?hits.slice(0,5):chapters.flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).slice(0,0);
+    return JSON.stringify({ok:true,version:ReportLogicCore.overview(type),sections:targets.map(x=>({chapter:x.c.name,title:x.s.t,rules:ReportLogicCore.match(type,x.c.name,x.s.t,{projectText:[project.name,project.type,project.location,project.desc].filter(Boolean).join(" ")}).map(r=>({id:r.id,sourceNo:r.sourceNo,subsection:r.subsection,pointTitle:r.pointTitle,requiredSources:r.requiredSources,writingLogic:r.writingLogic,outputForm:r.outputForm,importance:r.importance,generationMode:r.generationMode}))}))});
+  }});
+  AC.registerTool("check_section_material_requirements",{schema:{type:"function",function:{name:"check_section_material_requirements",description:"检查单个章节或全报告需要哪些材料和数据，区分已确认找到、需知识库检索、需网上检索、需数据接口、需测算引擎和需人工上传。‘需检索’不等于一定能找到。用户要求全表时必须返回全部137项，不得省略。",parameters:{type:"object",properties:{title:{type:"string",description:"章节标题、关键词；填写‘全报告’可取得完整137项台账"}}}}},run:async a=>{
+    if(!window.ReportLogicCore)return JSON.stringify({ok:false,error:"逐小节生成逻辑模块未加载"});
+    const type=(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent");await ReportLogicCore.load(type);
+    const context=airMaterialContext();
+    const inventory=ReportLogicCore.materialInventory(type,context),q=String(a&&a.title||"").trim(),all=!q||/全报告|全部|所有|完整|137/.test(q),nq=ReportLogicCore.normalize(q);
+    const compact=item=>({sourceNo:item.sourceNo,chapter:item.chapter,title:item.title,requiredSources:item.requiredSources,sourceKinds:item.sourceKinds,missing:item.missing,ready:item.ready,blocking:item.blocking});
+    if(all)return JSON.stringify({ok:true,scope:"all",version:inventory.version,total:inventory.total,summary:inventory.summary,chapters:inventory.chapters.map(g=>({chapter:g.chapter,total:g.total,counts:g.counts,items:g.items.map(compact)}))});
+    const hits=inventory.items.filter(item=>[item.chapter,item.section,item.title].some(text=>ReportLogicCore.normalize(text).includes(nq)||nq.includes(ReportLogicCore.normalize(text))));
+    return JSON.stringify({ok:true,scope:"matched",version:inventory.version,total:hits.length,summary:inventory.summary,items:hits.map(compact)});
+  }});
   AC.registerTool("propose_feasibility_section_revision",{schema:{type:"function",function:{name:"propose_feasibility_section_revision",description:"为一个明确小节生成候选修改稿，不覆盖正式正文；用户之后到复核页接受或拒绝",parameters:{type:"object",properties:{title:{type:"string"},instruction:{type:"string"}},required:["title","instruction"]}}},validate:a=>a&&String(a.title||"").trim()&&String(a.instruction||"").trim()?{ok:true}:{ok:false,error:"必须提供小节标题和修改要求"},run:async a=>{const q=String(a.title),hits=chapters.flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).filter(x=>x.s.t.includes(q)||q.includes(x.s.t));if(hits.length!==1)return JSON.stringify({ok:false,error:hits.length?"匹配到多个小节，请说完整标题":"没有找到该小节"});const x=hits[0];if(x.s.locked)return JSON.stringify({ok:false,error:"该小节已人工锁定，请先解除锁定"});const text=await reviseSection(x.c,x.s,String(a.instruction));ProjectWorkflow.setCandidate(x.s,text,String(a.instruction));saveDraft();return JSON.stringify({ok:true,status:"candidate_only",cn:x.c.cn,chapter:x.c.name,si:x.si,title:x.s.t,message:"候选稿已生成，正式正文尚未变化，请到复核页接受或拒绝"});},label:a=>"生成章节候选稿："+a.title});
 }
 async function airRunAgent(text){
   airRegisterAgentTools();const loading=airPushLoading("正在结合当前项目、测算和报告状态处理…");
   try{
+    if(window.ReportLogicCore&&airWantsFullMaterialTable(text)){const table=await airFullMaterialTableMarkdown();airResolve(loading,{kind:"text",content:table});airSaveState();return;}
     const meta=Object.entries(aiReportSuggested&&aiReportSuggested.paramMeta||{}).map(([k,m])=>k+"="+m.label+(m.unit?'('+m.unit+')':'')).join("；");
     const history=aiReportChat.filter(m=>m.kind==="text"&&(m.role==="user"||m.role==="assistant")).slice(-10).map(m=>({role:m.role,content:m.content}));
-    const res=await AgentCore.run({system:"你是当前可研项目的持续协作助手。项目已有白箱测算和报告。用户问‘项目怎么样’‘测算是否合理’‘哪里可以提升’‘主要风险/改进优先级’等开放式综合判断时，必须首先调用diagnose_feasibility_project，并严格按诊断底稿回答：先给总体判断，再按高/中/提示列建议，每条说明依据类型；财务数字只能引用metrics，硬规则只能引用hardRuleAnomalies，行业比较只能引用knowledgeEvidence；数据缺失必须直说暂无，AI推断必须明确标为判断。用户要求修改测算参数时，必须调用preview_feasibility_parameter_change，只能预演，绝不能声称已修改。用户只问影响范围时调用find_feasibility_impacted_sections。用户明确要求修改某个小节文字时，先用get_feasibility_section_content核对，再调用propose_feasibility_section_revision生成候选稿；候选稿不等于已采用，必须提示用户到复核页接受或拒绝。不要自行计算IRR/NPV。参数中文与key目录："+meta+"。比例参数工具值必须用0到1，例如90%传0.9。",messages:history,tools:["diagnose_feasibility_project","get_current_feasibility_project","preview_feasibility_parameter_change","find_feasibility_impacted_sections","get_feasibility_section_status","get_feasibility_section_content","propose_feasibility_section_revision","get_calc_summary","search_knowledge_base","get_review_issues"],maxRounds:4,selfCheck:false,traceQuery:text});
+    const res=await AgentCore.run({system:"你是当前可研项目的持续协作助手。项目已有白箱测算和报告。用户询问某节怎么写、需要什么表格/材料时，必须调用get_section_generation_logic；用户询问还缺什么资料、为什么不能直接生成时，必须调用check_section_material_requirements，按‘已确认找到、需知识库检索、需网上检索、需数据接口取得、需测算引擎取得、需人工上传、重要阻断项’说明。‘需检索’只表示路径，不代表一定能找到；不得把缺失资料说成已有。用户要求全报告材料表、完整清单或全部137项时，调用工具时title传‘全报告’，必须按章节输出完整Markdown表格，不得只给摘要或省略后续行。用户问‘项目怎么样’‘测算是否合理’‘哪里可以提升’‘主要风险/改进优先级’等开放式综合判断时，必须首先调用diagnose_feasibility_project，并严格按诊断底稿回答：先给总体判断，再按高/中/提示列建议，每条说明依据类型；财务数字只能引用metrics，硬规则只能引用hardRuleAnomalies，行业比较只能引用knowledgeEvidence；数据缺失必须直说暂无，AI推断必须明确标为判断。用户要求修改测算参数时，必须调用preview_feasibility_parameter_change，只能预演，绝不能声称已修改。用户只问影响范围时调用find_feasibility_impacted_sections。用户明确要求修改某个小节文字时，先用get_feasibility_section_content核对，再调用propose_feasibility_section_revision生成候选稿；候选稿不等于已采用，必须提示用户到复核页接受或拒绝。不要自行计算IRR/NPV。参数中文与key目录："+meta+"。比例参数工具值必须用0到1，例如90%传0.9。",messages:history,tools:["diagnose_feasibility_project","get_current_feasibility_project","preview_feasibility_parameter_change","find_feasibility_impacted_sections","get_feasibility_section_status","get_feasibility_section_content","get_section_generation_logic","check_section_material_requirements","propose_feasibility_section_revision","get_calc_summary","search_knowledge_base","get_review_issues"],maxRounds:4,selfCheck:false,traceQuery:text});
     airResolve(loading,{kind:"text",content:res.text||"已处理。"});
     if(aiReportPendingCalcChange)airPush({role:"assistant",kind:"calcPreview"});
     airSaveState();
@@ -925,7 +1226,7 @@ async function airRunAgent(text){
 function airSerializableState(){
   const chat = [];
   aiReportChat.forEach(m=>{
-    if(m.kind==="loading") return; // 瞬时态，不必存
+    if(m.kind==="loading"||m.kind==="materialCheck") return; // 瞬时态/可重算材料清单，不必存
     if(m.kind==="genProgress"){ chat.push({role:"assistant",kind:"genProgress",total:m.total,done:m.done,failed:m.failed,active:false,stopped:true}); return; }
     if(m.kind==="calcPreview")return;
     if(m.kind==="typeTag"){ chat.push({role:m.role, kind:"typeTag", content:m.content||"", calcType:m.calcType}); return; }

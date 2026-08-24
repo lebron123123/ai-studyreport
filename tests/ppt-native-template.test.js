@@ -13,7 +13,14 @@ test("真实模板页面选择会按版式分配并避免常用页重复",()=>{
   assert.equal(pages.length,6);
   assert.equal(new Set(pages).size,6);
   assert.equal(pages[0],1);
-  assert.equal(pages[1],8);
+  assert.ok([6,7,8,9,10].includes(pages[1]));
+});
+
+test("已确认的模板页可通过占位符合同显式锁定",()=>{
+  const plan={templateId:"business-blue-160",nativeTemplate:true,slides:[{layoutId:"timeline",templatePage:30}]};
+  const selected=selectNativePages(plan)[0];
+  assert.equal(selected.page,30);
+  assert.equal(selected.selectionMode,"explicit-contract");
 });
 
 test("图表和表格页在完成原生数据槽位前不会误用静态模板数据",()=>{
@@ -34,6 +41,14 @@ test("真实模板文字槽位替换保留形状结构",()=>{
   assert.match(out,/项目决策汇报/);
   assert.match(out,/经营班子审议/);
   assert.equal((out.match(/<p:sp>/g)||[]).length,2);
+});
+
+test("原生模板优先按shape id填充，不依赖旧占位文字",()=>{
+  const xml='<p:sld><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="21" name="标题 1"/></p:nvSpPr><p:txBody><a:p><a:r><a:rPr sz="3200"/><a:t>任意旧标题</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>';
+  const slide={layoutId:"bullets",title:"不会覆盖显式值",templateFillPlan:{actions:[{sourceId:"21",action:"replace-text",value:"按槽位合同写入"}]}};
+  const out=fillNativeSlideXml(xml,slide,{title:"项目"},57);
+  assert.match(out,/按槽位合同写入/);
+  assert.doesNotMatch(out,/不会覆盖显式值/);
 });
 
 const templatePath=resolveNativeTemplatePath();

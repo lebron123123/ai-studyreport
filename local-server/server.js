@@ -14,7 +14,7 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
-import { readdirSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { readdirSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { createD1Shim } from "./d1-shim.js";
@@ -24,7 +24,10 @@ import { createWorker } from "tesseract.js";
 import chiSimData from "@tesseract.js-data/chi_sim";
 import { verifyAuth } from "../functions/api/_auth.js";
 import { buildPptxBuffer, validatePptxBuffer } from "./ppt-export.js";
+import { buildNativeTemplatePptx } from "./ppt-native-template.js";
+import { enrichCustomTemplatePlan } from "./ppt-custom-template-export.js";
 import { analyzeTemplateBuffer } from "./ppt-template-analyzer.js";
+import { ensureTemplatePreviews, resolvePreviewFile, resolveStoredTemplate } from "./ppt-template-preview.js";
 import { createLimiter, generatePptImage, imageProviderStatus } from "./ppt-image-generation.js";
 import { providerStatus as llmProviderStatus } from "../functions/api/_llm-providers.js";
 
@@ -161,12 +164,25 @@ app.post("/api/local-ocr", async c=>{
 app.post("/api/ppt-export", async c=>{
   const user=await verifyAuth(c.req.raw,ENV);if(!user)return c.json({ok:false,error:"未登录"},401);
   try{
-    const body=await c.req.json(),plan=body&&body.plan;
+    const body=await c.req.json();let plan=body&&body.plan;
     if(!plan||!Array.isArray(plan.slides)||plan.slides.length<1)return c.json({ok:false,error:"没有可导出的PPT页面"},400);
     if(plan.slides.length>40)return c.json({ok:false,error:"单份PPT暂不支持超过40页"},400);
-    const buffer=await buildPptxBuffer(plan),qa=await validatePptxBuffer(buffer,plan),name=String(plan.title||"项目汇报").replace(/[\\/:*?\"<>|]/g,"_").slice(0,80)+".pptx";
+    const customId=String(plan.realTemplateRecordId||(plan.slides.find(slide=>slide&&slide.templateRecordId)||{}).templateRecordId||"").slice(0,100);
+    let buffer;
+    if(customId){
+      const row=await ENV.DB.prepare("SELECT id,user_id,name,status,storage_key,profile FROM ppt_templates WHERE id=?").bind(customId).first();
+      if(!row)return c.json({ok:false,error:"选中的真实模板不存在或已删除"},404);
+      const admins=String(ENV.ADMIN_USERS||"").split(",").map(value=>value.trim()).filter(Boolean),admin=admins.includes(user.username)||admins.includes(String(user.userId));
+      if(Number(row.user_id)!==Number(user.userId)&&row.status!=="published"&&!admin)return c.json({ok:false,error:"无权使用该真实模板"},403);
+      let profile={};try{profile=JSON.parse(row.profile||"{}");}catch{}
+      const sourcePath=resolveStoredTemplate(ROOT,row.storage_key);
+      if(!existsSync(sourcePath))return c.json({ok:false,error:"真实模板原文件不存在，请重新上传"},404);
+      plan=enrichCustomTemplatePlan(plan,{...row,profile},{isOwner:Number(row.user_id)===Number(user.userId)});
+      buffer=await buildNativeTemplatePptx(plan,{templatePath:sourcePath});
+    }else buffer=await buildPptxBuffer(plan);
+    const qa=await validatePptxBuffer(buffer,plan),name=String(plan.title||"项目汇报").replace(/[\\/:*?\"<>|]/g,"_").slice(0,80)+".pptx";
     if(!qa.ok)return c.json({ok:false,error:"PPT结构质检失败："+qa.errors.join("；"),qa},500);
-    return new Response(buffer,{status:200,headers:{"Content-Type":"application/vnd.openxmlformats-officedocument.presentationml.presentation","Content-Disposition":"attachment; filename*=UTF-8''"+encodeURIComponent(name),"Cache-Control":"no-store","X-PPT-QA":"passed","X-PPT-QA-Warnings":String(qa.warnings.length),"X-PPT-Slides":String(qa.slideCount),"X-PPT-Native":String(qa.nativeTemplate===true)}});
+    return new Response(buffer,{status:200,headers:{"Content-Type":"application/vnd.openxmlformats-officedocument.presentationml.presentation","Content-Disposition":"attachment; filename*=UTF-8''"+encodeURIComponent(name),"Cache-Control":"no-store","X-PPT-QA":"passed","X-PPT-QA-Warnings":String(qa.warnings.length),"X-PPT-Slides":String(qa.slideCount),"X-PPT-Native":String(qa.nativeTemplate===true),"X-PPT-Template-Mode":plan.realTemplateRecordId?"source-slide-clone":"generated"}});
   }catch(e){console.error("[ppt-export]",e);return c.json({ok:false,error:"PPT导出失败："+(e.message||e)},500);}
 });
 
@@ -181,6 +197,40 @@ app.post("/api/ppt-template-analyze", async c=>{
     const file=profile.fingerprint.slice(0,24)+path.extname(name).toLowerCase();writeFileSync(path.join(dir,file),buffer);
     return c.json({ok:true,profile,storageKey:"user-"+user.userId+"/"+file,cached:false});
   }catch(e){console.error("[ppt-template-analyze]",e);return c.json({ok:false,error:"参考PPT解析失败："+(e.message||e)},500);}
+});
+
+// Local template thumbnail endpoint. Source PPTX stays private; only cached PNG previews are returned.
+app.get("/api/ppt-template-preview", async c=>{
+  const user=await verifyAuth(c.req.raw,ENV);if(!user)return c.json({ok:false,error:"未登录"},401);
+  try{
+    const templateId=String(c.req.query("id")||"").slice(0,100),page=Math.max(1,Number(c.req.query("page"))||1);
+    const row=await ENV.DB.prepare("SELECT id,user_id,status,storage_key,profile FROM ppt_templates WHERE id=?").bind(templateId).first();
+    if(!row)return c.json({ok:false,error:"模板不存在"},404);
+    const admins=String(ENV.ADMIN_USERS||"").split(",").map(value=>value.trim()).filter(Boolean),admin=admins.includes(user.username)||admins.includes(String(user.userId));
+    if(Number(row.user_id)!==Number(user.userId)&&row.status!=="published"&&!admin)return c.json({ok:false,error:"无权查看该模板"},403);
+    let profile={};try{profile=JSON.parse(row.profile||"{}");}catch{}
+    const pages=(profile.pages||[]).map(item=>Number(item.page)).filter(Number.isFinite),allowed=pages.includes(page)||(profile.pageIndex||[]).some(item=>Number(item.page)===page);
+    if(!allowed)return c.json({ok:false,error:"页面不在模板合同中"},404);
+    const sourcePath=resolveStoredTemplate(ROOT,row.storage_key),previewPath=resolvePreviewFile(ROOT,templateId,page);
+    if(!existsSync(previewPath))await ensureTemplatePreviews({root:ROOT,templateId,sourcePath,pages:pages.length?pages:[page]});
+    if(!existsSync(previewPath))return c.json({ok:false,error:"缩略图生成失败"},500);
+    return new Response(readFileSync(previewPath),{headers:{"Content-Type":"image/png","Cache-Control":"private, max-age=86400"}});
+  }catch(e){console.error("[ppt-template-preview]",e);return c.json({ok:false,error:"模板缩略图生成失败："+(e.message||e)},500);}
+});
+
+// Local-only artifact cleanup after the governance API has deleted a template record.
+app.post("/api/ppt-template-cleanup", async c=>{
+  const user=await verifyAuth(c.req.raw,ENV);if(!user)return c.json({ok:false,error:"未登录"},401);
+  const admins=String(ENV.ADMIN_USERS||"").split(",").map(value=>value.trim()).filter(Boolean);
+  if(!admins.includes(user.username)&&!admins.includes(String(user.userId)))return c.json({ok:false,error:"仅管理员可清理模板文件"},403);
+  if(ENV.ADMIN_PASS&&c.req.header("x-admin-pass")!==ENV.ADMIN_PASS)return c.json({ok:false,error:"管理员验证已失效"},403);
+  try{
+    const body=await c.req.json(),templateId=String(body.id||"").slice(0,100),storageKey=String(body.storageKey||"").slice(0,300);
+    if(!templateId||!storageKey)return c.json({ok:false,error:"缺少模板清理目标"},400);
+    const sourcePath=resolveStoredTemplate(ROOT,storageKey),previewDir=path.dirname(resolvePreviewFile(ROOT,templateId,1));
+    rmSync(sourcePath,{force:true});rmSync(previewDir,{recursive:true,force:true});
+    return c.json({ok:true,cleaned:true});
+  }catch(e){console.error("[ppt-template-cleanup]",e);return c.json({ok:false,error:"模板文件清理失败："+(e.message||e)},500);}
 });
 
 // 可用的接口名单（从目录扫描，下划线开头的是内部模块，不对外）

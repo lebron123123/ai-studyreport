@@ -7,7 +7,7 @@
   const TYPE_NAMES={gaibao:"非居改保",rent:"出租类",sale:"出售类"};
   const COST_LABELS={deco:"装修及重置",manage:"管理费用",maint:"维修费用",property:"物业费用",vac:"空置物业费用",fund:"专项维修资金",insurance:"保险费",ins:"保险费",landTax:"土地使用税",tax:"税费",finBuild:"建设期财务费用",finOp:"运营期财务费用",depreciation:"折旧摊销",devDep:"开发间接费"};
   function yearsOf(result={}){return (Array.isArray(result.allYears)?result.allYears:Object.keys(result.cf||{})).map(String).filter(x=>/^\d{4}$/.test(x)).sort();}
-  function typeOf(result={},hint){return hint||result.__ctype||"";}
+  function typeOf(result={},hint){return hint||(result&&result.__ctype)||"";}
   function metric(label,value,unit,sourceKey){return num(value)==null?null:{label,value:r2(value),unit:unit||"",sourceKey};}
   function metricsOf(result={},type){
     const s=result.summary||{},rows=[

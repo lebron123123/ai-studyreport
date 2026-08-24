@@ -102,9 +102,10 @@ function renderTOC(){
     it.onclick = ()=>{ const card = document.getElementById(it.dataset.home); if(card) card.click(); };
   });
 }
-function goHome(){ appMode=null; renderTOC(); renderSheet(); }
+function goHome(){ appMode=null; if(window.UiRouteState){try{sessionStorage.removeItem("studyreport:last-view:v1");history.replaceState(null,"",location.pathname+location.search);}catch(e){}} renderTOC(); renderSheet(); }
 
 function renderSheet(){
+  if(window.UiRouteState) window.UiRouteState.write();
   const sheet = document.getElementById("sheet");
   sheet.classList.toggle("personal-sheet",appMode==="personalKnowledge");
   sheet.classList.toggle("ppt-sheet",appMode==="office" && typeof officeView!=="undefined" && officeView==="ppt");

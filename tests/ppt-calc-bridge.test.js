@@ -11,6 +11,13 @@ const result={
   cf:{2026:{net:-5000},2027:{net:2200},2028:{net:3900}}
 };
 
+test("页面尚无测算结果时返回空分析而不抛异常",()=>{
+  const a=Bridge.analyze(null);
+  assert.equal(a.available,false);
+  assert.equal(a.calcType,"");
+  assert.deepEqual(a.years,[]);
+});
+
 test("三类白箱结果的共同骨架可转换为PPT指标和年度图表",()=>{
   const a=Bridge.analyze(result,{calcType:"rent",snapshotId:"snap_1"});
   assert.equal(a.available,true);assert.equal(a.calcTypeName,"出租类");assert.deepEqual(a.years,["2026","2027","2028"]);

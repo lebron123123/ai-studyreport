@@ -136,7 +136,7 @@
     <div class="nav-sep"></div>
     <div class="nav-item" id="btnCalcCfg"><span class="ic">🧮</span>测算参数管理</div>
     <div class="nav-item" id="btnExamples"><span class="ic">📖</span>黄金范例库</div>
-    <div class="nav-item" id="btnAiRules"><span class="ic">🛡</span>AI审核规则、逻辑</div>
+    <div class="nav-item" id="btnAiRules"><span class="ic">🛡</span>AI生成、审核规则与逻辑</div>
     <div class="nav-item" id="btnRag"><span class="ic">🗂</span>RAG知识库</div>
     <div class="nav-item" id="btnAgent"><span class="ic">🤖</span>Agent调用记录</div>
     <div class="nav-item" id="btnCases"><span class="ic">📁</span>历史项目案例库</div>
@@ -285,7 +285,7 @@ async function wikiApi(body){ const r=await fetch("/api/wiki",{method:"POST",hea
 function wikiDate(ts){ if(!ts)return "—"; const d=new Date(Number(ts)); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 async function openWiki(){
   document.getElementById("listBox").style.display="none"; const box=document.getElementById("editBox"); box.style.display="block";
-  box.innerHTML='<h1>知识 Wiki</h1><div class="sub">把原始资料沉淀成经人工确认的公司知识页：政策要点、报告写法、业务口径与案例经验。<b>Wiki负责解释与举证，不直接形成审核扣分；真正执行的检查条件仍在“AI审核规则、逻辑”中维护。</b> 只有点击发布的版本才会同步进入 RAG；编辑已发布页会先生成草稿，不会污染线上报告引用。</div><div class="bar"><button class="btn" id="wikiNew">新建 Wiki 页面</button><button class="btn ghost" id="wikiReload">刷新列表</button></div><div id="wikiList" class="empty">读取中…</div>';
+  box.innerHTML='<h1>知识 Wiki</h1><div class="sub">把原始资料沉淀成经人工确认的公司知识页：政策要点、报告写法、业务口径与案例经验。<b>Wiki负责解释与举证，不直接形成审核扣分；真正执行的生成与检查条件在“AI生成、审核规则与逻辑”中维护。</b> 只有点击发布的版本才会同步进入 RAG；编辑已发布页会先生成草稿，不会污染线上报告引用。</div><div class="bar"><button class="btn" id="wikiNew">新建 Wiki 页面</button><button class="btn ghost" id="wikiReload">刷新列表</button></div><div id="wikiList" class="empty">读取中…</div>';
   document.getElementById("wikiNew").onclick=()=>openWikiEdit(null); document.getElementById("wikiReload").onclick=openWiki;
   try{
     const d=await wikiApi({action:"list"}); if(!d.ok)throw new Error(d.error||"读取失败"); const pages=d.pages||[],stat={draft:0,published:0,archived:0}; pages.forEach(p=>stat[p.status]=(stat[p.status]||0)+1);
@@ -1367,7 +1367,7 @@ let arList = [];
 let csList = [];   // 测算审核标准(calcstd)：文本部分之外，测算假设/成本/收入/财务结果的结构化数值型审核标准
 let arWikiPages = []; // 仅用于把审核规则关联到“已发布”的Wiki依据；Wiki本身不参与重复扣分
 let clLogic = {gaibao:{}, rent:{}, sale:{}};
-let arTab = "rules";   // "rules" | "logic" | "sensitivity" | "std"
+let arTab = "generation";   // "generation" | "rules" | "logic" | "sensitivity" | "std"
 let clType = "rent";   // 可研测算逻辑页当前查看的测算类型
 // AI审核规则/测算审核标准默认只读，防止手滑增删——每次进入本页都重新锁定，
 // 要编辑须重新输入一次管理员密码解锁；保存成功后自动重新锁定，逼着下一轮编辑也走一次确认。
@@ -1400,17 +1400,22 @@ async function openAiRules(){
     csList = csList.map((e,i)=>Object.assign({id:e.id||("CS-"+String(i+1).padStart(3,"0")),reason:"",evidenceRefs:[]},e));
     try{ const wd=await wikiApi({action:"list"}); arWikiPages=(wd.pages||[]).filter(p=>p.status==="published"); }catch(e){ arWikiPages=[]; }
   }catch(e){ arList = []; }
-  arTab = "rules";
+  arTab = "generation";
   renderAiRulesTab();
 }
 function renderAiRulesTab(){
-  if(arTab==="logic") renderCalcLogic();
+  if(arTab==="generation" && typeof window.renderReportLogicAdminTab==="function") window.renderReportLogicAdminTab();
+  else if(arTab==="logic") renderCalcLogic();
   else if(arTab==="sensitivity") renderSensitivity();
   else if(arTab==="std") renderCalcStd();
   else renderAiRules();
+  const generationTab=document.getElementById("arTabGeneration");
+  if(generationTab)generationTab.onclick=()=>{ arTab="generation"; renderAiRulesTab(); };
 }
+function switchAiRuleAdminTab(next){ arTab=next; renderAiRulesTab(); }
 function arSubnavHtml(){
   return '<div class="subnav">'
+    +'<a href="javascript:void(0)" id="arTabGeneration" style="'+(arTab==="generation"?"background:#DCEBF7;":"")+'">✍ 可研生成逻辑</a>'
     +'<a href="javascript:void(0)" id="arTabRules" style="'+(arTab==="rules"?"background:#DCEBF7;":"")+'">🛡 AI可研审核规则与业务逻辑</a>'
     +'<a href="javascript:void(0)" id="arTabLogic" style="'+(arTab==="logic"?"background:#DCEBF7;":"")+'">🧮 可研测算逻辑</a>'
     +'<a href="javascript:void(0)" id="arTabSensitivity" style="'+(arTab==="sensitivity"?"background:#DCEBF7;":"")+'">📈 敏感性分析</a>'
@@ -1420,7 +1425,7 @@ function arSubnavHtml(){
 function renderAiRules(){
   const box = document.getElementById("editBox");
   const locked = !stdEditUnlocked;
-  box.innerHTML = '<h1 style="font-size:18px;">AI审核规则、逻辑</h1>'
+  box.innerHTML = '<h1 style="font-size:18px;">AI生成规则、审核规则与逻辑</h1>'
     + arSubnavHtml()
     +'<h2 style="font-size:15px; margin-top:16px;">AI可研审核规则与业务逻辑</h2>'
     +'<div class="sub">复核页"AI深度审核"按这些要点逐节评审。<b>规则负责执行检查，Wiki只负责解释与举证，不会重复扣分。</b> 匹配关键词命中章节标题即适用；每条规则可关联一条已发布Wiki。审核结果按“检查了什么 → 依据哪条规则 → 为什么这么规定 → 应该怎样修改”展示。</div>'
@@ -1514,7 +1519,7 @@ function renderCalcLogic(){
         '<tr><td>'+(i===0?esc(sheet.sheet):"")+'</td><td style="font-family:var(--mono); font-size:11px; color:var(--soft);">'+r.id+'</td><td>'+esc(r.label)+'</td></tr>'
       ).join("")).join("")
     +'</table>';
-  box.innerHTML = '<h1 style="font-size:18px;">AI审核规则、逻辑</h1>'
+  box.innerHTML = '<h1 style="font-size:18px;">AI生成规则、审核规则与逻辑</h1>'
     + arSubnavHtml()
     +'<h2 style="font-size:15px; margin-top:16px;">可研测算逻辑</h2>'
     +'<div class="sub">这里的科目结构与说明文字，就是「导出Excel明细表」和「导出测算说明书（Word）」实际会用到的内容——科目名称/Excel公式结构由测算引擎代码决定（只读参考，改代码才会变）；每条说明文字可在此编辑，保存后Word测算说明书导出时优先用这里的文字，留空则退回内置默认文案。</div>'
@@ -1638,7 +1643,7 @@ function renderSensitivity(){
   const methodChecks = SENS_METHOD_DEFS.map(m=>
     '<label style="font-size:12.5px; margin-right:14px;" title="'+esc(m.hint)+'">'
     +'<input type="checkbox" class="sensMethod" value="'+m.v+'" checked> '+m.label+'</label>').join("");
-  box.innerHTML = '<h1 style="font-size:18px;">AI审核规则、逻辑</h1>'
+  box.innerHTML = '<h1 style="font-size:18px;">AI生成规则、审核规则与逻辑</h1>'
     + arSubnavHtml()
     +'<h2 style="font-size:15px; margin-top:16px;">敏感性分析</h2>'
     +'<div class="sub">用真实测算引擎、按"测算参数管理"里已保存的系数，跑一遍全局敏感性分析，找出这56~22个填空参数里哪些真正决定IRR。'
@@ -1870,7 +1875,7 @@ function renderCalcStd(){
           +'<div>'+idxs.map(x=>csRowHtml(x.e,x.i,locked)).join("")+'</div></details>';
       }).join("")
     : '<div class="empty">还没有测算审核标准，点下面"+ 添加标准"开始录入，或联系管理员导入公司编制审查指引。</div>';
-  box.innerHTML = '<h1 style="font-size:18px;">AI审核规则、逻辑</h1>'
+  box.innerHTML = '<h1 style="font-size:18px;">AI生成规则、审核规则与逻辑</h1>'
     + arSubnavHtml()
     +'<h2 style="font-size:15px; margin-top:16px;">测算审核标准</h2>'
     +'<div class="sub">来自公司《可研报告编制与审查指引》测算部分的结构化标准，逐条落库、持续可维护。<b>checkType=exact/max/min</b>的条目"运行审核检查"时会拿真实测算结果做硬性数值核对；<b>tier/formula</b>需结合项目属性判断，"AI深度审核"会参考；<b>info</b>仅作为AI审核与生成时的提示，不做硬性判定。生成报告涉及数字的小节，也会按同样的标准引导撰写——生成和核查用的是同一份标准，不是两套口径。</div>'
@@ -2770,3 +2775,6 @@ async function openPptTemplates(){
 const pptTemplateNav=document.getElementById("btnPptTemplates");
 if(pptTemplateNav)pptTemplateNav.onclick=()=>{document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));pptTemplateNav.classList.add("active");openPptTemplates();};
 </script>
+<script src="ppt-template-admin-v2.js?v=1.0"></script>
+<script src="ppt-asset-admin.js?v=1.0"></script>
+<script src="report-logic-admin.js?v=1.3"></script>

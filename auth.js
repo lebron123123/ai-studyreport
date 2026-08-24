@@ -176,7 +176,7 @@ async function startApp(){
   if(currentProjectId){
     try{
       const pr=await fetch("/api/projects?id="+encodeURIComponent(currentProjectId),{headers:authHeaders()});
-      const pd=await pr.json();if(pd.ok&&pd.project&&pd.project.data)restoreDraft(pd.project.data,{openHome:true});
+      const pd=await pr.json();if(pd.ok&&pd.project&&pd.project.data){const resumeMode=appMode,resumeOffice=typeof officeView!=="undefined"?officeView:"chat";restoreDraft(pd.project.data,{openHome:true});if(window.UiRouteState){appMode=resumeMode;if(typeof officeView!=="undefined")officeView=resumeOffice;renderTOC();renderSheet();}}
       else{currentProjectId=null;rememberActiveProjectId(null);}
     }catch(e){ /* 网络失败时仍保留本地草稿兜底，不主动遗忘项目 */ }
   }

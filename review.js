@@ -144,13 +144,30 @@ function normalizeAiAuditIssue(issue,rules,calcStds){
   const check=String(issue.point||issue.check||"发现审核问题"),ruleId=String(hit.id||issue.ruleId||"通用检查"),rule=String(hit.check||issue.rule||"签发前审核检查"),reason=String(issue.reason||hit.reason||"依据当前已发布审核标准判断"),evidence=auditEvidenceLabel(hit)||String(issue.evidence||"未关联Wiki，按规则原文执行");
   return {point:"检查了什么："+check+"｜依据哪条规则："+ruleId+" "+rule+"｜为什么这么规定："+reason+"（关联依据："+evidence+"）｜应该怎样修改",ruleId,rule,reason,evidence,suggestion:String(issue.suggestion||"请按该规则补充或修正")};
 }
+function rvLogicType(){
+  const type=(typeof calcType!=="undefined"&&calcType)||(typeof calcResult!=="undefined"&&calcResult&&calcResult.__ctype)||(typeof rptCtype!=="undefined"&&rptCtype)||"rent";
+  return type==="sale"?"sale":type==="gaibao"?"gaibao":"rent";
+}
+function rvLogicRules(c,s){
+  if(!window.ReportLogicCore)return [];
+  const projectText=typeof project!=="undefined"?[project.name,project.type,project.location,project.desc].filter(Boolean).join(" "):"";
+  return ReportLogicCore.match(rvLogicType(),c.name,s.t,{projectText}).map(rule=>({
+    id:rule.id,
+    rule:"按逐小节逻辑撰写："+(rule.writingLogic||"按标题规范撰写")+"；输出形式："+(rule.outputForm||"文字"),
+    reason:"所需来源/材料："+(rule.requiredSources||"未指定"),
+    sourceNo:rule.sourceNo,
+    evidenceRefs:[]
+  }));
+}
 async function aiAuditOne(c, s){
-  const rules = aiRulesFor(c.name, s.t);
+  if(window.ReportLogicCore){try{await ReportLogicCore.load(rvLogicType());}catch(e){}}
+  const logicRules=rvLogicRules(c,s);
+  const rules = [...logicRules,...aiRulesFor(c.name, s.t)];
   const calcStds = s.numeric ? calcStdFor(c.name, s.t) : [];
   const src = s.editedHtml? blocksToSource(s.editedHtml) : (s.content||"");
-  const sys = '你是政府投资项目可研报告评审专家。请依据【审核要点】'+(calcStds.length?'与【测算取值标准】':'')+'评审给定小节。Wiki仅用于解释为什么，不得另行制造审核项或重复扣分。只输出一个JSON对象（不要markdown代码块、不要任何其他文字），格式：{"score":0到100整数,"issues":[{"point":"检查发现的问题(20字内)","ruleId":"命中的规则编号","reason":"为什么不符合(40字内)","suggestion":"具体修改建议(60字内)"}]}。每个问题必须对应输入中的一个规则编号；带分档性质的条目若未写清适用档位或依据，应视为问题；达标项不要列入issues；最多列3条最重要的问题。';
+  const sys = '你是政府投资项目可研报告评审专家。请依据【逐小节生成逻辑/审核要点】'+(calcStds.length?'与【测算取值标准】':'')+'评审给定小节。生成逻辑与审核共用同一规则ID；Wiki仅用于解释为什么，不得另行制造审核项或重复扣分。只输出一个JSON对象（不要markdown代码块、不要任何其他文字），格式：{"score":0到100整数,"issues":[{"point":"检查发现的问题(20字内)","ruleId":"命中的规则编号","reason":"为什么不符合(40字内)","suggestion":"具体修改建议(60字内)"}]}。每个问题必须对应输入中的一个规则编号；带分档性质的条目若未写清适用档位或依据，应视为问题；达标项不要列入issues；最多列3条最重要的问题。';
   const user = '【小节】第'+c.cn+'章 '+c.name+' — '+s.t
-    +'\n【审核要点】\n'+rules.map((r,i)=>'['+(r.id||('KY-'+String(i+1).padStart(3,'0')))+'] '+r.rule+(r.reason?'｜依据摘要：'+r.reason:'')+(auditEvidenceLabel(r)?'｜关联Wiki：'+auditEvidenceLabel(r):'')).join('\n')
+    +'\n【逐小节生成逻辑/审核要点】\n'+rules.map((r,i)=>'['+(r.id||('KY-'+String(i+1).padStart(3,'0')))+'] '+r.rule+(r.reason?'｜依据摘要：'+r.reason:'')+(auditEvidenceLabel(r)?'｜关联Wiki：'+auditEvidenceLabel(r):'')).join('\n')
     +(calcStds.length? '\n【测算取值标准】\n'+calcStds.map((e,i)=>'['+(e.id||('CS-'+String(i+1).padStart(3,'0')))+'] '+(e.item?e.item+'：':'')+(e.standard||'')+(e.reason?'｜依据摘要：'+e.reason:'')+(auditEvidenceLabel(e)?'｜关联Wiki：'+auditEvidenceLabel(e):'')).join('\n') : '')
     +'\n【小节内容】\n'+src.slice(0,3000);
   const text = await callGen(sys, user);

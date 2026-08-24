@@ -24,6 +24,11 @@
   register("project-assets",{name:"项目材料图片",local:true,async search(query,ctx){return projectAssets(ctx&&ctx.plan,query);}});
   register("department-assets",{name:"部门审核素材",local:true,async search(query,ctx){
     const q=String(query||"").toLowerCase();
+    if(root.PptAssetCenter&&typeof root.PptAssetCenter.api==="function"){
+      const listed=await root.PptAssetCenter.api({action:"list",scope:"department",search:q,limit:12});
+      const details=await Promise.all((listed.items||[]).slice(0,12).map(x=>root.PptAssetCenter.api({action:"get",id:x.id}).catch(()=>null)));
+      return details.filter(Boolean).map(x=>x.item).filter(x=>x&&x.dataUrl).map(x=>({id:x.id,libraryAssetId:x.id,label:x.title,kind:"image",dataUrl:x.dataUrl,sourceRef:"部门素材中心："+x.title,provider:"department-assets",tags:x.tags||[]}));
+    }
     return((ctx&&ctx.plan&&ctx.plan.departmentAssets)||[])
       .filter(x=>x.status==="approved"&&x.dataUrl&&(!q||String([x.name,...(x.tags||[])].join(" ")).toLowerCase().includes(q)))
       .map(x=>({...x,id:x.id||x.name,label:x.name,sourceRef:x.sourceRef||"部门审核素材",provider:"department-assets"}));

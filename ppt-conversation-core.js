@@ -15,6 +15,15 @@
     };
   }
 
+  function localProjectAnswer(plan={},text=""){
+    const q=clean(text,500),slides=Array.isArray(plan.slides)?plan.slides:[],pack=plan.evidencePack||{},sum=pack.summary||{},body=slides.filter((s,i)=>i>0&&s.type!=="cover"),thin=body.filter(s=>!(s.bullets||[]).filter(Boolean).length&&!Object.keys(s.content||{}).length),ungrounded=body.filter(s=>!(s.sources||[]).length);
+    if(/(?:一共|共有|总共|现在有).{0,6}(?:几|多少)页|页数/.test(q))return"这套PPT目前共 "+slides.length+" 页。";
+    if(/(?:材料|来源|证据|表格|数字).*(?:多少|哪些|情况)|(?:多少|哪些).*(?:材料|来源|证据|表格|数字)/.test(q))return"当前已读取 "+Number(sum.assetCount||0)+" 份材料，识别 "+Number(sum.factCount||0)+" 条数字事实、"+Number(sum.tableCount||0)+" 张结构化表格；其中 "+ungrounded.length+" 个正文页仍缺少明确来源。";
+    if(/文字.*(?:不够|太少)|内容.*(?:不够|太少|空)|页面.*(?:太空|空白)/.test(q))return thin.length?"你的判断是对的：当前 "+thin.length+" 个正文页缺少足够的结构化内容。建议优先把材料里的表格和数字分别转成表格页、指标页，再补每页结论和来源；我不会因为文字少而擅自调用生图。":"当前正文页都有内容，但仍可把长段文字压缩为结论、数字和图表。你可以指定页码让我继续深化。";
+    if(/哪里.*(?:提升|改进|优化)|(?:评价|诊断|分析).*(?:PPT|项目)|(?:PPT|项目).*(?:怎么样|如何)/i.test(q))return"当前PPT共 "+slides.length+" 页；需要优先处理："+(ungrounded.length?ungrounded.length+"页缺少来源；":"来源基本完整；")+(thin.length?thin.length+"页内容偏薄；":"正文覆盖基本完整；")+"建议下一步检查数字是否进入指标/图表组件，以及结论是否与材料逐项对应。";
+    return"";
+  }
+
   function materialPlanningPrompt(input={}){
     return [
       "你是资深汇报策划师、信息设计师和保障房项目分析顾问。",
@@ -22,6 +31,8 @@
       "严禁生成只有标题没有内容的空页面；严禁脱离材料编造数字。",
       "每页必须有一个明确的沟通任务，标题尽量写成结论句，并提供能直接渲染的bullets或content。",
       "数字、表格和关键判断必须在sources中填写对应文件名、Sheet、页码或材料位置；无法定位时写材料文件名。",
+      "材料中存在结构化表格时，至少生成一页table页面并把headers、rows写入content；存在三项以上数字事实时，至少生成一页metric或chart页面。",
+      "禁止把表格逐行压成普通项目符号；数字页面必须保留指标名称、数值、单位和来源。",
       "汇报标题："+clean(input.title,120), "汇报对象："+clean(input.audience,100), "汇报用途："+clean(input.purpose,160),
       "目标页数："+Math.max(5,Math.min(24,Number(input.slideCount)||10)), "可用页面组件："+(input.layouts||[]).join("、"),
       "只输出JSON，不要Markdown代码围栏。JSON结构：",
@@ -79,11 +90,12 @@
     slide.content={...(slide.content||{}),image:image.dataUrl,imageSource:image.sourceRef||image.provider||"AI生成图片"};
     slide.assetPlan={status:"matched",kind:"image",assetId:image.id||("generated_"+Date.now()),dataUrl:image.dataUrl,sourceRef:image.sourceRef||"AI生成图片",provider:image.provider||"unknown",approvedAt:Date.now(),rationale:"用户选择智能生成整套PPT，系统自动生成并应用主视觉"};
     slide.assetCandidates=[...(slide.assetCandidates||[]),{...slide.assetPlan,id:slide.assetPlan.assetId,label:image.label||"AI生成主视觉",status:"approved",createdAt:Date.now(),slideId:slide.id||""}].slice(-12);
+    slide.assetPlan.libraryAssetId=image.libraryAssetId||image.id||"";
     slide.sources=Array.from(new Set([...(slide.sources||[]),slide.assetPlan.sourceRef])).filter(Boolean);
     out.updatedAt=Date.now();
     return{ok:true,plan:out,page:Number(page)};
   }
 
-  const api={deckContext,materialPlanningPrompt,applySlidePatch,groundDeck,selectImageSlides,applyGeneratedImage};root.PptConversationCore=api;
+  const api={deckContext,localProjectAnswer,materialPlanningPrompt,applySlidePatch,groundDeck,selectImageSlides,applyGeneratedImage};root.PptConversationCore=api;
   if(typeof module==="object"&&module.exports)module.exports=api;
 })(typeof window!=="undefined"?window:globalThis);

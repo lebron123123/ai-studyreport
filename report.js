@@ -89,7 +89,9 @@ async function fetchOutlines(){
         const dd = await det.json();
         if(dd.ok) map[item.key] = {label:dd.outline.label, chapters:dd.outline.chapters};
       }
-      if(Object.keys(map).length){ dynamicOutlines = map; return map; }
+      if(Object.keys(map).length){
+        dynamicOutlines = map; return map;
+      }
     }
   }catch(e){}
   dynamicOutlines = window.OUTLINES || {};
@@ -97,15 +99,16 @@ async function fetchOutlines(){
 }
 function getOutlines(){ return dynamicOutlines || window.OUTLINES || {}; }
 
-function loadDomain(key){
+function reportLoadDomainSource(key,src){
   domainKey = key;
-  const src = getOutlines()[key];
+  if(!src)throw new Error("未找到可研大纲："+key);
   project.industry = src.label;
   chapters = src.chapters.map(ch=>({
     cn: ch.cn, name: ch.name, checked: true,
     sections: ch.sections.map(s=>({ t: s.t, numeric: !!s.numeric, content: "" }))
   }));
 }
+function loadDomain(key){ reportLoadDomainSource(key,getOutlines()[key]); }
 
 
 function stepDomain(){
@@ -348,7 +351,7 @@ async function updateStaleSections(){
 // 保留降级分支：万一 md.js 未加载，仍能按老逻辑显示，不至于整页空白
 function renderContent(text){
   if(window.MD && typeof window.MD.renderHtml === "function"){
-    return window.MD.renderHtml(text);
+    return window.MD.renderHtml(text).replace(/【待补：([^】]+)】/g,'<span class="rpt-missing-placeholder">【待补：$1】</span>');
   }
   const tableRe = /\[\[TABLE\]\]([\s\S]*?)\[\[\/TABLE\]\]/g;
   let html = text.replace(tableRe, function(m, inner){
@@ -366,6 +369,12 @@ function renderContent(text){
     return p.trim()? '<p style="margin:0 0 10px;">'+escapeHtml(p).replace(/\*\*([^*\n]+)\*\*/g,"<b>$1</b>").replace(/\n/g,"<br>")+'</p>' : "";
   }).join("");
   return html;
+}
+
+function reportBodyContainsInternalLogic(text){
+  return /【(?:逐小节生成逻辑|内部生成约束)/.test(String(text||""))
+    || /(?:^|\n)\s*(?:材料状态|所需材料摘要|写作逻辑|输出形式)：/.test(String(text||""))
+    || /本节重点按照以下逻辑展开/.test(String(text||""));
 }
 async function kbHandleFiles(files){
   const parsing = document.getElementById("kbParsing");
@@ -638,6 +647,18 @@ function stdRetrieve(chapterName, secTitle, numeric){
   return out;
 }
 
+function rlProjectType(){
+  const type = (calcType||(calcResult&&calcResult.__ctype)||rptCtype||"");
+  return type==="sale"?"sale":type==="gaibao"?"gaibao":"rent";
+}
+function rlProjectText(){
+  return [project.name,project.type,project.location,project.desc].filter(Boolean).join(" ");
+}
+function rlRetrieve(chapterName, secTitle){
+  if(!window.ReportLogicCore)return "";
+  return ReportLogicCore.prompt(rlProjectType(),chapterName,secTitle,{projectText:rlProjectText(),context:typeof airMaterialContext==="function"?airMaterialContext():{hasCalculation:!!(calcParams&&calcResult)}});
+}
+
 // 按章节标题匹配最相关的参考资料（关键词2元组打分，无需向量库）
 function kbRetrieve(chapterName, secTitle){
   if(!kbEntries.length) return "";
@@ -649,6 +670,8 @@ function kbRetrieve(chapterName, secTitle){
   }
   const scored = kbEntries.map(e=>{
     let s = 0;
+    if(e.chapter&&(String(chapterName||"").includes(e.chapter)||e.chapter.includes(String(chapterName||""))))s+=40;
+    if(e.section&&(String(secTitle||"").includes(e.section)||e.section.includes(String(secTitle||""))))s+=80;
     grams.forEach(g=>{
       if(e.title && e.title.includes(g)) s += 3;
       if(e.content && e.content.includes(g)) s += 1;
@@ -679,6 +702,7 @@ function blocksToSource(htmlStr){
 
 // 按用户修改意见改写小节
 async function reviseSection(c, s, instruction, onChunk){
+  if(window.ReportLogicCore){try{await ReportLogicCore.load(rlProjectType());}catch(e){}}
   const digest = s.numeric ? buildCalcDigest() : null;
   const current = s.editedHtml ? blocksToSource(s.editedHtml) : (s.content||"");
   let numRule;
@@ -700,12 +724,14 @@ async function reviseSection(c, s, instruction, onChunk){
     +'\n\n【当前稿件】\n'+current
     +'\n\n【修改意见】\n'+instruction
     +'\n\n请输出按意见修改后的完整小节正文。'
+    + rlRetrieve(c.name,s.t)
     + kbRetrieve(c.name, s.t);
   return callGen(sys, user, onChunk);
 }
 
 async function generateSection(c, s, onChunk){
   provStart();   // 开启溯源采集
+  if(window.ReportLogicCore){try{await ReportLogicCore.load(rlProjectType());}catch(e){}}
   const digest = s.numeric ? buildCalcDigest() : null;
   if(digest) provCollector.hasCalcData = true;
   let tableHint = "";
@@ -714,16 +740,27 @@ async function generateSection(c, s, onChunk){
   } else if(s.numeric){
     tableHint = '\n本子标题涉及具体数字或测算，请：①用文字说明测算口径、方法与逻辑；②生成一个结构完整的数据表格，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔，每行一个换行）：\n[[TABLE]]\n列1|列2|列3\n项目A|待填|待填\n[[/TABLE]]\n表格中的具体数值一律填"待填"，绝不编造精确数字；但表格的行项目、列结构要专业完整、贴合真实可研报告。';
   }
-  const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n3. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n4. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+tableHint;
+  const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 材料不足时仍须先完成专业的分析框架、论证方法、逻辑链和表格结构，禁止整节只返回待补提示或空内容；只有项目专属事实、关键数字、批复、证照、合同等依据在对应位置简短标注“【待补：具体依据】”。\n3. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n4. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n5. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+tableHint;
   // 记录本节用到了哪些项目信息字段（L2溯源的一部分）
   [["项目名称",project.name],["建设/委托单位",project.owner],["建设地点",project.location],
    ["投资规模",project.scale],["项目概况",project.desc]].forEach(([k,v])=>{
     if(v && String(v).trim() && provCollector) provCollector.projectFields.push(k);
   });
   const excelContext=s.numeric?(excelSourceRetrieve()+await mappedExcelSourceRetrieve()):"";
-  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t) + kbRetrieve(c.name, s.t) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t);
+  const logicRules=window.ReportLogicCore?ReportLogicCore.match(rlProjectType(),c.name,s.t,{projectText:rlProjectText()}):[];
+  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t) + kbRetrieve(c.name, s.t) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t);
 
-  const text = await callGen(sys, user, onChunk);
+  let text = await callGen(sys, user, onChunk);
+  if(!text || text === "（未返回内容）" || reportBodyContainsInternalLogic(text)){
+    text = window.ReportLogicCore?.fallbackDraft
+      ? ReportLogicCore.fallbackDraft(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),numeric:!!s.numeric,context:typeof airMaterialContext==="function"?airMaterialContext():{hasCalculation:!!(calcParams&&calcResult)}})
+      : (s.t+"应结合项目实际条件建立分析框架，并在取得正式资料后补充项目专属事实、关键数据和最终结论。\n\n【待补：与本节相关的正式依据】");
+    if(onChunk) onChunk(text);
+  }
+  if(window.ReportLogicCore?.ensureMissingMarkers){
+    text=ReportLogicCore.ensureMissingMarkers(text,logicRules,typeof airMaterialContext==="function"?airMaterialContext():{hasCalculation:!!(calcParams&&calcResult)});
+    if(onChunk)onChunk(text);
+  }
   // 生成完成：把溯源档案挂到该小节上（含模型与时间，即L3模型溯源）
   const prov = provTake();
   if(prov){
@@ -731,6 +768,7 @@ async function generateSection(c, s, onChunk){
     prov.generatedAt = new Date().toISOString();
     if(projectWorkflow&&projectWorkflow.currentAnalysisSnapshotId){prov.analysisSnapshotId=projectWorkflow.currentAnalysisSnapshotId;prov.analysisSnapshotVersion=projectWorkflow.currentAnalysisSnapshotVersion||null;}
     prov.confidence = provConfidence(prov);
+    prov.reportLogic = logicRules.map(r=>({id:r.id,sourceNo:r.sourceNo,version:(ReportLogicCore.current(rlProjectType())||{}).version||1}));
     s.prov = prov;
   }
   return text;

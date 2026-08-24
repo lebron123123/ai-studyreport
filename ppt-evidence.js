@@ -29,7 +29,11 @@
     return{schemaVersion:2,title:clean(opts.title,120)||"PPT材料证据包",assets,facts,tables,sourceRefs,summary:{assetCount:assets.length,imageCount:assets.filter(x=>x.kind==="image").length,factCount:facts.length,tableCount:tables.length,totalChars:assets.reduce((n,x)=>n+x.text.length,0)},createdAt:Date.now()};
   }
   function evidenceText(pack,maxChars=60000){
-    let used=0,out=[];for(const a of (pack&&pack.assets)||[]){const head="\n\n[来源 "+a.name+"｜"+a.kind+"｜"+(a.version||"本次导入")+"]\n",left=Math.max(0,maxChars-used-head.length);if(left<=0)break;const body=a.text.slice(0,left);out.push(head+body);used+=head.length+body.length;}return out.join("").trim();
+    const out=[];let used=0,reserve=Math.min(18000,Math.floor(maxChars*.3));
+    for(const a of (pack&&pack.assets)||[]){const head="\n\n[来源 "+a.name+"｜"+a.kind+"｜"+(a.version||"本次导入")+"]\n",left=Math.max(0,maxChars-reserve-used-head.length);if(left<=0)break;const body=a.text.slice(0,left);out.push(head+body);used+=head.length+body.length;}
+    const facts=(pack&&pack.facts||[]).slice(0,40);if(facts.length)out.push("\n\n[结构化数字事实]\n"+facts.map(f=>"- "+f.statement+"（来源："+f.sourceLabel+"｜"+f.locator+"）").join("\n"));
+    const tables=(pack&&pack.tables||[]).slice(0,8);for(const t of tables){const rows=(t.rows||[]).slice(0,12);if(!rows.length)continue;out.push("\n\n[结构化表格 "+t.title+"｜来源："+t.sourceLabel+"｜"+t.locator+"]\n"+rows.map(r=>(r||[]).slice(0,10).join(" | ")).join("\n"));}
+    return clean(out.join(""),maxChars);
   }
   const api={kindOf,buildEvidencePack,evidenceText,numericFacts};root.PptEvidence=api;if(typeof module==="object"&&module.exports)module.exports=api;
 })(typeof window!=="undefined"?window:globalThis);

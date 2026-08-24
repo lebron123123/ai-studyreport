@@ -10,6 +10,10 @@ test("多材料形成含数字事实、表格和来源的Evidence Pack",()=>{
     {name:"测算.xlsx",text:"年度,收入\n2028,1200万元",sheets:[{name:"收入表",range:"A1:B2",rows:[["年度","收入"],[2028,1200]]}]}
   ]);
   assert.equal(pack.assets.length,2);assert.ok(pack.facts.length>=2);assert.equal(pack.tables.length,1);assert.equal(pack.sourceRefs[1].label,"测算.xlsx");
+  const evidence=globalThis.PptEvidence.evidenceText(pack);
+  assert.match(evidence,/\[结构化数字事实\]/);
+  assert.match(evidence,/\[结构化表格/);
+  assert.match(evidence,/年度 \| 收入/);
 });
 
 test("AI SlideSpec解析并保留动态组件和来源",()=>{

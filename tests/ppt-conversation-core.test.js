@@ -27,3 +27,10 @@ test("generated image is applied to preview/export content and keeps provenance"
   const result=C.applyGeneratedImage({slides:[{title:"封面"},{id:"s2",title:"项目背景",layoutId:"bullets",content:{}}]},2,image);
   assert.equal(result.ok,true);assert.equal(result.plan.slides[1].layoutId,"image-hero");assert.equal(result.plan.slides[1].content.image,image.dataUrl);assert.equal(result.plan.slides[1].assetPlan.provider,"nano-banana");assert.equal(result.plan.slides[1].assetCandidates[0].status,"approved");
 });
+
+test("common PPT questions are answered from the current white-box project",()=>{
+  const plan={slides:[{type:"cover",title:"封面"},{title:"指标",bullets:[],content:{},sources:[]}],evidencePack:{summary:{assetCount:2,factCount:6,tableCount:1}}};
+  assert.match(C.localProjectAnswer(plan,"这个PPT一共有多少页？"),/2 页/);
+  assert.match(C.localProjectAnswer(plan,"材料和数字情况怎么样？"),/2 份材料/);
+  assert.match(C.localProjectAnswer(plan,"感觉文字不够"),/内容/);
+});
