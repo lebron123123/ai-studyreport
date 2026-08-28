@@ -175,7 +175,24 @@ function htmlToBlocks(htmlStr){
     if(node.nodeType===3){ const t=node.textContent.trim(); if(t) blocks.push({type:"p", text:t}); return; }
     if(node.nodeType!==1) return;
     const tag = node.tagName;
-    if(tag==="TABLE"){
+    if(tag==="FIGURE" && node.classList.contains("rpt-template-card")){
+      const id=node.getAttribute("data-template-id");
+      const type=typeof reportTableProjectType==="function"?reportTableProjectType():null;
+      const template=id&&type&&window.ReportTableTemplates?window.ReportTableTemplates.exportTemplate(id,type):null;
+      if(template){
+        node.querySelectorAll(".rpt-template-segment[data-segment]").forEach(segEl=>{
+          const si=Number(segEl.getAttribute("data-segment"));
+          const segment=template.segments&&template.segments[si];
+          if(!segment)return;
+          segEl.querySelectorAll("[data-row][data-col]").forEach(cellEl=>{
+            const row=segment.rows[Number(cellEl.getAttribute("data-row"))];
+            const cell=row&&row.cells.find(c=>Number(c.col)===Number(cellEl.getAttribute("data-col")));
+            if(cell)cell.text=cellEl.querySelector(".rpt-template-empty")?"":cellEl.textContent.trim();
+          });
+        });
+        blocks.push({type:"templateTable",template});
+      }
+    }else if(tag==="TABLE"){
       const rows = [...node.querySelectorAll("tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
       if(rows.length) blocks.push({type:"table", rows});
     }else if(tag==="UL" || tag==="OL"){
@@ -217,7 +234,15 @@ function buildExportPayload(){
     sections: c.sections.map((s,si)=>{
       const el = elMap[c.cn+'_'+si];
       const htmlStr = el? el.innerHTML : (s.editedHtml || renderContent(s.content||""));
-      return { title:s.title||s.t, blocks: htmlToBlocks(htmlStr) };
+      const blocks=htmlToBlocks(htmlStr);
+      const type=typeof reportTableProjectType==="function"?reportTableProjectType():null;
+      if(type&&window.ReportTableTemplates){
+        const used=new Set(blocks.filter(b=>b.type==="templateTable").map(b=>b.template&&b.template.id));
+        window.ReportTableTemplates.forSection(type,c.name,s.t).forEach(t=>{
+          if(!used.has(t.id))blocks.push({type:"templateTable",template:window.ReportTableTemplates.exportTemplate(t.id,type)});
+        });
+      }
+      return { title:s.title||s.t, blocks };
     })
   }));
 
@@ -259,7 +284,11 @@ function buildExportPayload(){
       mainRows, sensRows,
     };
   }
-  return { project: project, signed: signed, docNo: getDocNo(), chapters: chs, appendix, provenance };
+  const type=typeof reportTableProjectType==="function"?reportTableProjectType():null;
+  const tableAppendix=type&&window.ReportTableTemplates
+    ?window.ReportTableTemplates.appendix(type).map(t=>window.ReportTableTemplates.exportTemplate(t.id,type))
+    :[];
+  return { project: project, signed: signed, docNo: getDocNo(), chapters: chs, appendix, tableAppendix, provenance };
 }
 
 /* ===== 图表转PNG(嵌入Word用) ===== */
@@ -322,6 +351,7 @@ async function exportWord(){
   if(btn){ btn.disabled = true; btn.textContent = "正在生成 .docx…"; }
   try{
     await ensureDocxLib();
+    if(typeof ensureReportTableTemplates==="function")await ensureReportTableTemplates();
     const payload = buildExportPayload();
     payload.images = await collectReportImages();
     const doc = window.buildDocxDocument(window.docx, payload);

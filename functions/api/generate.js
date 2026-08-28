@@ -110,10 +110,15 @@ export async function onRequestPost(context) {
   // 指向内网地址即可，本文件及全部业务代码一行都不用动。
   let upstream;
   let usedProvider = "";
+  let usedModel = "";
   try{
-    const called = await callConfiguredLlm(env, body.provider, dsPayload);
+    const called = await callConfiguredLlm(env, body.provider, dsPayload, fetch, {
+      profile: body.latency_profile === "interactive" ? "interactive" : "standard",
+    });
     upstream = called.response;
     usedProvider = called.provider;
+    usedModel = called.model;
+    var upstreamLatencyMs = called.totalLatencyMs || called.latencyMs || 0;
   }catch(e){
     if (counted) await refund(env, userKey, globalKey);
     return json({ error: "上游AI接口连接失败：" + e.message }, 502);
@@ -142,7 +147,8 @@ export async function onRequestPost(context) {
     const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
     const text = msg.content || "";
     // 有工具调用时一并返回,前端据此执行工具、回填结果、再次调用(ReAct循环)
-    return json({ content: [{ type: "text", text }], tool_calls: msg.tool_calls || null, usage: data.usage || null, provider: usedProvider });
+    return json({ content: [{ type: "text", text }], tool_calls: msg.tool_calls || null, usage: data.usage || null,
+      provider: usedProvider, model: usedModel, upstream_latency_ms: upstreamLatencyMs });
   }
 }
 

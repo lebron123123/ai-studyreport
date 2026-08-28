@@ -276,6 +276,32 @@ CREATE TABLE IF NOT EXISTS agent_memory (
   UNIQUE(user_id, mkey)
 );
 
+-- Agent 企业级运行账本（与 migrations/0008_agent_runtime.sql 一致）
+CREATE TABLE IF NOT EXISTS agent_runs (id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,agent_type TEXT NOT NULL DEFAULT 'general',project_id TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'running',query_text TEXT NOT NULL DEFAULT '',idempotency_key TEXT NOT NULL DEFAULT '',input_json TEXT NOT NULL DEFAULT '{}',output_json TEXT NOT NULL DEFAULT '{}',error_text TEXT NOT NULL DEFAULT '',current_step INTEGER NOT NULL DEFAULT 0,tool_call_count INTEGER NOT NULL DEFAULT 0,created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL,completed_at BIGINT DEFAULT 0,UNIQUE(user_id,idempotency_key));
+CREATE INDEX IF NOT EXISTS idx_agent_runs_user_updated ON agent_runs(user_id,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_status_updated ON agent_runs(status,updated_at DESC);
+CREATE TABLE IF NOT EXISTS agent_run_steps (id TEXT PRIMARY KEY,run_id TEXT NOT NULL,user_id INTEGER NOT NULL,step_no INTEGER NOT NULL,kind TEXT NOT NULL,tool_name TEXT NOT NULL DEFAULT '',risk_level TEXT NOT NULL DEFAULT 'read',status TEXT NOT NULL DEFAULT 'completed',input_json TEXT NOT NULL DEFAULT '{}',output_json TEXT NOT NULL DEFAULT '{}',error_text TEXT NOT NULL DEFAULT '',duration_ms INTEGER NOT NULL DEFAULT 0,created_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_run_steps(run_id,step_no);
+CREATE TABLE IF NOT EXISTS agent_checkpoints (id TEXT PRIMARY KEY,run_id TEXT NOT NULL,user_id INTEGER NOT NULL,step_no INTEGER NOT NULL,state_json TEXT NOT NULL DEFAULT '{}',resume_token TEXT NOT NULL DEFAULT '',created_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_run ON agent_checkpoints(run_id,step_no DESC);
+CREATE TABLE IF NOT EXISTS agent_approvals (id TEXT PRIMARY KEY,run_id TEXT NOT NULL,user_id INTEGER NOT NULL,tool_name TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',request_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'pending',decided_by TEXT NOT NULL DEFAULT '',decision_note TEXT NOT NULL DEFAULT '',created_at BIGINT NOT NULL,decided_at BIGINT DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_agent_approvals_run ON agent_approvals(run_id,status,created_at DESC);
+CREATE TABLE IF NOT EXISTS agent_skill_candidates (id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,name TEXT NOT NULL,scene TEXT NOT NULL DEFAULT 'general',description TEXT NOT NULL DEFAULT '',instruction_md TEXT NOT NULL DEFAULT '',source_run_id TEXT NOT NULL DEFAULT '',evidence_json TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL DEFAULT 'candidate',version INTEGER NOT NULL DEFAULT 1,reviewed_by TEXT NOT NULL DEFAULT '',review_note TEXT NOT NULL DEFAULT '',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_agent_skills_status ON agent_skill_candidates(status,updated_at DESC);
+
+-- Agent企业级治理（后台续跑、父子谱系、用量、Skill版本、ABAC）
+CREATE TABLE IF NOT EXISTS agent_run_governance (run_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,parent_run_id TEXT DEFAULT '',root_run_id TEXT DEFAULT '',department TEXT DEFAULT '',security_level INTEGER NOT NULL DEFAULT 1,execution_mode TEXT NOT NULL DEFAULT 'client',budget_input_tokens INTEGER NOT NULL DEFAULT 0,budget_output_tokens INTEGER NOT NULL DEFAULT 0,budget_cost_micros BIGINT NOT NULL DEFAULT 0,input_tokens INTEGER NOT NULL DEFAULT 0,output_tokens INTEGER NOT NULL DEFAULT 0,cost_micros BIGINT NOT NULL DEFAULT 0,provider TEXT DEFAULT '',model TEXT DEFAULT '',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_agent_governance_root ON agent_run_governance(root_run_id,updated_at DESC);
+CREATE TABLE IF NOT EXISTS agent_jobs (id TEXT PRIMARY KEY,run_id TEXT NOT NULL,user_id INTEGER NOT NULL,kind TEXT NOT NULL DEFAULT 'llm_task',payload_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'queued',priority INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,max_attempts INTEGER NOT NULL DEFAULT 3,next_retry_at BIGINT NOT NULL DEFAULT 0,lease_owner TEXT DEFAULT '',lease_expires_at BIGINT NOT NULL DEFAULT 0,error_text TEXT DEFAULT '',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL,completed_at BIGINT NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_agent_jobs_claim ON agent_jobs(status,next_retry_at,priority,created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_jobs_user ON agent_jobs(user_id,updated_at DESC);
+CREATE TABLE IF NOT EXISTS agent_run_usage (id TEXT PRIMARY KEY,run_id TEXT NOT NULL,user_id INTEGER NOT NULL,provider TEXT DEFAULT '',model TEXT DEFAULT '',input_tokens INTEGER NOT NULL DEFAULT 0,output_tokens INTEGER NOT NULL DEFAULT 0,cost_micros BIGINT NOT NULL DEFAULT 0,latency_ms INTEGER NOT NULL DEFAULT 0,cached INTEGER NOT NULL DEFAULT 0,created_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_agent_usage_run ON agent_run_usage(run_id,created_at);
+CREATE TABLE IF NOT EXISTS agent_skill_versions (id TEXT PRIMARY KEY,skill_id TEXT NOT NULL,version INTEGER NOT NULL,instruction_md TEXT NOT NULL DEFAULT '',evidence_json TEXT NOT NULL DEFAULT '[]',eval_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'draft',created_by INTEGER NOT NULL,created_at BIGINT NOT NULL,UNIQUE(skill_id,version));
+CREATE TABLE IF NOT EXISTS agent_skill_evals (id TEXT PRIMARY KEY,skill_id TEXT NOT NULL,version INTEGER NOT NULL,passed INTEGER NOT NULL DEFAULT 0,score DOUBLE PRECISION NOT NULL DEFAULT 0,cases_json TEXT NOT NULL DEFAULT '[]',result_json TEXT NOT NULL DEFAULT '{}',created_by INTEGER NOT NULL,created_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS agent_skill_releases (skill_id TEXT PRIMARY KEY,active_version INTEGER NOT NULL,previous_version INTEGER NOT NULL DEFAULT 0,published_by TEXT DEFAULT '',published_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS agent_project_access (user_id INTEGER NOT NULL,project_id TEXT NOT NULL,department TEXT DEFAULT '',permission TEXT NOT NULL DEFAULT 'read',max_security_level INTEGER NOT NULL DEFAULT 1,updated_at BIGINT NOT NULL,PRIMARY KEY(user_id,project_id));
+
 -- ---------- 办公助手与限额 ----------
 CREATE TABLE IF NOT EXISTS office_chats (
   user_id    INTEGER PRIMARY KEY,
@@ -376,6 +402,17 @@ CREATE INDEX IF NOT EXISTS idx_personal_versions_note ON personal_note_versions(
 CREATE TABLE IF NOT EXISTS personal_note_links (id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,from_note_id TEXT NOT NULL,to_note_id TEXT DEFAULT '',target_title TEXT NOT NULL,link_text TEXT DEFAULT '',created_at BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_personal_links_from ON personal_note_links(user_id,from_note_id);
 CREATE INDEX IF NOT EXISTS idx_personal_links_to ON personal_note_links(user_id,to_note_id,target_title);
+
+-- 联网研究、证据台账和检索 Provider 治理
+CREATE TABLE IF NOT EXISTS web_search_runs (id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,project_id TEXT DEFAULT '',section_key TEXT DEFAULT '',plan_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'running',provider TEXT DEFAULT '',query_count INTEGER NOT NULL DEFAULT 0,result_count INTEGER NOT NULL DEFAULT 0,error_text TEXT DEFAULT '',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_web_runs_user_project ON web_search_runs(user_id,project_id,updated_at);
+CREATE TABLE IF NOT EXISTS web_evidence (id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,project_id TEXT DEFAULT '',logic_id TEXT DEFAULT '',chapter TEXT DEFAULT '',section TEXT DEFAULT '',query_text TEXT DEFAULT '',title TEXT NOT NULL,url TEXT NOT NULL,canonical_url TEXT NOT NULL,publisher TEXT DEFAULT '',published_at TEXT DEFAULT '',fetched_at TEXT DEFAULT '',source_type TEXT DEFAULT 'web',authority_level TEXT DEFAULT 'D',authority_score INTEGER NOT NULL DEFAULT 0,excerpt TEXT DEFAULT '',content_text TEXT DEFAULT '',content_hash TEXT DEFAULT '',data_period TEXT DEFAULT '',provider TEXT DEFAULT '',confidence INTEGER NOT NULL DEFAULT 0,verification_status TEXT DEFAULT 'single',status TEXT NOT NULL DEFAULT 'candidate',metadata_json TEXT NOT NULL DEFAULT '{}',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_web_evidence_project ON web_evidence(user_id,project_id,status,updated_at);
+CREATE INDEX IF NOT EXISTS idx_web_evidence_section ON web_evidence(user_id,project_id,chapter,section);
+CREATE TABLE IF NOT EXISTS web_evidence_bindings (id TEXT PRIMARY KEY,evidence_id TEXT NOT NULL,user_id INTEGER NOT NULL,project_id TEXT DEFAULT '',logic_id TEXT NOT NULL,chapter TEXT DEFAULT '',section TEXT DEFAULT '',status TEXT NOT NULL DEFAULT 'approved',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL,UNIQUE(evidence_id,logic_id));
+CREATE INDEX IF NOT EXISTS idx_web_evidence_bindings_project ON web_evidence_bindings(user_id,project_id,logic_id,status);
+CREATE TABLE IF NOT EXISTS web_provider_health (provider TEXT PRIMARY KEY,status TEXT NOT NULL DEFAULT 'unknown',latency_ms INTEGER NOT NULL DEFAULT 0,last_error TEXT DEFAULT '',success_count INTEGER NOT NULL DEFAULT 0,failure_count INTEGER NOT NULL DEFAULT 0,last_checked_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS web_search_lenses (id TEXT PRIMARY KEY,name TEXT NOT NULL,dimension TEXT DEFAULT '',domains_json TEXT NOT NULL DEFAULT '[]',housing_types_json TEXT NOT NULL DEFAULT '[]',query_suffix TEXT DEFAULT '',status TEXT NOT NULL DEFAULT 'active',version INTEGER NOT NULL DEFAULT 1,updated_by TEXT DEFAULT '',updated_at BIGINT NOT NULL);
 
 -- AI办公固定模板PPT工作台
 CREATE TABLE IF NOT EXISTS ppt_projects (id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,title TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'draft',template_id TEXT NOT NULL DEFAULT 'anju-blue',data TEXT NOT NULL DEFAULT '{}',revision INTEGER NOT NULL DEFAULT 1,created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL);

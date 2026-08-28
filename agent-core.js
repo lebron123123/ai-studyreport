@@ -12,6 +12,42 @@ window.AgentCore = (function(){
   /* ---------- 工具注册表 ---------- */
   // 每项：{ schema:{...OpenAI function schema}, validate(args)->{ok,error}, run(args)->string, label(args)->string }
   const TOOLS = {};
+  const RISK_LEVELS = { READ:"read", WRITE:"write", EXTERNAL:"external", DESTRUCTIVE:"destructive" };
+  const TOOLSETS = { REPORT:"report", CALC:"calc", KNOWLEDGE:"knowledge", PPT:"ppt", OFFICE:"office", SYSTEM:"system" };
+
+  function normalizeToolMeta(name, def){
+    const risk = Object.values(RISK_LEVELS).indexOf(def.risk)>=0 ? def.risk : RISK_LEVELS.READ;
+    return {
+      name,
+      version:String(def.version||"1.0.0"),
+      risk,
+      toolset:String(def.toolset||TOOLSETS.SYSTEM),
+      requiresApproval:def.requiresApproval===true || risk===RISK_LEVELS.DESTRUCTIVE,
+      idempotent:def.idempotent!==false,
+      timeoutMs:Math.max(1000,Math.min(Number(def.timeoutMs)||30000,120000)),
+    };
+  }
+
+  async function runtimeCall(action, payload){
+    try{
+      const r = await fetch("/api/agentruns", {
+        method:"POST",
+        headers:Object.assign({"Content-Type":"application/json"}, (window.authHeaders ? window.authHeaders() : {})),
+        body:JSON.stringify(Object.assign({action},payload||{})),
+      });
+      if(!r.ok) return null;
+      const d=await r.json();
+      return d && d.ok ? d : null;
+    }catch(e){ return null; }
+  }
+
+  function withTimeout(promise, ms, label){
+    let timer;
+    return Promise.race([
+      Promise.resolve(promise),
+      new Promise((_,reject)=>{ timer=setTimeout(()=>reject(new Error((label||"工具")+"执行超时")),ms); }),
+    ]).finally(()=>clearTimeout(timer));
+  }
 
   /**
    * 注册一个工具
@@ -27,6 +63,8 @@ window.AgentCore = (function(){
       run: def.run,
       validate: def.validate || (()=>({ok:true})),
       label: def.label || (()=>"🔧 " + name),
+      meta: normalizeToolMeta(name, def),
+      autoInclude: def.autoInclude === true || name === "search_affordable_housing_web" || name === "list_web_evidence",
     };
   }
 
@@ -95,6 +133,31 @@ window.AgentCore = (function(){
       + mem.map(m=>"- "+m.mkey+"："+m.mvalue).join("\n");
   }
 
+  function buildContextLayers(input){
+    input=input||{};
+    return {
+      instruction:{system:String(input.system||""),latestUser:String(input.latestUser||"")},
+      working:{projectId:String(input.projectId||""),state:input.state||{},recentMessages:(input.recentMessages||[]).slice(-12)},
+      knowledge:{rag:input.rag||[],wiki:input.wiki||[],rules:input.rules||[]},
+      memory:{preferences:input.preferences||[],skills:input.skills||[],historySummary:String(input.historySummary||"")},
+    };
+  }
+  function contextLayersToPrompt(layers){
+    if(!layers) return "";
+    const x=layers.instruction ? layers : buildContextLayers(layers), parts=[];
+    if(x.working && Object.keys(x.working.state||{}).length) parts.push("【当前任务状态】\n"+JSON.stringify(x.working.state));
+    if(x.knowledge && (x.knowledge.rules||[]).length) parts.push("【适用规则】\n"+x.knowledge.rules.join("\n"));
+    if(x.memory && (x.memory.skills||[]).length) parts.push("【已审核技能】\n"+x.memory.skills.join("\n"));
+    return parts.length ? "\n\n"+parts.join("\n\n") : "";
+  }
+
+  async function proposeSkill(candidate){
+    try{
+      const r=await fetch("/api/agentskills",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},window.authHeaders?window.authHeaders():{}),body:JSON.stringify(Object.assign({action:"candidateCreate"},candidate||{}))});
+      return await r.json();
+    }catch(e){ return {ok:false,error:e.message}; }
+  }
+
   /** 取出可用工具的 schema 列表（可按名单过滤，供不同页面暴露不同工具集） */
   function toolSchemas(allowNames){
     return Object.keys(TOOLS)
@@ -159,21 +222,47 @@ window.AgentCore = (function(){
    */
   async function run(opt){
     opt = opt || {};
+    const notifyTrace = (lines)=>{
+      if(typeof opt.onTrace === "function"){
+        try{ opt.onTrace(lines.slice()); }catch(e){}
+      }
+    };
+    notifyTrace(["🧠 正在理解你的问题并读取当前上下文"]);
     const maxRounds = opt.maxRounds || 3;
-    const allow = opt.tools;
+    const allow = Array.isArray(opt.tools)
+      ? [...new Set(opt.tools.concat(Object.keys(TOOLS).filter(name=>TOOLS[name].autoInclude)))]
+      : opt.tools;
     const schemas = toolSchemas(allow);
     const startedAt = Date.now();
+    const maxDurationMs = Math.max(5000, Number(opt.maxDurationMs)||180000);
+    const maxToolCalls = Math.max(1, Number(opt.maxToolCalls)||12);
+    const maxRepeatCalls = Math.max(1, Number(opt.maxRepeatCalls)||2);
+    const deferRuntime = opt.deferRuntime === true;
+    const callFingerprints = {};
+    let runtimeRunId = "";
+    let waitingApproval = false;
+    const runtimeCreatePayload = {
+      agentType:opt.agentType||"general", projectId:opt.projectId||"",
+      query:opt.traceQuery||"", idempotencyKey:opt.idempotencyKey||"",
+      securityLevel:opt.securityLevel||1, executionMode:"client",
+      budgetInputTokens:opt.budgetInputTokens||0, budgetOutputTokens:opt.budgetOutputTokens||0,
+      budgetCostMicros:opt.budgetCostMicros||0,
+      input:{toolset:opt.toolset||"",allowedTools:allow||[],messageCount:(opt.messages||[]).length},
+    };
+    const created = deferRuntime ? null : await runtimeCall("create", runtimeCreatePayload);
+    if(created && created.run) runtimeRunId=created.run.id;
 
     let convo = (opt.messages || []).slice();
     // 长期记忆：自动加载并注入系统提示词(可用 opt.useMemory=false 关闭)
     let sysWithMem = opt.system || "";
+    sysWithMem += contextLayersToPrompt(opt.contextLayers);
     if(opt.useMemory !== false){
       try{
         const mem = await loadMemory();
         sysWithMem += memoryToPrompt(mem);
       }catch(e){}
     }
-    const trace = [];
+    const trace = ["🧠 正在理解你的问题并读取当前上下文"];
     const allToolCalls = [];
     let rounds = 0;
     let finalText = "";
@@ -187,15 +276,18 @@ window.AgentCore = (function(){
 
     const pushTrace = (line)=>{
       trace.push(line);
-      if(typeof opt.onTrace === "function"){
-        try{ opt.onTrace(trace.slice()); }catch(e){}
-      }
+      notifyTrace(trace.slice());
     };
 
     try{
       while(rounds < maxRounds){
+        if(Date.now()-startedAt > maxDurationMs) throw new Error("Agent运行超过时间上限，请缩小任务范围后重试");
+        if(runtimeRunId && !await runtimeCall("budget",{runId:runtimeRunId})) throw new Error("本次Agent的Token或费用预算已用尽");
         rounds++;
+        pushTrace(rounds===1 ? "🧭 正在判断需要直接回答还是调用工具" : "🔄 正在结合已取得的信息继续分析");
         const payload = { system: sysWithMem, messages: convo };
+        if(opt.maxTokens) payload.max_tokens=Math.max(100,Math.min(4000,Number(opt.maxTokens)||1200));
+        if(opt.latencyProfile) payload.latency_profile=String(opt.latencyProfile);
         if(schemas.length) payload.tools = schemas;
 
         const resp = await fetch("/api/generate", {
@@ -206,6 +298,10 @@ window.AgentCore = (function(){
         const data = await resp.json();
         if(data.error) throw new Error(data.error);
 
+        if(runtimeRunId && data.usage) await runtimeCall("usage", {runId:runtimeRunId,usage:data.usage,provider:data.provider||"",model:data.model||""});
+
+        if(runtimeRunId) await runtimeCall("step", {runId:runtimeRunId,kind:"model",status:"completed",input:{round:rounds,messageCount:convo.length},output:{hasToolCalls:!!(data.tool_calls&&data.tool_calls.length)}});
+
         const calls = data.tool_calls;
         const text = (data.content || []).map(b => b.text || "").join("").trim();
 
@@ -215,6 +311,16 @@ window.AgentCore = (function(){
             let args = {};
             try{ args = JSON.parse(c.function.arguments || "{}"); }catch(e){}
             const name = c.function.name;
+            if(allToolCalls.length >= maxToolCalls) throw new Error("工具调用次数超过上限，请拆分任务后继续");
+            const fp=name+":"+JSON.stringify(args||{});
+            callFingerprints[fp]=(callFingerprints[fp]||0)+1;
+            if(callFingerprints[fp]>maxRepeatCalls){
+              const repeatError="检测到相同工具与参数重复调用，已停止循环";
+              pushTrace("⚠️ "+repeatError);
+              convo.push({role:"tool",tool_call_id:c.id,content:"工具调用失败："+repeatError});
+              allToolCalls.push({name,args,error:repeatError});
+              continue;
+            }
 
             // 参数校验：不合规不执行，把错误回给模型自行纠正（自我纠错）
             const v = validateArgs(name, args);
@@ -226,26 +332,56 @@ window.AgentCore = (function(){
             }
 
             const t = TOOLS[name];
+            const meta = t.meta || normalizeToolMeta(name,{});
+            if(runtimeRunId){
+              const auth=await runtimeCall("authorize",{runId:runtimeRunId,toolName:name,riskLevel:meta.risk,permission:meta.risk===RISK_LEVELS.READ?"read":"write",securityLevel:opt.securityLevel||1,meta});
+              if(!auth){
+                const denied="权限复核未通过，工具未执行";pushTrace("🛡️ "+denied+"："+name);
+                convo.push({role:"tool",tool_call_id:c.id,content:denied});allToolCalls.push({name,args,error:denied});continue;
+              }
+            }
+            if(meta.requiresApproval){
+              let approved=false;
+              if(typeof opt.approveTool === "function"){
+                try{ approved=await opt.approveTool({name,args,meta,runId:runtimeRunId}); }catch(e){ approved=false; }
+              }
+              if(!approved){
+                if(runtimeRunId) await runtimeCall("approvalCreate",{runId:runtimeRunId,toolName:name,reason:"工具风险等级要求人工确认",request:{args,meta}});
+                waitingApproval = true;
+                const approvalError="该操作需要人工确认，尚未执行";
+                pushTrace("🛡️ "+approvalError+"："+name);
+                convo.push({role:"tool",tool_call_id:c.id,content:approvalError});
+                allToolCalls.push({name,args,error:approvalError,waitingApproval:true});
+                continue;
+              }
+            }
             let label = "🔧 " + name;
             try{ label = t.label(args) || label; }catch(e){}
             pushTrace(label);
 
             let result;
+            const toolStarted=Date.now();
             try{
-              result = await t.run(args);
+              result = await withTimeout(t.run(args),meta.timeoutMs,label);
             }catch(e){
               result = "（工具执行失败：" + e.message + "）";
             }
             convo.push({ role:"tool", tool_call_id:c.id, content: String(result == null ? "" : result) });
-            allToolCalls.push({ name, args });
+            allToolCalls.push({ name, args, risk:meta.risk, toolset:meta.toolset });
+            if(runtimeRunId){
+              const step=await runtimeCall("step",{runId:runtimeRunId,kind:"tool",toolName:name,riskLevel:meta.risk,status:String(result).startsWith("（工具执行失败")?"failed":"completed",input:{args,version:meta.version},output:{summary:String(result==null?"":result).slice(0,1500)},durationMs:Date.now()-toolStarted});
+              await runtimeCall("checkpoint",{runId:runtimeRunId,stepNo:step&&step.step?step.step.stepNo:0,state:{round:rounds,toolCalls:allToolCalls.length,lastTool:name,conversationLength:convo.length}});
+            }
           }
           continue;   // 带着工具结果再问一轮
         }
 
         // ===== 回答自我核查：模型给出答案后，先让它自评是否合格，不合格则补查重答 =====
         const candidate = text || "";
+        pushTrace("📝 已取得结果，正在组织为清晰答案");
         if(opt.selfCheck !== false && candidate && selfCheckCount < maxSelfCheck){
           selfCheckCount++;
+          pushTrace("✅ 正在进行回答完整性核查");
           let verdict = null;
           try{
             const checkSys = "你是严格的质量审核员。判断给出的【回答】是否合格。\n"
@@ -271,10 +407,13 @@ window.AgentCore = (function(){
                   ? allToolCalls.map(t=>t.name + (t.error ? "(失败:"+t.error+")" : "(成功)")).join("、")
                   : "未调用任何工具")
               + "\n\n【回答】" + candidate;
+            const checkBody={ system: checkSys, messages: [{role:"user", content: checkUser}] };
+            if(opt.maxTokens) checkBody.max_tokens=Math.max(100,Math.min(800,Number(opt.maxTokens)||400));
+            if(opt.latencyProfile) checkBody.latency_profile=String(opt.latencyProfile);
             const cr = await fetch("/api/generate", {
               method: "POST",
               headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
-              body: JSON.stringify({ system: checkSys, messages: [{role:"user", content: checkUser}] }),
+              body: JSON.stringify(checkBody),
             });
             const cd = await cr.json();
             const ctext = (cd.content || []).map(b=>b.text || "").join("").trim();
@@ -309,7 +448,7 @@ window.AgentCore = (function(){
         finalText = candidate;
         break;
       }
-      if(!finalText && rounds >= maxRounds){
+      if(!finalText && rounds >= maxRounds && opt.allowCloseRound !== false){
         // 轮次用尽时，模型往往刚查完资料就被截断，等于白查了一轮。
         // 这里补一次"只准作答、不准再调工具"的收尾调用，让它用已掌握的全部信息给出结论。
         try{
@@ -321,10 +460,13 @@ window.AgentCore = (function(){
             + "但不要因为存在不确定就整体拒绝回答。";
           const closeConvo = convo.concat([{ role:"user",
             content:"请基于以上全部信息，直接给出最终回答（不要再调用工具）。" }]);
+          const closeBody={ system: closeSys, messages: closeConvo };
+          if(opt.maxTokens) closeBody.max_tokens=Math.max(100,Math.min(1200,Number(opt.maxTokens)||600));
+          if(opt.latencyProfile) closeBody.latency_profile=String(opt.latencyProfile);
           const fr = await fetch("/api/generate", {
             method: "POST",
             headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
-            body: JSON.stringify({ system: closeSys, messages: closeConvo }),   // 不传 tools，模型只能作答
+            body: JSON.stringify(closeBody),   // 不传 tools，模型只能作答
           });
           const fd = await fr.json();
           if(!fd.error){
@@ -351,9 +493,19 @@ window.AgentCore = (function(){
       finalText = "回答失败：" + e.message;
     }
 
+    if(runtimeRunId && !waitingApproval){
+      await runtimeCall(errorMsg?"fail":"complete",{runId:runtimeRunId,output:{text:finalText,rounds,toolCalls:allToolCalls,selfChecked:selfCheckCount>0,clarified},error:errorMsg});
+    }else if(deferRuntime){
+      // 网站客服先返回答案，再异步补记粗粒度运行台账；不让审计写入阻塞用户响应。
+      Promise.resolve(runtimeCall("create",runtimeCreatePayload)).then(createdLater=>{
+        const id=createdLater&&createdLater.run&&createdLater.run.id;if(!id)return null;
+        return runtimeCall(errorMsg?"fail":"complete",{runId:id,output:{text:finalText,rounds,toolCalls:allToolCalls,selfChecked:selfCheckCount>0,clarified,deferred:true},error:errorMsg});
+      }).catch(()=>{});
+    }
+
     // 链路日志（自建，数据留在本账号内；失败不影响使用）
     try{
-      await fetch("/api/agent", {
+      const traceRequest=fetch("/api/agent", {
         method:"POST",
         headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),
         body: JSON.stringify({
@@ -365,12 +517,26 @@ window.AgentCore = (function(){
           durationMs: Date.now() - startedAt,
         }),
       });
+      if(!deferRuntime) await traceRequest;
+      else traceRequest.catch(()=>{});
     }catch(e){}
 
-    return { text: finalText, rounds, toolCalls: allToolCalls, trace, error: errorMsg,
+    return { text: finalText, rounds, toolCalls: allToolCalls, trace, error: errorMsg, runId:runtimeRunId, waitingApproval,
              selfChecked: selfCheckCount > 0, selfCheckNotes, clarified };
   }
 
+  async function enqueueBackground(opt){
+    const r=await fetch("/api/agentjobs",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},window.authHeaders?window.authHeaders():{}),body:JSON.stringify(Object.assign({action:"enqueue"},opt||{}))});
+    const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"后台任务创建失败");return d;
+  }
+  async function backgroundStatus(id){
+    const r=await fetch("/api/agentjobs?id="+encodeURIComponent(id),{headers:window.authHeaders?window.authHeaders():{}}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"后台任务查询失败");return d.job;
+  }
+
   return { registerTool, unregisterTool, toolSchemas, validateArgs, run, V, _tools: TOOLS,
-           loadMemory, saveMemory, deleteMemory, memoryToPrompt, memoryLoadError };
+           RISK_LEVELS, TOOLSETS, normalizeToolMeta,
+           loadMemory, saveMemory, deleteMemory, memoryToPrompt, memoryLoadError,
+           buildContextLayers, contextLayersToPrompt, proposeSkill, enqueueBackground, backgroundStatus };
 })();
+
+if(typeof module==="object" && module.exports){ module.exports=global.window && global.window.AgentCore; }

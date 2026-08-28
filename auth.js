@@ -61,6 +61,7 @@ function showLoginModal(msg){
 
 /* ================= 云端项目库 ================= */
 let currentProjectId = null;
+let currentProjectUpdatedAt = null;
 let cloudTimer = null;
 function rememberActiveProjectId(id){try{id?localStorage.setItem("fs_active_project_id",id):localStorage.removeItem("fs_active_project_id");}catch(e){}}
 function recalledActiveProjectId(){try{return localStorage.getItem("fs_active_project_id")||null;}catch(e){return null;}}
@@ -81,17 +82,19 @@ async function cloudSaveNow(){
   try{
     const resp = await fetch("/api/projects", {method:"POST",
       headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
-      body: JSON.stringify({id:currentProjectId, name:project.name||"未命名项目", data:buildDraftData()})});
+      body: JSON.stringify({id:currentProjectId, name:project.name||"未命名项目", data:buildDraftData(),expectedUpdatedAt:currentProjectUpdatedAt})});
     if(resp.status===401){ setSaveState("err"); clearAuth(); showLoginModal("登录已过期，请重新登录（本地草稿仍在）"); return; }
     const d = await resp.json();
+    if(resp.status===409&&d.conflict){setSaveState("conflict");return;}
+    if(d.ok)currentProjectUpdatedAt=Number(d.updatedAt)||currentProjectUpdatedAt;
     setSaveState(d.ok? "ok":"err");
   }catch(e){ setSaveState("err"); }
 }
 function setSaveState(st){
   const el = document.getElementById("saveState");
   if(!el) return;
-  el.textContent = st==="saving"? "云端保存中…" : st==="ok"? "已保存到云端" : "云端保存失败（本地已存）";
-  el.style.color = st==="err"? "var(--seal-red)" : "";
+  el.textContent = st==="saving"? "云端保存中…" : st==="ok"? "已保存到云端" : st==="conflict"?"发现其他页面的新版本，请从项目管理重新载入":"云端保存失败（本地已存）";
+  el.style.color = st==="err"||st==="conflict"? "var(--seal-red)" : "";
 }
 
 function mountUserBar(){
@@ -114,7 +117,7 @@ function mountUserBar(){
 }
 function newProject(){
   if(typeof airSwitchProjectSession==="function")airSwitchProjectSession();
-  currentProjectId = null; domainKey = null; chapters = []; signed = false;
+  currentProjectId = null; currentProjectUpdatedAt=null; domainKey = null; chapters = []; signed = false;
   rememberActiveProjectId(null);
   calcParams = null; calcResult = null; docNo = null;
   projectWorkflow = window.ProjectWorkflow ? window.ProjectWorkflow.ensureState({}) : {calcSnapshots:[],reportVersions:[]};
@@ -124,6 +127,10 @@ function newProject(){
   renderTOC(); renderSheet();
 }
 async function openProjectsPanel(){
+  if(window.ProjectManager)return window.ProjectManager.open({
+    headers:authHeaders,currentId:()=>currentProjectId,genId:genProjectId,openProject,newProject,
+    updateCurrentMeta:(meta,updatedAt)=>{currentProjectUpdatedAt=Number(updatedAt)||currentProjectUpdatedAt;projectWorkflow=window.ProjectWorkflow?ProjectWorkflow.ensureState(projectWorkflow):projectWorkflow;projectWorkflow.management=Object.assign(projectWorkflow.management||{},meta||{});saveDraft();}
+  });
   const old = document.getElementById("projPanel"); if(old) old.remove();
   document.body.insertAdjacentHTML("beforeend",
     '<div id="projPanel" class="proj-overlay"><div class="proj-panel">'
@@ -161,6 +168,7 @@ async function openProject(id){
     if(!d.ok){ alert(d.error||"打开失败"); return; }
     if(id!==currentProjectId&&typeof airSwitchProjectSession==="function")airSwitchProjectSession();
     currentProjectId = id;
+    currentProjectUpdatedAt=Number(d.project.updated_at)||null;
     rememberActiveProjectId(id);
     const panel = document.getElementById("projPanel"); if(panel) panel.remove();
     const bar = document.getElementById("draftBar"); if(bar) bar.remove();
@@ -176,8 +184,8 @@ async function startApp(){
   if(currentProjectId){
     try{
       const pr=await fetch("/api/projects?id="+encodeURIComponent(currentProjectId),{headers:authHeaders()});
-      const pd=await pr.json();if(pd.ok&&pd.project&&pd.project.data){const resumeMode=appMode,resumeOffice=typeof officeView!=="undefined"?officeView:"chat";restoreDraft(pd.project.data,{openHome:true});if(window.UiRouteState){appMode=resumeMode;if(typeof officeView!=="undefined")officeView=resumeOffice;renderTOC();renderSheet();}}
-      else{currentProjectId=null;rememberActiveProjectId(null);}
+      const pd=await pr.json();if(pd.ok&&pd.project&&pd.project.data){currentProjectUpdatedAt=Number(pd.project.updated_at)||null;const resumeMode=appMode,resumeOffice=typeof officeView!=="undefined"?officeView:"chat";restoreDraft(pd.project.data,{openHome:true});if(window.UiRouteState){appMode=resumeMode;if(typeof officeView!=="undefined")officeView=resumeOffice;renderTOC();renderSheet();}}
+      else{currentProjectId=null;currentProjectUpdatedAt=null;rememberActiveProjectId(null);}
     }catch(e){ /* 网络失败时仍保留本地草稿兜底，不主动遗忘项目 */ }
   }
   renderTOC(); renderSheet();

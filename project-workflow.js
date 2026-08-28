@@ -136,6 +136,24 @@
     if(a===b)return '<div class="wf-diff-same">内容没有变化</div>';
     return '<div class="wf-diff-cols"><div><b>修改前</b><div class="wf-diff-old">'+escapeHtml(a)+'</div></div><div><b>建议稿</b><div class="wf-diff-new">'+escapeHtml(b)+'</div></div></div>';
   }
+  // 将AI返回的局部替换稿安全放回完整小节。优先精确替换；仅在唯一命中时容忍换行/空格差异，
+  // 避免同一句在正文中出现多次时误改其它位置。
+  function replaceSelectedText(source,selected,replacement){
+    const body=String(source||""),needle=String(selected||"").trim(),next=String(replacement||"").trim();
+    if(!needle)return {ok:false,error:"没有选中文字"};
+    if(!next)return {ok:false,error:"AI未返回替换内容"};
+    const first=body.indexOf(needle);
+    if(first>=0){
+      if(body.indexOf(needle,first+needle.length)>=0)return {ok:false,error:"所选文字在本节出现多次，请扩大选择范围后重试"};
+      return {ok:true,text:body.slice(0,first)+next+body.slice(first+needle.length)};
+    }
+    const parts=needle.split(/\s+/).filter(Boolean).map(x=>x.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"));
+    if(!parts.length)return {ok:false,error:"无法识别所选文字"};
+    const re=new RegExp(parts.join("\\s+"),"g"),matches=[...body.matchAll(re)];
+    if(matches.length!==1)return {ok:false,error:matches.length?"所选文字在本节出现多次，请扩大选择范围后重试":"所选文字与正文源稿不一致，请改用整节AI修改"};
+    const hit=matches[0],at=hit.index||0;
+    return {ok:true,text:body.slice(0,at)+next+body.slice(at+hit[0].length)};
+  }
   function ensureState(raw){
     const s=raw&&typeof raw==="object"?raw:{};
     if(!Array.isArray(s.calcSnapshots))s.calcSnapshots=[];
@@ -164,6 +182,25 @@
     return "empty";
   }
   function aiReportStageRank(stage){return {empty:0,info:1,suggested:2,calculated:3,generating:4,paused:4,delivered:5}[stage]||0;}
+  function previousAiReportStage(stage){
+    return {suggested:"info",calculated:"suggested",generating:"calculated",paused:"calculated",delivered:"calculated"}[stage]||null;
+  }
+  function locationTokens(text){
+    const value=String(text||"").replace(/\s+/g,"");
+    const hits=value.match(/[\u4e00-\u9fa5]{2,8}(?:市|区|县|街道|镇|乡|社区|村)/g)||[];
+    return [...new Set(hits.concat((value.match(/[\u4e00-\u9fa5]{2,8}区/g)||[])))];
+  }
+  function rankLocationCandidates(query,candidates){
+    const q=String(query||"").replace(/\s+/g,""),tokens=locationTokens(q);
+    return Array.from(candidates||[]).map((item,index)=>{
+      const hay=[item.name,item.district,item.address].filter(Boolean).join("").replace(/\s+/g,"");
+      const matched=tokens.filter(t=>hay.includes(t));
+      const conflicts=tokens.filter(t=>/[区县]$/.test(t)&&!hay.includes(t));
+      let score=matched.length*30-conflicts.length*45-index;
+      if(q&&hay.includes(q))score+=80;
+      return Object.assign({},item,{matchScore:score,matchedTokens:matched,conflictTokens:conflicts,locationMatch:conflicts.length?"conflict":matched.length?"matched":"uncertain"});
+    }).sort((a,b)=>b.matchScore-a.matchScore);
+  }
   function resumeAppMode(savedMode,hasAiSession){
     if(hasAiSession)return "aireport";
     return ["report","calc","review","office","aireport"].includes(savedMode)?savedMode:"report";
@@ -199,8 +236,8 @@
   }
 
   const api={clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,
-    createCalcSnapshot,createReportVersion,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,ensureState,bulkConfirm,
-    aiReportStage,aiReportStageRank,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
+    createCalcSnapshot,createReportVersion,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,bulkConfirm,
+    aiReportStage,aiReportStageRank,previousAiReportStage,locationTokens,rankLocationCandidates,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
     impactedAnalysisSections,markAnalysisImpacted,METRIC_LABELS,ANALYSIS_DOMAIN_WORDS};
   root.ProjectWorkflow=api;
   if(typeof module==="object"&&module.exports)module.exports=api;

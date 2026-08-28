@@ -38,8 +38,73 @@
       })),
     });
   }
+  function preparedTemplateRows(segment){
+    const rows=(segment.rows||[]).map(r=>({cells:(r.cells||[]).map(c=>Object.assign({},c))}));
+    rows.forEach((row,ri)=>row.cells.forEach(cell=>{
+      if(cell.vMerge!=="restart")return;
+      let span=1;
+      for(let r=ri+1;r<rows.length;r++){
+        const next=rows[r].cells.find(c=>Number(c.col)===Number(cell.col));
+        if(!next||next.vMerge!=="continue")break;
+        span++;
+      }
+      cell.rowSpan=span;
+    }));
+    return rows;
+  }
+  function makeTemplateTable(template,segment){
+    const border={style:D.BorderStyle.SINGLE,size:4,color:"666666"};
+    const sourceWidths=(segment.gridWidths||[]).map(Number);
+    const sourceTotal=sourceWidths.reduce((a,b)=>a+b,0)||1;
+    const tableWidth=9026;
+    const widths=sourceWidths.length?sourceWidths.map(w=>Math.max(260,Math.round(w/sourceTotal*tableWidth))):[];
+    const rows=preparedTemplateRows(segment);
+    return new D.Table({
+      alignment:D.AlignmentType.CENTER,
+      width:{size:tableWidth,type:D.WidthType.DXA},
+      columnWidths:widths,
+      layout:D.TableLayoutType.FIXED,
+      borders:{top:border,bottom:border,left:border,right:border,insideHorizontal:border,insideVertical:border},
+      rows:rows.map((row,ri)=>new D.TableRow({
+        tableHeader:ri===0,
+        cantSplit:true,
+        children:row.cells.filter(c=>c.vMerge!=="continue").map(c=>{
+          const start=Math.max(0,Number(c.col)||0),span=Math.max(1,Number(c.colSpan)||1);
+          const cellWidth=widths.length?widths.slice(start,start+span).reduce((a,b)=>a+b,0):undefined;
+          return new D.TableCell({
+            columnSpan:span>1?span:undefined,
+            rowSpan:Number(c.rowSpan)>1?Number(c.rowSpan):undefined,
+            width:cellWidth?{size:cellWidth,type:D.WidthType.DXA}:undefined,
+            shading:ri===0?{fill:"E8F0F7",type:D.ShadingType.CLEAR}:undefined,
+            verticalAlign:D.VerticalAlign.CENTER,
+            margins:{top:42,bottom:42,left:55,right:55},
+            children:[new D.Paragraph({
+              alignment:D.AlignmentType.CENTER,
+              children:[run(String(c.text||""),{size:template.longPeriod?14:18,bold:ri===0})],
+              spacing:{line:template.longPeriod?220:250,lineRule:D.LineRuleType.AUTO},
+            })],
+          });
+        }),
+      })),
+    });
+  }
+  function templateTableElems(template){
+    const out=[];
+    (template.segments||[]).forEach((segment,index)=>{
+      out.push(new D.Paragraph({
+        children:[run(index?template.title+"（续表"+index+"）":template.title,{size:22,bold:true})],
+        alignment:D.AlignmentType.CENTER,
+        pageBreakBefore:!!(template.longPeriod&&index>0),
+        spacing:{before:index?0:180,after:100},
+      }));
+      out.push(makeTemplateTable(template,segment));
+      out.push(new D.Paragraph({children:[],spacing:{after:80}}));
+    });
+    return out;
+  }
   function blockToElems(b){
     if(b.type==="table" && b.rows && b.rows.length) return [makeTable(b.rows), new D.Paragraph({children:[], spacing:{after:60}})];
+    if(b.type==="templateTable" && b.template) return templateTableElems(b.template);
     // 小标题：正文里的 ## 三级标题，加粗略大，与正文拉开层次
     if(b.type==="h" && b.text) return [new D.Paragraph({
       children:[run(b.text,{size:24, bold:true})],
@@ -131,6 +196,18 @@
       children.push(new D.Paragraph({children:[run("附表二　单因素敏感性分析",{size:24,bold:true})], spacing:{before:300, after:120}}));
       children.push(makeTable(payload.appendix.sensRows));
     }
+  }
+  if(payload.tableAppendix&&payload.tableAppendix.length){
+    children.push(new D.Paragraph({
+      heading:D.HeadingLevel.HEADING_1,
+      children:[run("出租类标准财务附表",{size:44,bold:true})],
+      alignment:D.AlignmentType.CENTER,pageBreakBefore:true,spacing:{after:260},
+    }));
+    children.push(new D.Paragraph({
+      children:[run("以下附表按原可研报告结构输出；项目专属数值由测算引擎和正式资料填充。70年长表采用同一逻辑表按年度区间自动续表。",{size:20,color:"666666"})],
+      spacing:{after:180},
+    }));
+    payload.tableAppendix.forEach(t=>templateTableElems(t).forEach(e=>children.push(e)));
   }
 
   /* ---------- 签发说明 ---------- */

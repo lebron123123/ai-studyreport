@@ -35,6 +35,13 @@ test("AI候选稿拒绝不改正文，接受后可撤销",()=>{
   WF.setCandidate(s,"建议稿","更正式");WF.acceptCandidate(s);assert.equal(s.content,"建议稿");assert.equal(s.pendingRevision,null);assert.equal(WF.undoSection(s),true);assert.equal(s.content,"原稿");
 });
 
+test("拖选局部修改只替换唯一命中的片段并保护重复文本",()=>{
+  let r=WF.replaceSelectedText("第一段原文。\n\n第二段原文。","第二段原文。","第二段修改稿。");
+  assert.equal(r.ok,true);assert.equal(r.text,"第一段原文。\n\n第二段修改稿。");
+  r=WF.replaceSelectedText("甲 乙\n丙","甲 乙 丙","新内容");assert.equal(r.ok,true);assert.equal(r.text,"新内容");
+  r=WF.replaceSelectedText("重复句。重复句。","重复句。","新句。");assert.equal(r.ok,false);assert.match(r.error,/出现多次/);
+});
+
 test("报告版本保存锁定、同步状态和溯源，不只保存正文",()=>{
   const state=WF.ensureState({}),cs=chapters();cs[1].sections[1].syncStatus="locked-stale";cs[1].sections[1].prov={model:"x",kbDocs:[{title:"依据"}]};
   const v=WF.createReportVersion(state,cs,{reason:"复核版"}),saved=v.chapters[1].sections[1];
@@ -72,6 +79,24 @@ test("AI可研暂停生成与最终交付能区分，确保只展示正确的继
   assert.equal(WF.aiReportStage({suggested:{},paramsConfirmed:true,chat:[{kind:"genProgress",total:8,done:3,active:false,stopped:true}]}),"paused");
   assert.equal(WF.aiReportStage({suggested:{},chat:[{kind:"deliver"}],calcParams:{}}),"delivered");
   assert.ok(WF.aiReportStageRank("calculated")>WF.aiReportStageRank("suggested"));
+});
+
+test("AI可研返回上一步按业务阶段回退且首步不伪造可返回状态",()=>{
+  assert.equal(WF.previousAiReportStage("suggested"),"info");
+  assert.equal(WF.previousAiReportStage("calculated"),"suggested");
+  assert.equal(WF.previousAiReportStage("generating"),"calculated");
+  assert.equal(WF.previousAiReportStage("delivered"),"calculated");
+  assert.equal(WF.previousAiReportStage("info"),null);
+});
+
+test("地点候选优先匹配用户填写行政区，不把宝安候选排在罗湖前面",()=>{
+  const ranked=WF.rankLocationCandidates("深圳市罗湖区翠竹街道",[
+    {name:"某项目",district:"广东省深圳市宝安区",address:"新安街道",location:"1,1"},
+    {name:"翠竹大厦",district:"广东省深圳市罗湖区",address:"翠竹街道",location:"2,2"},
+  ]);
+  assert.equal(ranked[0].location,"2,2");
+  assert.equal(ranked[0].locationMatch,"matched");
+  assert.equal(ranked[1].locationMatch,"conflict");
 });
 
 test("刷新草稿时保留AI可研入口，普通旧草稿仍回到传统报告流程",()=>{

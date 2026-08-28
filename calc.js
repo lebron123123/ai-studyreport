@@ -18,9 +18,9 @@ async function fetchCalcConfig(){
 let calcResult = null;   // 财务测算结果（null表示跳过测算，走"待填"模式）
 let calcParams = null;
 function renderCalcModule(){
-  if(scStep===0) return scStepType();
-  if(scStep===1) return scStepForm();
-  return scStepResult();
+  const body=scStep===0?scStepType():(scStep===1?scStepForm():scStepResult());
+  let fromAi=false;try{fromAi=sessionStorage.getItem("studyreport:calc-return-aireport:v1")==="1";}catch(e){}
+  return (fromAi?'<div class="calc-air-return"><b>当前测算来自 AI 可研项目</b><span>可在这里查看或修改完整参数；返回后会把本次测算结果同步回 AI 可研并继续原流程。</span><button type="button" class="btn" id="scReturnAiReport">← 返回 AI 可研继续</button></div>':'')+body;
 }
 function scStepType(){
   const card=(k,n,d,dis)=>'<div class="domain-card '+(calcType===k?'sel':'')+(dis?'" style="opacity:.55;':'"')+' data-sct="'+k+'"><div class="dn">'+n+'</div><div class="dd">'+d+'</div>'+(dis?'<div class="dc" style="color:var(--seal-red);">建设中 · 下一轮上线</div>':'')+'</div>';
@@ -994,6 +994,8 @@ async function askAI(){
   btn.disabled = true; btn.textContent = "思考中…";
   aiChat.push({role:"user", content:q});
   renderAiMsgs();
+  const initialTrace = document.getElementById("aiTrace");
+  if(initialTrace) initialTrace.innerHTML = '<div style="font-size:11.5px; color:var(--ink-soft);">🧠 正在理解问题并核对当前测算状态…</div>';
   inp.value = "";
 
   const sys = "你是保障性住房项目财务测算专家。你可以调用工具获取真实数据后再回答，禁止在未调用工具、没有真实依据的情况下编造具体数字。回答简明、专业、分点，200-400字，涉及数字必须逐字引用工具返回的真实结果。"
@@ -1137,6 +1139,11 @@ function bindParameterGovernanceEvents(){
 
 function bindCalcEvents(){
   const s=id=>document.getElementById(id);
+  if(s("scReturnAiReport"))s("scReturnAiReport").onclick=()=>{
+    if(scParams&&scResult){calcParams=scParams;calcResult=scResult;calcResult.__ctype=calcType;if(typeof aiReportSuggested!=="undefined"&&aiReportSuggested)aiReportSuggested.params=Object.assign({},scParams);if(typeof aiReportParamsConfirmed!=="undefined")aiReportParamsConfirmed=true;if(typeof airSaveState==="function")airSaveState();}
+    try{sessionStorage.removeItem("studyreport:calc-return-aireport:v1");}catch(e){}
+    appMode="aireport";renderTOC();renderSheet();
+  };
   document.querySelectorAll("[data-sct]").forEach(c=>{ c.onclick=()=>{ if(calcType!==c.dataset.sct){ scParams=null; scResult=null; aiChat=[]; } calcType=c.dataset.sct; renderSheet(); }; });
   if(s("scNext1")) s("scNext1").onclick=()=>{ scStep=1; renderTOC(); renderSheet(); };
   if(s("scBack0")) s("scBack0").onclick=()=>{ scStep=0; renderTOC(); renderSheet(); };

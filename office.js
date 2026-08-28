@@ -190,6 +190,8 @@ async function officeSend(){
   btn.disabled = true; btn.textContent = "思考中…";
   officeChat.push({role:"user", content:q});
   renderOfficeMsgs();
+  const initialTrace = document.getElementById("officeTrace");
+  if(initialTrace) initialTrace.innerHTML = '<div style="font-size:11.5px; color:var(--ink-soft);">🧠 正在识别任务、文种和所需资料…</div>';
   inp.value = "";
 
   // 文种识别：判断用户要写的是哪类公文，套用对应的结构规范

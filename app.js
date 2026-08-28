@@ -73,6 +73,9 @@ function renderTOC(){
   if(appMode!==null){
     items += '<div class="toc-item" style="cursor:pointer;" onclick="goHome()"><span class="num">⌂</span><span>返回首页</span></div>';
   }
+  if(appMode==="aireport"){
+    items += '<div class="toc-item" data-project-manager style="cursor:pointer;"><span class="num">▣</span><span>项目管理</span></div>';
+  }
   if(appMode==="calc"){
     const CS = ["选择类型","参数录入","测算结果"];
     items += CS.map((s,i)=>{
@@ -101,6 +104,7 @@ function renderTOC(){
   el.querySelectorAll("[data-home]").forEach(it=>{
     it.onclick = ()=>{ const card = document.getElementById(it.dataset.home); if(card) card.click(); };
   });
+  el.querySelectorAll("[data-project-manager]").forEach(it=>{it.onclick=()=>openProjectsPanel();});
 }
 function goHome(){ appMode=null; if(window.UiRouteState){try{sessionStorage.removeItem("studyreport:last-view:v1");history.replaceState(null,"",location.pathname+location.search);}catch(e){}} renderTOC(); renderSheet(); }
 

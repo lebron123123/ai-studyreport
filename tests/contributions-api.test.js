@@ -12,7 +12,8 @@ function dbMock(seed={}){
     return {success:true};},async all(){
       if(sql.includes("WHERE user_id=?"))return{results:state.items.filter(x=>x.user_id===q.args[0])};
       if(sql.includes("WHERE status=?"))return{results:state.items.filter(x=>x.status===q.args[0])};return{results:[]};},async first(){
-      if(sql.includes("FROM knowledge_contributions WHERE id=?"))return state.items.find(x=>x.id===q.args[0])||null;
+    if(sql.includes("FROM knowledge_contributions WHERE id=?"))return state.items.find(x=>x.id===q.args[0])||null;
+      if(sql.includes("user_id=? AND kind=? AND source_ref=?"))return state.items.find(x=>x.user_id===q.args[0]&&x.kind===q.args[1]&&x.source_ref===q.args[2]&&["pending","approved"].includes(x.status))||null;
       if(sql.includes("SELECT data FROM configs"))return null;return null;}};}};
 }
 async function call(env,username,body,admin=false){
@@ -24,6 +25,13 @@ test("普通用户投稿只进入待审核台账，不直接写正式模块",asy
   const DB=dbMock(),env={SESSION_SECRET:"s1",ADMIN_USERS:"admin",ADMIN_PASS:"pass",DEPLOY_MODE:"local",DB};
   const r=await call(env,"user",{action:"submit",item:{kind:"wiki",title:"租金口径",content:"建议正文",source_ref:"制度第12条"}});
   assert.equal(r.data.ok,true);assert.equal(DB.state.items[0].status,"pending");assert.equal(DB.state.wiki.length,0);
+});
+
+test("同一联网证据重复提交时复用已有审核记录",async()=>{
+  const meta=JSON.stringify({idempotencyKey:"web:evi_1"}),row={id:"con_old",kind:"wiki",title:"联网依据",content:"摘要",source_ref:"https://example.com",file_name:"",region:"深圳",project_type:"rent",meta,status:"pending",user_id:2,username:"user",created_at:1};
+  const DB=dbMock({items:[row]}),env={SESSION_SECRET:"s1b",ADMIN_USERS:"admin",ADMIN_PASS:"pass",DEPLOY_MODE:"local",DB};
+  const r=await call(env,"user",{action:"submit",item:{kind:"wiki",title:"联网依据",content:"摘要",source_ref:"https://example.com",meta:{idempotencyKey:"web:evi_1"}}});
+  assert.equal(r.data.ok,true);assert.equal(r.data.existing,true);assert.equal(r.data.id,"con_old");assert.equal(DB.state.items.length,1);
 });
 
 test("普通用户不能读取后台审核队列",async()=>{

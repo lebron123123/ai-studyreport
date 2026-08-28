@@ -30,6 +30,7 @@ import { analyzeTemplateBuffer } from "./ppt-template-analyzer.js";
 import { ensureTemplatePreviews, resolvePreviewFile, resolveStoredTemplate } from "./ppt-template-preview.js";
 import { createLimiter, generatePptImage, imageProviderStatus } from "./ppt-image-generation.js";
 import { providerStatus as llmProviderStatus } from "../functions/api/_llm-providers.js";
+import { startAgentWorker } from "./agent-worker.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 公司内网模型与第三方生图单独放在.env.company，避免改写原.env中的数据库及云端兜底密钥。
@@ -289,6 +290,8 @@ const httpServer = serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" }, 
   console.log("\n🚀 本地站已启动：http://localhost:" + info.port);
   console.log("   （同一局域网内其他电脑可用本机IP访问）\n");
 });
+const agentWorker=startAgentWorker(ENV,{pollMs:process.env.AGENT_WORKER_POLL_MS,leaseMs:process.env.AGENT_WORKER_LEASE_MS});
+console.log("Agent后台Worker已启动："+agentWorker.workerId);
 // 端口占用等启动失败原来是"未捕获异常"，Node会直接打一串英文堆栈然后退出——
 // 双击桌面快捷方式时窗口一闪而过，根本来不及看是什么问题。这里接住，打印人话原因再退出。
 httpServer.on("error", (err) => {

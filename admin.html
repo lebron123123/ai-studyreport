@@ -142,6 +142,7 @@
     <div class="nav-item" id="btnCases"><span class="ic">📁</span>历史项目案例库</div>
     <div class="nav-item" id="btnPopulation"><span class="ic">👥</span>人口参考表</div>
     <div class="nav-item" id="btnStats"><span class="ic">📊</span>运维看板</div>
+    <div class="nav-item" id="btnWebResearch"><span class="ic">🌐</span>联网检索治理</div>
     <div class="nav-item" id="btnPptTemplates"><span class="ic">▰</span>PPT模板审核</div>
     <div class="nav-item" id="btnWiki"><span class="ic">📖</span>知识 Wiki</div>
     <div class="nav-item" id="btnContrib"><span class="ic">📨</span>知识投稿审核</div>
@@ -171,6 +172,7 @@
 <!-- 敏感性分析(Sobol/Saltelli)核心逻辑，和命令行 scripts/sensitivity.js 共用同一份代码 -->
 <script src="sensitivity-core.js"></script>
 <script src="paramgovernance.js"></script>
+<script src="web-research-admin.js?v=1.0"></script>
 <script>
 function getToken(){ return localStorage.getItem("fs_token"); }
 function getUser(){ return localStorage.getItem("fs_user"); }
@@ -1329,16 +1331,35 @@ async function openAgentTraces(){
   box.innerHTML = '<h1>Agent调用记录</h1><div class="sub">自建的调用链路日志（替代第三方LangSmith，数据留在本账号内不出境）——每次"AI智能问答"的自主查询过程都会记录在此，用于调试与观察Agent行为是否合理。</div><div id="agentPanel"><span style="color:var(--soft);">加载中…</span></div><div class="bar" style="margin-top:18px;"><button class="btn ghost" id="agentBack">返回列表</button></div>';
   document.getElementById("agentBack").onclick = ()=>{ setActiveNav("btnRefresh"); loadList(); };
   try{
-    const [sr, lr] = await Promise.all([
+    const [sr, lr, rr] = await Promise.all([
       fetch("/api/agent",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"stats"})}),
       fetch("/api/agent",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"list"})}),
+      fetch("/api/agentruns?action=adminList",{headers:authHeaders()}),
     ]);
-    const sd = await sr.json(), ld = await lr.json();
+    const sd = await sr.json(), ld = await lr.json(), rd = await rr.json();
     const panel = document.getElementById("agentPanel");
     let html = '';
     if(sd.ok){
       const s = sd.stats;
       html += '<div class="card" style="display:block;"><b>累计调用</b> '+(s.n||0)+' 次　<b>平均轮数</b> '+(s.avgRounds?Number(s.avgRounds).toFixed(1):0)+'　<b>平均耗时</b> '+(s.avgMs?Math.round(s.avgMs):0)+'ms</div>';
+    }
+    if(rd.ok){
+      const runs=rd.runs||[], running=runs.filter(r=>r.status==="running").length;
+      const waiting=runs.filter(r=>r.status==="waiting_approval").length;
+      const st=rd.stats||{},jobMap={};(st.jobs||[]).forEach(x=>jobMap[x.status]=Number(x.cnt)||0);
+      const usage=st.usage||{},cost=Number(usage.cost_micros)||0;
+      html += '<div class="card" style="display:block;margin-top:10px;"><b>企业级运行账本</b>　最近 '+runs.length+' 次　<b>运行中</b> '+running+'　<b>待审批</b> '+waiting
+        +'　<span style="color:var(--soft);">已记录逐轮模型调用、工具步骤、检查点与终态</span></div>';
+      html += '<div class="stat-kpi-row" style="margin-top:10px;">'
+        +'<div class="stat-kpi"><span>后台任务</span><b>'+((jobMap.queued||0)+(jobMap.running||0))+'</b><small>排队 '+(jobMap.queued||0)+' · 执行 '+(jobMap.running||0)+'</small></div>'
+        +'<div class="stat-kpi"><span>重试 / 死信</span><b>'+((jobMap.retry||0)+(jobMap.dead||0))+'</b><small>重试 '+(jobMap.retry||0)+' · 死信 '+(jobMap.dead||0)+'</small></div>'
+        +'<div class="stat-kpi"><span>Token 用量</span><b>'+((Number(usage.input_tokens)||0)+(Number(usage.output_tokens)||0)).toLocaleString()+'</b><small>输入 '+(Number(usage.input_tokens)||0).toLocaleString()+' · 输出 '+(Number(usage.output_tokens)||0).toLocaleString()+'</small></div>'
+        +'<div class="stat-kpi"><span>已核算费用</span><b>'+(cost?((cost/1000000).toFixed(4)+' 配置币种'):'待配置单价')+'</b><small>候选Skill待审 '+(st.pendingSkills||0)+'</small></div></div>';
+      if(runs.length){
+        html += '<details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:600;">查看 Run / Step 运行状态</summary><table class="tbl" style="width:100%;font-size:12px;margin-top:8px;"><tr><th>状态</th><th style="text-align:left;">Agent/项目</th><th style="text-align:left;">任务</th><th>步骤</th><th>工具</th><th>更新时间</th></tr>';
+        runs.slice(0,30).forEach(r=>{ const dt=new Date(Number(r.updated_at)||0); html+='<tr><td>'+esc(r.status||'')+'</td><td>'+esc((r.agent_type||'general')+(r.project_id?' / '+r.project_id:''))+'</td><td>'+esc((r.query_text||'').slice(0,80))+'</td><td style="text-align:center;">'+(r.current_step||0)+'</td><td style="text-align:center;">'+(r.tool_call_count||0)+'</td><td>'+esc(dt.toLocaleString())+'</td></tr>'; });
+        html += '</table></details>';
+      }
     }
     if(ld.ok && (ld.traces||[]).length){
       html += '<table class="tbl" style="width:100%; font-size:12px; margin-top:10px;"><tr><th style="text-align:left;">时间</th><th style="text-align:left;">提问</th><th>轮数</th><th style="text-align:left;">工具调用轨迹</th><th style="text-align:left;">最终回答</th></tr>';
@@ -2503,7 +2524,7 @@ window.openContributions=async function(){
 async function refreshContributions(){
   document.querySelectorAll("[data-cstatus]").forEach(b=>b.classList.toggle("active",b.dataset.cstatus===contribStatus));const box=document.getElementById("contribList");if(!box)return;box.innerHTML='<div class="empty">读取中…</div>';
   try{const d=await contribApi({action:"listReview",status:contribStatus});if(!d.ok)throw new Error(d.error||"读取失败");const rows=d.items||[];
-    box.innerHTML=rows.length?rows.map(x=>'<article class="contrib-card"><div class="contrib-head"><div><div class="contrib-title"><span class="contrib-kind">'+esc(CONTRIB_KIND_LABEL[x.kind]||x.kind)+'</span>'+esc(x.title)+'</div><div class="contrib-meta">提交人：'+esc(x.username||("#"+x.user_id))+'　·　'+new Date(x.created_at).toLocaleString("zh-CN")+(x.file_name?'　·　文件 '+esc(x.file_name):'')+'</div></div><span class="contrib-kind">'+esc(CONTRIB_STATUS_LABEL[x.status]||x.status)+'</span></div><div class="contrib-body">'+esc(x.content)+'</div><div class="contrib-source"><b>原始依据：</b>'+esc(x.source_ref||"未填写")+'　　<b>区域/类型：</b>'+esc(x.region||"不限")+' / '+esc(x.project_type||"不限")+'</div>'+(x.review_note?'<div class="contrib-note">审核意见：'+esc(x.review_note)+'</div>':'')+(x.target_module?'<div class="contrib-target">已分流：'+esc(x.target_module)+'　编号 '+esc(x.target_ref)+'</div>':'')+(x.status==="pending"?'<div class="contrib-actions"><button class="btn sm" data-capprove="'+x.id+'">通过并分流</button><button class="btn sm ghost" data-creturn="'+x.id+'">退回补充</button><button class="btn sm red" data-creject="'+x.id+'">驳回</button></div>':'')+'</article>').join(""):'<div class="empty">当前没有'+esc(CONTRIB_STATUS_LABEL[contribStatus])+'的投稿</div>';
+    box.innerHTML=rows.length?rows.map(x=>{const meta=x.meta||{},webMeta=meta.sourceChannel==="web_research"?'<span class="contrib-kind">🌐 联网检索</span><span class="contrib-kind">'+esc(meta.webCategory||meta.category||"研究资料")+'</span><span class="contrib-kind">权威度 '+esc(meta.authorityLevel||"待定")+'</span>':'';return '<article class="contrib-card"><div class="contrib-head"><div><div class="contrib-title"><span class="contrib-kind">'+esc(CONTRIB_KIND_LABEL[x.kind]||x.kind)+'</span>'+webMeta+esc(x.title)+'</div><div class="contrib-meta">提交人：'+esc(x.username||("#"+x.user_id))+'　·　'+new Date(x.created_at).toLocaleString("zh-CN")+(x.file_name?'　·　文件 '+esc(x.file_name):'')+'</div></div><span class="contrib-kind">'+esc(CONTRIB_STATUS_LABEL[x.status]||x.status)+'</span></div><div class="contrib-body">'+esc(x.content)+'</div><div class="contrib-source"><b>原始依据：</b>'+esc(x.source_ref||"未填写")+'　　<b>区域/类型：</b>'+esc(x.region||"不限")+' / '+esc(x.project_type||"不限")+'</div>'+(x.review_note?'<div class="contrib-note">审核意见：'+esc(x.review_note)+'</div>':'')+(x.target_module?'<div class="contrib-target">已分流：'+esc(x.target_module)+'　编号 '+esc(x.target_ref)+'</div>':'')+(x.status==="pending"?'<div class="contrib-actions"><button class="btn sm" data-capprove="'+x.id+'">通过并分流</button><button class="btn sm ghost" data-creturn="'+x.id+'">退回补充</button><button class="btn sm red" data-creject="'+x.id+'">驳回</button></div>':'')+'</article>';}).join(""):'<div class="empty">当前没有'+esc(CONTRIB_STATUS_LABEL[contribStatus])+'的投稿</div>';
     document.querySelectorAll("[data-capprove]").forEach(b=>b.onclick=()=>reviewContribution(b.dataset.capprove,"approve",""));document.querySelectorAll("[data-creturn]").forEach(b=>b.onclick=()=>openContributionNote(b.dataset.creturn,"return"));document.querySelectorAll("[data-creject]").forEach(b=>b.onclick=()=>openContributionNote(b.dataset.creject,"reject"));
   }catch(e){box.innerHTML='<div class="msg err">'+esc(e.message)+'</div>';}
 }
@@ -2571,6 +2592,7 @@ else{
   document.getElementById("btnCases").onclick = ()=>{ setActiveNav("btnCases"); openCalcCases(); };
   document.getElementById("btnPopulation").onclick = ()=>{ setActiveNav("btnPopulation"); openPopulation(); };
   document.getElementById("btnStats").onclick = ()=>{ setActiveNav("btnStats"); openStats(); };
+  document.getElementById("btnWebResearch").onclick = ()=>{ setActiveNav("btnWebResearch"); openWebResearchAdmin(); };
   (async ()=>{ if(await adminGate()) loadList(); })();
 
   /* ===== 运维看板：今日AI调用量占全站上限比例 + 本地部署向量化缓存命中率/Ollama耗时 =====
@@ -2777,4 +2799,6 @@ if(pptTemplateNav)pptTemplateNav.onclick=()=>{document.querySelectorAll(".nav-it
 </script>
 <script src="ppt-template-admin-v2.js?v=1.0"></script>
 <script src="ppt-asset-admin.js?v=1.0"></script>
-<script src="report-logic-admin.js?v=1.3"></script>
+<script src="report-table-templates.js?v=1.1"></script>
+<script src="report-table-admin.js?v=1.1"></script>
+<script src="report-logic-admin.js?v=1.4"></script>

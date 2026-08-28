@@ -38,6 +38,8 @@ let aiReportMaterialTarget = null; // 当前项目材料上传要补到哪一条
 let aiReportBatchFiles = []; // 批量材料解析后的待确认映射，不确认不写入项目资料
 let aiReportCanEnhanceLogic = false; // 仅控制管理员增强入口显示；真正发布仍由服务端校验密码
 let aiReportLogicEnhanceState = null; // 当前逐项增强会话
+let aiReportLocationCandidates = []; // 地图候选必须由用户确认，禁止默认取第一条
+let aiReportLocationConfirmed = null; // {name,district,address,location,query}
 
 function airCurrentStage(){
   const state={chat:aiReportChat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,
@@ -55,7 +57,7 @@ function airClearLocalState(){try{localStorage.removeItem(airLocalStateKey());}c
 
 function airSwitchProjectSession(){
   aiReportStopFlag=true;aiReportChat=[];aiReportExtracted=null;aiReportSuggested=null;aiReportProgressMsg=null;aiReportPendingTasks=null;
-  aiReportHasDoc=false;aiReportDocVisible=false;aiReportPendingCalcChange=null;aiReportBusy=false;aiReportChatLoaded=false;aiReportParamsConfirmed=false;aiReportMaterialTarget=null;aiReportBatchFiles=[];aiReportLogicEnhanceState=null;
+  aiReportHasDoc=false;aiReportDocVisible=false;aiReportPendingCalcChange=null;aiReportBusy=false;aiReportChatLoaded=false;aiReportParamsConfirmed=false;aiReportMaterialTarget=null;aiReportBatchFiles=[];aiReportLogicEnhanceState=null;aiReportLocationCandidates=[];aiReportLocationConfirmed=null;
 }
 
 function airDocPaneEmptyHtml(){
@@ -65,7 +67,7 @@ function airDocPaneEmptyHtml(){
 function renderAiReportModule(){
   return '<div class="air-shell solo">'
     +'<div class="air-chat-pane">'
-    +'<div class="air-restart-row"><button type="button" class="btn ghost air-restart-btn" id="airRestartBtn">🔄 重新开始</button></div>'
+    +'<div class="air-restart-row"><button type="button" class="btn ghost air-back-btn" id="airBackStepBtn">← 返回上一步</button><button type="button" class="btn ghost air-restart-btn" id="airRestartBtn">🔄 重新开始</button></div>'
     +'<div class="doc-eyebrow">AI可研生成 · 对话式</div>'
     +'<h1 class="doc-title">AI可研生成</h1>'
     +'<div class="step-desc">一句话描述项目，AI会自动抽取信息、从历史案例库推荐一整套测算参数初值；'
@@ -95,6 +97,8 @@ function airRestartChat(){
   aiReportPendingTasks = null;
   aiReportHasDoc = false;
   aiReportParamsConfirmed = false;
+  aiReportLocationCandidates = [];
+  aiReportLocationConfirmed = null;
   const pane = document.getElementById("airDocPane");
   if(pane){ pane.className = "air-doc-pane empty"; pane.innerHTML = airDocPaneEmptyHtml(); }
   airSetDocVisible(false);
@@ -104,9 +108,33 @@ function airRestartChat(){
   try{ fetch("/api/aireport"+(currentProjectId?"?projectId="+encodeURIComponent(currentProjectId):""), {method:"DELETE", headers: authHeaders()}); }catch(e){ /* 清云端存档失败不影响本地已经重置 */ }
 }
 
+/* 返回只撤销“流程确认状态”，不删除用户已经填写的信息、测算参数或已生成正文。
+   重新进入下一步时会基于保留的数据重算/续写，因此比“重新开始”安全。 */
+function airBackStep(){
+  const stage=airCurrentStage(),prev=window.ProjectWorkflow&&ProjectWorkflow.previousAiReportStage?ProjectWorkflow.previousAiReportStage(stage):null;
+  if(!prev){alert("当前已经是第一步，无需返回。");return;}
+  if(["generating","paused","delivered"].includes(stage)){
+    if(!confirm("返回测算确认步骤？正在生成的任务会暂停；已经生成的正文和测算结果都会保留。"))return;
+    aiReportStopFlag=true;aiReportHasDoc=false;
+    aiReportChat=aiReportChat.filter(m=>!["genProgress","deliver","materialCheck"].includes(m.kind));
+    aiReportPendingTasks=null;aiReportProgressMsg=null;airSetDocVisible(false);
+  }else if(stage==="calculated"){
+    aiReportParamsConfirmed=false;
+    aiReportChat=aiReportChat.filter(m=>!["genConfirm","materialCheck","calcPreview"].includes(m.kind));
+  }else if(stage==="suggested"){
+    aiReportSuggested=null;aiReportParamsConfirmed=false;
+    aiReportChat=aiReportChat.filter(m=>!["confirmCard","genConfirm","materialCheck","calcPreview"].includes(m.kind));
+  }else if(stage==="info"){
+    aiReportLocationCandidates=[];aiReportLocationConfirmed=null;
+    aiReportChat=aiReportChat.filter(m=>m.kind!=="locationCard");
+  }
+  airRepairFlowCards();renderAiReportMsgs();airSaveState();
+}
+
 function bindAiReportEvents(){
   const s = id=>document.getElementById(id);
   if(s("airRestartBtn")) s("airRestartBtn").onclick = airRestartChat;
+  if(s("airBackStepBtn")){s("airBackStepBtn").onclick = airBackStep;s("airBackStepBtn").disabled=!(window.ProjectWorkflow&&ProjectWorkflow.previousAiReportStage(airCurrentStage()));}
   if(s("airSend")) s("airSend").onclick = aiReportSend;
   if(s("airInput")){
     const inp = s("airInput");
@@ -120,8 +148,24 @@ function bindAiReportEvents(){
     docPane.addEventListener("click", e=>{
       const retry = e.target.closest(".air-retry-btn");
       if(retry){ airRetrySection(retry.dataset.cn, +retry.dataset.si); return; }
+      const rewrite=e.target.closest(".air-section-rewrite");
+      if(rewrite){airRewriteSection(rewrite.dataset.cn,+rewrite.dataset.si,rewrite);return;}
+      const revise=e.target.closest(".air-section-revise");
+      if(revise){airOpenRevisionModal(revise.dataset.cn,+revise.dataset.si,"");return;}
+      const accept=e.target.closest(".air-candidate-accept");
+      if(accept){airResolveRevision(accept.dataset.cn,+accept.dataset.si,"accept");return;}
+      const reject=e.target.closest(".air-candidate-reject");
+      if(reject){airResolveRevision(reject.dataset.cn,+reject.dataset.si,"reject");return;}
+      const undo=e.target.closest(".air-section-undo");
+      if(undo){airResolveRevision(undo.dataset.cn,+undo.dataset.si,"undo");return;}
+      const selectionEdit=e.target.closest(".air-selection-edit");
+      if(selectionEdit&&aiReportSelectionState){
+        const st=aiReportSelectionState;airHideSelectionAction();airOpenRevisionModal(st.cn,st.si,st.text);return;
+      }
       const upload=e.target.closest(".air-material-upload");
       if(upload){airOpenMaterialUpload(upload);return;}
+      const web=e.target.closest(".air-web-search");
+      if(web){window.WebResearch?.searchFromButton(web,()=>{airApplyDocMaterialStatuses();airSaveState();}).catch(error=>alert(error.message));return;}
       const enhance=e.target.closest(".air-section-enhance");
       if(enhance){airOpenSectionLogicEnhancement(enhance.dataset.cn,+enhance.dataset.si);return;}
       const close = e.target.closest(".air-doc-close");
@@ -129,6 +173,8 @@ function bindAiReportEvents(){
       const chip = e.target.closest(".air-doc-outline .chip");
       if(chip) airScrollToChapter(chip.dataset.cn);
     });
+    docPane.addEventListener("mouseup",airHandleTextSelection);
+    docPane.addEventListener("scroll",airHideSelectionAction,true);
     docPane.addEventListener("change",e=>{if(e.target&&e.target.id==="airDocMaterialFile")airHandleMaterialFiles([...e.target.files]);});
   }
   renderAiReportMsgs();
@@ -242,6 +288,7 @@ async function airRunExtract(text){
 function airInfoCardHtml(){
   const v = aiReportExtracted || {};
   if(airStageAtLeast("suggested")) return '<div class="air-card air-step-done"><b>✓ 项目信息已确认</b><span>'+escapeHtml(v.projectName||"未命名项目")+'｜'+escapeHtml(v.location||"")+'｜'+escapeHtml(AI_TYPE_CN[v.calcType]||"")+'</span></div>';
+  if(aiReportChat.some(m=>m.kind==="locationCard"))return '<div class="air-card air-step-done"><b>✓ 核心信息已填写，等待确认地图位置</b><span>'+escapeHtml(v.projectName||"未命名项目")+'｜填写地点：'+escapeHtml(v.location||"")+'。请在下方候选中人工选择，系统不会自动套用第一条结果。</span></div>';
   const opt = (val,label)=>'<option value="'+val+'" '+(v.calcType===val?"selected":"")+'>'+label+'</option>';
   const introText = v.__manual
     ? "请填写项目核心信息（都是真实信息，不是AI猜的）："
@@ -252,7 +299,7 @@ function airInfoCardHtml(){
     +'<div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:8px;">'+introText+'</div>'
     +'<div class="grid2">'
     +'<div><label>项目名称</label><input id="air_name" type="text" value="'+escapeHtml(v.projectName||"")+'"></div>'
-    +'<div><label>建设地点（区/街道）</label><input id="air_loc" type="text" value="'+escapeHtml(v.location||"")+'"></div>'
+    +'<div><label>建设地点（用于地图定位，建议填完整地址）</label><input id="air_loc" type="text" value="'+escapeHtml(v.location||"")+'"><small class="air-field-help">请在这里填：城市＋区＋街道＋社区/道路/门牌。例如“深圳市光明区凤凰街道光谷苑”；未建地块可填最近道路交叉口或已上图地标。</small></div>'
     +'</div><div class="grid2">'
     +'<div><label>测算类型</label><select id="air_ctype"><option value="">请选择…</option>'
       + opt("rent","出租类（公租房/保租房）") + opt("sale","出售类（配售/出售）") + opt("gaibao","非居改保") + '</select></div>'
@@ -291,31 +338,68 @@ async function aiReportConfirmInfo(){
     __manual: false,   // 已经走到确认这一步，后续走"多轮修正"逻辑时不用再当成空白表单处理
   });
   airSetBusy(true);
-  await airRunSurvey();
-  await airRunSuggest();
+  await airSearchLocationCandidates();
   airSetBusy(false);
 }
 
-/* 信息一确认，先自动跑一遍高德周边配套+竞品调研，不用像标准向导那样手动点"搜索位置"再
-   从候选里挑一个——这里直接取相关度最高的第一个候选。复用的还是 poi.js 里那三个接口
+async function airSearchLocationCandidates(overrideQuery){
+  const ex=aiReportExtracted||{},query=String(overrideQuery||ex.location||"").trim();
+  if(!query){alert("请在建设地点中填写城市、区、街道和社区/道路后再检索。");return;}
+  if(overrideQuery)aiReportExtracted.location=query;
+  aiReportLocationConfirmed=null;aiReportLocationCandidates=[];
+  const loading=airPushLoading("正在核对建设地点，请稍后选择正确地址…");
+  try{
+    const r=await fetch("/api/poi",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({action:"search",address:query,projectName:ex.projectName||""})});
+    const d=await r.json();
+    if(!d.ok||!(d.candidates||[]).length){
+      airResolve(loading,{kind:"locationCard",query,candidates:[],error:d.error||"未找到匹配地址"});return;
+    }
+    aiReportLocationCandidates=window.ProjectWorkflow?.rankLocationCandidates?ProjectWorkflow.rankLocationCandidates(query,d.candidates):d.candidates;
+    airResolve(loading,{kind:"locationCard",query,candidates:aiReportLocationCandidates});airSaveState();
+  }catch(e){airResolve(loading,{kind:"locationCard",query,candidates:[],error:e.message});}
+}
+
+function airLocationCardHtml(m){
+  const candidates=m.candidates||aiReportLocationCandidates||[],query=m.query||(aiReportExtracted&&aiReportExtracted.location)||"";
+  const tips='<div class="air-location-tip"><b>在哪里填、什么最影响结果？</b><span>就在下方“重新检索地址”框填写：城市＋区＋街道＋社区/道路/门牌；精确坐标/完整门牌 ＞ 区＋街道＋社区/道路 ＞ 仅区名。系统会合并精确地址、短地址和项目名称检索，最多展示15条真实相似候选，由你人工确认。</span></div>';
+  const search='<div class="air-location-retry"><input id="airLocationRetryInput" value="'+escapeHtml(query)+'" placeholder="例：深圳市光明区凤凰街道光谷苑"><button type="button" class="btn ghost" id="airLocationSearchAgain">重新检索地址</button></div>';
+  const rows=candidates.slice(0,15).map((c,i)=>'<label class="air-location-option '+(c.locationMatch==='conflict'?'conflict':'')+'"><input type="radio" name="airLocationCandidate" value="'+i+'"><span><b>'+escapeHtml(c.name||"未命名位置")+'</b><small>'+escapeHtml([c.district,c.address].filter(Boolean).join(" · ")||"无详细地址")+'</small></span><em>'+(c.locationMatch==='matched'?'行政区匹配':c.locationMatch==='conflict'?'行政区不一致':'请人工核对')+'</em></label>').join("");
+  const count=rows?'<div class="air-location-query">已汇总 <b>'+candidates.length+'</b> 条真实候选（不伪造凑数），请选择与你项目一致的一项：</div>':'';
+  return '<div class="air-card">'+tips+search+count+(rows?'<div class="air-location-list">'+rows+'</div>':'<div class="air-location-error">'+escapeHtml(m.error||"暂未找到真实候选")+'。请直接在上方补充街道、社区/道路、门牌或附近地标后重试，不需要重新开始整个流程。</div>')+'<div class="air-location-actions"><button type="button" class="btn" id="airConfirmLocation" '+(rows?'':'disabled')+'>确认所选地址并继续 →</button><button type="button" class="btn ghost" id="airRetryLocation">返回修改项目信息</button><button type="button" class="btn ghost" id="airSkipLocation">跳过地图检索</button></div></div>';
+}
+
+async function airConfirmLocation(){
+  const checked=document.querySelector('input[name="airLocationCandidate"]:checked');
+  if(!checked){alert("请先点击选择与你项目一致的地址。");return;}
+  const selected=aiReportLocationCandidates[+checked.value];if(!selected)return;
+  if(selected.locationMatch==='conflict'&&!confirm("该候选行政区与填写地点不一致，仍要采用吗？建议取消并选择正确地址。"))return;
+  aiReportLocationConfirmed=Object.assign({query:aiReportExtracted.location},selected);
+  project.poiLoc=selected.location;project.poiLocLabel=selected.name;project.poiKw=aiReportExtracted.location;
+  aiReportChat=aiReportChat.filter(m=>m.kind!=="locationCard");
+  airPush({role:"assistant",kind:"text",content:"📍 已人工确认项目位置："+selected.name+"（"+([selected.district,selected.address].filter(Boolean).join("，")||"地图坐标已确认")+"）。后续周边、职住和竞品分析均以该坐标为准。"});
+  airSetBusy(true);await airRunSurvey(selected);await airRunSuggest();airSetBusy(false);airSaveState();
+}
+
+async function airSkipLocation(){
+  if(!confirm("跳过后不会生成地图周边、竞品和POI职住代理数据，但不影响参数推荐与可研框架生成。是否继续？"))return;
+  aiReportLocationConfirmed={skipped:true,query:aiReportExtracted.location};aiReportChat=aiReportChat.filter(m=>m.kind!=="locationCard");
+  airPush({role:"assistant",kind:"text",content:"已按你的选择跳过地图检索。报告中需要周边实测数据的位置会标注待补，不会套用其他行政区结果。"});
+  airSetBusy(true);await airRunSuggest();airSetBusy(false);airSaveState();
+}
+
+/* 信息一确认，先列出高德候选并由用户人工选择；只有确认后的坐标才会跑周边配套和竞品调研。
+   复用的还是 poi.js 里那三个接口
    （/api/poi 的 search / 周边 / competitors），查到的 project.poiDesc / project.competitors
    跟标准向导写的是同一份字段，会被 surveyBrief() 自动带进后续生成的每一节里，不用额外接线。
    查不到、没配AMAP_KEY、接口挂了——都只是跳过，不能卡住后面的参数推荐和测算。 */
-async function airRunSurvey(){
+async function airRunSurvey(confirmedCandidate){
   const ex = aiReportExtracted;
   const kw = ((ex.location||"") + (ex.projectName||"")).trim();
   if(!kw) return;
   const loading = airPushLoading("正在检索项目周边配套与竞品（高德地图）…");
   try{
-    const sr = await fetch("/api/poi", {method:"POST",
-      headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
-      body: JSON.stringify({action:"search", address: kw})});
-    const sd = await sr.json();
-    if(!sd.ok || !(sd.candidates||[]).length){
-      airResolve(loading, {kind:"text", content:"没能在地图上自动定位到「"+(ex.projectName||kw)+"」，跳过周边检索，不影响后续测算（常见于地块尚未建成、地图上还查不到的新项目）。"});
-      return;
-    }
-    const best = sd.candidates[0];
+    const best=confirmedCandidate||aiReportLocationConfirmed;
+    if(!best||!best.location){airResolve(loading,{kind:"text",content:"尚未确认地图位置，已跳过周边检索。"});return;}
     project.poiLoc = best.location; project.poiLocLabel = best.name; project.poiKw = kw;
 
     const [poiRes, cpRes] = await Promise.all([
@@ -466,7 +550,7 @@ function airConfirmCardHtml(){
   return '<div class="air-card">'
     +'<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">来源层级：'+escapeHtml((sug.sourceHierarchy||[]).join(" → "))+'</div>'
     +'<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">本次全量来源：'+escapeHtml(sourceSummary)+'</div>'
-    +(alreadyCalculated?'<div class="air-step-done"><b>✓ 参数已经人工确认，财务测算已完成</b><span>当前参数只读展示；如需调整，可在下方对话中直接说明要修改的参数和值，系统会先预演影响。</span></div>':'<div class="air-bulk-confirm"><div><b>已逐项核对数值和依据？</b><span>可一次勾选本卡片全部待人工确认项；不会自动开始测算。</span></div><button type="button" class="btn" id="airConfirmAll">批量人工确认全部</button><span id="airConfirmAllState"></span></div>')
+    +(alreadyCalculated?'<div class="air-step-done"><b>✓ 参数已经人工确认，财务测算已完成</b><span>当前参数只读展示；如需调整，可在下方对话中直接说明要修改的参数和值，系统会先预演影响。</span><button type="button" class="btn ghost air-open-calc-details" style="margin-top:8px;align-self:flex-start;">📊 进入财务测算详情</button></div>':'<div class="air-bulk-confirm"><div><b>已逐项核对数值和依据？</b><span>可一次勾选本卡片全部待人工确认项；不会自动开始测算。</span></div><button type="button" class="btn" id="airConfirmAll">批量人工确认全部</button><span id="airConfirmAllState"></span></div>')
     + rows
     + otherDetails
     +(!alreadyCalculated&&otherManual.length?'<label style="display:block;margin-top:10px;font-size:11.5px;"><input class="air-kf-confirm" data-key="__other_batch" type="checkbox"> 已批量核对其余 '+otherManual.length+' 项案例/兜底/默认参数（低影响项后续还会做联合扰动验证）</label>':'')
@@ -595,7 +679,7 @@ async function airRunGenTasks(){
     await airGenOneSection(t);
     p.done++;
     renderAiReportMsgs();
-  }, 3, ()=>!aiReportStopFlag);
+  }, reportGenerationConcurrency(tasks.length), ()=>!aiReportStopFlag);
   saveDraft();
 
   if(aiReportStopFlag && tasks.length){
@@ -626,20 +710,30 @@ async function airDriveSectionGen(chapter, section, si, opts){
     secEl.classList.add("gen");
   }
   airUpdateChapterChipStatus(cn);
+  let streamTimer=null,streamText="";
+  const streamWrite=partial=>{
+    streamText=partial;
+    if(streamTimer)return;
+    streamTimer=setTimeout(()=>{
+      streamTimer=null;
+      const el=document.getElementById(secId),body=el&&el.querySelector(".body");
+      if(body)body.textContent=streamText;
+    },50);
+  };
   try{
     const text = await generateSection(chapter, section, (partial)=>{
-      const el = document.getElementById(secId);
-      if(el) el.querySelector(".body").textContent = partial;
+      streamWrite(partial);
     });
+    if(streamTimer){clearTimeout(streamTimer);streamTimer=null;}
     section.content = text;
     if(secEl){
       secEl.dataset.status = "done";
       secEl.classList.remove("pending"); secEl.classList.remove("gen");
-      secEl.querySelector(".body").innerHTML = renderContent(text);
-      secEl.querySelector("h4").insertAdjacentHTML("beforeend", '<span class="done-stamp">已拟</span>');
+      airRenderCompletedSection(chapter,section,si);
     }
     if(opts.onDone) opts.onDone();
   }catch(e){
+    if(streamTimer){clearTimeout(streamTimer);streamTimer=null;}
     if(secEl){
       secEl.dataset.status = "failed";
       secEl.classList.remove("gen");
@@ -671,6 +765,87 @@ async function airRetrySection(cn, si){
 }
 
 /* ================= 右侧报告预览面板 ================= */
+let aiReportSelectionState=null;
+function airSectionToolsHtml(chapter,section,si){
+  const undo=Array.isArray(section.undoStack)&&section.undoStack.length?'<button type="button" class="air-section-action air-section-undo" data-cn="'+chapter.cn+'" data-si="'+si+'">撤销</button>':'';
+  return '<div class="air-section-tools"><button type="button" class="air-section-action air-section-rewrite" data-cn="'+chapter.cn+'" data-si="'+si+'">↻ 重写</button>'
+    +'<button type="button" class="air-section-action air-section-revise" data-cn="'+chapter.cn+'" data-si="'+si+'">✎ AI修改</button>'+undo
+    +'<span>也可拖选正文中的文字进行局部修改</span></div>';
+}
+function airCandidateHtml(chapter,section,si){
+  if(!section.pendingRevision||!window.ProjectWorkflow)return '';
+  return '<div class="air-section-candidate wf-candidate"><b>AI修改候选稿 · 尚未覆盖正式正文</b>'
+    +ProjectWorkflow.simpleDiffHtml(section.pendingRevision.before,section.pendingRevision.after)
+    +'<div class="wf-candidate-actions"><button type="button" class="btn air-candidate-accept" data-cn="'+chapter.cn+'" data-si="'+si+'">接受修改</button>'
+    +'<button type="button" class="btn ghost air-candidate-reject" data-cn="'+chapter.cn+'" data-si="'+si+'">拒绝</button></div></div>';
+}
+function airRenderCompletedSection(chapter,section,si){
+  const el=document.getElementById('sec_'+chapter.cn+'_'+si);if(!el)return;
+  const title=el.querySelector('h4');if(title&&!title.querySelector('.done-stamp'))title.insertAdjacentHTML('beforeend','<span class="done-stamp">已拟</span>');
+  const tools=el.querySelector('.air-section-tools');
+  if(tools)tools.outerHTML=airSectionToolsHtml(chapter,section,si);else el.querySelector('.air-section-material')?.insertAdjacentHTML('afterend',airSectionToolsHtml(chapter,section,si));
+  const body=el.querySelector('.body');if(body)body.innerHTML=renderContent(airSectionDisplayContent(chapter,section));
+  el.querySelector('.air-section-candidate')?.remove();
+  if(body)body.insertAdjacentHTML('afterend',airCandidateHtml(chapter,section,si));
+}
+function airRefreshSection(cn,si){const info=findChapterSection(cn,si);if(info)airRenderCompletedSection(info.chapter,info.section,si);}
+function airHideSelectionAction(){document.getElementById('airSelectionAction')?.remove();aiReportSelectionState=null;}
+function airHandleTextSelection(e){
+  if(e.target.closest('button,input,textarea,.wf-candidate'))return;
+  setTimeout(()=>{
+    const sel=window.getSelection();if(!sel||sel.isCollapsed){airHideSelectionAction();return;}
+    const text=sel.toString().trim();if(text.length<2){airHideSelectionAction();return;}
+    const node=sel.anchorNode&&sel.anchorNode.nodeType===3?sel.anchorNode.parentElement:sel.anchorNode;
+    const body=node&&node.closest?node.closest('.section-block .body'):null;
+    const block=body&&body.closest('.section-block');if(!block||!block.id.startsWith('sec_')){airHideSelectionAction();return;}
+    const m=block.id.match(/^sec_(.+)_(\d+)$/);if(!m)return;
+    const rect=sel.getRangeAt(0).getBoundingClientRect();airHideSelectionAction();
+    aiReportSelectionState={cn:m[1],si:+m[2],text:text.slice(0,4000)};
+    const btn=document.createElement('button');btn.id='airSelectionAction';btn.type='button';btn.className='air-selection-edit';btn.textContent='✎ AI修改选中文字';
+    btn.onmousedown=event=>event.preventDefault();
+    btn.onclick=()=>{const st=aiReportSelectionState;if(!st)return;airHideSelectionAction();airOpenRevisionModal(st.cn,st.si,st.text);};
+    btn.style.left=Math.max(8,Math.min(window.innerWidth-180,rect.left+rect.width/2-75))+'px';btn.style.top=Math.max(8,rect.top-40)+'px';document.body.appendChild(btn);
+  },0);
+}
+async function airRewriteSection(cn,si,btn){
+  const info=findChapterSection(cn,si);if(!info||!window.ProjectWorkflow)return;
+  btn.disabled=true;const old=btn.textContent;btn.textContent='重写中…';
+  try{const text=await generateSection(info.chapter,info.section);ProjectWorkflow.setCandidate(info.section,text,'重写本节');saveDraft();airSaveState();airRefreshSection(cn,si);}
+  catch(e){alert('重写失败：'+e.message);}finally{btn.disabled=false;btn.textContent=old;}
+}
+function airOpenRevisionModal(cn,si,selected){
+  const info=findChapterSection(cn,si);if(!info)return;document.getElementById('airRevisionModal')?.remove();
+  const partial=!!selected,preview=partial?'<div class="air-revision-selection"><b>已选择文字</b><div>'+escapeHtml(selected)+'</div></div>':'';
+  document.body.insertAdjacentHTML('beforeend','<div class="air-modal-overlay" id="airRevisionModal"><div class="air-modal-card air-revision-modal">'
+    +'<div class="air-modal-head"><div><b>'+(partial?'局部AI修改':'整节AI修改')+' · '+escapeHtml(info.section.t)+'</b><span>'+(partial?'只替换选中文字，完整正文先保持不变。':'按要求生成完整候选稿，接受后才覆盖正文。')+'</span></div><button type="button" class="air-modal-close" id="airRevisionClose">×</button></div>'
+    +'<div class="air-revision-body">'+preview+'<label>修改要求<textarea id="airRevisionInstruction" rows="4" placeholder="例如：压缩表达、加强论证、改为正式公文语气">'+(partial?'在保持事实和数字不变的前提下，使这段文字更准确、正式、简洁。':'')+'</textarea></label><div class="air-revision-output" id="airRevisionOutput"></div></div>'
+    +'<div class="air-modal-actions"><button type="button" class="btn ghost" id="airRevisionCancel">取消</button><button type="button" class="btn" id="airRevisionSubmit">生成候选稿</button></div></div></div>');
+  const modal=document.getElementById('airRevisionModal'),close=()=>modal.remove();
+  document.getElementById('airRevisionClose').onclick=close;document.getElementById('airRevisionCancel').onclick=close;
+  document.getElementById('airRevisionSubmit').onclick=()=>airRunRevision(cn,si,selected);document.getElementById('airRevisionInstruction').focus();
+}
+async function airRunRevision(cn,si,selected){
+  const info=findChapterSection(cn,si),btn=document.getElementById('airRevisionSubmit'),input=document.getElementById('airRevisionInstruction'),out=document.getElementById('airRevisionOutput');
+  if(!info||!btn||!input)return;const instruction=input.value.trim();if(!instruction){input.focus();return;}
+  btn.disabled=true;btn.textContent='生成中…';if(out)out.textContent='AI正在形成候选稿…';
+  try{
+    let candidate;
+    if(selected){
+      const replacement=await reviseSectionExcerpt(info.chapter,info.section,selected,instruction,partial=>{if(out)out.textContent=partial;});
+      const current=info.section.editedHtml?blocksToSource(info.section.editedHtml):(info.section.content||'');
+      const merged=ProjectWorkflow.replaceSelectedText(current,selected,replacement);if(!merged.ok)throw new Error(merged.error);candidate=merged.text;
+    }else candidate=await reviseSection(info.chapter,info.section,instruction,partial=>{if(out)out.textContent=partial;});
+    ProjectWorkflow.setCandidate(info.section,candidate,(selected?'局部修改：':'整节修改：')+instruction);saveDraft();airSaveState();document.getElementById('airRevisionModal')?.remove();airRefreshSection(cn,si);
+    try{fetch('/api/revlog',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},authHeaders()),body:JSON.stringify({chapter:info.chapter.name,section:info.section.t,instruction,scope:selected?'selection':'section'})});}catch(e){}
+  }catch(e){if(out)out.innerHTML='<span style="color:var(--seal-red)">修改失败：'+escapeHtml(e.message)+'</span>';btn.disabled=false;btn.textContent='生成候选稿';}
+}
+function airResolveRevision(cn,si,action){
+  const info=findChapterSection(cn,si);if(!info||!window.ProjectWorkflow)return;
+  if(action==='accept'){ProjectWorkflow.acceptCandidate(info.section);ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:'在AI可研预览接受AI修改'});}
+  else if(action==='reject')ProjectWorkflow.rejectCandidate(info.section);
+  else if(action==='undo'){if(!ProjectWorkflow.undoSection(info.section))return;ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:'在AI可研预览撤销修改'});}
+  saveDraft();airSaveState();airRefreshSection(cn,si);
+}
 function airSectionMaterialState(chapter,section){
   if(!window.ReportLogicCore)return {rules:[],missing:[],ready:false};
   const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",rules=ReportLogicCore.match(type,chapter.name,section.t,{projectText:[project.name,project.type,project.location,project.desc].filter(Boolean).join(" ")}),ctx=airMaterialContext();
@@ -684,8 +859,10 @@ function airSectionMaterialHtml(chapter,section,si){
   if(st.ready)return '<div class="air-section-material ok"><b>✓ 本节依据已找到</b><span>测算或项目材料已经匹配，可据此生成并保留来源。</span>'+(enhance?'<div class="air-section-material-actions">'+enhance+'</div>':'')+'</div>';
   const needed=st.missing.map(x=>label[x]||x),sourcePool=st.level==="critical"?st.criticalRules:st.rules,sources=sourcePool.map(r=>String(r.requiredSources||"").trim()).filter(Boolean).slice(0,3).map(x=>x.length>120?x.slice(0,120)+"…":x);
   const css=st.level==="critical"?"missing":"pending",title=st.level==="critical"?"框架将先生成，以下关键依据待补":"可先生成通用框架，项目事实后续核实";
-  const upload='<button type="button" class="air-material-upload" data-rule-id="'+escapeHtml(st.rules.map(r=>r.id).join(","))+'" data-chapter="'+escapeHtml(chapter.name)+'" data-section="'+escapeHtml(section.t)+'" data-cn="'+chapter.cn+'" data-si="'+si+'">＋ 上传材料并补强本节</button>';
-  return '<div class="air-section-material '+css+'"><b>↳ '+title+'</b><span>'+(st.level==="critical"?'重要来源：'+escapeHtml(sources.join("；")||"与本节对应的批复、说明、表格或原始数据"):'待核实渠道：'+escapeHtml(needed.join("、")||"确认材料来源"))+'</span><div class="air-section-material-actions">'+upload+enhance+'</div></div>';
+  const ids=escapeHtml(st.rules.map(r=>r.id).join(",")),required=escapeHtml(sources.join("；"));
+  const upload='<button type="button" class="air-material-upload" data-rule-id="'+ids+'" data-chapter="'+escapeHtml(chapter.name)+'" data-section="'+escapeHtml(section.t)+'" data-cn="'+chapter.cn+'" data-si="'+si+'">＋ 上传材料并补强本节</button>';
+  const web=st.missing.includes("web_search")?'<button type="button" class="air-web-search" data-rule-id="'+ids+'" data-chapter="'+escapeHtml(chapter.name)+'" data-section="'+escapeHtml(section.t)+'" data-required-sources="'+required+'">🌐 联网查找本节依据</button>':'';
+  return '<div class="air-section-material '+css+'"><b>↳ '+title+'</b><span>'+(st.level==="critical"?'重要来源：'+escapeHtml(sources.join("；")||"与本节对应的批复、说明、表格或原始数据"):'待核实渠道：'+escapeHtml(needed.join("、")||"确认材料来源"))+'</span><div class="air-section-material-actions">'+web+upload+enhance+'</div></div>';
 }
 function airChapterMaterialLevel(chapter){const levels=chapter.sections.map(s=>airSectionMaterialState(chapter,s).level);return levels.includes("critical")?"missing":levels.includes("framework")?"pending":"ok";}
 function airApplyDocMaterialStatuses(){
@@ -699,8 +876,7 @@ function airBuildDocPane(){
   const totalSec = active.reduce((n,c)=>n+c.sections.length,0);
   const outline = active.map(c=>{const level=airChapterMaterialLevel(c);return '<span class="chip" data-cn="'+c.cn+'"><i class="air-material-dot '+level+'" title="'+(level==='ok'?'本章材料已确认齐全':level==='missing'?'本章有关键依据待补':'本章可先生成，部分来源待核实')+'"></i>'+c.cn+'·'+c.name+'</span>';}).join("");
   const body = active.map(c=>'<div class="chapter-block" id="block_'+c.cn+'"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
-    + c.sections.map((s,si)=>'<div class="section-block pending" id="sec_'+c.cn+'_'+si+'" data-status="pending"><h4>'+s.t+(s.numeric?' ⚠数据':'')+'</h4>'+airSectionMaterialHtml(c,s,si)
-      +'<div class="body"><span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:70%"></span></div></div>').join("")
+    + c.sections.map((s,si)=>{const ready=!!(s.content||s.editedHtml),content=ready?renderContent(airSectionDisplayContent(c,s)):'<span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:70%"></span>';return '<div class="section-block '+(ready?'':'pending')+'" id="sec_'+c.cn+'_'+si+'" data-status="'+(ready?'done':'pending')+'"><h4>'+s.t+(s.numeric?' ⚠数据':'')+(ready?'<span class="done-stamp">已拟</span>':'')+'</h4>'+airSectionMaterialHtml(c,s,si)+(ready?airSectionToolsHtml(c,s,si):'')+'<div class="body">'+content+'</div>'+airCandidateHtml(c,s,si)+'</div>';}).join("")
     +'</div>').join("");
   pane.innerHTML = '<div class="air-doc-head"><button type="button" class="air-doc-close" title="收起预览">✕</button>'
     +'<div class="air-doc-title">'+escapeHtml(project.name||"未命名项目")+'</div>'
@@ -727,14 +903,15 @@ function airScrollToChapter(cn){
   if(el) el.scrollIntoView({behavior:"smooth", block:"start"});
 }
 function airSectionDisplayContent(chapter,section){
-  if(!window.ReportLogicCore?.ensureMissingMarkers)return section.content||"";
+  const base=section.editedHtml&&typeof blocksToSource==="function"?blocksToSource(section.editedHtml):(section.content||"");
+  if(!window.ReportLogicCore?.ensureMissingMarkers)return base;
   const state=airSectionMaterialState(chapter,section);
-  return ReportLogicCore.ensureMissingMarkers(section.content||"",state.rules,airMaterialContext());
+  return ReportLogicCore.ensureMissingMarkers(base,state.rules,airMaterialContext());
 }
 // 从首页/其它模块切回本模块时，如果本轮已经生成过内容（chapters里有正文），把预览面板重建为"已完成"态
 async function airRestoreDocPaneIfNeeded(){
   if(!aiReportSuggested || !chapters.length) return;
-  const hasContent = chapters.some(c=>c.sections.some(s=>s.content));
+  const hasContent = chapters.some(c=>c.sections.some(s=>s.content||s.editedHtml));
   if(!hasContent) return;
   if(window.ReportLogicCore){
     try{await ReportLogicCore.load(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent");}catch(e){}
@@ -743,11 +920,10 @@ async function airRestoreDocPaneIfNeeded(){
   chapters.filter(c=>c.checked).forEach(c=>{
     c.sections.forEach((s,si)=>{
       const el = document.getElementById('sec_'+c.cn+'_'+si);
-      if(!el || !s.content) return;
+      if(!el || !(s.content||s.editedHtml)) return;
       el.dataset.status = "done";
       el.classList.remove("pending");
-      el.querySelector(".body").innerHTML = renderContent(airSectionDisplayContent(c,s));
-      el.querySelector("h4").insertAdjacentHTML("beforeend", '<span class="done-stamp">已拟</span>');
+      airRenderCompletedSection(c,s,si);
     });
     airUpdateChapterChipStatus(c.cn);
   });
@@ -767,11 +943,18 @@ function airProgressCardHtml(m){
 
 /* 测算和起草报告是两步：这张卡片是测算和生成之间的停顿点，人工确认数字没问题了再往下点。 */
 function airGenConfirmHtml(){
-  if(airStageAtLeast("generating")) return '<div class="air-card air-step-done"><b>✓ 已进入可研生成阶段</b><span>请查看当前生成进度或右侧报告预览，无需再次启动。</span></div>';
+  if(airStageAtLeast("generating")) return '<div class="air-card air-step-done"><b>✓ 已进入可研生成阶段</b><span>请查看当前生成进度或右侧报告预览；已完成的小节可立即重写、AI修改或拖选局部修改。</span></div>';
   const logic=window.ReportLogicCore?ReportLogicCore.overview(calcType||(calcResult&&calcResult.__ctype)||rptCtype):null;
   return '<div class="air-card">'+(logic?'<div class="air-step-done" style="margin-bottom:10px;"><b>✓ 已接入公司逐小节生成逻辑 v'+logic.version+'</b><span>'+logic.chapterCount+'章 / '+logic.ruleCount+'项；生成、材料提示和复核共用同一规则ID。</span></div>':'')
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;">'+(logic?'<button class="btn" id="airCheckMaterials">先检查'+logic.chapterCount+'章所需材料 →</button><button class="btn ghost air-start-gen">资料暂缺，带缺口标记生成</button>':'<button class="btn air-start-gen">确认，开始可研生成 →</button>')+'</div>'
     +'<div style="margin-top:8px; font-size:11.5px; color:var(--ink-soft);">建议先检查材料完整性。知识库、网上检索、数据接口和测算结果由系统尽量补齐；必须人工提供的资料会按章列出。即使继续生成，缺失处也只会标“待补”，不会编造。</div></div>';
+}
+
+function airOpenCalcDetails(){
+  if(!calcParams||!calcResult){alert("当前还没有可查看的测算结果。");return;}
+  scParams=Object.assign({},calcParams);scResult=calcResult;calcType=(aiReportSuggested&&aiReportSuggested.calcType)||(calcResult&&calcResult.__ctype)||calcType;scStep=2;
+  airSaveState();try{sessionStorage.setItem("studyreport:calc-return-aireport:v1","1");}catch(e){}
+  appMode="calc";renderTOC();renderSheet();
 }
 
 function airMaterialContext(){
@@ -783,7 +966,9 @@ function airMaterialContext(){
       evidenceByRule[id].push({kind:"all",title:entry.title||entry.fileName||"项目上传材料",source:"project_upload"});
     });
   });
-  return {hasKnowledge:false,hasWebEvidence:false,hasProviderData:false,hasManualMaterial:false,hasCalculation:!!(calcParams&&calcResult),hasDerivedSection:chapters.some(c=>c.sections.some(s=>!!(s.content||s.editedHtml))),evidenceByRule};
+  const web=window.WebResearch?.materialContext?.()||{hasWebEvidence:false,evidenceByRule:{}};
+  Object.entries(web.evidenceByRule||{}).forEach(([id,rows])=>{if(!evidenceByRule[id])evidenceByRule[id]=[];evidenceByRule[id].push(...rows);});
+  return {hasKnowledge:false,hasWebEvidence:!!web.hasWebEvidence,hasProviderData:false,hasManualMaterial:false,hasCalculation:!!(calcParams&&calcResult),hasDerivedSection:chapters.some(c=>c.sections.some(s=>!!(s.content||s.editedHtml))),evidenceByRule};
 }
 async function airCheckWholeReportMaterials(){
   if(!window.ReportLogicCore)return airPush({role:"assistant",kind:"text",content:"逐小节生成逻辑模块未加载，暂时无法检查材料。"});
@@ -794,15 +979,35 @@ async function airCheckWholeReportMaterials(){
 }
 function airMaterialCheckHtml(m){
   const inv=m.inventory||{summary:{},chapters:[]},sum=inv.summary||{},labels={knowledge_base:"知识库检索",web_search:"网上检索",provider:"数据接口",calculation_engine:"测算引擎",manual_upload:"人工上传",derived_section:"其他章节",system_rule:"系统规则",unclassified:"来源待确认"};
+  const batch=window.WebResearch?.batchStatus?.(),batchLabel=batch?(batch.status==="completed"?"🌐 查看批量检索结果（"+batch.done+"/"+batch.total+"）":batch.status==="paused"?"🌐 批量检索已暂停（"+batch.done+"/"+batch.total+"）":"🌐 查看批量检索进度（"+batch.done+"/"+batch.total+"）"):"🌐 自动批量检索全部网上缺口（"+(sum.pendingWeb||0)+"）";
   const stat=(num,label,color)=>'<div style="border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:#fff;"><b style="display:block;font-size:18px;color:'+color+';">'+(num||0)+'</b><span style="font-size:11px;color:var(--ink-soft);">'+label+'</span></div>';
-  const rowHtml=item=>{const status=item.ready?'<span style="color:var(--ok-green);">✓ 已确认找到</span>':'<span style="color:var(--red);">● 待补充/待检索</span>';const kinds=(item.sourceKinds||[]).length?item.sourceKinds:["unclassified"];const channels=kinds.map(kind=>'<span style="display:inline-block;border:1px solid '+(item.missing.includes(kind)?'#e6a5a0':'#b7ddc6')+';background:'+(item.missing.includes(kind)?'#fff0ef':'#edf8f1')+';color:'+(item.missing.includes(kind)?'var(--red)':'var(--ok-green)')+';padding:1px 5px;border-radius:8px;margin:1px;font-size:10.5px;">'+escapeHtml(labels[kind]||kind)+'</span>').join("");return '<tr><td style="white-space:nowrap;">第'+item.sourceNo+'项</td><td><b>'+escapeHtml(item.title)+'</b><div style="color:var(--ink-soft);margin-top:3px;white-space:pre-line;">'+escapeHtml(item.requiredSources)+'</div></td><td>'+channels+'</td><td><div class="air-material-row-actions">'+status+(item.blocking?'<span style="font-size:10px;color:var(--red);">重要阻断</span>':'')+'<button type="button" class="air-material-upload" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'">＋ 上传补充</button></div></td></tr>';};
+  const rowHtml=item=>{const status=item.ready?'<span style="color:var(--ok-green);">✓ 已确认找到</span>':'<span style="color:var(--red);">● 待补充/待检索</span>';const kinds=(item.sourceKinds||[]).length?item.sourceKinds:["unclassified"];const channels=kinds.map(kind=>'<span style="display:inline-block;border:1px solid '+(item.missing.includes(kind)?'#e6a5a0':'#b7ddc6')+';background:'+(item.missing.includes(kind)?'#fff0ef':'#edf8f1')+';color:'+(item.missing.includes(kind)?'var(--red)':'var(--ok-green)')+';padding:1px 5px;border-radius:8px;margin:1px;font-size:10.5px;">'+escapeHtml(labels[kind]||kind)+'</span>').join("");const web=item.missing.includes("web_search")?'<button type="button" class="air-web-search" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'" data-required-sources="'+escapeHtml(item.requiredSources)+'">🌐 联网查找</button>':'';return '<tr><td style="white-space:nowrap;">第'+item.sourceNo+'项</td><td><b>'+escapeHtml(item.title)+'</b><div style="color:var(--ink-soft);margin-top:3px;white-space:pre-line;">'+escapeHtml(item.requiredSources)+'</div></td><td>'+channels+'</td><td><div class="air-material-row-actions">'+status+(item.blocking?'<span style="font-size:10px;color:var(--red);">重要阻断</span>':'')+web+'<button type="button" class="air-material-upload" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'">＋ 上传补充</button></div></td></tr>';};
   return '<div class="air-card"><div class="air-step-done" style="margin-bottom:10px;"><b>材料完整性台账 · 逻辑 v'+inv.version+'</b><span>共'+inv.total+'项、'+inv.chapters.length+'章。以下来源数量允许交叉，例如同一小节可能同时需要知识库和人工材料。</span></div>'
     +(aiReportCanEnhanceLogic?'<div class="air-enhance-entry-tip"><b>管理员增强模式已开启</b><span>请先生成右侧正文并持续修改；定稿后从对应小节点击“从本节成稿提炼增强规则”，AI会比较版本并交由管理员审定。</span></div>':'')
     +'<div style="display:grid;grid-template-columns:repeat(7,minmax(86px,1fr));gap:7px;margin-bottom:10px;">'+stat(sum.ready,"已确认找到","var(--ok-green)")+stat(sum.system_rule,"系统规则直接生成","var(--bp)")+stat(sum.pendingKnowledge,"需从知识库检索","var(--red)")+stat(sum.pendingWeb,"需网上检索","var(--red)")+stat(sum.pendingProvider,"需调用数据接口","var(--red)")+stat(sum.pendingCalculation,"需从测算引擎取得","var(--red)")+stat(sum.pendingManual,"需人工上传","var(--red)")+'</div>'
-    +'<div style="display:flex;gap:7px;margin-bottom:8px;flex-wrap:wrap;"><button type="button" class="btn sm ghost" id="airMaterialExpandAll">展开全部</button><button type="button" class="btn sm ghost" id="airMaterialCollapseAll">收起全部</button><button type="button" class="btn sm ghost air-material-ask" data-prompt="请把全报告'+inv.total+'项材料需求按章节列成完整Markdown表格，列出序号、材料名称、获取渠道、当前状态和是否阻断，不要省略。">让AI列完整材料表</button><button type="button" class="btn sm air-batch-material-upload" id="airBatchMaterialUpload">＋ 批量上传材料</button></div>'
+    +'<div style="display:flex;gap:7px;margin-bottom:8px;flex-wrap:wrap;"><button type="button" class="btn sm ghost" id="airMaterialExpandAll">展开全部</button><button type="button" class="btn sm ghost" id="airMaterialCollapseAll">收起全部</button><button type="button" class="btn sm ghost air-material-ask" data-prompt="请把全报告'+inv.total+'项材料需求按章节列成完整Markdown表格，列出序号、材料名称、获取渠道、当前状态和是否阻断，不要省略。">让AI列完整材料表</button><button type="button" class="btn sm air-batch-web-search" id="airBatchWebSearch" '+(sum.pendingWeb||batch?'':'disabled')+'>'+batchLabel+'</button><button type="button" class="btn sm air-batch-material-upload" id="airBatchMaterialUpload">＋ 批量上传材料</button></div>'
     +'<div style="max-height:470px;overflow:auto;border:1px solid var(--line);border-radius:8px;">'+inv.chapters.map(g=>'<details class="air-material-chapter" style="border-bottom:1px solid var(--line);"><summary style="cursor:pointer;padding:11px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b style="min-width:210px;">'+escapeHtml(g.chapter)+'</b><span style="color:var(--ok-green);">已找到 '+g.counts.ready+'/'+g.total+'</span><span style="color:var(--red);">需知识库检索 '+g.counts.pendingKnowledge+'</span><span style="color:var(--red);">需网搜 '+g.counts.pendingWeb+'</span><span style="color:var(--red);">需接口 '+g.counts.pendingProvider+'</span><span style="color:var(--red);">需测算 '+g.counts.pendingCalculation+'</span><span style="color:var(--red);">需上传 '+g.counts.pendingManual+'</span></summary><div style="padding:0 10px 11px;"><table class="air-material-table" style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr style="text-align:left;background:#f5f8fb;"><th style="padding:7px;">序号</th><th style="padding:7px;">具体需要的内容/材料</th><th style="padding:7px;">获取渠道</th><th style="padding:7px;min-width:150px;">当前状态/补充</th></tr></thead><tbody>'+g.items.map(rowHtml).join("")+'</tbody></table><button type="button" class="btn sm ghost air-material-ask" style="margin-top:8px;" data-prompt="请把'+escapeHtml(g.chapter)+'全部材料需求列成表格，并告诉我应该先补哪几项。">询问本章补充顺序</button></div></details>').join("")+'</div>'
     +'<input type="file" id="airMaterialFile" accept=".txt,.md,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;"><button class="btn air-start-gen">确认，带缺口标记开始生成 →</button><button class="btn ghost air-material-ask" data-prompt="请按重要程度汇总全报告必须由我人工补充的材料清单，并列成表格">仅汇总人工材料</button></div><div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">红色表示系统当前尚未取得真实依据；这里只说明“需上传/需检索”，不承诺知识库或网络一定能找到。上传材料只关联你选择的逻辑项，不会误判为全报告材料齐全。</div></div>';
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;"><button class="btn air-start-gen">先联网检索并集中确认 →</button><button class="btn" id="airBackgroundSearchGenerate">后台检索并立即开始可研生成 →</button><button class="btn ghost air-material-ask" data-prompt="请按重要程度汇总全报告必须由我人工补充的材料清单，并列成表格">仅汇总人工材料</button></div><div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">“先联网检索”会等待你集中采用依据后再生成；“后台检索并立即生成”会让联网任务继续运行，同时先按现有资料起草可研，完成后可回到批量检索采用高价值来源并更新受影响章节。上传材料只关联你选择的逻辑项。</div></div>';
+}
+
+function airRefreshMaterialInventory(){
+  const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",card=aiReportChat.find(m=>m.kind==="materialCheck");
+  if(card)card.inventory=ReportLogicCore.materialInventory(type,airMaterialContext());
+  renderAiReportMsgs();airApplyDocMaterialStatuses();airSaveState();
+}
+function airUpdateBatchWebButton(status){
+  const button=document.getElementById("airBatchWebSearch");if(!button||!status)return;
+  button.disabled=false;button.textContent=status.status==="completed"?"🌐 查看批量检索结果（"+status.done+"/"+status.total+"）":status.status==="paused"?"🌐 批量检索已暂停（"+status.done+"/"+status.total+"）":"🌐 查看批量检索进度（"+status.done+"/"+status.total+"）";
+}
+async function airBatchWebPreflight(continueAfter,backgroundImmediately){
+  if(!window.WebResearch?.batchSearchGaps)return alert("批量联网检索模块未加载，请刷新页面后重试");
+  const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",inventory=ReportLogicCore.materialInventory(type,airMaterialContext());
+  try{
+    await window.WebResearch.batchSearchGaps(inventory.items,{continueAfter:!!continueAfter&&!backgroundImmediately,openReview:!backgroundImmediately,onProgress:airUpdateBatchWebButton,onAdopt:airRefreshMaterialInventory,onContinue:()=>aiReportStartGenerate()});
+    if(backgroundImmediately)await aiReportStartGenerate();
+  }
+  catch(error){alert("批量联网检索未完成："+error.message);}
 }
 
 async function airParseProjectMaterial(file){
@@ -1045,6 +1250,8 @@ function airPickCategory(calcType){
 function renderAiReportMsgs(){
   const box = document.getElementById("airMsgs");
   if(!box) return;
+  const backButton=document.getElementById("airBackStepBtn");
+  if(backButton)backButton.disabled=!(window.ProjectWorkflow&&ProjectWorkflow.previousAiReportStage(airCurrentStage()));
   box.innerHTML = aiReportChat.map(m=>{
     // 类型标签：彩色小胶囊，不套用普通消息气泡（不带"AI："前缀，不是在冒充一句对话）
     if(m.kind==="typeTag"){
@@ -1052,6 +1259,7 @@ function renderAiReportMsgs(){
     }
     let body;
     if(m.kind==="infoCard") body = airInfoCardHtml();
+    else if(m.kind==="locationCard") body = airLocationCardHtml(m);
     else if(m.kind==="confirmCard") body = airConfirmCardHtml();
     else if(m.kind==="genConfirm") body = airGenConfirmHtml();
     else if(m.kind==="materialCheck") body = airMaterialCheckHtml(m);
@@ -1069,6 +1277,14 @@ function renderAiReportMsgs(){
   box.scrollTop = box.scrollHeight;
   const s = id=>document.getElementById(id);
   if(s("airConfirmInfo")) s("airConfirmInfo").onclick = aiReportConfirmInfo;
+  if(s("airConfirmLocation")) s("airConfirmLocation").onclick = airConfirmLocation;
+  if(s("airSkipLocation")) s("airSkipLocation").onclick = airSkipLocation;
+  if(s("airLocationSearchAgain")){
+    const run=()=>airSearchLocationCandidates(String(s("airLocationRetryInput")?.value||"").trim());
+    s("airLocationSearchAgain").onclick=run;
+    if(s("airLocationRetryInput"))s("airLocationRetryInput").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();run();}};
+  }
+  if(s("airRetryLocation")) s("airRetryLocation").onclick = ()=>{aiReportLocationCandidates=[];aiReportLocationConfirmed=null;aiReportChat=aiReportChat.filter(m=>m.kind!=="locationCard");renderAiReportMsgs();airSaveState();};
   if(s("airConfirmParams")) s("airConfirmParams").onclick = aiReportConfirmParams;
   document.querySelectorAll(".air-kf-confirm").forEach(box=>box.addEventListener("change",airSyncConfirmButtonState));
   if(s("airConfirmAll")) s("airConfirmAll").onclick = ()=>{
@@ -1080,8 +1296,10 @@ function renderAiReportMsgs(){
     airSyncConfirmButtonState();
   };
   airSyncConfirmButtonState();
-  document.querySelectorAll(".air-start-gen").forEach(button=>button.onclick=aiReportStartGenerate);
+  document.querySelectorAll(".air-start-gen").forEach(button=>button.onclick=()=>airBatchWebPreflight(true));
+  if(s("airBackgroundSearchGenerate"))s("airBackgroundSearchGenerate").onclick=()=>airBatchWebPreflight(false,true);
   if(s("airCheckMaterials")) s("airCheckMaterials").onclick = airCheckWholeReportMaterials;
+  document.querySelectorAll(".air-open-calc-details").forEach(button=>button.onclick=airOpenCalcDetails);
   if(s("airApplyCalc"))s("airApplyCalc").onclick=airApplyCalcPreview;
   if(s("airRejectCalc"))s("airRejectCalc").onclick=()=>{aiReportPendingCalcChange=null;aiReportChat=aiReportChat.filter(m=>m.kind!=="calcPreview");airPush({role:"assistant",kind:"text",content:"已取消本次参数修改，当前正式测算和报告没有变化。"});airSaveState();};
   document.querySelectorAll(".air-act").forEach(b=>{ b.onclick = ()=>airDeliverAction(b.dataset.act); });
@@ -1092,7 +1310,9 @@ function renderAiReportMsgs(){
   if(s("airBatchMaterialUpload"))s("airBatchMaterialUpload").onclick=()=>{
     aiReportMaterialTarget={batch:true};const input=s("airMaterialFile");if(input){input.value="";input.click();}
   };
+  if(s("airBatchWebSearch"))s("airBatchWebSearch").onclick=()=>airBatchWebPreflight(false);
   box.querySelectorAll(".air-material-upload").forEach(button=>button.onclick=()=>airOpenMaterialUpload(button));
+  box.querySelectorAll(".air-web-search").forEach(button=>button.onclick=()=>window.WebResearch?.searchFromButton(button,()=>{const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",card=aiReportChat.find(m=>m.kind==="materialCheck");if(card)card.inventory=ReportLogicCore.materialInventory(type,airMaterialContext());renderAiReportMsgs();airApplyDocMaterialStatuses();airSaveState();}).catch(e=>alert(e.message)));
   if(s("airMaterialFile"))s("airMaterialFile").onchange=e=>aiReportMaterialTarget?.batch?airPrepareBatchMaterialFiles([...e.target.files]):airHandleMaterialFiles([...e.target.files]);
   document.querySelectorAll(".air-msg-copy").forEach(b=>{
     b.onclick = ()=>{
@@ -1166,7 +1386,7 @@ function airApplyCalcPreview(){
 }
 
 function airRegisterAgentTools(){
-  if(aiReportAgentRegistered||!window.AgentCore)return;aiReportAgentRegistered=true;const AC=window.AgentCore;
+  if(aiReportAgentRegistered||!window.AgentCore)return;aiReportAgentRegistered=true;const AC=window.AgentCore;window.WebResearch?.registerAgentTools?.();
   AC.registerTool("get_current_feasibility_project",{schema:{type:"function",function:{name:"get_current_feasibility_project",description:"读取当前可研项目、当前测算版本和报告状态，不修改数据",parameters:{type:"object",properties:{}}}},run:()=>JSON.stringify({project,calcType:calcType||(calcResult&&calcResult.__ctype),params:calcParams,summary:calcResult&&calcResult.summary,calcVersion:(projectWorkflow.calcSnapshots||[]).length,reportVersion:(projectWorkflow.reportVersions||[]).length,stale:chapters.reduce((n,c)=>n+c.sections.filter(s=>s.syncStatus==="stale"||s.syncStatus==="locked-stale").length,0)})});
   AC.registerTool("diagnose_feasibility_project",{schema:{type:"function",function:{name:"diagnose_feasibility_project",description:"对当前可研项目做一次完整、只读、可追溯的综合诊断。用户问‘项目怎么样’‘测算是否合理’‘哪里可以提升’‘主要风险和优先改进项’时必须优先调用。工具统一汇总白箱财务指标、硬规则异常、敏感参数、参数来源质量、报告待同步/锁定状态、确定性审查问题，并检索知识库依据；不会修改任何数据。",parameters:{type:"object",properties:{focus:{type:"string",description:"用户关注方向，例如综合、财务、参数、报告、风险；默认综合"}},required:[]}}},label:a=>"🩺 运行项目综合诊断"+(a.focus?"（"+a.focus+"）":""),run:async a=>{
     const type=calcType||(calcResult&&calcResult.__ctype)||(aiReportSuggested&&aiReportSuggested.calcType)||null;
@@ -1206,7 +1426,7 @@ function airRegisterAgentTools(){
     const hits=inventory.items.filter(item=>[item.chapter,item.section,item.title].some(text=>ReportLogicCore.normalize(text).includes(nq)||nq.includes(ReportLogicCore.normalize(text))));
     return JSON.stringify({ok:true,scope:"matched",version:inventory.version,total:hits.length,summary:inventory.summary,items:hits.map(compact)});
   }});
-  AC.registerTool("propose_feasibility_section_revision",{schema:{type:"function",function:{name:"propose_feasibility_section_revision",description:"为一个明确小节生成候选修改稿，不覆盖正式正文；用户之后到复核页接受或拒绝",parameters:{type:"object",properties:{title:{type:"string"},instruction:{type:"string"}},required:["title","instruction"]}}},validate:a=>a&&String(a.title||"").trim()&&String(a.instruction||"").trim()?{ok:true}:{ok:false,error:"必须提供小节标题和修改要求"},run:async a=>{const q=String(a.title),hits=chapters.flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).filter(x=>x.s.t.includes(q)||q.includes(x.s.t));if(hits.length!==1)return JSON.stringify({ok:false,error:hits.length?"匹配到多个小节，请说完整标题":"没有找到该小节"});const x=hits[0];if(x.s.locked)return JSON.stringify({ok:false,error:"该小节已人工锁定，请先解除锁定"});const text=await reviseSection(x.c,x.s,String(a.instruction));ProjectWorkflow.setCandidate(x.s,text,String(a.instruction));saveDraft();return JSON.stringify({ok:true,status:"candidate_only",cn:x.c.cn,chapter:x.c.name,si:x.si,title:x.s.t,message:"候选稿已生成，正式正文尚未变化，请到复核页接受或拒绝"});},label:a=>"生成章节候选稿："+a.title});
+  AC.registerTool("propose_feasibility_section_revision",{schema:{type:"function",function:{name:"propose_feasibility_section_revision",description:"为一个明确小节生成候选修改稿，不覆盖正式正文；用户可在右侧报告预览或复核页接受、拒绝",parameters:{type:"object",properties:{title:{type:"string"},instruction:{type:"string"}},required:["title","instruction"]}}},validate:a=>a&&String(a.title||"").trim()&&String(a.instruction||"").trim()?{ok:true}:{ok:false,error:"必须提供小节标题和修改要求"},run:async a=>{const q=String(a.title),hits=chapters.flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).filter(x=>x.s.t.includes(q)||q.includes(x.s.t));if(hits.length!==1)return JSON.stringify({ok:false,error:hits.length?"匹配到多个小节，请说完整标题":"没有找到该小节"});const x=hits[0];if(x.s.locked)return JSON.stringify({ok:false,error:"该小节已人工锁定，请先解除锁定"});const text=await reviseSection(x.c,x.s,String(a.instruction));ProjectWorkflow.setCandidate(x.s,text,String(a.instruction));saveDraft();airSaveState();if(aiReportHasDoc)airRefreshSection(x.c.cn,x.si);return JSON.stringify({ok:true,status:"candidate_only",cn:x.c.cn,chapter:x.c.name,si:x.si,title:x.s.t,message:"候选稿已生成，正式正文尚未变化；可直接在右侧报告预览接受或拒绝，也可进入复核页处理"});},label:a=>"生成章节候选稿："+a.title});
 }
 async function airRunAgent(text){
   airRegisterAgentTools();const loading=airPushLoading("正在结合当前项目、测算和报告状态处理…");
@@ -1215,7 +1435,7 @@ async function airRunAgent(text){
     const meta=Object.entries(aiReportSuggested&&aiReportSuggested.paramMeta||{}).map(([k,m])=>k+"="+m.label+(m.unit?'('+m.unit+')':'')).join("；");
     const history=aiReportChat.filter(m=>m.kind==="text"&&(m.role==="user"||m.role==="assistant")).slice(-10).map(m=>({role:m.role,content:m.content}));
     const logicTotal=window.ReportLogicCore?.overview(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent")?.ruleCount||0;
-    const res=await AgentCore.run({system:"你是当前可研项目的持续协作助手。项目已有白箱测算和报告。用户询问某节怎么写、需要什么表格/材料时，必须调用get_section_generation_logic；用户询问还缺什么资料、为什么不能直接生成时，必须调用check_section_material_requirements，按‘已确认找到、系统规则、需知识库检索、需网上检索、需数据接口取得、需测算引擎取得、需人工上传、重要阻断项’说明。‘需检索’只表示路径，不代表一定能找到；不得把缺失资料说成已有。用户要求全报告材料表、完整清单或当前全部"+logicTotal+"项时，调用工具时title传‘全报告’，必须按章节输出完整Markdown表格，不得只给摘要或省略后续行。用户问‘项目怎么样’‘测算是否合理’‘哪里可以提升’‘主要风险/改进优先级’等开放式综合判断时，必须首先调用diagnose_feasibility_project，并严格按诊断底稿回答：先给总体判断，再按高/中/提示列建议，每条说明依据类型；财务数字只能引用metrics，硬规则只能引用hardRuleAnomalies，行业比较只能引用knowledgeEvidence；数据缺失必须直说暂无，AI推断必须明确标为判断。用户要求修改测算参数时，必须调用preview_feasibility_parameter_change，只能预演，绝不能声称已修改。用户只问影响范围时调用find_feasibility_impacted_sections。用户明确要求修改某个小节文字时，先用get_feasibility_section_content核对，再调用propose_feasibility_section_revision生成候选稿；候选稿不等于已采用，必须提示用户到复核页接受或拒绝。不要自行计算IRR/NPV。参数中文与key目录："+meta+"。比例参数工具值必须用0到1，例如90%传0.9。",messages:history,tools:["diagnose_feasibility_project","get_current_feasibility_project","preview_feasibility_parameter_change","find_feasibility_impacted_sections","get_feasibility_section_status","get_feasibility_section_content","get_section_generation_logic","check_section_material_requirements","propose_feasibility_section_revision","get_calc_summary","search_knowledge_base","get_review_issues"],maxRounds:4,selfCheck:false,traceQuery:text});
+    const res=await AgentCore.run({system:"你是当前可研项目的持续协作助手。项目已有白箱测算和报告。用户询问某节怎么写、需要什么表格/材料时，必须调用get_section_generation_logic；用户询问还缺什么资料、为什么不能直接生成时，必须调用check_section_material_requirements，按‘已确认找到、系统规则、需知识库检索、需网上检索、需数据接口取得、需测算引擎取得、需人工上传、重要阻断项’说明。‘需检索’只表示路径，不代表一定能找到；不得把缺失资料说成已有。用户要求全报告材料表、完整清单或当前全部"+logicTotal+"项时，调用工具时title传‘全报告’，必须按章节输出完整Markdown表格，不得只给摘要或省略后续行。用户问‘项目怎么样’‘测算是否合理’‘哪里可以提升’‘主要风险/改进优先级’等开放式综合判断时，必须首先调用diagnose_feasibility_project，并严格按诊断底稿回答：先给总体判断，再按高/中/提示列建议，每条说明依据类型；财务数字只能引用metrics，硬规则只能引用hardRuleAnomalies，行业比较只能引用knowledgeEvidence；数据缺失必须直说暂无，AI推断必须明确标为判断。用户要求修改测算参数时，必须调用preview_feasibility_parameter_change，只能预演，绝不能声称已修改。用户只问影响范围时调用find_feasibility_impacted_sections。用户明确要求修改某个小节文字时，先用get_feasibility_section_content核对，再调用propose_feasibility_section_revision生成候选稿；候选稿不等于已采用，必须提示用户可直接在右侧报告预览接受或拒绝，也可到复核页处理。不要自行计算IRR/NPV。参数中文与key目录："+meta+"。比例参数工具值必须用0到1，例如90%传0.9。",messages:history,tools:["diagnose_feasibility_project","get_current_feasibility_project","preview_feasibility_parameter_change","find_feasibility_impacted_sections","get_feasibility_section_status","get_feasibility_section_content","get_section_generation_logic","check_section_material_requirements","propose_feasibility_section_revision","get_calc_summary","search_knowledge_base","get_review_issues"],maxRounds:4,selfCheck:false,traceQuery:text,onTrace:lines=>{loading.content=(lines&&lines.length?lines[lines.length-1]:"正在处理")+"…";renderAiReportMsgs();}});
     airResolve(loading,{kind:"text",content:res.text||"已处理。"});
     if(aiReportPendingCalcChange)airPush({role:"assistant",kind:"calcPreview"});
     airSaveState();
@@ -1231,9 +1451,11 @@ function airSerializableState(){
     if(m.kind==="genProgress"){ chat.push({role:"assistant",kind:"genProgress",total:m.total,done:m.done,failed:m.failed,active:false,stopped:true}); return; }
     if(m.kind==="calcPreview")return;
     if(m.kind==="typeTag"){ chat.push({role:m.role, kind:"typeTag", content:m.content||"", calcType:m.calcType}); return; }
+    if(m.kind==="locationCard"){chat.push({role:m.role,kind:m.kind,content:"",query:m.query||"",candidates:m.candidates||[]});return;}
     chat.push({role:m.role, kind:m.kind, content:m.content||""});
   });
   return { savedAt:Date.now(),stage:airCurrentStage(),chat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,paramsConfirmed:aiReportParamsConfirmed,
+    locationCandidates:aiReportLocationCandidates,locationConfirmed:aiReportLocationConfirmed,
     calcType:calcType||(calcResult&&calcResult.__ctype)||null,calcParams:calcParams||null,calcSummary:calcResult&&calcResult.summary||null,
     currentCalcSnapshotId:projectWorkflow&&projectWorkflow.currentCalcSnapshotId||null,currentReportVersionId:projectWorkflow&&projectWorkflow.currentReportVersionId||null,
     pendingTaskKeys:(aiReportPendingTasks||[]).map(t=>({cn:t.c.cn,si:t.si})) };
@@ -1270,6 +1492,8 @@ async function airLoadState(){
       aiReportChat = (Array.isArray(state.chat)?state.chat:[]).map(m=>Object.assign({id: ++aiReportMsgSeq}, m));
       aiReportExtracted = state.extracted || null;
       aiReportSuggested = state.suggested || null;
+      aiReportLocationCandidates=Array.isArray(state.locationCandidates)?state.locationCandidates:[];
+      aiReportLocationConfirmed=state.locationConfirmed||null;
       aiReportHasDoc=!!state.hasDoc;
       aiReportParamsConfirmed=airRestoredConfirmation(state);
       if(state.calcType)calcType=state.calcType;
@@ -1286,7 +1510,7 @@ async function airLoadState(){
   }catch(e){
     const state=airLoadLocalState();
     if(state){
-      aiReportChat=(state.chat||[]).map(m=>Object.assign({id:++aiReportMsgSeq},m));aiReportExtracted=state.extracted||null;aiReportSuggested=state.suggested||null;aiReportHasDoc=!!state.hasDoc;aiReportParamsConfirmed=airRestoredConfirmation(state);
+      aiReportChat=(state.chat||[]).map(m=>Object.assign({id:++aiReportMsgSeq},m));aiReportExtracted=state.extracted||null;aiReportSuggested=state.suggested||null;aiReportLocationCandidates=Array.isArray(state.locationCandidates)?state.locationCandidates:[];aiReportLocationConfirmed=state.locationConfirmed||null;aiReportHasDoc=!!state.hasDoc;aiReportParamsConfirmed=airRestoredConfirmation(state);
       if(state.calcType)calcType=state.calcType;if(aiReportParamsConfirmed&&state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;}catch(_){aiReportParamsConfirmed=false;} }
       airRepairFlowCards();renderAiReportMsgs();
     }
@@ -1297,9 +1521,10 @@ async function airLoadState(){
    恢复时补齐唯一必要的动作卡，同时删除同类重复卡，避免刷新后倒退或重复执行。 */
 function airRepairFlowCards(){
   const dedupe=kind=>{let seen=false;aiReportChat=aiReportChat.filter(m=>m.kind!==kind||(!seen&&(seen=true)));};
-  ["infoCard","confirmCard","genConfirm","deliver"].forEach(dedupe);
+  ["infoCard","locationCard","confirmCard","genConfirm","deliver"].forEach(dedupe);
   const has=kind=>aiReportChat.some(m=>m.kind===kind);
   if(aiReportExtracted&&!has("infoCard"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"infoCard"});
+  if(aiReportExtracted&&!aiReportSuggested&&!aiReportLocationConfirmed&&aiReportLocationCandidates.length&&!has("locationCard"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"locationCard",query:aiReportExtracted.location||"",candidates:aiReportLocationCandidates});
   if(aiReportSuggested&&!has("confirmCard"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"confirmCard"});
   const stage=airCurrentStage();
   if(stage==="calculated"&&!has("genConfirm"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"genConfirm"});

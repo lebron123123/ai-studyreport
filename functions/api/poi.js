@@ -10,6 +10,50 @@ const CATS = [
   ["学校", "教育"],
 ];
 
+export function poiSearchContext(address){
+  const raw=String(address||"").trim().replace(/\s+/g," ").slice(0,100);
+  let city="",keyword=raw;
+  const spaced=raw.split(/\s+/);
+  if(spaced.length>1 && /[市州盟]$/.test(spaced[0])){city=spaced[0];keyword=spaced.slice(1).join("");}
+  else{
+    const cityMatch=raw.match(/^([\u4e00-\u9fa5]{2,8}市)/);
+    if(cityMatch){city=cityMatch[1];keyword=raw.slice(city.length)||raw;}
+  }
+  return {raw,city,keyword};
+}
+
+export function poiSearchQueries(address,projectName){
+  const ctx=poiSearchContext(address),project=String(projectName||"").trim().slice(0,80);
+  const shortAddress=ctx.keyword
+    .replace(/^.*?(?:区|县|旗)/,"")
+    .replace(/^.*?(?:街道|镇|乡)/,"")
+    .trim();
+  return [...new Set([
+    ctx.keyword,
+    shortAddress && shortAddress!==ctx.keyword ? shortAddress : "",
+    project,
+    project ? project.replace(/(?:建设)?项目$/,'').trim() : "",
+  ].filter(x=>x&&x.length>=2))].slice(0,4);
+}
+
+export function mergePoiCandidates(groups,limit=15){
+  const out=[],seen=new Set();
+  for(const c of (groups||[]).flat()){
+    if(!c||!c.location)continue;
+    const key=String(c.location).trim();
+    if(seen.has(key))continue;
+    seen.add(key);out.push(c);
+    if(out.length>=limit)break;
+  }
+  return out;
+}
+
+async function amapJson(url){
+  const response=await fetch(url);
+  if(!response.ok)throw new Error("HTTP "+response.status);
+  return response.json();
+}
+
 export async function onRequestPost(context){
   const { request, env } = context;
   const user = await verifyAuth(request, env);
@@ -21,34 +65,45 @@ export async function onRequestPost(context){
   if(body.action === "search"){
     const address = String(body.address||"").trim().slice(0, 100);
     if(!address) return json({ok:false, error:"请输入项目/小区名称"}, 400);
-    // 支持"城市 名称"格式:空格前视为城市,限定搜索范围
-    let city = "", kw = address;
-    const sp = address.split(/\s+/);
-    if(sp.length > 1){ city = sp[0]; kw = sp.slice(1).join(""); }
-    // 优先POI搜索(小区/楼盘名精确命中真实项目)
-    const pR = await fetch("https://restapi.amap.com/v3/place/text?key="+env.AMAP_KEY
-      +"&keywords="+encodeURIComponent(kw)
-      +(city? "&city="+encodeURIComponent(city)+"&citylimit=true" : "")
-      +"&offset=8&page=1&extensions=base");
-    const pd = await pR.json();
-    let cands = (pd.status==="1" && pd.pois)? pd.pois.slice(0,8).map(p=>({
-      name: p.name, district: (p.pname||"")+(p.cityname&&p.cityname!==p.pname?p.cityname:"")+(p.adname||""),
-      address: typeof p.address==="string"? p.address : "", location: p.location,
-    })).filter(c=>c.location) : [];
-    // 兜底:结构化地址走地理编码
-    if(!cands.length){
-      const geoR = await fetch("https://restapi.amap.com/v3/geocode/geo?key="+env.AMAP_KEY
-        +"&address="+encodeURIComponent(kw)+(city? "&city="+encodeURIComponent(city):""));
-      const geo = await geoR.json();
-      if(geo.status==="1" && geo.geocodes && geo.geocodes.length){
-        cands = geo.geocodes.slice(0,3).map(gc=>({
-          name: gc.formatted_address, district: (gc.province||"")+(gc.district||""),
-          address: "（按地址解析，精度"+(gc.level||"未知")+"）", location: gc.location,
-        }));
-      }
+    const {city}=poiSearchContext(address),queries=poiSearchQueries(address,body.projectName);
+    const groups=[],failures=[];let providerResponded=false;
+    // 精确地址、短地址和项目名称分别检索；某一路失败不会再拖垮整个确认流程。
+    for(const kw of queries){
+      try{
+        const pd=await amapJson("https://restapi.amap.com/v3/place/text?key="+env.AMAP_KEY
+          +"&keywords="+encodeURIComponent(kw)
+          +(city? "&city="+encodeURIComponent(city)+"&citylimit=true" : "")
+          +"&offset=20&page=1&extensions=base");
+        providerResponded=true;
+        if(pd.status==="1" && pd.pois)groups.push(pd.pois.slice(0,20).map(p=>({
+          name:p.name,district:(p.pname||"")+(p.cityname&&p.cityname!==p.pname?p.cityname:"")+(p.adname||""),
+          address:typeof p.address==="string"?p.address:"",location:p.location,matchedBy:kw,
+        })).filter(c=>c.location));
+        else failures.push(pd.info||("检索“"+kw+"”未返回结果"));
+      }catch(e){failures.push("检索“"+kw+"”连接失败");}
     }
-    if(!cands.length) return json({ok:false, error:"未找到匹配位置，请换更具体的名称或地址（含城市名）"}, 400);
-    return json({ok:true, candidates: cands});
+    // 结构化地址始终地理编码一次。行政区/街道输入时，地理编码通常比同名POI更可靠；
+    // 两类候选都交给前端按行政区匹配排序并由用户人工确认。
+    try{
+      const geo=await amapJson("https://restapi.amap.com/v3/geocode/geo?key="+env.AMAP_KEY
+        +"&address="+encodeURIComponent(address)+(city? "&city="+encodeURIComponent(city):""));
+      providerResponded=true;
+      if(geo.status==="1" && geo.geocodes && geo.geocodes.length){
+        const geoCands=geo.geocodes.slice(0,3).map(gc=>({
+          name: gc.formatted_address, district: (gc.province||"")+(gc.city||"")+(gc.district||"")+(gc.township||""),
+          address: "（按完整地址解析，精度"+(gc.level||"未知")+"）", location: gc.location,matchedBy:"完整地址解析",
+        })).filter(c=>c.location);
+        groups.unshift(geoCands);
+      }
+    }catch(e){failures.push("完整地址解析连接失败");}
+    const cands=mergePoiCandidates(groups,15);
+    if(!cands.length){
+      const networkBlocked=!providerResponded;
+      return json({ok:false,code:networkBlocked?"MAP_PROVIDER_UNREACHABLE":"NO_LOCATION_MATCH",
+        error:networkBlocked?"地图服务当前不可达，请检查本地服务网络后原位重试":"没有找到真实候选，请在本页补充到街道、社区/道路或附近地标后重试",
+        searched:queries,details:failures.slice(0,4)},networkBlocked?503:400);
+    }
+    return json({ok:true,candidates:cands,searched:queries,partial:failures.length>0});
   }
 
   // ===== 第二步:按确认的精确坐标抓周边 =====

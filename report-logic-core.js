@@ -59,7 +59,8 @@
     for (const kind of kinds) {
       if (hasRuleEvidence(kind)) continue;
       if (kind === "knowledge_base" && !ctx.hasKnowledge) missing.push(kind);
-      if (kind === "web_search" && !ctx.hasWebEvidence) missing.push(kind);
+      // 联网证据必须绑定到当前规则；“项目里曾搜到过一条网页”不能把全报告所有网搜项都标绿。
+      if (kind === "web_search" && !hasRuleEvidence(kind) && !(ctx.allowGlobalWebEvidence && ctx.hasWebEvidence)) missing.push(kind);
       if (kind === "provider" && !ctx.hasProviderData) missing.push(kind);
       if (kind === "manual_upload" && !ctx.hasManualMaterial) missing.push(kind);
       if (kind === "calculation_engine" && !ctx.hasCalculation) missing.push(kind);

@@ -396,7 +396,7 @@ function stepReview(){
   const staleCount=active.reduce((n,c)=>n+c.sections.filter(s=>s.syncStatus==="stale"||s.syncStatus==="locked-stale").length,0);
   let inner = active.map(c=>'<div class="chapter-block"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
     + c.sections.map((s,si)=>'<div class="section-block" data-cn="'+c.cn+'" data-si="'+si+'"><h4>'+s.t+'<button class="regen-btn" data-cn="'+c.cn+'" data-si="'+si+'" title="用AI重写本节">↻ 重写</button><button class="regen-btn rev-toggle" data-cn="'+c.cn+'" data-si="'+si+'" title="提修改意见，AI按要求改">✎ AI修改</button></h4>'
-        +'<div class="body" contenteditable="true">'+(s.editedHtml? s.editedHtml : (s.content? renderContent(s.content) : "（该子章节未生成）"))+'</div>'
+        +'<div class="body" contenteditable="true">'+(s.content||s.editedHtml?renderSectionContent(c,s,true):"（该子章节未生成）")+'</div>'
         + workflowSectionHtml(c,s,si)
         +'<div class="revise-bar" style="display:none;"><input type="text" class="rev-input" placeholder="修改意见，如：数据分析太浅，应结合敏感性分析展开；语气再正式一些…"><button class="btn rev-go" data-cn="'+c.cn+'" data-si="'+si+'" style="padding:7px 16px; font-size:12px; flex-shrink:0;">按要求修改</button></div>'
         +(s.numeric?'<div class="data-flag">⚠ 请核对/替换为真实数据后再签发</div>':'')+'</div>').join("")
@@ -410,6 +410,7 @@ function stepReview(){
     +'<div class="step-desc">每一段正文可直接点击编辑。数据类子章节的表格须由人工替换为真实测算结果后，方可确认签发。</div>'
     +'<div class="cf-chart" style="margin:0 0 16px;"><div class="cf-head"><span>签发前审核检查</span><span style="display:flex; gap:8px;"><button class="ub-btn" id="auditBtn">运行审核检查</button><button class="ub-btn" id="aiAuditBtn">AI深度审核</button></span></div><div id="aiAuditBox" style="font-size:12.5px; display:none;"></div><div id="auditBox" style="font-size:12.5px;"><span style="color:var(--ink-soft);">检查项：内容完整性（未生成/待填）、规范性（篇幅/数据表格/AI穿帮语）、全文与测算结果的数据一致性。</span></div></div>'
     + inner
+    + (typeof renderReportTableAppendix==="function"?renderReportTableAppendix():"")
     +(signed?'<div class="seal"><span>单位复核确认<br>'+new Date().toLocaleDateString('zh-CN')+'<br>责任人签发</span></div><div class="final-banner">✓ 已完成人工复核签发，可导出正式文本</div>':'')
     +'<div class="actions"><button class="btn ghost" id="backStep4r">← 返回生成</button>'
     +'<button class="btn ghost" id="exportWordBtn">导出 Word</button>'

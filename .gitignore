@@ -27,8 +27,17 @@ local-data/
 outputs/*.pptx
 outputs/*.json
 outputs/*.html
+outputs/*.jpg
+outputs/*.jpeg
+outputs/*.png
+outputs/*.docx
+outputs/*.xls
+outputs/*.xlsx
 outputs/*-render/
 outputs/*-render*/
+outputs/*-slides/
+outputs/*-generated-slides/
+outputs/_preview-smoke/
 outputs/ppt-export-current/
 outputs/ppt-native-samples/
 outputs/ppt-template-timeline-pages/

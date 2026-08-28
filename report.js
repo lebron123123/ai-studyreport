@@ -292,7 +292,15 @@ function runWorkerPool(queue, workerFn, concurrency, shouldContinue){
   })());
   return Promise.all(workers);
 }
+// 一篇报告的生成以远端模型调用为主，4路能比原3路缩短约一成至两成墙钟时间，
+// 同时保留全局覆盖口供本地/服务器按模型限流能力调低或调高（安全范围2~6）。
+function reportGenerationConcurrency(total){
+  const configured=Number((typeof window!=="undefined"&&window.REPORT_GENERATION_CONCURRENCY)||4);
+  const safe=Number.isFinite(configured)?Math.max(2,Math.min(6,Math.round(configured))):4;
+  return Math.max(1,Math.min(Number(total)||1,safe));
+}
 async function runGeneration(){
+  await ensureReportTableTemplates();
   const active = chapters.filter(c=>c.checked);
   const genBtn = document.getElementById("startGen");
   genBtn.disabled = true; genBtn.textContent = "生成中…";
@@ -311,7 +319,7 @@ async function runGeneration(){
       const text = await generateSection(c, s);
       s.content = text;
       secEl.classList.remove("pending"); secEl.classList.remove("gen");
-      secEl.querySelector(".body").innerHTML = renderContent(text);
+      secEl.querySelector(".body").innerHTML = renderSectionContent(c,s,false);
       secEl.querySelector("h4").insertAdjacentHTML("beforeend", '<span class="done-stamp">已拟</span>' + provBadgeHtml(c.cn, si, s.prov));
       bindProvToggle(secEl);
       saveDraft();
@@ -321,9 +329,9 @@ async function runGeneration(){
       secEl.querySelector(".body").innerHTML = '<span style="color:var(--seal-red);">生成失败：'+escapeHtml(e.message)+'</span> <button class="retry-btn btn ghost" data-cn="'+c.cn+'" data-si="'+si+'" style="padding:3px 12px; font-size:11px; margin-left:8px;">重试</button>';
     }
     done++;
-    progressEl.textContent = '3路并行撰写中… 已完成 '+done+'/'+total + (failed? '（失败 '+failed+'）':'');
+    progressEl.textContent = reportGenerationConcurrency(total)+'路并行撰写中… 已完成 '+done+'/'+total + (failed? '（失败 '+failed+'）':'');
   }
-  await runWorkerPool(tasks, handleOne, 3);
+  await runWorkerPool(tasks, handleOne, reportGenerationConcurrency(total));
 
   const cost = (genUsage.inTok*PRICE_IN_PER_M + genUsage.outTok*PRICE_OUT_PER_M)/1000000;
   let tail = '已完成 '+(total-failed)+'/'+total+' 个子标题的初稿起草' + (failed? '（'+failed+' 个失败，可在下方点击重试）':'。');
@@ -331,6 +339,11 @@ async function runGeneration(){
     tail += ' ｜ 实际消耗：输入 '+genUsage.inTok.toLocaleString()+' + 输出 '+genUsage.outTok.toLocaleString()+' tokens ≈ ¥'+cost.toFixed(2);
   }
   progressEl.textContent = tail;
+  const chapterContainer=document.getElementById("chapterContainer");
+  if(chapterContainer&&!document.getElementById("rentTableAppendixPreview")){
+    const appendixHtml=renderReportTableAppendix();
+    if(appendixHtml)chapterContainer.insertAdjacentHTML("beforeend",'<div id="rentTableAppendixPreview">'+appendixHtml+'</div>');
+  }
   genBtn.style.display = "none";
   document.getElementById("toStep5r").style.display = "inline-block";
   if(window.ProjectWorkflow)window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"完成初稿生成"});
@@ -369,6 +382,33 @@ function renderContent(text){
     return p.trim()? '<p style="margin:0 0 10px;">'+escapeHtml(p).replace(/\*\*([^*\n]+)\*\*/g,"<b>$1</b>").replace(/\n/g,"<br>")+'</p>' : "";
   }).join("");
   return html;
+}
+
+function reportTableProjectType(){
+  const type=(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"");
+  return type==="rent"?"rent":null;
+}
+async function ensureReportTableTemplates(){
+  const type=reportTableProjectType();
+  if(!type||!window.ReportTableTemplates)return null;
+  try{return await window.ReportTableTemplates.load(type);}catch(e){console.warn("出租类标准表格模板加载失败",e);return null;}
+}
+function sectionFormalTemplates(c,s){
+  const type=reportTableProjectType();
+  return type&&window.ReportTableTemplates?window.ReportTableTemplates.forSection(type,c.name,s.t):[];
+}
+function renderSectionContent(c,s,useEdited){
+  const base=useEdited&&s.editedHtml?s.editedHtml:renderContent(s.content||"");
+  if(/data-template-id=/.test(base))return base;
+  const type=reportTableProjectType();
+  const tables=type&&window.ReportTableTemplates?window.ReportTableTemplates.renderSection(type,c.name,s.t):"";
+  return base+tables;
+}
+function renderReportTableAppendix(){
+  const type=reportTableProjectType();
+  if(!type||!window.ReportTableTemplates)return "";
+  const html=window.ReportTableTemplates.renderAppendix(type);
+  return html?'<details class="rpt-template-appendix"><summary>附：出租类标准财务附表（7套，点击查看；70年表按年度区间续表）</summary>'+html+'</details>':"";
 }
 
 function reportBodyContainsInternalLogic(text){
@@ -472,25 +512,23 @@ function bindProvToggle(scope){
    L3 模型溯源：用什么模型、什么时间生成
    置信度：按素材构成加权，让人一眼看出"这节有多少真凭实据"
 */
-let provCollector = null;   // 生成单节期间的临时采集器
 function projectExcelSources(){ try{return JSON.parse(sessionStorage.getItem("projectExcelSources")||"[]")||[];}catch(e){return [];} }
-function excelSourceRetrieve(){
+function excelSourceRetrieve(collector){
   const xs=projectExcelSources(); if(!xs.length) return "";
-  if(provCollector) provCollector.excelSources.push(...xs);
+  if(collector) collector.excelSources.push(...xs);
   return "\n\n【已确认的 Excel 数字来源】\n"+xs.map((x,i)=>(i+1)+". "+x.label+" = "+x.displayValue+(x.formula?"（公式："+x.formula+"）":"")+(x.sourceRef?"；原始依据："+x.sourceRef:"")).join("\n")+"\n只能引用与当前章节直接相关的数字；不确定时不要使用。";
 }
-async function mappedExcelSourceRetrieve(){
+async function mappedExcelSourceRetrieve(collector){
   try{
     const ct=(typeof calcType!=="undefined"?calcType:"")||"";
     const r=await fetch("/api/materials",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"resolveMappings",projectType:(project&&project.type)||"",calcType:ct})});
     const d=await r.json(), xs=d.values||[]; if(!d.ok||!xs.length){ try{sessionStorage.removeItem("resolvedExcelMappings");}catch(e){} return ""; }
     try{sessionStorage.setItem("resolvedExcelMappings",JSON.stringify(xs));}catch(e){}
-    if(provCollector) provCollector.excelSources.push(...xs.map(x=>({label:"《"+x.workbook_title+"》→"+x.sheet_name+"!"+x.cell_address,displayValue:x.display_value,formula:x.formula||"",sourceRef:x.source_ref||""})));
+    if(collector) collector.excelSources.push(...xs.map(x=>({label:"《"+x.workbook_title+"》→"+x.sheet_name+"!"+x.cell_address,displayValue:x.display_value,formula:x.formula||"",sourceRef:x.source_ref||""})));
     return "\n\n【项目字段自动映射（Excel 原始单元格）】\n"+xs.map(x=>"- "+(x.field_label||x.field_key)+"："+x.display_value+"［《"+x.workbook_title+"》→"+x.sheet_name+"!"+x.cell_address+"］").join("\n")+"\n仅在字段含义明确匹配时引用；不得自行换算或编造。";
   }catch(e){return "";}
 }
-function provStart(){ provCollector = { rag:[], examples:[], kbDocs:[], excelSources:[], hasCalcData:false, projectFields:[] }; }
-function provTake(){ const p = provCollector; provCollector = null; return p; }
+function provStart(){ return { rag:[], examples:[], kbDocs:[], excelSources:[], hasCalcData:false, projectFields:[] }; }
 
 // 置信度：有真实测算数据 > 有高匹配知识库依据 > 仅项目信息 > 纯AI发挥
 function provConfidence(p){
@@ -536,7 +574,7 @@ function ragTierOf(score){
   if(s >= RAG_TIER.MID)  return { key:"mid",  label:"中匹配" };
   return { key:"low", label:"低匹配·仅供参考" };
 }
-async function ragRetrieve(chapterName, secTitle){
+async function ragRetrieve(chapterName, secTitle, collector){
   if(ragAvailable === false) return "";
   try{
     const q = (project.industry||"") + " " + String(chapterName||"") + " " + String(secTitle||"");
@@ -559,7 +597,7 @@ async function ragRetrieve(chapterName, secTitle){
     hits.forEach(m=>{
       if(budget<=200) return;
       const tier = ragTierOf(m.score);
-      if(provCollector) provCollector.rag.push({ title:m.title||"历史报告", section:m.section||m.chapter||"",
+      if(collector) collector.rag.push({ title:m.title||"历史报告", section:m.section||m.chapter||"",
         score:m.score, tier:tier.label, lifecycle:m.lifecycle||"valid", lifecycleNote:m.lifecycleNote||"",
         docNo:m.docNo||"", issuer:m.issuer||"", sourceRef:m.sourceRef||"", exact:!!m.exact, exactReason:m.exactReason||"" });
       const c = String(m.text).slice(0, Math.min(1400, budget));
@@ -572,8 +610,13 @@ async function ragRetrieve(chapterName, secTitle){
   }catch(e){ return ""; }
 }
 
+/* 联网证据只消费用户已经人工采用的记录；候选搜索结果不会悄悄进入正文。 */
+function webEvidenceRetrieve(chapterName,secTitle,collector){
+  return window.WebResearch?.contextForSection?.(chapterName,secTitle,collector)||"";
+}
+
 // 黄金范例库：按章节标题匹配范文（管理员在后台维护）
-function exampleRetrieve(chapterName, secTitle){
+function exampleRetrieve(chapterName, secTitle, collector){
   const exs = CALC_CFG.examples||[];
   if(!exs.length) return "";
   const q = String(chapterName||"") + String(secTitle||"");
@@ -586,7 +629,7 @@ function exampleRetrieve(chapterName, secTitle){
   let budget = 3000;
   hits.forEach(e=>{
     if(budget<=200) return;
-    if(provCollector) provCollector.examples.push({ title: e.title||"范文" });
+    if(collector) collector.examples.push({ title: e.title||"范文" });
     const c = String(e.content||"").slice(0, Math.min(1800, budget));
     budget -= c.length;
     out += "《"+(e.title||"范文")+"》：\n"+c+"\n\n";
@@ -660,7 +703,7 @@ function rlRetrieve(chapterName, secTitle){
 }
 
 // 按章节标题匹配最相关的参考资料（关键词2元组打分，无需向量库）
-function kbRetrieve(chapterName, secTitle){
+function kbRetrieve(chapterName, secTitle, collector){
   if(!kbEntries.length) return "";
   const q = String(chapterName||"") + String(secTitle||"");
   const grams = new Set();
@@ -683,7 +726,7 @@ function kbRetrieve(chapterName, secTitle){
   let budget = 2600;
   scored.forEach(({e})=>{
     if(budget<=100) return;
-    if(provCollector) provCollector.kbDocs.push({ title: e.title||"未命名资料" });
+    if(collector) collector.kbDocs.push({ title: e.title||"未命名资料" });
     const c = String(e.content||"").slice(0, Math.min(1500, budget));
     budget -= c.length;
     out += "《"+(e.title||"未命名资料")+"》：\n"+c+"\n\n";
@@ -696,8 +739,9 @@ function kbRetrieve(chapterName, secTitle){
 function blocksToSource(htmlStr){
   return htmlToBlocks(htmlStr).map(b=>{
     if(b.type==="table") return "[[TABLE]]\n"+b.rows.map(r=>r.join("|")).join("\n")+"\n[[/TABLE]]";
+    if(b.type==="templateTable") return "";
     return b.text;
-  }).join("\n\n");
+  }).filter(Boolean).join("\n\n");
 }
 
 // 按用户修改意见改写小节
@@ -729,13 +773,34 @@ async function reviseSection(c, s, instruction, onChunk){
   return callGen(sys, user, onChunk);
 }
 
-async function generateSection(c, s, onChunk){
-  provStart();   // 开启溯源采集
+// 仅改写用户在预览正文中拖选的片段；返回“替换片段”，完整小节的安全拼接由 ProjectWorkflow 完成。
+async function reviseSectionExcerpt(c,s,selected,instruction,onChunk){
   if(window.ReportLogicCore){try{await ReportLogicCore.load(rlProjectType());}catch(e){}}
+  const current=s.editedHtml?blocksToSource(s.editedHtml):(s.content||"");
+  const sys='你是资深工程咨询报告编辑。请只改写用户指定的正文片段：\n'
+    +'1. 只输出用于替换原片段的新文字，不要输出说明、引号、标题或“修改后”等字样；\n'
+    +'2. 不改变片段中的项目事实、数字和政策口径，除非修改意见明确要求且上下文已有可靠依据；\n'
+    +'3. 保持与完整小节一致的正式公文文风和上下文衔接；\n'
+    +'4. 不得扩写到未被选中的其他段落。';
+  const user='【报告位置】第'+c.cn+'章 '+c.name+' — '+s.t
+    +'\n\n【完整小节（仅供理解上下文）】\n'+current
+    +'\n\n【需要替换的原片段】\n'+String(selected||'')
+    +'\n\n【修改意见】\n'+String(instruction||'请使表述更准确、正式、简洁')
+    +'\n\n请只输出替换片段。'+rlRetrieve(c.name,s.t)+kbRetrieve(c.name,s.t);
+  return callGen(sys,user,onChunk);
+}
+
+async function generateSection(c, s, onChunk){
+  const collector=provStart();   // 每个并发任务独享，避免不同小节的溯源相互串写
+  if(window.ReportLogicCore){try{await ReportLogicCore.load(rlProjectType());}catch(e){}}
+  await ensureReportTableTemplates();
+  const formalTemplates=sectionFormalTemplates(c,s);
   const digest = s.numeric ? buildCalcDigest() : null;
-  if(digest) provCollector.hasCalcData = true;
+  if(digest) collector.hasCalcData = true;
   let tableHint = "";
-  if(s.numeric && digest){
+  if(formalTemplates.length){
+    tableHint='\n本节已由系统按公司出租类标准报告自动插入以下固定表格：'+formalTemplates.map(t=>'《'+t.title+'》').join('、')+'。正文只负责解释口径、分析结论和表格前后衔接，不得自行重画表格、重复罗列表头或改变表格结构；项目专属数值由资料与测算引擎后续填充。'+(digest?'\n\n【真实财务测算结果】\n'+digest:'');
+  } else if(s.numeric && digest){
     tableHint = '\n本子标题涉及财务数字。下面提供了本项目由内置公式实际计算出的真实测算结果，请：①严格依据这些真实数字撰写分析（数字直接引用，不得改动、不得另行编造）；②在正文中生成1-2个数据表格支撑论述，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔）：\n[[TABLE]]\n列1|列2|列3\n行1|数值|数值\n[[/TABLE]]\n表格数据从测算结果中选取，允许按年份归并或取关键年份，但数值必须与测算结果一致。\n\n'+digest;
   } else if(s.numeric){
     tableHint = '\n本子标题涉及具体数字或测算，请：①用文字说明测算口径、方法与逻辑；②生成一个结构完整的数据表格，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔，每行一个换行）：\n[[TABLE]]\n列1|列2|列3\n项目A|待填|待填\n[[/TABLE]]\n表格中的具体数值一律填"待填"，绝不编造精确数字；但表格的行项目、列结构要专业完整、贴合真实可研报告。';
@@ -744,11 +809,11 @@ async function generateSection(c, s, onChunk){
   // 记录本节用到了哪些项目信息字段（L2溯源的一部分）
   [["项目名称",project.name],["建设/委托单位",project.owner],["建设地点",project.location],
    ["投资规模",project.scale],["项目概况",project.desc]].forEach(([k,v])=>{
-    if(v && String(v).trim() && provCollector) provCollector.projectFields.push(k);
+    if(v && String(v).trim()) collector.projectFields.push(k);
   });
-  const excelContext=s.numeric?(excelSourceRetrieve()+await mappedExcelSourceRetrieve()):"";
+  const excelContext=s.numeric?(excelSourceRetrieve(collector)+await mappedExcelSourceRetrieve(collector)):"";
   const logicRules=window.ReportLogicCore?ReportLogicCore.match(rlProjectType(),c.name,s.t,{projectText:rlProjectText()}):[];
-  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t) + kbRetrieve(c.name, s.t) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t);
+  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t, collector) + kbRetrieve(c.name, s.t, collector) + webEvidenceRetrieve(c.name,s.t,collector) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t, collector);
 
   let text = await callGen(sys, user, onChunk);
   if(!text || text === "（未返回内容）" || reportBodyContainsInternalLogic(text)){
@@ -762,7 +827,7 @@ async function generateSection(c, s, onChunk){
     if(onChunk)onChunk(text);
   }
   // 生成完成：把溯源档案挂到该小节上（含模型与时间，即L3模型溯源）
-  const prov = provTake();
+  const prov = collector;
   if(prov){
     prov.model = "deepseek-v4-flash";
     prov.generatedAt = new Date().toISOString();
