@@ -1,0 +1,9 @@
+const test=require("node:test"),assert=require("node:assert/strict");
+const D=require("../report-dependency.js"),E=require("../report-evidence-graph.js"),G=require("../report-golden.js");
+const chapters=[{cn:1,name:"总论",sections:[{t:"结论与建议",content:"项目财务可行，IRR为6.2%。",prov:{hasCalcData:true}}]},{cn:10,name:"投资估算与资金筹措",sections:[{t:"财务评价",numeric:true,content:"项目总投资1000万元。",prov:{hasCalcData:true}}]}];
+test("参数依赖图贯通参数、指标和章节",()=>{const x=D.traceParameter("rent",chapters,"租金");assert.ok(x.metrics.some(m=>m.key==="irr"));assert.ok(x.sections.some(s=>s.title==="财务评价"));assert.ok(x.graph.edges.length>2);});
+test("建设期变化可给出指标差额和受影响章节",()=>{const x=D.impactFromChanges({changedKeys:["buildYears"],beforeSummary:{irr:6,totalInvestment:900},afterSummary:{irr:5.5,totalInvestment:1000},chapters});assert.equal(x.metricChanges.find(m=>m.key==="irr").delta,-0.5);assert.ok(x.sections.length);});
+test("证据图形成Claim到Evidence到Source链",()=>{const g=E.buildGraph(chapters);assert.ok(g.claims.length>=2);assert.ok(g.evidence.some(x=>x.type==="calculation"));assert.ok(g.edges.some(x=>x.kind==="supported_by"));assert.ok(g.edges.some(x=>x.kind==="derived_from"));});
+test("无依据数字结论阻断签发",()=>{const r=E.preSubmitAudit([{cn:1,name:"总论",sections:[{t:"结论",content:"项目IRR为8%。",prov:{}}]}]);assert.equal(r.ready,false);assert.equal(r.blockerCount,1);});
+test("有白箱测算依据的数字结论可通过硬阻断",()=>{const r=E.preSubmitAudit(chapters);assert.equal(r.ready,true);assert.equal(r.blockerCount,0);});
+test("黄金样本评测覆盖结构、数字、缺口和审计",()=>{const sample=G.createSample({name:"样本",chapters,expectedFacts:{irr:6.2}}),audit=E.preSubmitAudit(chapters),candidate={chapters,facts:{irr:6.2},preSubmitAudit:audit};const r=G.evaluate(sample,candidate);assert.equal(r.metrics.sectionCoverage,100);assert.equal(r.metrics.factAccuracy,100);assert.equal(r.passed,true);});

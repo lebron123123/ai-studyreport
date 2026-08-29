@@ -27,11 +27,11 @@ test("普通用户投稿只进入待审核台账，不直接写正式模块",asy
   assert.equal(r.data.ok,true);assert.equal(DB.state.items[0].status,"pending");assert.equal(DB.state.wiki.length,0);
 });
 
-test("同一联网证据重复提交时复用已有审核记录",async()=>{
-  const meta=JSON.stringify({idempotencyKey:"web:evi_1"}),row={id:"con_old",kind:"wiki",title:"联网依据",content:"摘要",source_ref:"https://example.com",file_name:"",region:"深圳",project_type:"rent",meta,status:"pending",user_id:2,username:"user",created_at:1};
+test("同一联网证据重复提交时复用已有审核记录并返回所处阶段",async()=>{
+  const meta=JSON.stringify({idempotencyKey:"web:evi_1"}),row={id:"con_old",kind:"wiki",title:"联网依据",content:"摘要",source_ref:"https://example.com",file_name:"",region:"深圳",project_type:"rent",meta,status:"approved",target_module:"知识 Wiki（待发布草稿）",target_ref:"wiki_1",user_id:2,username:"user",created_at:1};
   const DB=dbMock({items:[row]}),env={SESSION_SECRET:"s1b",ADMIN_USERS:"admin",ADMIN_PASS:"pass",DEPLOY_MODE:"local",DB};
   const r=await call(env,"user",{action:"submit",item:{kind:"wiki",title:"联网依据",content:"摘要",source_ref:"https://example.com",meta:{idempotencyKey:"web:evi_1"}}});
-  assert.equal(r.data.ok,true);assert.equal(r.data.existing,true);assert.equal(r.data.id,"con_old");assert.equal(DB.state.items.length,1);
+  assert.equal(r.data.ok,true);assert.equal(r.data.existing,true);assert.equal(r.data.id,"con_old");assert.equal(r.data.status,"approved");assert.equal(r.data.target_ref,"wiki_1");assert.equal(DB.state.items.length,1);
 });
 
 test("普通用户不能读取后台审核队列",async()=>{

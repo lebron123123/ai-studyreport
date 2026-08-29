@@ -16,3 +16,9 @@ test("归档状态与报告完成阶段可从管理元数据恢复",()=>{
   const out=summarizeProjectRow({id:"project-456",name:"已签发项目",data:JSON.stringify(data),updated_at:456});
   assert.equal(out.archived,true);assert.equal(out.archivedAt,99);assert.equal(out.stage,"已签发");assert.equal(out.progress,100);
 });
+
+test("投资全周期显式阶段优先显示且不被旧可研进度覆盖",()=>{
+  const data={project:{name:"实施中项目"},workflow:{management:{investmentStage:"implementation"}},chapters:[{sections:[{content:"正文"}]}]};
+  const out=summarizeProjectRow({id:"project-789",name:"实施中项目",data:JSON.stringify(data),updated_at:789});
+  assert.equal(out.stage,"项目实施");assert.equal(out.progress,78);assert.equal(out.status,"implementation");
+});

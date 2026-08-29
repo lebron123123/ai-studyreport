@@ -77,11 +77,11 @@ export async function onRequestPost(context){
     if(!content)return json({ok:false,error:"请填写说明或上传可解析文件"},400);
     if(kind!=="correction"&&!sourceRef)return json({ok:false,error:"请填写原始依据或来源位置"},400);
     if(parentId){const old=await env.DB.prepare("SELECT user_id,status FROM knowledge_contributions WHERE id=?").bind(parentId).first();if(!old||old.user_id!==user.userId||!["needs_changes","rejected"].includes(old.status))return json({ok:false,error:"只有本人被退回或驳回的提交可重新提交"},400);}
-    if(idempotencyKey){const existing=await env.DB.prepare("SELECT id,status FROM knowledge_contributions WHERE user_id=? AND kind=? AND source_ref=? AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1").bind(user.userId,kind,sourceRef).first();if(existing)return json({ok:true,id:existing.id,status:existing.status,existing:true,message:"该联网依据已在知识库审核链路中，无需重复提交"});}
+    if(idempotencyKey){const existing=await env.DB.prepare("SELECT id,status,target_module,target_ref FROM knowledge_contributions WHERE user_id=? AND kind=? AND source_ref=? AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1").bind(user.userId,kind,sourceRef).first();if(existing)return json({ok:true,id:existing.id,status:existing.status,target_module:existing.target_module||"",target_ref:existing.target_ref||"",existing:true,message:"该联网依据已在知识库审核链路中，无需重复提交"});}
     const id=makeId(),now=Date.now(),meta=JSON.stringify(itemMeta);
     await env.DB.prepare("INSERT INTO knowledge_contributions(id,kind,title,content,source_ref,file_name,region,project_type,meta,status,parent_id,user_id,username,created_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)")
       .bind(id,kind,title,content,sourceRef,fileName,clean(p.region,40),clean(p.project_type,40),meta,parentId,user.userId,user.username,now).run();
-    return json({ok:true,id,message:"已提交管理员审核；审核前不会进入正式知识库"});
+    return json({ok:true,id,status:"pending",message:"已提交管理员审核；审核前不会进入正式知识库"});
   }
   if(action==="review"){
     if(!isAdmin(env,user)||!passOk(env,request))return json({ok:false,error:"仅管理员可审核"},403);

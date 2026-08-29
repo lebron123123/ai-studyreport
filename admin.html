@@ -136,6 +136,7 @@
     <div class="nav-sep"></div>
     <div class="nav-item" id="btnCalcCfg"><span class="ic">🧮</span>测算参数管理</div>
     <div class="nav-item" id="btnExamples"><span class="ic">📖</span>黄金范例库</div>
+    <div class="nav-item" id="btnGoldenEval"><span class="ic">🏆</span>可研黄金项目评测</div>
     <div class="nav-item" id="btnAiRules"><span class="ic">🛡</span>AI生成、审核规则与逻辑</div>
     <div class="nav-item" id="btnRag"><span class="ic">🗂</span>RAG知识库</div>
     <div class="nav-item" id="btnAgent"><span class="ic">🤖</span>Agent调用记录</div>
@@ -628,6 +629,7 @@ async function openRag(){
   box.innerHTML = '<h1 style="font-size:18px;">RAG知识库</h1>'
     +'<div class="sub">批量上传单位知识资料（docx/pdf/txt/图片/xlsx/csv/html等），按分类定制切块策略（可研报告按章节、政策文件按条款、会议纪要按议题），向量化后存入语义检索库；支持15类知识分类、密级权限隔离、时效管理、相似度分层。生成报告与AI问答时自动检索最相关内容并按可信度标注注入。<b>需先按部署说明创建 Vectorize 索引并绑定 VECTORIZE 与 AI。</b></div>'
     +'<div id="ragStats" style="font-size:12px; color:var(--soft); margin:8px 0;">读取库规模…</div>'
+    +'<div id="ragWebPipeline" style="margin:12px 0 16px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:14px;"><span style="color:var(--soft);font-size:12px;">正在读取联网知识沉淀状态…</span></div>'
     +'<div style="display:flex; gap:12px; margin-bottom:10px; flex-wrap:wrap; align-items:center;">'
     +'<label style="font-size:13px;">分类：<select id="ragCat" style="padding:5px 8px;">'+ragCatOptionsHtml(false)+'</select></label>'
     +'<label style="font-size:13px;">权威等级：<select id="ragLevel" style="padding:5px 8px;"><option value="1">权威（政策/正式文件）</option><option value="2" selected>参考（一般报告）</option><option value="3">存档（历史/非正式）</option></select></label>'
@@ -688,7 +690,60 @@ async function openRag(){
   if(document.getElementById("ragCat")) document.getElementById("ragCat").onchange = updChunkHint;
   updChunkHint();
   refreshRagStats();
+  refreshRagWebPipeline();
   refreshRagFiles();
+}
+let ragWebPipelineRows=[];
+async function loadRagWebPipelineData(){
+  const [pendingData,approvedData,wikiData]=await Promise.all([
+    contribApi({action:"listReview",status:"pending"}),
+    contribApi({action:"listReview",status:"approved"}),
+    wikiApi({action:"list"})
+  ]);
+  if(!pendingData.ok)throw new Error(pendingData.error||"待审核资料读取失败");
+  if(!approvedData.ok)throw new Error(approvedData.error||"已审核资料读取失败");
+  if(!wikiData.ok)throw new Error(wikiData.error||"Wiki状态读取失败");
+  const wikiById=new Map((wikiData.pages||[]).map(page=>[String(page.id),page]));
+  const webRows=[...(pendingData.items||[]),...(approvedData.items||[])].filter(row=>row.meta&&row.meta.sourceChannel==="web_research");
+  return webRows.map(row=>{
+    const wiki=row.target_ref?wikiById.get(String(row.target_ref)):null;
+    let stage="pending";
+    if(row.status==="approved"&&wiki&&wiki.status==="published")stage="published";
+    else if(row.status==="approved"&&wiki)stage="draft";
+    else if(row.status==="approved")stage="routed";
+    return {...row,wiki,stage};
+  }).sort((a,b)=>(b.created_at||0)-(a.created_at||0));
+}
+function renderRagWebPipeline(){
+  const box=document.getElementById("ragWebPipeline");if(!box)return;
+  const rows=ragWebPipelineRows,counts={pending:0,draft:0,published:0,routed:0};rows.forEach(row=>counts[row.stage]++);
+  const badge=(text,color,bg)=>'<span style="display:inline-flex;align-items:center;padding:3px 8px;border-radius:999px;color:'+color+';background:'+bg+';font-size:11px;font-weight:600;">'+text+'</span>';
+  const stageLabel={pending:badge("待管理员审核","#9A6700","#FFF4CE"),draft:badge("Wiki草稿·待发布","#245B86","#E8F3FB"),published:badge("已进入RAG","#18794E","#E7F6ED"),routed:badge("已审核·待分流核查","#A33A2B","#FDECEA")};
+  const list=rows.length?rows.slice(0,100).map(row=>{
+    const meta=row.meta||{},source=row.source_ref||"",action=row.stage==="pending"?'<button class="btn sm" data-rag-web-approve="'+row.id+'">审核并发布到RAG</button>':row.stage==="draft"?'<button class="btn sm" data-rag-web-publish="'+row.wiki.id+'">发布草稿到RAG</button>':row.stage==="published"?'<span style="font-size:11px;color:var(--ok);">可被报告生成与问答检索</span>':'<button class="btn sm ghost" data-rag-web-review>去审核台核查</button>';
+    return '<div style="display:grid;grid-template-columns:minmax(260px,1fr) 140px minmax(180px,auto);gap:12px;align-items:center;padding:10px 2px;border-top:1px solid var(--line);"><div><b style="font-size:12.5px;">'+esc(row.title)+'</b><div style="font-size:11px;color:var(--soft);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(meta.webCategory||meta.category||"联网资料")+' · 权威度 '+esc(meta.authorityLevel||"待定")+' · '+esc(source)+'</div></div><div>'+stageLabel[row.stage]+'</div><div style="text-align:right;">'+action+'</div></div>';
+  }).join(""):'<div class="empty" style="padding:12px 0;">暂无联网资料沉淀记录</div>';
+  box.innerHTML='<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;"><div><b style="font-size:14px;">🌐 联网知识沉淀队列</b><div style="font-size:11px;color:var(--soft);margin-top:4px;">“保存到后台”先进入审核链路；仅绿色“已进入RAG”会参与检索。</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;">'+badge("待审核 "+counts.pending,"#9A6700","#FFF4CE")+badge("待发布 "+counts.draft,"#245B86","#E8F3FB")+badge("已入RAG "+counts.published,"#18794E","#E7F6ED")+'<button class="btn sm ghost" id="ragWebRefresh">刷新</button><button class="btn sm ghost" id="ragWebReview">打开审核台</button></div></div><details style="margin-top:10px;" '+(counts.pending||counts.draft?'open':'')+'><summary style="cursor:pointer;font-size:12px;color:var(--bp);">查看 '+rows.length+' 条资料的实际去向</summary><div style="max-height:430px;overflow:auto;margin-top:8px;">'+list+'</div></details>';
+  document.getElementById("ragWebRefresh").onclick=refreshRagWebPipeline;
+  document.getElementById("ragWebReview").onclick=openRagWebReview;
+  document.querySelectorAll("[data-rag-web-review]").forEach(button=>button.onclick=openRagWebReview);
+  document.querySelectorAll("[data-rag-web-approve]").forEach(button=>button.onclick=()=>approveAndPublishRagWeb(button.dataset.ragWebApprove,button));
+  document.querySelectorAll("[data-rag-web-publish]").forEach(button=>button.onclick=()=>publishRagWebDraft(button.dataset.ragWebPublish,button));
+}
+async function refreshRagWebPipeline(){
+  const box=document.getElementById("ragWebPipeline");if(box)box.innerHTML='<span style="color:var(--soft);font-size:12px;">正在核对投稿、Wiki与RAG三处状态…</span>';
+  try{ragWebPipelineRows=await loadRagWebPipelineData();renderRagWebPipeline();}catch(error){if(box)box.innerHTML='<div class="msg err">联网沉淀状态读取失败：'+esc(error.message)+'</div>';}
+}
+function openRagWebReview(){setActiveNav("btnContrib");contribStatus="pending";openContributions();}
+async function publishRagWebDraft(wikiId,button){
+  if(!confirm("确认该Wiki草稿内容与原始网址已经核对？发布后将立即参与RAG检索。"))return;
+  button.disabled=true;button.textContent="正在发布…";
+  try{const result=await wikiApi({action:"publish",id:wikiId});if(!result.ok)throw new Error(result.error||"发布失败");msg(result.message||"已进入RAG","ok");await Promise.all([refreshRagWebPipeline(),refreshRagStats(),refreshRagFiles()]);}catch(error){msg(error.message,"err");button.disabled=false;button.textContent="发布草稿到RAG";}
+}
+async function approveAndPublishRagWeb(contributionId,button){
+  if(!confirm("确认已经核对该联网资料的标题、来源网址和正文？系统将先审核分流为Wiki草稿，再立即发布到RAG。"))return;
+  button.disabled=true;button.textContent="正在审核并发布…";
+  try{const reviewed=await contribApi({action:"review",id:contributionId,decision:"approve",note:"联网高价值来源经管理员核验后发布"});if(!reviewed.ok)throw new Error(reviewed.error||"审核失败");const wikiId=reviewed.target&&reviewed.target.ref;if(!wikiId)throw new Error("审核已完成，但未生成Wiki草稿，请到审核台核查分流结果");const published=await wikiApi({action:"publish",id:wikiId});if(!published.ok)throw new Error("已形成Wiki草稿，但发布RAG失败："+(published.error||"未知错误"));msg("审核完成，资料已发布并进入RAG","ok");await Promise.all([refreshRagWebPipeline(),refreshRagStats(),refreshRagFiles()]);}catch(error){msg(error.message,"err");await refreshRagWebPipeline();}
 }
 async function refreshRagStats(){
   try{
@@ -2802,3 +2857,4 @@ if(pptTemplateNav)pptTemplateNav.onclick=()=>{document.querySelectorAll(".nav-it
 <script src="report-table-templates.js?v=1.1"></script>
 <script src="report-table-admin.js?v=1.1"></script>
 <script src="report-logic-admin.js?v=1.4"></script>
+<script src="report-golden-admin.js?v=1.0"></script>

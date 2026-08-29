@@ -64,6 +64,12 @@
   }
   function impactedSections(chapters,keys){
     const out=[]; const uniq=[...new Set((keys||[]).filter(Boolean))];
+    // 首选显式的“参数→指标→章节”依赖图；旧项目或脚本缺少新模块时继续使用关键词兼容逻辑。
+    if(root.ReportDependency&&uniq.length){
+      const graph=root.ReportDependency.buildGraph({paramKeys:uniq,chapters:chapters||[]}),bySection=new Map();
+      graph.edges.filter(e=>e.kind==="appears_in").forEach(edge=>{const sec=graph.nodes.find(n=>n.id===edge.to),metric=graph.nodes.find(n=>n.id===edge.from);if(!sec)return;const key=String(sec.cn)+":"+sec.si,row=bySection.get(key)||{cn:sec.cn,si:sec.si,title:sec.title,chapter:sec.chapter,keys:uniq.slice(),metrics:[],locked:!!sec.locked};if(metric&&!row.metrics.some(x=>x.key===metric.key))row.metrics.push({key:metric.key,label:metric.label});bySection.set(key,row);});
+      if(bySection.size)return [...bySection.values()];
+    }
     (chapters||[]).forEach(c=>(c.sections||[]).forEach((s,si)=>{
       const why=uniq.filter(k=>sectionAffected(s,c,k));
       if(why.length) out.push({cn:c.cn,si,title:s.t,chapter:c.name,keys:why,locked:!!s.locked});
@@ -77,6 +83,7 @@
       s.syncStatus=s.locked?"locked-stale":"stale";
       s.staleReason=reason||("参数变化："+h.keys.join("、"));
       s.staleKeys=h.keys.slice();
+      s.staleMetrics=(h.metrics||[]).map(x=>x.key);
     });
     return hits;
   }
@@ -106,12 +113,18 @@
   }
   function createReportVersion(state,chapters,meta){
     state=state||{}; state.reportVersions=Array.isArray(state.reportVersions)?state.reportVersions:[];
-    const body=(chapters||[]).map(c=>({cn:c.cn,name:c.name,checked:c.checked,sections:(c.sections||[]).map(s=>({t:s.t,numeric:!!s.numeric,content:s.content||"",editedHtml:s.editedHtml||null,locked:!!s.locked,syncStatus:s.syncStatus||"current",prov:clone(s.prov||null)}))}));
+    meta=meta||{};const trust=root.ReportTrust,evidenceApi=root.ReportEvidenceGraph,dependencyApi=root.ReportDependency;
+    const body=(chapters||[]).map(c=>({cn:c.cn,name:c.name,checked:c.checked,sections:(c.sections||[]).map(s=>({t:s.t,numeric:!!s.numeric,content:s.content||"",editedHtml:s.editedHtml||null,locked:!!s.locked,syncStatus:s.syncStatus||"current",prov:clone(s.prov||null),trust:trust?trust.buildSectionProfile(s,{hasCalculation:!!state.currentCalcSnapshotId}):null}))}));
     const nextVersion=state.reportVersions.reduce((n,x)=>Math.max(n,Number(x.version)||0),0)+1;
+    const lineage=trust?trust.buildLineage(state,meta):null;
+    const evidenceAudit=evidenceApi?evidenceApi.preSubmitAudit(chapters):null;
+    const calc=(state.calcSnapshots||[]).find(x=>x&&x.id===state.currentCalcSnapshotId),dependencyGraph=dependencyApi?dependencyApi.buildGraph({calcType:calc&&calc.calcType,paramKeys:Object.keys(calc&&calc.params||{}),chapters}):null;
     const ver={id:uid("report"),version:nextVersion,createdAt:new Date().toISOString(),
-      calcSnapshotId:state.currentCalcSnapshotId||null,analysisSnapshotId:state.currentAnalysisSnapshotId||null,reason:String(meta&&meta.reason||"报告保存"),chapters:body,hash:hash(body)};
+      calcSnapshotId:state.currentCalcSnapshotId||null,analysisSnapshotId:state.currentAnalysisSnapshotId||null,reason:String(meta.reason||"报告保存"),chapters:body,hash:hash(body),lineage,
+      trustSummary:trust?trust.buildReportSummary(chapters,{hasCalculation:!!state.currentCalcSnapshotId}):null,
+      evidenceAudit,dependencyGraph:dependencyGraph?{schemaVersion:dependencyGraph.schemaVersion,parameters:dependencyGraph.parameters,metrics:dependencyGraph.metrics,sections:dependencyGraph.sections,hash:hash(dependencyGraph)}:null};
     const prev=state.reportVersions[state.reportVersions.length-1];
-    if(prev&&prev.hash===ver.hash&&prev.calcSnapshotId===ver.calcSnapshotId&&prev.analysisSnapshotId===ver.analysisSnapshotId)return prev;
+    if(prev&&prev.hash===ver.hash&&prev.calcSnapshotId===ver.calcSnapshotId&&prev.analysisSnapshotId===ver.analysisSnapshotId&&(!lineage||prev.lineage&&prev.lineage.hash===lineage.hash))return prev;
     state.reportVersions.push(ver);if(state.reportVersions.length>5)state.reportVersions.splice(0,state.reportVersions.length-5);state.currentReportVersionId=ver.id; return ver;
   }
   function setCandidate(section,newText,instruction){

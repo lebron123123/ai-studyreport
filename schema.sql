@@ -41,6 +41,18 @@ CREATE TABLE IF NOT EXISTS calc_cases (
 );
 CREATE INDEX IF NOT EXISTS idx_calc_cases_type_status ON calc_cases(calc_type, status);
 
+-- AI可研黄金项目样本与重复评测
+CREATE TABLE IF NOT EXISTS report_golden_samples (
+  id TEXT PRIMARY KEY,name TEXT NOT NULL,calc_type TEXT NOT NULL DEFAULT '',region TEXT NOT NULL DEFAULT '',tags_json TEXT NOT NULL DEFAULT '[]',
+  source_project_id TEXT NOT NULL DEFAULT '',sample_json TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'candidate',user_id INTEGER NOT NULL,created_by TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_report_golden_samples_status ON report_golden_samples(status,calc_type,updated_at);
+CREATE TABLE IF NOT EXISTS report_golden_runs (
+  id TEXT PRIMARY KEY,sample_id TEXT NOT NULL,user_id INTEGER NOT NULL,score INTEGER NOT NULL DEFAULT 0,passed INTEGER NOT NULL DEFAULT 0,
+  metrics_json TEXT NOT NULL DEFAULT '{}',result_json TEXT NOT NULL DEFAULT '{}',candidate_hash TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_report_golden_runs_sample ON report_golden_runs(sample_id,created_at);
+
 -- AI可研生成（对话式）· 会话进度存档，每人一份，覆盖式保存
 CREATE TABLE IF NOT EXISTS aireport_sessions (
   user_id INTEGER PRIMARY KEY,
@@ -213,3 +225,31 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
   published_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_status_updated ON wiki_pages(status, updated_at DESC);
+
+-- Investment OS Project Brain：在旧 projects JSON 之上增加统一索引、决策与阶段历史，不复制大附件。
+CREATE TABLE IF NOT EXISTS project_facts (
+  id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,fact_type TEXT NOT NULL,fact_key TEXT NOT NULL,label TEXT DEFAULT '',value_json TEXT NOT NULL DEFAULT 'null',unit TEXT DEFAULT '',source_type TEXT DEFAULT '',source_ref TEXT DEFAULT '',confidence REAL NOT NULL DEFAULT 1,status TEXT NOT NULL DEFAULT 'candidate',valid_from TEXT DEFAULT '',valid_to TEXT DEFAULT '',version INTEGER NOT NULL DEFAULT 1,created_by TEXT DEFAULT '',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_facts_version ON project_facts(project_id,user_id,fact_key,version);
+CREATE INDEX IF NOT EXISTS idx_project_facts_lookup ON project_facts(project_id,user_id,status,updated_at);
+CREATE TABLE IF NOT EXISTS project_metrics (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,metric_key TEXT NOT NULL,label TEXT DEFAULT '',value_json TEXT NOT NULL DEFAULT 'null',unit TEXT DEFAULT '',calc_snapshot_id TEXT DEFAULT '',lineage_json TEXT NOT NULL DEFAULT '{}',version INTEGER NOT NULL DEFAULT 1,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_project_metrics_lookup ON project_metrics(project_id,user_id,metric_key,version);
+CREATE TABLE IF NOT EXISTS project_artifacts (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,artifact_type TEXT NOT NULL,title TEXT DEFAULT '',module_ref TEXT DEFAULT '',version TEXT DEFAULT '',status TEXT DEFAULT 'draft',evidence_audit_id TEXT DEFAULT '',meta_json TEXT NOT NULL DEFAULT '{}',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_project_artifacts_lookup ON project_artifacts(project_id,user_id,artifact_type,updated_at);
+CREATE TABLE IF NOT EXISTS project_events (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,event_type TEXT NOT NULL,actor TEXT DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_project_events_lookup ON project_events(project_id,user_id,created_at);
+CREATE TABLE IF NOT EXISTS project_decisions (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,stage_key TEXT DEFAULT 'feasibility',topic TEXT NOT NULL,options_json TEXT NOT NULL DEFAULT '[]',decision_text TEXT DEFAULT '',evidence_ids_json TEXT NOT NULL DEFAULT '[]',scenario_ids_json TEXT NOT NULL DEFAULT '[]',owner TEXT DEFAULT '',status TEXT NOT NULL DEFAULT 'candidate',created_by TEXT DEFAULT '',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+
+-- Investment OS阶段4—6：会议行动化、情景决策包与生产验收台账。
+CREATE TABLE IF NOT EXISTS project_meetings (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,title TEXT NOT NULL,content TEXT NOT NULL,extraction_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'candidate',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS project_tasks (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,title TEXT NOT NULL,owner TEXT DEFAULT '',due_date TEXT DEFAULT '',source_ref TEXT DEFAULT '',status TEXT NOT NULL DEFAULT 'candidate',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS project_risks (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,title TEXT NOT NULL,risk_level TEXT DEFAULT 'normal',owner TEXT DEFAULT '',source_ref TEXT DEFAULT '',status TEXT NOT NULL DEFAULT 'candidate',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS project_scenarios (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,name TEXT NOT NULL,kind TEXT NOT NULL,calc_type TEXT DEFAULT '',calc_snapshot_id TEXT NOT NULL,engine TEXT NOT NULL DEFAULT 'whitebox',params_json TEXT NOT NULL DEFAULT '{}',metrics_json TEXT NOT NULL DEFAULT '{}',risks_json TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL DEFAULT 'draft',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS project_decision_packages (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,title TEXT NOT NULL,scenario_id TEXT NOT NULL,decision_id TEXT DEFAULT '',package_json TEXT NOT NULL DEFAULT '{}',audit_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'blocked',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS project_evaluations (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,evaluation_type TEXT NOT NULL,result_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'draft',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS optimization_ledger (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,title TEXT NOT NULL,evidence TEXT DEFAULT '',before_value TEXT DEFAULT '',after_value TEXT DEFAULT '',actual_benefit TEXT DEFAULT '',status TEXT NOT NULL DEFAULT 'candidate',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_project_decisions_lookup ON project_decisions(project_id,user_id,status,updated_at);
+CREATE TABLE IF NOT EXISTS project_change_sets (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,title TEXT DEFAULT '',before_json TEXT NOT NULL DEFAULT '{}',after_json TEXT NOT NULL DEFAULT '{}',impact_json TEXT NOT NULL DEFAULT '{}',approval_status TEXT NOT NULL DEFAULT 'preview',created_by TEXT DEFAULT '',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_project_changes_lookup ON project_change_sets(project_id,user_id,created_at);
+CREATE TABLE IF NOT EXISTS project_stage_history (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,from_stage TEXT DEFAULT '',to_stage TEXT NOT NULL,reason TEXT DEFAULT '',approved_by TEXT DEFAULT '',changed_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_project_stage_history_lookup ON project_stage_history(project_id,user_id,changed_at);

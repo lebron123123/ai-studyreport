@@ -5,12 +5,15 @@
 import { verifyAuth, json } from "./_auth.js";
 
 import { adaptEnv } from "./_adapters.js";
+import "../../project-brain.js";
 
 function parseData(raw){
   try{ return typeof raw==="string"?JSON.parse(raw):(raw||{}); }catch(e){ return {}; }
 }
 function projectStage(data){
   const wf=data.workflow||{},chapters=Array.isArray(data.chapters)?data.chapters:[];
+  const investmentStage=wf.management&&wf.management.investmentStage;
+  if(investmentStage&&globalThis.ProjectBrain){const stage=globalThis.ProjectBrain.stage(investmentStage);return {key:investmentStage,label:stage.label,progress:stage.progress};}
   const sections=chapters.flatMap(c=>Array.isArray(c.sections)?c.sections:[]);
   const generated=sections.filter(s=>String(s.editedHtml||s.content||"").trim()).length;
   if(data.signed)return {key:"signed",label:"已签发",progress:100};

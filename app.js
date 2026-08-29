@@ -61,6 +61,7 @@ function renderTOC(){
   if(appMode===null){
     const HM = [
       {id:"homeAiReport",ic:"✨", label:"AI可研生成"},
+      {id:"homeInvestmentOS",ic:"◈", label:"投资全周期"},
       {id:"homeCalc",  ic:"📊", label:"财务测算"},
       {id:"homeReview",ic:"🔍", label:"可研智能审查"},
       {id:"homeReport",ic:"📄", label:"可研生成"},
@@ -74,7 +75,7 @@ function renderTOC(){
     items += '<div class="toc-item" style="cursor:pointer;" onclick="goHome()"><span class="num">⌂</span><span>返回首页</span></div>';
   }
   if(appMode==="aireport"){
-    items += '<div class="toc-item" data-project-manager style="cursor:pointer;"><span class="num">▣</span><span>项目管理</span></div>';
+    items += '<div class="toc-item" data-project-manager style="cursor:pointer;"><span class="num">◈</span><span>投资全周期</span></div>';
   }
   if(appMode==="calc"){
     const CS = ["选择类型","参数录入","测算结果"];
@@ -102,7 +103,10 @@ function renderTOC(){
   el.querySelectorAll("[data-goc]").forEach(it=>{ it.onclick = ()=>{ scStep = +it.dataset.goc; renderTOC(); renderSheet(); }; });
   el.querySelectorAll("[data-gov]").forEach(it=>{ it.onclick = ()=>{ rvStep = +it.dataset.gov; renderTOC(); renderSheet(); }; });
   el.querySelectorAll("[data-home]").forEach(it=>{
-    it.onclick = ()=>{ const card = document.getElementById(it.dataset.home); if(card) card.click(); };
+    it.onclick = ()=>{
+      if(it.dataset.home==="homeInvestmentOS"){ openProjectsPanel(); return; }
+      const card = document.getElementById(it.dataset.home); if(card) card.click();
+    };
   });
   el.querySelectorAll("[data-project-manager]").forEach(it=>{it.onclick=()=>openProjectsPanel();});
 }
@@ -266,9 +270,17 @@ function bindEvents(){
       };
     });
   };
-  if(s("signBtn")) s("signBtn").onclick = ()=>{ signed=true; saveDraft(); renderSheet(); };
+  if(s("signBtn")) s("signBtn").onclick = ()=>{
+    const evidenceAudit=typeof preSubmitAuditForCurrentReport==="function"?preSubmitAuditForCurrentReport():{ready:true};
+    if(!evidenceAudit.ready){
+      const issues=runAudit();const box=document.getElementById("auditBox");if(box)box.innerHTML=auditPanelHtml(issues);
+      alert("签发前审计发现 "+evidenceAudit.blockerCount+" 项硬阻断。请先处理数字无来源或正文版本过期问题；普通资料缺口不会阻止继续完善。");return;
+    }
+    signed=true;if(projectWorkflow)projectWorkflow.reviewSnapshot={status:"signed",signedAt:new Date().toISOString(),evidenceAudit:{ready:true,claimCoverage:evidenceAudit.claimCoverage,graphHash:evidenceAudit.graph.hash}};saveDraft();renderSheet();
+  };
   if(s("printBtn")) s("printBtn").onclick = ()=> window.print();
   if(s("exportWordBtn")) s("exportWordBtn").onclick = exportWord;
+  if(s("goldenCandidateBtn")) s("goldenCandidateBtn").onclick = async()=>{const b=s("goldenCandidateBtn"),old=b.textContent;b.disabled=true;b.textContent="正在提交…";try{const d=await saveCurrentAsGoldenCandidate();alert(d.message||"已提交黄金样本候选");}catch(e){alert("提交失败："+e.message);}finally{b.disabled=false;b.textContent=old;}};
   document.querySelectorAll(".chk").forEach(chk=>{ chk.onchange = e=>{ chapters[+e.target.dataset.idx].checked = e.target.checked; }; });
   if(document.querySelector(".cnum")) animateCountUps();
   // 复核页：编辑实时写回数据层（修复"返回再进来编辑丢失"）

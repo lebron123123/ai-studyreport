@@ -346,7 +346,7 @@ async function runGeneration(){
   }
   genBtn.style.display = "none";
   document.getElementById("toStep5r").style.display = "inline-block";
-  if(window.ProjectWorkflow)window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"完成初稿生成"});
+  if(window.ProjectWorkflow)window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("完成初稿生成"));
   saveDraft();
   bindEvents();
 }
@@ -496,6 +496,17 @@ function provDetailHtml(p){
     + '🤖 生成模型：' + escapeHtml(p.model||"-") + '　⏱ 生成时间：' + (p.generatedAt ? new Date(p.generatedAt).toLocaleString("zh-CN") : "-") + '</div>';
   return h;
 }
+// 报告版本只绑定各输入快照的标识/哈希，不复制知识库与联网正文，兼顾追溯和存储体积。
+function currentReportVersionMeta(reason){
+  const provs=[];(chapters||[]).forEach(c=>(c.sections||[]).forEach(s=>{if(s.prov)provs.push(s.prov);}));
+  const models=[...new Set(provs.map(p=>p.model).filter(Boolean))];
+  return {reason:reason||"报告保存",projectData:project,parameterSet:calcParams||null,calcEngineVersion:"whitebox-2026-08",
+    knowledgeSnapshot:{localFiles:(kbEntries||[]).map(x=>({title:x.title,length:String(x.content||"").length})),rag:provs.flatMap(p=>p.rag||[]).map(x=>({title:x.title,section:x.section,score:x.score,lifecycle:x.lifecycle}))},
+    evidenceSnapshot:provs.map((p,i)=>({section:i,excel:p.excelSources||[],web:p.webEvidence||p.web||[],projectFields:p.projectFields||[]})),
+    workflowVersion:"ai-studyreport-workflow-2026-08-28",promptVersion:"report-generation-2026-08-28",model:models.join(",")||null,
+    reviewSnapshot:projectWorkflow&&projectWorkflow.reviewSnapshot||null};
+}
+
 function bindProvToggle(scope){
   (scope||document).querySelectorAll(".prov-badge").forEach(b=>{
     if(b.__bound) return; b.__bound = true;

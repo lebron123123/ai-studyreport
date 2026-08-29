@@ -374,7 +374,31 @@ function runAudit(){
     let maps=[]; try{maps=JSON.parse(sessionStorage.getItem("resolvedExcelMappings")||"[]")||[];}catch(e){}
     excelMappingChecks(maps,calcParams,calcResult&&calcResult.summary,fullText).forEach(x=>issues.push({sev:x.sev,cn:"—",si:null,secTitle:"",chName:"Excel映射三方核对",msg:x.msg}));
   }
+  // Claim—Evidence签发审计：数字结论无来源、正文绑定旧版本属于硬阻断；普通判断缺证据只提醒，不把框架稿全部卡死。
+  if(appMode!=="review"&&window.ReportEvidenceGraph){
+    const evidenceAudit=window.ReportEvidenceGraph.preSubmitAudit(active);
+    evidenceAudit.issues.forEach(x=>issues.push({sev:x.severity==="blocker"?"err":x.severity==="warning"?"warn":"info",cn:x.cn==null?"—":x.cn,si:x.si==null?null:x.si,secTitle:x.title||"",chName:x.chapter||"证据图谱",msg:"["+x.code+"] "+x.message}));
+  }
   return issues;
+}
+
+function preSubmitAuditForCurrentReport(){
+  if(!window.ReportEvidenceGraph)return {ready:true,blockerCount:0,warningCount:0,claimCoverage:0,graph:{claims:[],evidence:[],sources:[]},issues:[]};
+  return window.ReportEvidenceGraph.preSubmitAudit(chapters.filter(c=>c.checked));
+}
+function trustworthyReportCardHtml(){
+  const audit=preSubmitAuditForCurrentReport(),dep=window.ReportDependency?window.ReportDependency.buildGraph({calcType:calcType,paramKeys:Object.keys(calcParams||{}),chapters:chapters.filter(c=>c.checked)}):null;
+  const blockers=audit.blockerCount||0,color=blockers?"var(--seal-red)":"var(--ok-green)";
+  const issueRows=(audit.issues||[]).slice(0,30).map(x=>'<div class="audit-row" style="display:flex;gap:8px;"><b style="color:'+(x.severity==="blocker"?'var(--seal-red)':'#C99A2E')+';">'+(x.severity==="blocker"?'阻断':'提醒')+'</b><span>'+escapeHtml((x.chapter?x.chapter+' · ':'')+(x.title||''))+'</span><span>'+escapeHtml(x.message||'')+'</span></div>').join('');
+  return '<details class="cf-chart" style="margin:0 0 16px;"><summary class="cf-head" style="cursor:pointer;"><span>可信可研图谱与提交前审计</span><span style="color:'+color+';">'+(blockers?'存在 '+blockers+' 项签发阻断':'硬阻断已通过')+'</span></summary>'
+    +'<div style="display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:8px;padding:12px 0;"><div class="ac-cell"><span class="ac-l">参数依赖</span><b>'+(dep?dep.parameters:0)+' 项</b></div><div class="ac-cell"><span class="ac-l">联动指标</span><b>'+(dep?dep.metrics:0)+' 项</b></div><div class="ac-cell"><span class="ac-l">结论Claim</span><b>'+audit.graph.claims.length+' 条</b></div><div class="ac-cell"><span class="ac-l">证据覆盖率</span><b>'+audit.claimCoverage+'%</b></div></div>'
+    +'<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">路径：参数 → 白箱指标 → 受影响章节；结论 → 证据 → 原始文件/网页/单元格/测算快照。展开后可在签发前集中处理。</div>'
+    +(issueRows?'<div style="max-height:230px;overflow:auto;">'+issueRows+'</div>':'<div style="color:var(--ok-green);">✓ 所有数字结论均已绑定可追溯依据，正文未发现旧版本残留。</div>')+'</details>';
+}
+async function saveCurrentAsGoldenCandidate(){
+  if(!window.ReportGolden)throw new Error("黄金评测模块未加载");
+  const sample=ReportGolden.createSample({name:(project.name||"未命名项目")+"黄金样本",calcType:calcType||rptCtype||"",projectType:calcType||rptCtype||"",region:project.location||"",sourceProjectId:projectWorkflow&&projectWorkflow.projectId||"",tags:["真实项目","AI可研"],chapters:chapters.filter(c=>c.checked),expectedFacts:calcResult&&calcResult.summary||{},reviewBaseline:{signed:!!signed,evidenceAudit:preSubmitAuditForCurrentReport()}});
+  const r=await fetch("/api/reportgolden",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"create",sample})}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"提交失败");return d;
 }
 function auditPanelHtml(issues){
   const err = issues.filter(x=>x.sev==="err"), warn = issues.filter(x=>x.sev==="warn"), info = issues.filter(x=>x.sev==="info");
@@ -406,6 +430,7 @@ function stepReview(){
     +(!signed?'<div class="watermark">AI初稿 · 未经复核</div>':'')
     + archiveCardHtml()
     + workflowVersionCardHtml()
+    + trustworthyReportCardHtml()
     +(staleCount?'<div class="wf-sync-banner"><b>'+staleCount+'个小节需要同步或复核</b><span>测算或依据已变化，旧正文不再标记为最新。</span><button class="btn" id="wfUpdateStale">只更新未锁定的受影响章节</button></div>':'')
     +'<div class="step-desc">每一段正文可直接点击编辑。数据类子章节的表格须由人工替换为真实测算结果后，方可确认签发。</div>'
     +'<div class="cf-chart" style="margin:0 0 16px;"><div class="cf-head"><span>签发前审核检查</span><span style="display:flex; gap:8px;"><button class="ub-btn" id="auditBtn">运行审核检查</button><button class="ub-btn" id="aiAuditBtn">AI深度审核</button></span></div><div id="aiAuditBox" style="font-size:12.5px; display:none;"></div><div id="auditBox" style="font-size:12.5px;"><span style="color:var(--ink-soft);">检查项：内容完整性（未生成/待填）、规范性（篇幅/数据表格/AI穿帮语）、全文与测算结果的数据一致性。</span></div></div>'
@@ -413,7 +438,7 @@ function stepReview(){
     + (typeof renderReportTableAppendix==="function"?renderReportTableAppendix():"")
     +(signed?'<div class="seal"><span>单位复核确认<br>'+new Date().toLocaleDateString('zh-CN')+'<br>责任人签发</span></div><div class="final-banner">✓ 已完成人工复核签发，可导出正式文本</div>':'')
     +'<div class="actions"><button class="btn ghost" id="backStep4r">← 返回生成</button>'
-    +'<button class="btn ghost" id="exportWordBtn">导出 Word</button>'
+    +'<button class="btn ghost" id="exportWordBtn">导出 Word</button><button class="btn ghost" id="goldenCandidateBtn">纳入黄金评测候选</button>'
     +(!signed?'<button class="btn" id="signBtn">人工复核 · 确认签发</button>':'<button class="btn" id="printBtn">打印</button>')+'</div>';
 }
 

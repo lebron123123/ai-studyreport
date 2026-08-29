@@ -1,0 +1,43 @@
+{
+  "id": "anju-mascot-v2",
+  "name": "安小居",
+  "description": "由深安居标志中的安居屋造型衍生的蓝色数字助手吉祥物；动作格已独立归一化，避免相邻帧串入。",
+  "baseImage": "anju-mascot-base-v1.png",
+  "spriteSheet": "anju-mascot-sprite-v2.png",
+  "grid": {
+    "columns": 4,
+    "rows": 4,
+    "sheetWidth": 1536,
+    "sheetHeight": 1024,
+    "cellWidth": 384,
+    "cellHeight": 256,
+    "background": "transparent",
+    "safeGutter": "每格角色独立居中，运行时不会显示相邻格"
+  },
+  "playback": {
+    "engine": "requestAnimationFrame",
+    "virtualFrameRate": "跟随屏幕刷新率，通常约60fps",
+    "morphDurationMs": 1680,
+    "morphVirtualFramesAt60Hz": 100,
+    "preferredPresence": "安小居约60%，蓝喵约40%",
+    "roamRoute": "沿屏幕四周矩形边界，相邻节点移动，不横穿中部内容"
+  },
+  "actions": [
+    { "index": 0, "key": "idle", "label": "待机" },
+    { "index": 1, "key": "blink", "label": "眨眼" },
+    { "index": 2, "key": "wave", "label": "挥手" },
+    { "index": 3, "key": "think", "label": "思考" },
+    { "index": 4, "key": "point-right", "label": "向右指引" },
+    { "index": 5, "key": "walk-right", "label": "向右行走" },
+    { "index": 6, "key": "run-right", "label": "向右奔跑" },
+    { "index": 7, "key": "jump", "label": "跳跃" },
+    { "index": 7, "key": "vault", "label": "跨越低障碍", "rendering": "跳跃姿态叠加独立障碍动画" },
+    { "index": 8, "key": "stretch", "label": "伸展" },
+    { "index": 9, "key": "sit-rest", "label": "坐下休息" },
+    { "index": 10, "key": "sleep", "label": "睡觉" },
+    { "index": 11, "key": "inspect", "label": "查看清单" },
+    { "index": 12, "key": "carry-folder", "label": "抱资料夹" },
+    { "index": 14, "key": "celebrate", "label": "庆祝" },
+    { "index": 15, "key": "transform", "label": "变身光效" }
+  ]
+}

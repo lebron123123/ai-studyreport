@@ -21,9 +21,9 @@ test("项目级AI可研会话按projectId隔离、可覆盖更新并删除",asyn
   const env={DB:memoryDb(),SESSION_SECRET:"secret"},authorization=await auth(env);
   async function save(projectId,state){const request=new Request("http://x/api/aireport",{method:"POST",headers:{authorization,"content-type":"application/json"},body:JSON.stringify({action:"saveState",projectId,state})});return (await onRequestPost({request,env})).json();}
   async function load(projectId){const request=new Request("http://x/api/aireport?projectId="+projectId,{headers:{authorization}});return (await onRequestGet({request,env})).json();}
-  assert.equal((await save("project-a1",{step:"calc",value:1})).ok,true);
+  assert.equal((await save("project-a1",{step:"calc",value:1,materialCheckOpen:true})).ok,true);
   assert.equal((await save("project-b2",{step:"report",value:2})).ok,true);
-  assert.equal((await load("project-a1")).state.value,1);assert.equal((await load("project-b2")).state.value,2);
+  const restoredA=await load("project-a1");assert.equal(restoredA.state.value,1);assert.equal(restoredA.state.materialCheckOpen,true);assert.equal((await load("project-b2")).state.value,2);
   await save("project-a1",{step:"done",value:3});assert.equal((await load("project-a1")).state.value,3);
   const del=new Request("http://x/api/aireport?projectId=project-a1",{method:"DELETE",headers:{authorization}});await onRequestDelete({request:del,env});
   assert.equal((await load("project-a1")).state,null);assert.equal((await load("project-b2")).state.value,2);

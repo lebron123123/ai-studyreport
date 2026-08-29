@@ -1,0 +1,41 @@
+{
+  "id": "anju-mascot-v1",
+  "name": "安小居",
+  "description": "由深安居标志中的安居屋造型衍生的蓝色数字助手吉祥物。",
+  "baseImage": "anju-mascot-base-v1.png",
+  "spriteSheet": "anju-mascot-sprite-v1.png",
+  "grid": {
+    "columns": 4,
+    "rows": 4,
+    "sheetWidth": 1536,
+    "sheetHeight": 1024,
+    "cellWidth": 384,
+    "cellHeight": 256,
+    "background": "transparent"
+  },
+  "playback": {
+    "engine": "requestAnimationFrame",
+    "virtualFrameRate": "跟随屏幕刷新率，通常约60fps",
+    "morphDurationMs": 1680,
+    "morphVirtualFramesAt60Hz": 100,
+    "preferredPresence": "安小居约70%至78%，蓝喵约22%至30%"
+  },
+  "actions": [
+    { "index": 0, "key": "idle", "label": "待机", "purpose": "常态陪伴与等待用户操作" },
+    { "index": 1, "key": "blink", "label": "眨眼", "purpose": "低干扰微动作" },
+    { "index": 2, "key": "wave", "label": "挥手", "purpose": "欢迎用户或主动问候" },
+    { "index": 3, "key": "think", "label": "思考", "purpose": "AI正在分析或组织答案" },
+    { "index": 4, "key": "point-right", "label": "向右指引", "purpose": "引导用户进入功能或查看提示" },
+    { "index": 5, "key": "walk-right", "label": "向右行走", "purpose": "屏幕小范围悠闲移动" },
+    { "index": 6, "key": "run-right", "label": "向右奔跑", "purpose": "偶发跨区域移动" },
+    { "index": 7, "key": "jump", "label": "跳跃", "purpose": "完成任务或获得新消息时反馈" },
+    { "index": 8, "key": "stretch", "label": "伸展", "purpose": "长时间待机后的自然动作" },
+    { "index": 9, "key": "sit-rest", "label": "坐下休息", "purpose": "静默陪伴与降低干扰" },
+    { "index": 10, "key": "sleep", "label": "睡觉", "purpose": "长时间无操作时休眠" },
+    { "index": 11, "key": "inspect", "label": "查看清单", "purpose": "检查材料、任务或审查结果" },
+    { "index": 12, "key": "carry-folder", "label": "抱资料夹", "purpose": "上传、整理或沉淀资料" },
+    { "index": 13, "key": "press-button", "label": "点击按钮", "purpose": "示范工具调用或执行操作" },
+    { "index": 14, "key": "celebrate", "label": "庆祝", "purpose": "任务成功、生成完成或审查通过" },
+    { "index": 15, "key": "transform", "label": "变身光效", "purpose": "安小居与蓝猫形态互相切换" }
+  ]
+}
