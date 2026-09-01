@@ -7,7 +7,9 @@ const root=path.resolve(__dirname,"..");
 const templatePath=path.join(root,"data","report-table-templates-rent-v1.json");
 const templateRaw=fs.readFileSync(templatePath,"utf8");
 const templateSet=JSON.parse(templateRaw);
-global.fetch=async()=>({ok:true,json:async()=>templateSet});
+const housingSet=JSON.parse(fs.readFileSync(path.join(root,"data","report-table-templates-gaibao-housing-v1.json"),"utf8"));
+const commercialSet=JSON.parse(fs.readFileSync(path.join(root,"data","report-table-templates-gaibao-commercial-v1.json"),"utf8"));
+global.fetch=async url=>({ok:true,json:async()=>String(url).includes("gaibao-housing")?housingSet:String(url).includes("gaibao-commercial")?commercialSet:templateSet});
 const ReportTableTemplates=require("../report-table-templates.js");
 
 test("出租类模板采用无损紧凑存储，运行时结构和展示字段不变",()=>{
@@ -97,4 +99,35 @@ test("33套模板可按正文与财务附表两章打包为完整Word查看版",
   const buffer=await docx.Packer.toBuffer(doc);
   assert.ok(buffer.length>50000);
   assert.equal(buffer.subarray(0,2).toString(),"PK");
+});
+
+test("非居改保和商业改造分别加载14张与22张Word表格，场景之间不串表",async()=>{
+  await ReportTableTemplates.load("gaibao-housing");await ReportTableTemplates.load("gaibao-commercial");
+  assert.deepEqual(ReportTableTemplates.stats("gaibao-housing"),{templates:14,physicalTables:14,appendix:0,longPeriod:0});
+  assert.deepEqual(ReportTableTemplates.stats("gaibao-commercial"),{templates:22,physicalTables:22,appendix:0,longPeriod:0});
+  assert.equal(ReportTableTemplates.resolveType("gaibao",{businessScenario:"housing_conversion"}),"gaibao-housing");
+  assert.equal(ReportTableTemplates.resolveType("gaibao",{businessScenario:"commercial_renovation"}),"gaibao-commercial");
+  assert.ok(ReportTableTemplates.forSection("gaibao-housing","项目总论","项目概况").some(t=>t.title==="改建条件可行性研判表"));
+  assert.ok(ReportTableTemplates.forSection("gaibao-commercial","项目建设必要性","遏制经营下滑态势").some(t=>t.title==="经营现状及趋势分析表"));
+  assert.equal(ReportTableTemplates.forSection("gaibao-housing","项目建设必要性","遏制经营下滑态势").length,0);
+});
+
+test("后台差异支持新增、删除、章节与匹配小节修改",()=>{
+  const base=structuredClone(housingSet),edited=structuredClone(housingSet),removed=edited.templates.shift();
+  edited.templates[0].chapter="第二章 测试章节";edited.templates[0].match=["测试小节"];
+  edited.templates.push({...structuredClone(edited.templates[0]),id:"custom-gaibao-housing-test",title:"管理员新增表"});
+  const overrides=ReportTableTemplates.buildOverrides(edited,base),applied=ReportTableTemplates.applyOverrides(base,overrides);
+  assert.ok(overrides.deletedTemplateIds.includes(removed.id));assert.equal(overrides.addedTemplates.length,1);
+  assert.equal(applied.templates.some(t=>t.id===removed.id),false);assert.ok(applied.templates.some(t=>t.id==="custom-gaibao-housing-test"));
+  assert.equal(applied.templates.find(t=>t.id===edited.templates[0].id).chapter,"第二章 测试章节");
+});
+
+test("两类改造表格均能被74项逻辑的实际章节自动调出",async()=>{
+  const logic=JSON.parse(fs.readFileSync(path.join(root,"data","report-logic-gaibao-v1.json"),"utf8"));
+  for(const [type,scenario,set] of [["gaibao-housing","housing_conversion",housingSet],["gaibao-commercial","commercial_renovation",commercialSet]]){
+    await ReportTableTemplates.load(type);const matched=new Set();
+    logic.rules.filter(rule=>!rule.scenarios?.length||rule.scenarios.includes(scenario)).forEach(rule=>ReportTableTemplates.forSection(type,rule.chapter,rule.section).forEach(template=>matched.add(template.id)));
+    const missing=set.templates.filter(template=>!matched.has(template.id)).map(template=>template.title);
+    assert.deepEqual(missing,[],type+"存在无法自动调出的表格");
+  }
 });

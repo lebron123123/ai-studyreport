@@ -16,20 +16,35 @@ async function ensureSchema(env){
 function validateOverrides(input,expectedType="rent"){
   const source=input&&typeof input==="object"?input:{};
   const projectType=clean(expectedType||source.projectType,30)||"rent";
-  if(projectType!=="rent")throw new Error("当前仅开放出租类表格模板治理");
+  if(!["rent","gaibao-housing","gaibao-commercial"].includes(projectType))throw new Error("不支持的表格模板库");
   const templates=source.templates&&typeof source.templates==="object"?source.templates:{};
-  const output={projectType,templates:{}};
+  const output={projectType,templates:{},deletedTemplateIds:[],addedTemplates:[]};
+  const deleted=Array.isArray(source.deletedTemplateIds)?source.deletedTemplateIds:[];
+  if(deleted.length>100)throw new Error("删除表格数量异常");
+  output.deletedTemplateIds=deleted.map(id=>clean(id,120)).filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i);
   const ids=Object.keys(templates);
   if(ids.length>60)throw new Error("表格覆盖项数量异常");
   ids.forEach(id=>{
     const item=templates[id]||{},next={};
     const title=clean(item.title,240);if(title)next.title=title;
+    const chapter=clean(item.chapter,240);if(chapter)next.chapter=chapter;
+    if(Array.isArray(item.match))next.match=item.match.slice(0,20).map(x=>clean(x,120)).filter(Boolean);
     const cells=item.cells&&typeof item.cells==="object"?item.cells:{};
     const keys=Object.keys(cells);if(keys.length>20000)throw new Error("单元格覆盖项数量异常："+id);
     const normalized={};
     keys.forEach(key=>{if(!/^\d+:\d+:\d+$/.test(key))throw new Error("单元格坐标格式有误："+key);normalized[key]=clean(cells[key],1000);});
     if(keys.length)next.cells=normalized;
-    if(next.title||next.cells)output.templates[clean(id,120)]=next;
+    if(next.title||next.chapter||next.match||next.cells)output.templates[clean(id,120)]=next;
+  });
+  const added=Array.isArray(source.addedTemplates)?source.addedTemplates:[];
+  if(added.length>50)throw new Error("新增表格数量异常");
+  output.addedTemplates=added.map((template,index)=>{
+    const id=clean(template?.id,120);if(!id)throw new Error("新增表格缺少ID："+(index+1));
+    const segments=Array.isArray(template.segments)?template.segments:[];if(!segments.length||segments.length>20)throw new Error("新增表格结构异常："+id);
+    let cellCount=0;
+    const safeSegments=segments.map(segment=>({sourceTableNumber:Number(segment.sourceTableNumber||0),gridWidths:(Array.isArray(segment.gridWidths)?segment.gridWidths:[]).slice(0,50).map(Number),rows:(Array.isArray(segment.rows)?segment.rows:[]).slice(0,300).map(row=>({cells:(Array.isArray(row.cells)?row.cells:[]).slice(0,50).map(cell=>{cellCount++;return {text:clean(cell.text,1000),col:Number(cell.col||0),colSpan:Math.max(1,Number(cell.colSpan||1)),vMerge:["restart","continue"].includes(cell.vMerge)?cell.vMerge:"",fill:clean(cell.fill,12),align:clean(cell.align,20),role:cell.role==="value"?"value":"static"};})}))}));
+    if(cellCount>20000)throw new Error("新增表格单元格过多："+id);
+    return {id,title:clean(template.title,240)||"新建表格",projectType,businessScenario:clean(template.businessScenario,40),version:Math.max(1,Number(template.version||1)),chapter:clean(template.chapter,240),match:(Array.isArray(template.match)?template.match:[]).slice(0,20).map(x=>clean(x,120)).filter(Boolean),placement:clean(template.placement,500),appendix:!!template.appendix,longPeriod:!!template.longPeriod,sourceTableNumbers:[],segments:safeSegments};
   });
   return output;
 }

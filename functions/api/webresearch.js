@@ -14,6 +14,8 @@ async function wrEnsureSchema(env){
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_web_evidence_bindings_project ON web_evidence_bindings(user_id,project_id,logic_id,status)").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS web_provider_health (provider TEXT PRIMARY KEY,status TEXT NOT NULL DEFAULT 'unknown',latency_ms INTEGER NOT NULL DEFAULT 0,last_error TEXT DEFAULT '',success_count INTEGER NOT NULL DEFAULT 0,failure_count INTEGER NOT NULL DEFAULT 0,last_checked_at BIGINT NOT NULL)").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS web_search_lenses (id TEXT PRIMARY KEY,name TEXT NOT NULL,dimension TEXT DEFAULT '',domains_json TEXT NOT NULL DEFAULT '[]',housing_types_json TEXT NOT NULL DEFAULT '[]',query_suffix TEXT DEFAULT '',status TEXT NOT NULL DEFAULT 'active',version INTEGER NOT NULL DEFAULT 1,updated_by TEXT DEFAULT '',updated_at BIGINT NOT NULL)").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS data_requirement_refinements (id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,project_id TEXT NOT NULL,logic_id TEXT NOT NULL,version INTEGER NOT NULL,requirement_json TEXT NOT NULL,feedback TEXT DEFAULT '',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL,UNIQUE(user_id,project_id,logic_id,version))").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_requirement_refinement_latest ON data_requirement_refinements(user_id,project_id,logic_id,version DESC)").run();
   wrSchemaReady=true;
 }
 function wrId(prefix){return prefix+"_"+crypto.randomUUID();}
@@ -22,27 +24,53 @@ function wrHash(value){let h=2166136261;for(const c of String(value||"")){h^=c.c
 async function wrHealth(env,provider,ok,latency,error){const now=Date.now();await env.DB.prepare("INSERT INTO web_provider_health(provider,status,latency_ms,last_error,success_count,failure_count,last_checked_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(provider) DO UPDATE SET status=?,latency_ms=?,last_error=?,success_count=web_provider_health.success_count+?,failure_count=web_provider_health.failure_count+?,last_checked_at=?").bind(provider,ok?"healthy":"degraded",latency||0,error||"",ok?1:0,ok?0:1,now,ok?"healthy":"degraded",latency||0,error||"",ok?1:0,ok?0:1,now).run();}
 async function wrSaveEvidence(env,user,ctx,row){
   const id=wrId("evi"),now=Date.now(),canonical=wrCanonicalUrl(row.url),authority=wrAuthority(canonical,row.publisher);
-  await env.DB.prepare("INSERT INTO web_evidence(id,user_id,project_id,logic_id,chapter,section,query_text,title,url,canonical_url,publisher,published_at,fetched_at,source_type,authority_level,authority_score,excerpt,content_text,content_hash,data_period,provider,confidence,verification_status,status,metadata_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,user.userId,ctx.projectId||"",ctx.logicId||"",ctx.chapter||"",ctx.section||"",ctx.query||"",row.title||canonical,row.url,canonical,row.publisher||"",row.publishedAt||"",row.fetchedAt||"","web",row.authorityLevel||authority.level,row.authorityScore||authority.score,row.snippet||row.excerpt||"",row.contentText||"",wrHash((row.contentText||row.snippet||"")+canonical),ctx.dataPeriod||"",row.provider||"",row.confidence||authority.score,row.verificationStatus||"single","candidate",JSON.stringify({authorityReason:row.authorityReason||authority.reason,rank:row.rank||0}),now,now).run();
+  await env.DB.prepare("INSERT INTO web_evidence(id,user_id,project_id,logic_id,chapter,section,query_text,title,url,canonical_url,publisher,published_at,fetched_at,source_type,authority_level,authority_score,excerpt,content_text,content_hash,data_period,provider,confidence,verification_status,status,metadata_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,user.userId,ctx.projectId||"",ctx.logicId||"",ctx.chapter||"",ctx.section||"",ctx.query||"",row.title||canonical,row.url,canonical,row.publisher||"",row.publishedAt||"",row.fetchedAt||"","web",row.authorityLevel||authority.level,row.authorityScore||authority.score,row.snippet||row.excerpt||"",row.contentText||"",wrHash((row.contentText||row.snippet||"")+canonical),ctx.dataPeriod||"",row.provider||"",row.confidence||authority.score,row.verificationStatus||"single","candidate",JSON.stringify({authorityReason:row.authorityReason||authority.reason,rank:row.rank||0,qualityScore:row.qualityScore||0,qualityGrade:row.qualityGrade||"D",qualityReasons:row.qualityReasons||[],meetsRequirement:!!row.meetsRequirement}),now,now).run();
   return id;
 }
 async function wrListEvidence(env,user,body){
   const projectId=wrText(body.projectId,120),rows=(await env.DB.prepare("SELECT * FROM web_evidence WHERE user_id=? AND project_id=? AND status<>? ORDER BY authority_score DESC,updated_at DESC LIMIT 200").bind(user.userId,projectId,"archived").all()).results||[];
   const bindings=(await env.DB.prepare("SELECT evidence_id,logic_id,chapter,section,status FROM web_evidence_bindings WHERE user_id=? AND project_id=? AND status=?").bind(user.userId,projectId,"approved").all()).results||[],byEvidence={};
   for(const binding of bindings)(byEvidence[binding.evidence_id]||(byEvidence[binding.evidence_id]=[])).push(binding);
-  return rows.filter(x=>!body.chapter||x.chapter===body.chapter).filter(x=>!body.section||x.section===body.section).map(x=>({...x,logicIds:(byEvidence[x.id]||[]).map(y=>y.logic_id),bindings:byEvidence[x.id]||[],metadata:safeJson(x.metadata_json,{})}));
+  return rows.filter(x=>!body.chapter||x.chapter===body.chapter).filter(x=>!body.section||x.section===body.section).map(x=>{const metadata=safeJson(x.metadata_json,{});return {...x,logicIds:(byEvidence[x.id]||[]).map(y=>y.logic_id),bindings:byEvidence[x.id]||[],metadata,qualityScore:Number(metadata.qualityScore||0),qualityGrade:metadata.qualityGrade||"D",qualityReasons:metadata.qualityReasons||[],meetsRequirement:!!metadata.meetsRequirement};});
 }
 function safeJson(value,fallback){try{return JSON.parse(value);}catch(e){return fallback;}}
+function wrNormalizeRequirement(input){
+  const source=input&&typeof input==="object"?input:{},channels=["knowledge_base","provider","web_search","manual_upload","calculation_engine","derived_section"],fields=(Array.isArray(source.fields)?source.fields:[]).slice(0,20).map((field,index)=>({key:wrText(field?.key||"custom"+(index+1),50),label:wrText(field?.label||field,80),dataType:wrText(field?.dataType||"mixed",20),required:field?.required!==false})).filter(x=>x.label);
+  return {fields,timeScope:{kind:wrText(source.timeScope?.kind,50),maxAgeMonths:source.timeScope?.maxAgeMonths==null?null:wrClamp(source.timeScope.maxAgeMonths,1,240,36)},geoScope:{level:wrText(source.geoScope?.level,30),value:wrText(source.geoScope?.value,100)},allowedChannels:(Array.isArray(source.allowedChannels)?source.allowedChannels:[]).filter(x=>channels.includes(x)),quality:{minScore:wrClamp(source.quality?.minScore,60,100,80),minAuthority:["A","B","C","D"].includes(source.quality?.minAuthority)?source.quality.minAuthority:"A",requireCrossCheck:source.quality?.requireCrossCheck!==false},budget:{maxQueries:wrClamp(source.budget?.maxQueries,1,2,1),maxResults:wrClamp(source.budget?.maxResults,1,8,5),maxOutputTokens:wrClamp(source.budget?.maxOutputTokens,500,1000,900),maxSourcesAccepted:wrClamp(source.budget?.maxSourcesAccepted,1,4,2)}};
+}
+async function wrListRefinements(env,user,body){
+  const rows=(await env.DB.prepare("SELECT * FROM data_requirement_refinements WHERE user_id=? AND project_id=? ORDER BY logic_id,version DESC").bind(user.userId,wrText(body.projectId,120)).all()).results||[],latest={};
+  rows.forEach(row=>{if(!latest[row.logic_id])latest[row.logic_id]={id:row.id,ruleId:row.logic_id,version:Number(row.version),requirement:safeJson(row.requirement_json,{}),feedback:row.feedback||"",updatedAt:Number(row.updated_at)};});return latest;
+}
+const wrClamp=(value,min,max,fallback)=>Math.max(min,Math.min(Number(value)||fallback,max));
+function wrRequirementTokens(requirement){
+  const text=[...(requirement?.queryTerms||[]),...(requirement?.fields||[]).flatMap(x=>[x.key,x.label]),requirement?.title,requirement?.evidenceGoal].filter(Boolean).join(" ").toLowerCase();
+  return [...new Set(text.match(/[\u4e00-\u9fa5]{2,8}|[a-z0-9]{3,}/g)||[])].slice(0,40);
+}
+function wrEvidenceQuality(row,requirement,now=Date.now()){
+  const authority=String(row.authorityLevel||"D"),authorityPoints={A:35,B:29,C:19,D:8}[authority]||8,tokens=wrRequirementTokens(requirement),hay=[row.title,row.snippet,row.publisher,row.url].filter(Boolean).join(" ").toLowerCase();
+  const matched=tokens.filter(token=>hay.includes(token)),relevance=tokens.length?Math.min(30,Math.round(matched.length/Math.min(tokens.length,6)*30)):18;
+  const published=Date.parse(row.publishedAt||""),maxAge=Number(requirement?.timeScope?.maxAgeMonths)||60,ageMonths=Number.isFinite(published)?Math.max(0,(now-published)/(30.44*86400000)):null;
+  const freshness=ageMonths==null?6:ageMonths<=maxAge?15:ageMonths<=maxAge*2?8:2,cross=/cross|multi/.test(row.verificationStatus||"")?10:requirement?.quality?.requireCrossCheck?2:7;
+  const completeness=[row.title,row.url,row.publisher,row.publishedAt,row.snippet].filter(Boolean).length*2,score=Math.max(0,Math.min(100,authorityPoints+relevance+freshness+cross+completeness));
+  const minScore=Number(requirement?.quality?.minScore)||80,minAuthority=String(requirement?.quality?.minAuthority||"A"),rank={A:4,B:3,C:2,D:1},meetsAuthority=(rank[authority]||0)>=(rank[minAuthority]||4);
+  return {...row,qualityScore:score,qualityGrade:score>=90?"A":score>=80?"B":score>=65?"C":"D",qualityReasons:[`权威度${authority}`,`需求词命中${matched.length}项`,ageMonths==null?"发布日期待核":"时效约"+Math.round(ageMonths)+"个月",/cross|multi/.test(row.verificationStatus||"")?"已交叉核验":"单一来源"],meetsRequirement:score>=minScore&&meetsAuthority};
+}
 async function wrRunSearch(env,user,body){
-  const plan=body.plan?.queries?body.plan:buildHousingSearchPlan(body),queries=(body.query?[{dimension:"manual",query:wrText(body.query,220)}]:plan.queries).slice(0,Math.min(Number(body.maxQueries)||3,6)),runId=wrId("run"),now=Date.now();
+  const requirement=body.requirementSchema&&typeof body.requirementSchema==="object"?body.requirementSchema:null,budget=body.budget&&typeof body.budget==="object"?body.budget:requirement?.budget||{};
+  if(requirement&&requirement.webAllowed===false)return {skipped:true,stopReason:"精确数据需求禁止联网，应改用项目材料、数据接口或测算引擎",plan:{queries:[]},results:[],errors:[],budgetUsed:{queries:0,results:0,outputTokens:0}};
+  const maxQueries=wrClamp(budget.maxQueries||body.maxQueries,1,2,1),maxResults=wrClamp(budget.maxResults||body.maxResults,1,8,5),limit=wrClamp(body.limit||maxResults,1,5,5),maxOutputTokens=wrClamp(budget.maxOutputTokens,500,1000,900);
+  const exactQuery=wrText(body.query||requirement?.query,180),broadPlan=body.plan?.queries?body.plan:buildHousingSearchPlan({...body,maxQueries:1}),plan=exactQuery?{schemaVersion:requirement?.schemaVersion||1,queries:[{dimension:requirement?.dataNature||"precise",query:exactQuery}]}:broadPlan,queries=(exactQuery?plan.queries:broadPlan.queries).slice(0,maxQueries),runId=wrId("run"),now=Date.now();
   await env.DB.prepare("INSERT INTO web_search_runs(id,user_id,project_id,section_key,plan_json,status,query_count,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(runId,user.userId,body.projectId||"",[body.chapter,body.section].filter(Boolean).join("/"),JSON.stringify(plan),"running",queries.length,now,now).run();
-  const settled=[];for(let i=0;i<queries.length;i+=3){const batch=queries.slice(i,i+3);settled.push(...await Promise.all(batch.map(async q=>({q,out:await wrSearch(env,q.query,{limit:body.limit||10,providers:body.providers})}))));}
+  const settled=[];for(let i=0;i<queries.length;i+=2){const batch=queries.slice(i,i+2);settled.push(...await Promise.all(batch.map(async q=>({q,out:await wrSearch(env,q.query,{limit,providers:body.providers,maxOutputTokens})}))));}
   const raw=[];const errors=[];let provider="",latency=0;
   for(const item of settled){provider=provider||item.out.provider;latency+=item.out.latencyMs||0;item.out.results.forEach(x=>raw.push({...x,query:item.q.query,dimension:item.q.dimension}));errors.push(...(item.out.errors||[]));}
-  const verified=wrCrossVerify(wrDeduplicate(raw)).slice(0,Math.min(Number(body.maxResults)||30,60));const ids=[];
+  const verified=wrCrossVerify(wrDeduplicate(raw)).map(row=>wrEvidenceQuality(row,requirement,now)).sort((a,b)=>b.qualityScore-a.qualityScore||b.authorityScore-a.authorityScore).slice(0,maxResults);const ids=[];
   for(const row of verified)ids.push(await wrSaveEvidence(env,user,{...body,query:row.query},row));
   const ok=verified.length>0;await wrHealth(env,provider||"all",ok,latency,ok?"":errors.map(x=>x.provider+":"+x.error).join("；").slice(0,500));
   await env.DB.prepare("UPDATE web_search_runs SET status=?,provider=?,result_count=?,error_text=?,updated_at=? WHERE id=?").bind(ok?"completed":"failed",provider,verified.length,errors.map(x=>x.error).join("；").slice(0,800),Date.now(),runId).run();
-  return {runId,plan,results:verified.map((x,i)=>({...x,evidenceId:ids[i]})),errors,provider};
+  const accepted=verified.filter(x=>x.meetsRequirement).length,stopReason=accepted?`已找到${accepted}条达到质量门槛的证据，停止继续检索`:queries.length>=maxQueries?"已达到查询预算，停止继续检索":"本轮无合格证据，转知识库、数据接口或人工补充";
+  return {runId,plan,results:verified.map((x,i)=>({...x,evidenceId:ids[i]})),errors,provider,stopReason,budgetUsed:{queries:queries.length,results:verified.length,outputTokens:maxOutputTokens*queries.length,maxQueries,maxResults,maxOutputTokens}};
 }
 
 async function wrHandle(context,body){
@@ -55,6 +83,13 @@ async function wrHandle(context,body){
   if(action==="plan")return json({ok:true,plan:buildHousingSearchPlan(body)});
   if(action==="search"||action==="searchSection")return json({ok:true,...await wrRunSearch(env,user,body)});
   if(action==="listEvidence")return json({ok:true,evidence:await wrListEvidence(env,user,body)});
+  if(action==="listRequirementRefinements")return json({ok:true,refinements:await wrListRefinements(env,user,body)});
+  if(action==="refineRequirement"){
+    const projectId=wrText(body.projectId,120),logicId=wrText(body.logicId||body.ruleId,120),feedback=wrText(body.feedback,1000);if(!projectId||!logicId)return json({ok:false,error:"缺少项目或逻辑项标识"},400);
+    const latest=await env.DB.prepare("SELECT version FROM data_requirement_refinements WHERE user_id=? AND project_id=? AND logic_id=? ORDER BY version DESC LIMIT 1").bind(user.userId,projectId,logicId).first(),version=Number(latest?.version||0)+1,requirement=wrNormalizeRequirement(body.requirement),now=Date.now(),id=wrId("reqref");
+    await env.DB.prepare("INSERT INTO data_requirement_refinements(id,user_id,project_id,logic_id,version,requirement_json,feedback,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(id,user.userId,projectId,logicId,version,JSON.stringify(requirement),feedback,now,now).run();
+    return json({ok:true,refinement:{id,ruleId:logicId,version,requirement,feedback,updatedAt:now}});
+  }
   if(action==="fetch"){
     const doc=await wrFetchDocument(env,body.url);if(body.evidenceId)await env.DB.prepare("UPDATE web_evidence SET fetched_at=?,content_text=?,excerpt=?,content_hash=?,updated_at=? WHERE id=? AND user_id=?").bind(doc.fetchedAt,doc.text,doc.text.slice(0,1200),wrHash(doc.text),Date.now(),body.evidenceId,user.userId).run();return json({ok:true,document:doc});
   }
@@ -83,3 +118,4 @@ async function wrHandle(context,body){
 }
 export async function onRequestGet(context){try{return await wrHandle(context,{action:"status"});}catch(e){return json({ok:false,error:"联网检索状态读取失败："+e.message},500);}}
 export async function onRequestPost(context){let body;try{body=await context.request.json();}catch(e){return json({ok:false,error:"格式有误"},400);}try{return await wrHandle(context,body);}catch(e){return json({ok:false,error:"联网研究失败："+e.message},500);}}
+export { wrEvidenceQuality, wrRequirementTokens, wrNormalizeRequirement };

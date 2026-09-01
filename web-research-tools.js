@@ -1,12 +1,21 @@
 /* 前端联网研究工具：证据候选需人工采用后，才进入可研材料状态和生成提示词。 */
 (function webResearchToolsModule(global){
   "use strict";
-  const state={projectId:"",evidence:[],loaded:false,busy:false,batchBusy:false,batchJob:null,batchRender:null};
+  const state={projectId:"",evidence:[],refinements:{},loaded:false,busy:false,batchBusy:false,batchJob:null,batchRender:null};
   const BATCH_STORAGE_KEY="studyreport:webresearch:batch:v1";
   const esc=value=>String(value==null?"":value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  function administrativeScope(row,ctx){
+    const source=[row&&row.title,row&&row.publisher,row&&row.url].filter(Boolean).join(" "),fallback=String(ctx&&ctx.location||"");
+    if(/^https?:\/\/(?:www\.)?gov\.cn\//i.test(String(row&&row.url||""))||/国务院|国家发展改革委|财政部|住房城乡建设部|国家统计局/.test(source))return {region:"全国",regionLevel:"national",regionPath:["全国"]};
+    const text=source+" "+fallback,city=text.match(/([\u4e00-\u9fa5]{2,10}市)/),local=city?text.slice(text.indexOf(city[1])+city[1].length):text,street=local.match(/([\u4e00-\u9fa5]{2,8}区)[\s·、-]*([\u4e00-\u9fa5]{2,12}街道)/),district=local.match(/([\u4e00-\u9fa5]{2,8}区)/);
+    if(street)return {region:street[1]+street[2],regionLevel:"street",regionPath:[city&&city[1]||"深圳市",street[1],street[2]]};
+    if(district)return {region:district[1],regionLevel:"district",regionPath:[city&&city[1]||"深圳市",district[1]]};
+    if(city)return {region:city[1],regionLevel:"city",regionPath:[city[1]]};
+    return {region:"深圳市",regionLevel:"city",regionPath:["深圳市"]};
+  }
   function projectContext(extra){
     const p=global.project||{},workflow=global.projectWorkflow||{};
-    return Object.assign({projectId:String(workflow.projectId||p.id||p.name||"current-project").slice(0,120),projectName:p.name||"",location:p.location||"",projectType:global.calcType||(global.calcResult&&global.calcResult.__ctype)||global.rptCtype||"rent"},extra||{});
+    return Object.assign({projectId:String(workflow.projectId||p.id||p.name||"current-project").slice(0,120),projectName:p.name||"",location:p.location||"",projectType:global.calcType||(global.calcResult&&global.calcResult.__ctype)||global.rptCtype||"rent",businessScenario:p.businessScenario||(global.aiReportExtracted&&global.aiReportExtracted.businessScenario)||""},extra||{});
   }
   async function api(body){
     const response=await fetch("/api/webresearch",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},typeof global.authHeaders==="function"?global.authHeaders():{}),body:JSON.stringify(body)});
@@ -14,13 +23,13 @@
   }
   async function loadEvidence(force){
     const ctx=projectContext();if(!force&&state.loaded&&state.projectId===ctx.projectId)return state.evidence;
-    const data=await api({action:"listEvidence",projectId:ctx.projectId});state.projectId=ctx.projectId;state.evidence=data.evidence||[];state.loaded=true;return state.evidence;
+    const [data,refined]=await Promise.all([api({action:"listEvidence",projectId:ctx.projectId}),api({action:"listRequirementRefinements",projectId:ctx.projectId})]);state.projectId=ctx.projectId;state.evidence=data.evidence||[];state.refinements=refined.refinements||{};state.loaded=true;return state.evidence;
   }
   function approved(){return state.evidence.filter(x=>x.status==="approved");}
   function evidenceByRule(){
     const out={};for(const row of approved()){const ids=Array.isArray(row.logicIds)&&row.logicIds.length?row.logicIds:[row.logic_id];for(const id of ids){if(!id)continue;if(!out[id])out[id]=[];out[id].push({kind:"web_search",title:row.title,url:row.url,authorityLevel:row.authority_level,confidence:row.confidence,source:"web_evidence"});}}return out;
   }
-  function materialContext(){const current=projectContext().projectId;if(state.projectId!==current){loadEvidence(true).then(()=>{if(typeof global.airApplyDocMaterialStatuses==="function")global.airApplyDocMaterialStatuses();}).catch(()=>{});return {hasWebEvidence:false,evidenceByRule:{},webEvidence:[]};}const rows=approved();return {hasWebEvidence:rows.length>0,evidenceByRule:evidenceByRule(),webEvidence:rows};}
+  function materialContext(){const current=projectContext().projectId;if(state.projectId!==current){loadEvidence(true).then(()=>{if(typeof global.airApplyDocMaterialStatuses==="function")global.airApplyDocMaterialStatuses();}).catch(()=>{});return {hasWebEvidence:false,evidenceByRule:{},webEvidence:[],requirementOverrides:{}};}const rows=approved();return {hasWebEvidence:rows.length>0,evidenceByRule:evidenceByRule(),webEvidence:rows,requirementOverrides:state.refinements||{}};}
   function sectionRows(chapter,section){return approved().filter(x=>(!chapter||x.chapter===chapter)&&(!section||x.section===section));}
   function contextForSection(chapter,section,collector){
     const rows=sectionRows(chapter,section).slice(0,8);if(!rows.length)return "";
@@ -29,6 +38,11 @@
   }
   function injectStyle(){
     if(document.getElementById("wrStyle"))return;const style=document.createElement("style");style.id="wrStyle";style.textContent='.wr-overlay{position:fixed;inset:0;background:rgba(20,45,70,.32);z-index:10020;display:grid;place-items:center;padding:24px}.wr-modal{width:min(980px,95vw);max-height:88vh;overflow:auto;background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(20,50,80,.28);padding:20px}.wr-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-bottom:1px solid #dce6ef;padding-bottom:12px}.wr-head h3{margin:0;color:#164c78}.wr-close{border:0;background:transparent;font-size:24px;cursor:pointer}.wr-result{border:1px solid #d9e5ef;border-radius:9px;padding:12px 14px;margin-top:10px}.wr-result.approved{background:#eef8f2;border-color:#9ed0b1}.wr-meta{font-size:11px;color:#687f93;margin:5px 0}.wr-actions{display:flex;gap:7px;margin-top:9px;flex-wrap:wrap}.wr-pill{font-size:10px;border-radius:10px;padding:2px 7px;background:#eaf3fb;color:#236797}.air-web-search{border:1px solid #4a91c8;background:#eef7fd;color:#17649b;border-radius:14px;padding:3px 8px;cursor:pointer;font-size:10.5px}.wr-batch-modal{width:min(1120px,96vw);padding-bottom:74px;position:relative}.wr-batch-progress{margin:14px 0;padding:12px;background:#f4f8fc;border-radius:9px;display:grid;grid-template-columns:1fr auto;gap:8px}.wr-batch-progress>div{grid-column:1/-1;height:7px;background:#dce8f2;border-radius:9px;overflow:hidden}.wr-batch-progress i{display:block;height:100%;background:#2d7eb8;transition:width .25s}.wr-batch-summary{padding:10px 12px;border-left:3px solid #2d7eb8;background:#f8fbfd}.wr-batch-group{border:1px solid #d9e5ef;border-radius:9px;margin-top:10px}.wr-batch-group>summary{cursor:pointer;padding:11px 13px;display:flex;justify-content:space-between;gap:12px}.wr-batch-need{padding:8px 13px;background:#f7f9fb;color:#687f93;font-size:11px}.wr-batch-result{display:grid;grid-template-columns:22px 1fr;gap:8px;cursor:pointer;margin:9px 12px}.wr-batch-result>span{display:grid;gap:4px}.wr-batch-result a{width:max-content;color:#17649b}.wr-batch-empty{padding:16px;color:#9b3d37}.wr-batch-footer{position:sticky;bottom:-20px;margin:18px -20px -74px;padding:13px 20px;background:#fff;border-top:1px solid #d9e5ef;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.wr-batch-selected{margin-left:auto;color:#47677f}.wr-live-ledger{display:grid;grid-template-columns:minmax(440px,1.08fr) minmax(330px,.92fr);gap:12px;margin-top:12px;min-height:285px}.wr-ledger-pane,.wr-detail-pane{border:1px solid #d9e5ef;border-radius:9px;overflow:hidden;background:#fff}.wr-pane-title{padding:9px 12px;background:#eef5fa;color:#174f78;font-weight:700;border-bottom:1px solid #d9e5ef}.wr-ledger-scroll{max-height:330px;overflow:auto}.wr-ledger-table{width:100%;border-collapse:collapse;font-size:11px}.wr-ledger-table th{position:sticky;top:0;background:#f7f9fb;color:#567086;text-align:left;padding:7px 8px;border-bottom:1px solid #d9e5ef}.wr-ledger-table td{padding:7px 8px;border-bottom:1px solid #e4ebf1;vertical-align:top}.wr-ledger-row{cursor:pointer}.wr-ledger-row:hover,.wr-ledger-row.active{background:#edf6fd}.wr-ledger-status{white-space:nowrap;font-weight:600}.wr-ledger-status.done{color:#278356}.wr-ledger-status.running{color:#2375ad}.wr-ledger-status.waiting{color:#7a8d9c}.wr-ledger-status.empty{color:#a45f28}.wr-detail-body{max-height:330px;overflow:auto;padding:12px}.wr-detail-query{padding:9px;background:#f7f9fb;border-radius:7px;margin-bottom:9px;white-space:pre-wrap}.wr-detail-source{border-top:1px solid #e2eaf0;padding:9px 0}.wr-detail-source:first-of-type{border-top:0}.wr-detail-source a{color:#17649b}.wr-detail-source p{margin:5px 0;color:#4e6679;line-height:1.55}@media(max-width:820px){.wr-live-ledger{grid-template-columns:1fr}.wr-ledger-pane,.wr-detail-pane{min-height:230px}}';document.head.appendChild(style);
+  }
+  function openRequirementRefinement(requirement,onSaved){
+    if(!requirement)return;injectStyle();document.getElementById("wrRequirementModal")?.remove();const overlay=document.createElement("div");overlay.id="wrRequirementModal";overlay.className="wr-overlay";const channels=[['knowledge_base','知识库'],['provider','数据接口'],['web_search','联网检索'],['manual_upload','人工材料'],['calculation_engine','测算引擎'],['derived_section','其他章节']],selected=new Set(requirement.allowedChannels||[]);
+    overlay.innerHTML='<section class="wr-modal" style="width:min(760px,95vw)"><div class="wr-head"><div><h3>精化数据需求 · v'+Number(requirement.refinementVersion||0)+'</h3><div class="wr-meta">保存后只影响本项目这一逻辑项；系统会据此重算检索词和来源通道，不会无边界扩大网搜。</div></div><button class="wr-close">×</button></div><div style="display:grid;gap:10px;margin-top:14px"><label>真正需要的字段（逗号分隔）<input id="wrReqFields" style="width:100%" value="'+esc((requirement.fields||[]).map(x=>x.label).join('，'))+'"></label><label>地域范围<input id="wrReqGeo" style="width:100%" value="'+esc(requirement.geoScope?.value||'')+'"></label><label>最长数据时效（月）<input id="wrReqAge" type="number" min="1" max="240" value="'+esc(requirement.timeScope?.maxAgeMonths||36)+'"></label><label>允许来源通道<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:5px">'+channels.map(([key,label])=>'<label><input type="checkbox" data-wr-channel="'+key+'" '+(selected.has(key)?'checked':'')+'> '+label+'</label>').join('')+'</div></label><label>最低质量分<input id="wrReqScore" type="number" min="60" max="100" value="'+esc(requirement.quality?.minScore||80)+'"></label><label>本次调整原因 / 反馈<textarea id="wrReqFeedback" rows="3" style="width:100%" placeholder="例如：不要泛搜行业材料，只要龙华区近12个月官方租金样本"></textarea></label><div class="wr-actions"><button class="btn wr-req-save">保存为下一版精确需求</button><button class="btn ghost wr-close2">取消</button></div></div></section>';
+    document.body.appendChild(overlay);const close=()=>overlay.remove();overlay.querySelector('.wr-close').onclick=close;overlay.querySelector('.wr-close2').onclick=close;overlay.onclick=e=>{if(e.target===overlay)close();};overlay.querySelector('.wr-req-save').onclick=async event=>{const button=event.currentTarget,labels=overlay.querySelector('#wrReqFields').value.split(/[，,；;\n]/).map(x=>x.trim()).filter(Boolean),allowedChannels=[...overlay.querySelectorAll('[data-wr-channel]:checked')].map(x=>x.dataset.wrChannel);button.disabled=true;button.textContent='保存中…';try{const data=await api(Object.assign(projectContext(),{action:'refineRequirement',logicId:requirement.ruleId,feedback:overlay.querySelector('#wrReqFeedback').value,requirement:{fields:labels.map((label,index)=>({key:'custom'+(index+1),label,dataType:'mixed',required:true})),timeScope:Object.assign({},requirement.timeScope,{maxAgeMonths:Number(overlay.querySelector('#wrReqAge').value)||36}),geoScope:Object.assign({},requirement.geoScope,{value:overlay.querySelector('#wrReqGeo').value.trim()}),allowedChannels,quality:Object.assign({},requirement.quality,{minScore:Number(overlay.querySelector('#wrReqScore').value)||80}),budget:requirement.budget}}));state.refinements[requirement.ruleId]=data.refinement;close();if(onSaved)onSaved(data.refinement);}catch(error){button.disabled=false;button.textContent='保存失败：'+error.message;}};
   }
   async function setStatus(id,status,logicIds,options){logicIds=Array.isArray(logicIds)?logicIds:[logicIds].filter(Boolean);await api({action:"setEvidenceStatus",id,status,logicIds});if(!(options&&options.skipReload))await loadEvidence(true);}
   function classifyWebEvidence(row,target){
@@ -42,9 +56,10 @@
   }
   function knowledgeContributionItem(row,target){
     const ctx=projectContext(),title=String(row.title||"联网检索依据").trim(),authority=row.authorityLevel||row.authority_level||"D",published=row.publishedAt||row.published_at||"未标明",publisher=row.publisher||"来源机构待识别",text=String(row.contentText||row.content_text||row.snippet||row.excerpt||"暂无摘要").trim(),classification=classifyWebEvidence(row,target||{}),bindings=Array.isArray(target&&target.bindings)?target.bindings:[];
+    const scope=administrativeScope(row,ctx);
     const chapterText=bindings.length?bindings.map(x=>String(x.chapter||"")+"｜"+String(x.section||"")).filter(Boolean).join("；"):String(target&&target.chapter||"")+"｜"+String(target&&target.section||"");
     const logicIds=[...(target&&Array.isArray(target.logicIds)?target.logicIds:[]),...bindings.flatMap(x=>Array.isArray(x.logicIds)?x.logicIds:[])].filter((x,i,a)=>x&&a.indexOf(x)===i);
-    return {kind:"wiki",title:("联网依据｜"+title).slice(0,120),content:["【联网检索待审核材料】","业务分类："+classification.webCategory,"对应章节："+chapterText,"发布/来源机构："+publisher,"发布日期/统计期："+published,"权威等级："+authority,"交叉核验："+(row.verificationStatus||row.verification_status||"single"),"原始网址："+String(row.url||""),"","【网页正文或检索摘要】",text].join("\n").slice(0,180000),source_ref:String(row.url||"").slice(0,500),region:String(ctx.location||"").slice(0,40),project_type:String(ctx.projectType||"").slice(0,40),meta:{wikiKind:classification.wikiKind,category:classification.webCategory,webCategory:classification.webCategory,sourceChannel:"web_research",tags:[classification.webCategory,"联网检索","可研依据",String(target&&target.chapter||""),String(target&&target.section||"")].filter(Boolean),issuer:publisher,authorityLevel:authority,publishedAt:published,webEvidenceId:row.evidenceId||row.id||"",reportBindings:bindings.length?bindings:[{chapter:target&&target.chapter||"",section:target&&target.section||"",logicIds}],logicIds,idempotencyKey:"web:"+String(row.evidenceId||row.id||row.url||"").slice(0,110)}};
+    return {kind:"wiki",title:("联网依据｜"+title).slice(0,120),content:["【联网检索待审核材料】","业务分类："+classification.webCategory,"对应章节："+chapterText,"发布/来源机构："+publisher,"发布日期/统计期："+published,"权威等级："+authority,"适用区域："+scope.region,"交叉核验："+(row.verificationStatus||row.verification_status||"single"),"原始网址："+String(row.url||""),"","【网页正文或检索摘要】",text].join("\n").slice(0,180000),source_ref:String(row.url||"").slice(0,500),region:scope.region,project_type:String(ctx.businessScenario||ctx.projectType||"").slice(0,40),meta:{wikiKind:classification.wikiKind,category:classification.webCategory,webCategory:classification.webCategory,sourceChannel:"web_research",tags:[classification.webCategory,"联网检索","可研依据",scope.region,String(target&&target.chapter||""),String(target&&target.section||"")].filter(Boolean),issuer:publisher,authorityLevel:authority,publishedAt:published,regionLevel:scope.regionLevel,regionPath:scope.regionPath,businessScenario:ctx.businessScenario||"",webEvidenceId:row.evidenceId||row.id||"",reportBindings:bindings.length?bindings:[{chapter:target&&target.chapter||"",section:target&&target.section||"",logicIds}],logicIds,idempotencyKey:"web:"+String(row.evidenceId||row.id||row.url||"").slice(0,110)}};
   }
   async function submitKnowledgeReview(row,target,options){
     options=options||{};
@@ -76,40 +91,46 @@
   }
   function resultModal(data,ctx,callback){
     injectStyle();document.getElementById("wrEvidenceModal")?.remove();const overlay=document.createElement("div");overlay.id="wrEvidenceModal";overlay.className="wr-overlay";
-    const rows=data.results||[];overlay.innerHTML='<section class="wr-modal"><div class="wr-head"><div><h3>联网证据候选</h3><div class="wr-meta">已执行 '+(data.plan&&data.plan.queries?data.plan.queries.length:1)+' 组保障房垂直查询；只有点击“采用为本节依据”的来源才进入正式生成。</div></div><button class="wr-close">×</button></div>'+(data.errors&&data.errors.length?'<div class="wr-meta" style="color:#a36813;margin-top:9px;">部分通道不可用：'+esc(data.errors.map(x=>x.provider+" "+x.error).join("；"))+'</div>':'')+(rows.length?rows.map(row=>'<article class="wr-result" data-id="'+esc(row.evidenceId)+'"><b>'+esc(row.title)+'</b><div class="wr-meta"><span class="wr-pill">权威度 '+esc(row.authorityLevel)+'</span> <span class="wr-pill">置信 '+esc(row.confidence)+'</span> '+esc(row.publisher||"")+' '+esc(row.publishedAt||"")+'</div><div>'+esc(row.snippet||"暂无摘要")+'</div><div class="wr-actions"><a class="btn sm ghost" href="'+esc(row.url)+'" target="_blank" rel="noopener">打开原网页</a><button class="btn sm ghost wr-fetch" data-id="'+esc(row.evidenceId)+'">获取网页/PDF/Word全文</button><button class="btn sm wr-approve" data-id="'+esc(row.evidenceId)+'">采用为本节依据</button></div></article>').join(""):'<div style="padding:28px 0;color:#9b3d37;">当前 Provider 未返回真实候选。系统不会伪造结果；可在后台“联网检索治理”查看通道状态或配置搜索 API。</div>')+'</section>';
+    const rows=data.results||[],used=data.budgetUsed||{};overlay.innerHTML='<section class="wr-modal"><div class="wr-head"><div><h3>精确联网证据候选</h3><div class="wr-meta">本轮使用 '+(used.queries||0)+' 次查询、返回 '+(used.results||0)+' 条（上限 '+(used.maxResults||5)+' 条）；'+esc(data.stopReason||"达到证据门槛或预算后自动停止")+'。只有点击“采用为本节依据”的来源才进入正式生成。</div></div><button class="wr-close">×</button></div>'+(data.errors&&data.errors.length?'<div class="wr-meta" style="color:#a36813;margin-top:9px;">部分通道不可用：'+esc(data.errors.map(x=>x.provider+" "+x.error).join("；"))+'</div>':'')+(rows.length?rows.map(row=>'<article class="wr-result" data-id="'+esc(row.evidenceId)+'"><b>'+esc(row.title)+'</b><div class="wr-meta"><span class="wr-pill">权威度 '+esc(row.authorityLevel)+'</span> <span class="wr-pill">质量 '+esc(row.qualityScore||0)+'分 / '+esc(row.qualityGrade||"D")+'</span> <span class="wr-pill">置信 '+esc(row.confidence)+'</span> '+esc(row.publisher||"")+' '+esc(row.publishedAt||"")+'</div><div>'+esc(row.snippet||"暂无摘要")+'</div><div class="wr-meta">'+esc((row.qualityReasons||[]).join("；"))+'</div><div class="wr-actions"><a class="btn sm ghost" href="'+esc(row.url)+'" target="_blank" rel="noopener">打开原网页</a><button class="btn sm ghost wr-fetch" data-id="'+esc(row.evidenceId)+'">获取网页/PDF/Word全文</button><button class="btn sm wr-approve" data-id="'+esc(row.evidenceId)+'" '+(row.meetsRequirement?'':'title="未达到自动质量门槛，请人工复核"')+'>采用为本节依据</button></div></article>').join(""):'<div style="padding:28px 0;color:#9b3d37;">当前 Provider 未返回真实候选。系统不会伪造结果，也不会自动扩大搜索；请转知识库、数据接口或人工补充。</div>')+'</section>';
     document.body.appendChild(overlay);const close=()=>overlay.remove();overlay.querySelector(".wr-close").onclick=close;overlay.onclick=e=>{if(e.target===overlay)close();};
     overlay.querySelectorAll(".wr-approve").forEach(button=>button.onclick=async()=>{button.disabled=true;button.textContent="正在采用…";try{await setStatus(button.dataset.id,"approved",ctx.logicIds&&ctx.logicIds.length?ctx.logicIds:[ctx.logicId].filter(Boolean));button.closest(".wr-result").classList.add("approved");button.textContent="✓ 已采用";if(callback)callback();}catch(e){button.disabled=false;button.textContent="采用失败："+e.message;}});
     overlay.querySelectorAll(".wr-fetch").forEach(button=>button.onclick=()=>extractFullText(rows.find(x=>x.evidenceId===button.dataset.id)||{},button));
   }
   async function searchSection(options){
     options=options||{};if(state.busy)throw new Error("已有联网检索正在进行");state.busy=true;try{
-      const ctx=projectContext(options),data=await api(Object.assign({},ctx,{action:"searchSection",maxQueries:options.maxQueries||3,maxResults:options.maxResults||20,logicId:options.logicId||"",logicIds:options.logicIds||[],requiredSources:options.requiredSources||""}));
+      const requirement=options.requirementSchema||null;
+      if(requirement&&requirement.webAllowed===false)return {skipped:true,stopReason:"该数据需求应由项目材料、数据接口或测算引擎取得，禁止无效联网",results:[],budgetUsed:{queries:0,results:0,outputTokens:0}};
+      const budget=requirement&&requirement.budget||options.budget||{},ctx=projectContext(options),data=await api(Object.assign({},ctx,{action:"searchSection",query:options.query||requirement&&requirement.query||"",requirementSchema:requirement,budget,maxQueries:Math.max(1,Math.min(Number(options.maxQueries||budget.maxQueries)||1,2)),maxResults:Math.max(1,Math.min(Number(options.maxResults||budget.maxResults)||5,8)),logicId:options.logicId||"",logicIds:options.logicIds||[],requiredSources:options.requiredSources||""}));
       await loadEvidence(true);if(options.review!==false)resultModal(data,ctx,options.onAdopt);return data;
     }finally{state.busy=false;}
   }
   async function searchFromButton(button,onAdopt){
     const logicIds=String(button.dataset.ruleId||"").split(",").filter(Boolean),logicId=logicIds[0]||"";
+    let requirementSchema=null;try{requirementSchema=JSON.parse(decodeURIComponent(button.dataset.requirementSchema||"null"));}catch(e){}
     button.disabled=true;const old=button.textContent;button.textContent="正在检索…";
-    try{return await searchSection({logicId,logicIds,chapter:button.dataset.chapter||"",section:button.dataset.section||"",requiredSources:button.dataset.requiredSources||"",onAdopt});}
+    try{return await searchSection({logicId,logicIds,chapter:button.dataset.chapter||"",section:button.dataset.section||"",query:button.dataset.query||"",requirementSchema,requiredSources:button.dataset.requiredSources||"",onAdopt});}
     finally{button.disabled=false;button.textContent=old;}
   }
   function buildBatchTargets(items){
     const groups=new Map();
     for(const item of (Array.isArray(items)?items:[])){
       if(!Array.isArray(item.missing)||!item.missing.includes("web_search"))continue;
+      const exact=item.dataRequirement||null;if(exact&&exact.webAllowed===false)continue;
       const chapter=String(item.chapter||"").trim(),section=String(item.section||item.title||"").trim(),key=chapter+"\u0000"+section;
-      if(!groups.has(key))groups.set(key,{chapter,section,logicIds:[],requiredSources:[],sourceNos:[],titles:[]});
+      if(!groups.has(key))groups.set(key,{chapter,section,logicIds:[],requiredSources:[],requirements:[],sourceNos:[],titles:[]});
       const group=groups.get(key);
       if(item.ruleId&&!group.logicIds.includes(item.ruleId))group.logicIds.push(item.ruleId);
       const need=String(item.requiredSources||"").trim();if(need&&!group.requiredSources.includes(need))group.requiredSources.push(need);
+      if(exact&&!group.requirements.some(x=>x.requirementId===exact.requirementId))group.requirements.push(exact);
       if(item.sourceNo!=null&&!group.sourceNos.includes(item.sourceNo))group.sourceNos.push(item.sourceNo);
       const title=String(item.title||"").trim();if(title&&!group.titles.includes(title))group.titles.push(title);
     }
-    return [...groups.values()].map((group,index)=>({...group,index,requirement:group.requiredSources.join("；").slice(0,900)}));
+    return [...groups.values()].map((group,index)=>({...group,index,requirement:group.requirements.map(x=>x.evidenceGoal).filter(Boolean).join("；")||group.titles.join("；")||"本节公开依据",query:group.requirements.map(x=>x.query).filter(Boolean).join("；").slice(0,180),budget:{maxQueries:1,maxResults:5,maxOutputTokens:900,maxSourcesAccepted:2},quality:group.requirements[0]?.quality||{minScore:80,minAuthority:"A"}}));
   }
   function batchSearchQuery(target){
-    const ctx=projectContext(),parts=[ctx.location,ctx.projectName,target.chapter,target.section,target.requirement,"政府官网 统计部门 原始发布页"].filter(Boolean);
-    return parts.join(" ").replace(/\s+/g," ").slice(0,220);
+    if(String(target&&target.query||"").trim())return String(target.query).replace(/\s+/g," ").slice(0,180);
+    const ctx=projectContext(),parts=[ctx.location,target.chapter,target.section,...(target.titles||[]).slice(0,2),"官方 原始发布页"].filter(Boolean);
+    return parts.join(" ").replace(/\s+/g," ").slice(0,160);
   }
   async function runLimited(list,limit,worker,onProgress){
     let cursor=0,done=0;const output=new Array(list.length),count=Math.max(1,Math.min(Number(limit)||2,4));
@@ -127,7 +148,7 @@
   function restoreBatchJob(){
     if(state.batchJob)return state.batchJob;let saved=null;try{saved=JSON.parse(localStorage.getItem(BATCH_STORAGE_KEY)||"null");}catch(e){}
     if(!saved||saved.projectId!==projectContext().projectId||!Array.isArray(saved.targets))return null;
-    saved.outputs=Array.isArray(saved.outputs)?saved.outputs:new Array(saved.targets.length);saved.done=saved.outputs.filter(Boolean).length;saved.maxResults=Math.max(Number(saved.maxResults)||0,10);const firstMissing=saved.outputs.findIndex(output=>!output);saved.nextIndex=firstMissing<0?saved.targets.length:firstMissing;saved.runtime={};saved.runPromise=null;state.batchJob=saved;return saved;
+    saved.outputs=Array.isArray(saved.outputs)?saved.outputs:new Array(saved.targets.length);saved.done=saved.outputs.filter(Boolean).length;saved.maxResults=Math.max(1,Math.min(Number(saved.maxResults)||5,8));const firstMissing=saved.outputs.findIndex(output=>!output);saved.nextIndex=firstMissing<0?saved.targets.length:firstMissing;saved.runtime={};saved.runPromise=null;state.batchJob=saved;return saved;
   }
   function notifyBatch(job){
     job.updatedAt=Date.now();persistBatchJob(job);if(state.batchRender)state.batchRender();
@@ -135,8 +156,8 @@
   }
   async function searchBatchTarget(job,target){
     const ctx=projectContext({logicId:target.logicIds[0]||"",logicIds:target.logicIds,chapter:target.chapter,section:target.section,requiredSources:target.requirement,query:batchSearchQuery(target)});
-    const data=await api(Object.assign({},ctx,{action:"searchSection",maxQueries:1,maxResults:job.maxResults}));
-    return {target,results:data.results||[],errors:data.errors||[],provider:data.provider||""};
+    const data=await api(Object.assign({},ctx,{action:"searchSection",requirementSchema:target.requirements&&target.requirements[0]||null,budget:target.budget,maxQueries:1,maxResults:Math.min(job.maxResults,5)}));
+    return {target,results:data.results||[],errors:data.errors||[],provider:data.provider||"",budgetUsed:data.budgetUsed||{},stopReason:data.stopReason||""};
   }
   function startBatchJob(job){
     if(job.runPromise||job.status!=="running"||job.done>=job.targets.length)return job.runPromise;
@@ -185,15 +206,15 @@
   }
   function batchSearchGaps(items,options){
     options=options||{};const targets=buildBatchTargets(items);if(!targets.length){if(options.onAdopt)options.onAdopt();if(options.continueAfter&&options.onContinue)options.onContinue({adopted:0,noGaps:true});return {targets:[],outputs:[]};}
-    let job=restoreBatchJob(),signature=batchSignature(targets);if(!job||job.projectId!==projectContext().projectId||job.signature!==signature){job={id:"wrb-"+Date.now(),projectId:projectContext().projectId,status:"running",targets,outputs:new Array(targets.length),nextIndex:0,done:0,continued:false,signature,concurrency:Math.max(1,Math.min(Number(options.concurrency)||2,4)),maxResults:Number(options.maxResults)||10,startedAt:Date.now(),updatedAt:Date.now(),runtime:{},runPromise:null};state.batchJob=job;persistBatchJob(job);}
-    job.maxResults=Math.max(Number(job.maxResults)||0,Number(options.maxResults)||10);job.runtime=Object.assign(job.runtime||{},options);if(job.status==="running")startBatchJob(job);if(options.openReview!==false)openBatchReview(job);return job;
+    let job=restoreBatchJob(),signature=batchSignature(targets);if(!job||job.projectId!==projectContext().projectId||job.signature!==signature){job={id:"wrb-"+Date.now(),projectId:projectContext().projectId,status:"running",targets,outputs:new Array(targets.length),nextIndex:0,done:0,continued:false,signature,concurrency:Math.max(1,Math.min(Number(options.concurrency)||2,2)),maxResults:Math.max(1,Math.min(Number(options.maxResults)||5,8)),startedAt:Date.now(),updatedAt:Date.now(),runtime:{},runPromise:null};state.batchJob=job;persistBatchJob(job);}
+    job.maxResults=Math.max(1,Math.min(Number(options.maxResults)||job.maxResults||5,8));job.runtime=Object.assign(job.runtime||{},options);if(job.status==="running")startBatchJob(job);if(options.openReview!==false)openBatchReview(job);return job;
   }
   function registerAgentTools(){
     if(!global.AgentCore||global.AgentCore._tools&&global.AgentCore._tools.search_affordable_housing_web)return;
-    global.AgentCore.registerTool("search_affordable_housing_web",{risk:"external",toolset:"knowledge",timeoutMs:60000,schema:{type:"function",function:{name:"search_affordable_housing_web",description:"联网检索保障房项目政策、人口统计、市场、规划和当前小节所需依据。返回真实候选及权威等级；候选未经人工采用不能视为正式依据。",parameters:{type:"object",properties:{chapter:{type:"string"},section:{type:"string"},requirement:{type:"string"},maxQueries:{type:"number"}},required:["requirement"]}}},label:a=>"🌐 联网检索："+String(a.requirement||"").slice(0,28),run:async a=>JSON.stringify(await searchSection(Object.assign({},a,{review:false,maxQueries:Math.min(Number(a.maxQueries)||3,3)})))});
+    global.AgentCore.registerTool("search_affordable_housing_web",{risk:"external",toolset:"knowledge",timeoutMs:60000,schema:{type:"function",function:{name:"search_affordable_housing_web",description:"仅在精确数据需求允许联网时执行一次低预算检索；返回真实候选及质量评分，候选未经人工采用不能视为正式依据。",parameters:{type:"object",properties:{chapter:{type:"string"},section:{type:"string"},query:{type:"string"},requirementSchema:{type:"object"}},required:["query"]}}},label:a=>"🌐 精确检索："+String(a.query||"").slice(0,28),run:async a=>JSON.stringify(await searchSection(Object.assign({},a,{review:false,maxQueries:1,maxResults:5})))});
     global.AgentCore.registerTool("list_web_evidence",{toolset:"knowledge",schema:{type:"function",function:{name:"list_web_evidence",description:"列出当前项目已经人工采用的联网证据及其权威度、网址和对应章节。",parameters:{type:"object",properties:{chapter:{type:"string"},section:{type:"string"}}}}},run:async a=>{await loadEvidence();return JSON.stringify(sectionRows(a.chapter,a.section));}});
   }
-  global.WebResearch={api,loadEvidence,materialContext,contextForSection,searchSection,searchFromButton,batchSearchGaps,buildBatchTargets,batchStatus,pauseBatchSearch,resumeBatchSearch,setStatus,classifyWebEvidence,knowledgeContributionItem,highValueEntries,depositHighValue,state,registerAgentTools};
+  global.WebResearch={api,loadEvidence,materialContext,contextForSection,searchSection,searchFromButton,openRequirementRefinement,batchSearchGaps,buildBatchTargets,batchSearchQuery,batchStatus,pauseBatchSearch,resumeBatchSearch,setStatus,classifyWebEvidence,knowledgeContributionItem,highValueEntries,depositHighValue,state,registerAgentTools};
   function boot(){registerAgentTools();loadEvidence().catch(()=>{});const job=restoreBatchJob();if(job&&job.status==="running")startBatchJob(job);}
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot);else boot();
 })(window);

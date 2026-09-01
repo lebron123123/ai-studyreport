@@ -1,4 +1,4 @@
-/* 出租类可研标准表格模板：网页预览与Word导出共用同一份结构数据。 */
+/* 可研标准表格模板：网页预览与Word导出共用同一份结构数据。 */
 (function(root){
   "use strict";
   const state={sets:{},baseSets:{},configs:{},loading:{}};
@@ -6,11 +6,25 @@
   const norm=s=>String(s||"").replace(/^第[一二三四五六七八九十百]+章\s*/,"").replace(/\s+/g,"");
 
   const clone=value=>JSON.parse(JSON.stringify(value));
+  const LIBRARIES={
+    rent:{path:"data/report-table-templates-rent-v1.json",label:"出租类"},
+    "gaibao-housing":{path:"data/report-table-templates-gaibao-housing-v1.json",label:"非居改保（住房改造）"},
+    "gaibao-commercial":{path:"data/report-table-templates-gaibao-commercial-v1.json",label:"商业改造（自持改造）"}
+  };
+  function resolveType(projectType,options){
+    if(projectType==="rent")return "rent";
+    if(projectType==="gaibao-commercial"||projectType==="gaibao-housing")return projectType;
+    if(projectType==="gaibao")return (options?.businessScenario||options?.scenario)==="commercial_renovation"?"gaibao-commercial":"gaibao-housing";
+    return "";
+  }
   function applyOverrides(base,overrides){
-    const set=clone(base),map=overrides&&overrides.templates||{};
+    const set=clone(base),map=overrides&&overrides.templates||{},deleted=new Set(overrides&&overrides.deletedTemplateIds||[]);
+    set.templates=(set.templates||[]).filter(template=>!deleted.has(template.id));
     (set.templates||[]).forEach(template=>{
       const patch=map[template.id];if(!patch)return;
       if(patch.title)template.title=String(patch.title);
+      if(patch.chapter)template.chapter=String(patch.chapter);
+      if(Array.isArray(patch.match))template.match=patch.match.map(String).filter(Boolean);
       const cells=patch.cells||{};
       Object.entries(cells).forEach(([key,text])=>{
         const [si,ri,col]=key.split(":").map(Number),segment=template.segments&&template.segments[si],row=segment&&segment.rows&&segment.rows[ri];
@@ -18,21 +32,26 @@
         if(cell&&cell.role!=="value")cell.text=String(text==null?"":text);
       });
     });
+    (overrides&&overrides.addedTemplates||[]).forEach(template=>{if(template&&template.id&&!set.templates.some(x=>x.id===template.id))set.templates.push(clone(template));});
     return set;
   }
   function buildOverrides(edited,base){
-    const output={projectType:edited&&edited.projectType||"rent",templates:{}},baseMap=new Map(((base&&base.templates)||[]).map(t=>[t.id,t]));
+    const output={projectType:edited&&edited.projectType||"rent",templates:{},deletedTemplateIds:[],addedTemplates:[]},baseMap=new Map(((base&&base.templates)||[]).map(t=>[t.id,t]));
+    const editedIds=new Set(((edited&&edited.templates)||[]).map(t=>t.id));
+    output.deletedTemplateIds=[...baseMap.keys()].filter(id=>!editedIds.has(id));
     ((edited&&edited.templates)||[]).forEach(template=>{
-      const original=baseMap.get(template.id);if(!original)return;
+      const original=baseMap.get(template.id);if(!original){output.addedTemplates.push(clone(template));return;}
       const patch={cells:{}};
       if(String(template.title||"")!==String(original.title||""))patch.title=String(template.title||"");
+      if(String(template.chapter||"")!==String(original.chapter||""))patch.chapter=String(template.chapter||"");
+      if(JSON.stringify(template.match||[])!==JSON.stringify(original.match||[]))patch.match=(template.match||[]).map(String);
       (template.segments||[]).forEach((segment,si)=>(segment.rows||[]).forEach((row,ri)=>(row.cells||[]).forEach(cell=>{
         if(cell.role==="value")return;
         const source=original.segments?.[si]?.rows?.[ri]?.cells?.find(item=>Number(item.col)===Number(cell.col));
         if(source&&String(cell.text||"")!==String(source.text||""))patch.cells[si+":"+ri+":"+Number(cell.col||0)]=String(cell.text||"");
       })));
       if(!Object.keys(patch.cells).length)delete patch.cells;
-      if(patch.title||patch.cells)output.templates[template.id]=patch;
+      if(patch.title||patch.chapter||patch.match||patch.cells)output.templates[template.id]=patch;
     });
     return output;
   }
@@ -40,12 +59,12 @@
     const type=projectType||"rent";
     if(force){delete state.sets[type];delete state.baseSets[type];delete state.configs[type];}
     if(state.sets[type])return state.sets[type];
-    if(type!=="rent")return null;
-    if(!state.loading[type])state.loading[type]=fetch("data/report-table-templates-rent-v1.json")
+    const library=LIBRARIES[type];if(!library)return null;
+    if(!state.loading[type])state.loading[type]=fetch(library.path)
       .then(r=>{if(!r.ok)throw new Error("表格模板库加载失败：HTTP "+r.status);return r.json();})
       .then(async set=>{
         state.baseSets[type]=clone(set);
-        let config={version:1,status:"baseline",overrides:{projectType:type,templates:{}}};
+        let config={version:1,status:"baseline",overrides:{projectType:type,templates:{},deletedTemplateIds:[],addedTemplates:[]}};
         try{
           const headers=typeof authHeaders==="function"?authHeaders():{},response=await fetch("/api/reporttables?projectType="+encodeURIComponent(type),{headers});
           const result=await response.json();if(response.ok&&result.ok&&result.config)config=result.config;
@@ -112,8 +131,9 @@
       body=segments.map((s,i)=>'<details class="rpt-template-period" '+(i===0?'open':'')+'><summary>'
         +esc(i===0?'第1段':('续表第'+(i+1)+'段'))+' · 按原报告年度容量分段</summary>'+s+'</details>').join("");
     }
+    const label=LIBRARIES[template.projectType]?.label||"可研";
     return '<figure class="rpt-template-card" data-template-id="'+esc(template.id)+'"><figcaption><b>表：'+esc(template.title)
-      +'</b><span>出租类标准模板 v'+esc(template.version||1)+' · 项目数据待填</span></figcaption>'+body+'</figure>';
+      +'</b><span>'+esc(label)+'标准模板 v'+esc(template.version||1)+' · 项目数据待填</span></figcaption>'+body+'</figure>';
   }
   function renderSection(type,chapter,section){return forSection(type,chapter,section).map(renderTemplate).join("");}
   function renderAppendix(type){return appendix(type).map(renderTemplate).join("");}
@@ -127,6 +147,6 @@
     return {templates:list.length,physicalTables:Number(set.source&&set.source.physicalTableCount)||0,
       appendix:list.filter(x=>x.appendix).length,longPeriod:list.filter(x=>x.longPeriod).length};
   }
-  root.ReportTableTemplates={load,current,baseline,config,applyOverrides,buildOverrides,forSection,appendix,renderTemplate,renderSection,renderAppendix,exportTemplate,preparedRows,stats};
+  root.ReportTableTemplates={LIBRARIES,resolveType,load,current,baseline,config,applyOverrides,buildOverrides,forSection,appendix,renderTemplate,renderSection,renderAppendix,exportTemplate,preparedRows,stats};
   if(typeof module==="object"&&module.exports)module.exports=root.ReportTableTemplates;
 })(typeof window!=="undefined"?window:globalThis);

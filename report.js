@@ -20,7 +20,7 @@ function buildDraftData(){
     chapters: chapters.map(c=>({cn:c.cn, name:c.name, checked:c.checked,
       sections:c.sections.map(s=>({t:s.t, numeric:s.numeric, content:s.content, editedHtml:s.editedHtml||null,
         locked:!!s.locked,syncStatus:s.syncStatus||"current",staleReason:s.staleReason||"",staleKeys:s.staleKeys||[],
-        pendingRevision:s.pendingRevision||null,undoStack:s.undoStack||[],prov:s.prov||null}))}))
+        pendingRevision:s.pendingRevision||null,undoStack:s.undoStack||[],prov:s.prov||null,logicSnapshot:s.logicSnapshot||null}))}))
   };
 }
 function saveDraft(){
@@ -51,7 +51,7 @@ function restoreDraft(d, options){
         if(chapters[i].sections[j]){ Object.assign(chapters[i].sections[j],{
           content:ds.content||"",editedHtml:ds.editedHtml||null,locked:!!ds.locked,syncStatus:ds.syncStatus||"current",
           staleReason:ds.staleReason||"",staleKeys:ds.staleKeys||[],pendingRevision:ds.pendingRevision||null,
-          undoStack:ds.undoStack||[],prov:ds.prov||null}); }
+          undoStack:ds.undoStack||[],prov:ds.prov||null,logicSnapshot:ds.logicSnapshot||null}); }
       });
     });
   }
@@ -267,14 +267,14 @@ function stepGenerate(){
   const active = chapters.filter(c=>c.checked);
   const totalSec = active.reduce((n,c)=>n+c.sections.length,0);
   let inner = active.map(c=>'<div class="chapter-block" id="block_'+c.cn+'"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
-    + c.sections.map((s,si)=>'<div class="section-block pending" id="sec_'+c.cn+'_'+si+'"><h4>'+s.t+(s.numeric?' ⚠数据':'')+'</h4><div class="body"><span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:88%"></span><span class="skel" style="width:56%"></span></div></div>').join("")
+    + c.sections.map((s,si)=>{const ready=!!(s.content||s.editedHtml);return '<div class="section-block '+(ready?'':'pending')+'" id="sec_'+c.cn+'_'+si+'"><h4>'+s.t+(s.numeric?' ⚠数据':'')+(ready?'<span class="done-stamp">已拟</span>':'')+'</h4>'+(ready?renderSectionLogicHtml(c,s):'')+'<div class="body">'+(ready?renderSectionContent(c,s,true):'<span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:88%"></span><span class="skel" style="width:56%"></span>')+'</div></div>';}).join("")
     +'</div>').join("");
   return '<div class="doc-eyebrow">STEP 04 · 逐章生成</div>'
     +'<h1 class="doc-title">起草中：'+(project.name||"（未命名项目）")+'</h1>'
     +'<div class="progress-line" id="progressLine">共 '+active.length+' 章 / '+totalSec+' 个子标题待生成'+(kbEntries.length?'｜已挂载参考资料 '+kbEntries.length+' 篇（自动匹配注入）':'')+' ｜ 预计消耗约 '+((totalSec*(EST_IN_PER_SEC+EST_OUT_PER_SEC))/10000).toFixed(1)+' 万 tokens（约 ¥'+((totalSec*EST_IN_PER_SEC*PRICE_IN_PER_M + totalSec*EST_OUT_PER_SEC*PRICE_OUT_PER_M)/1000000).toFixed(2)+'，按标准价估算）</div>'
     +'<div id="chapterContainer">'+inner+'</div>'
     +'<div class="actions"><button class="btn ghost" id="backStep3g">← 上一步</button>'
-    +'<button class="btn" id="startGen">开始逐章生成</button>'
+    +'<button class="btn" id="startGen">开始逐章生成</button><button class="btn ghost" id="exportWordDraftBtn">下载当前阶段 Word</button>'
     +'<button class="btn" id="toStep5r" style="display:none;">下一步：人工复核 →</button></div>';
 }
 
@@ -307,7 +307,7 @@ async function runGeneration(){
   const progressEl = document.getElementById("progressLine");
   genUsage = {inTok:0, outTok:0};
   const tasks = [];
-  active.forEach(c=>c.sections.forEach((s,si)=>tasks.push({c,s,si})));
+  active.forEach(c=>c.sections.forEach((s,si)=>{if(!s.content&&!s.editedHtml)tasks.push({c,s,si});}));
   const total = tasks.length;
   let done = 0, failed = 0;
 
@@ -320,6 +320,7 @@ async function runGeneration(){
       s.content = text;
       secEl.classList.remove("pending"); secEl.classList.remove("gen");
       secEl.querySelector(".body").innerHTML = renderSectionContent(c,s,false);
+      secEl.querySelector(".rpt-logic-note")?.remove();secEl.querySelector("h4").insertAdjacentHTML("afterend",renderSectionLogicHtml(c,s));
       secEl.querySelector("h4").insertAdjacentHTML("beforeend", '<span class="done-stamp">已拟</span>' + provBadgeHtml(c.cn, si, s.prov));
       bindProvToggle(secEl);
       saveDraft();
@@ -356,7 +357,7 @@ async function updateStaleSections(){
   if(!tasks.length){alert("没有可自动更新的小节；锁定小节需要先解除锁定。");return;}
   const btn=document.getElementById("wfUpdateStale");if(btn){btn.disabled=true;btn.textContent="正在生成候选稿…";}
   let failed=0;
-  await runWorkerPool(tasks,async t=>{try{const text=await reviseSection(t.c,t.s,"测算参数已经更新。请严格依据最新真实测算结果，只修改受影响的数字、判断和分析，其他内容尽量保留。");window.ProjectWorkflow.setCandidate(t.s,text,"同步最新测算");}catch(e){failed++;}},3);
+  await runWorkerPool(tasks,async t=>{try{const instruction="测算参数已经更新。请严格依据最新真实测算结果，只修改受影响的数字、判断和分析，其他内容尽量保留。",text=await reviseSection(t.c,t.s,instruction);window.ProjectWorkflow.setCandidate(t.s,text,"同步最新测算",{logicRevision:reportLogicRevision(t.c,t.s,instruction)});}catch(e){failed++;}},3);
   saveDraft();renderSheet();if(failed)alert(failed+"个小节候选稿生成失败，可单独重试。");
 }
 
@@ -386,12 +387,13 @@ function renderContent(text){
 
 function reportTableProjectType(){
   const type=(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"");
-  return type==="rent"?"rent":null;
+  if(!window.ReportTableTemplates)return type==="rent"?"rent":null;
+  return window.ReportTableTemplates.resolveType(type,{businessScenario:typeof rlBusinessScenario==="function"?rlBusinessScenario():""})||null;
 }
 async function ensureReportTableTemplates(){
   const type=reportTableProjectType();
   if(!type||!window.ReportTableTemplates)return null;
-  try{return await window.ReportTableTemplates.load(type);}catch(e){console.warn("出租类标准表格模板加载失败",e);return null;}
+  try{return await window.ReportTableTemplates.load(type);}catch(e){console.warn("可研标准表格模板加载失败",e);return null;}
 }
 function sectionFormalTemplates(c,s){
   const type=reportTableProjectType();
@@ -403,6 +405,44 @@ function renderSectionContent(c,s,useEdited){
   const type=reportTableProjectType();
   const tables=type&&window.ReportTableTemplates?window.ReportTableTemplates.renderSection(type,c.name,s.t):"";
   return base+tables;
+}
+function reportSectionLogicSnapshot(c,s,rules){
+  if(s?.pendingRevision?.logicRevision)return s.pendingRevision.logicRevision;
+  if(!Array.isArray(rules)&&s?.logicSnapshot)return s.logicSnapshot;
+  const matched=Array.isArray(rules)?rules:(window.ReportLogicCore?ReportLogicCore.match(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),businessScenario:rlBusinessScenario()}):[]),set=window.ReportLogicCore&&ReportLogicCore.current(rlProjectType());
+  return {version:set?.version||0,updatedAt:new Date().toISOString(),rules:matched.map(r=>({id:r.id,sourceNo:r.sourceNo,title:r.displayTitle||r.pointTitle||r.section,writingLogic:r.writingLogic||"按本节标题和已核实资料完成论证",outputForm:r.outputForm||"文字",changeReason:""}))};
+}
+function reportLogicRevision(c,s,instruction){
+  const base=reportSectionLogicSnapshot(c,s),reason=String(instruction||"按本次意见调整").replace(/\s+/g," ").trim().slice(0,500);
+  return {version:base.version||0,updatedAt:new Date().toISOString(),changeReason:reason,rules:(base.rules||[]).map(r=>Object.assign({},r,{writingLogic:String(r.writingLogic||"").replace(/\n?本次定稿调整：[\s\S]*$/,"")+(reason?"\n本次定稿调整："+reason:""),changeReason:reason}))};
+}
+function reportLogicText(c,s,pending){
+  const snap=pending&&s?.pendingRevision?.logicRevision?s.pendingRevision.logicRevision:reportSectionLogicSnapshot(c,s);
+  return (snap?.rules||[]).map((r,i)=>((r.sourceNo?"第"+r.sourceNo+"项：":"逻辑"+(i+1)+"：")+(r.writingLogic||"")+(r.outputForm?"；输出："+r.outputForm:""))).filter(Boolean).join("\n");
+}
+function renderSectionLogicHtml(c,s){
+  const pending=!!s?.pendingRevision?.logicRevision,text=reportLogicText(c,s,pending);
+  if(!text)return "";
+  return '<div class="rpt-logic-note '+(pending?'pending':'')+'"><b>'+(pending?'本次候选稿对应生成逻辑（接受后生效）':'本节生成逻辑')+'</b><div>'+escapeHtml(text).replace(/\n/g,"<br>")+'</div></div>';
+}
+async function adoptReportLogicRevision(c,s,revision){
+  const snap=revision||s?.pendingRevision?.logicRevision,rule=snap?.rules?.[0];
+  if(!rule?.id)throw new Error("本节没有可采纳的后台逻辑项");
+  const projectType=rlProjectType(),payload={projectType,baseRuleId:rule.id,businessScenario:rlBusinessScenario(),revision:{writingLogic:rule.writingLogic||"",outputForm:rule.outputForm||"",changeReason:snap.changeReason||rule.changeReason||"由小节定稿反馈沉淀"}};
+  const evaluationResponse=await fetch("/api/reportlogic",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify(Object.assign({action:"evaluateRuleRevision"},payload))}),evaluationData=await evaluationResponse.json();
+  if(!evaluationResponse.ok||!evaluationData.ok)throw new Error(evaluationData.error||"逻辑自动评测失败");
+  const evaluation=evaluationData.evaluation;if(!evaluation.recommended)throw new Error("自动评测未通过（现行 "+evaluation.oldScore+" 分，候选 "+evaluation.candidateScore+" 分）："+[...(evaluation.blockers||[]),...(evaluation.warnings||[])].join("；"));
+  const capability=await fetch("/api/reportlogic",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({action:"adminCapability"})}).then(r=>r.json()).catch(()=>({isAdmin:false}));
+  if(capability.isAdmin){
+    const send=pass=>fetch("/api/reportlogic",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders(),pass?{"x-admin-pass":pass}:{}),body:JSON.stringify(Object.assign({action:"mergeRuleRevision"},payload))});
+    let response=await send(""),data=await response.json();
+    if(response.status===403){const pass=prompt("请输入管理员发布密码（只用于本次直接并入）：");if(pass===null)throw new Error("已取消并入后台逻辑");response=await send(pass);data=await response.json();}
+    if(!response.ok||!data.ok)throw new Error(data.error||"生成逻辑发布失败");
+    await ReportLogicCore.load(projectType,true);return {direct:true,message:"自动评测通过（"+evaluation.oldScore+"→"+evaluation.candidateScore+"），已直接替换原规则并发布为生成逻辑 v"+data.set.version};
+  }
+  const item={kind:"report_logic",title:"可研小节逻辑修订｜"+c.name+"｜"+s.t,content:JSON.stringify(payload.revision),source_ref:"project:"+(typeof currentProjectId!=="undefined"&&currentProjectId||"local")+"/section:"+c.cn+"-"+s.t,project_type:projectType,region:project.location||"",meta:{projectType,baseRuleId:rule.id,businessScenario:payload.businessScenario,revision:payload.revision,idempotencyKey:"report-logic-"+rule.id+"-"+(snap.updatedAt||Date.now())}};
+  const response=await fetch("/api/contributions",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({action:"submit",item})}),data=await response.json();
+  if(!response.ok||!data.ok)throw new Error(data.error||"提交审核失败");return {direct:false,message:"自动评测通过（"+evaluation.oldScore+"→"+evaluation.candidateScore+"），逻辑修订已提交管理员审核"};
 }
 function renderReportTableAppendix(){
   const type=reportTableProjectType();
@@ -708,9 +748,14 @@ function rlProjectType(){
 function rlProjectText(){
   return [project.name,project.type,project.location,project.desc].filter(Boolean).join(" ");
 }
+function rlBusinessScenario(){
+  const value=(project&&project.businessScenario)||(typeof aiReportExtracted!=="undefined"&&aiReportExtracted&&aiReportExtracted.businessScenario)||"";
+  return value==="commercial_renovation"?value:"housing_conversion";
+}
 function rlRetrieve(chapterName, secTitle){
   if(!window.ReportLogicCore)return "";
-  return ReportLogicCore.prompt(rlProjectType(),chapterName,secTitle,{projectText:rlProjectText(),context:typeof airMaterialContext==="function"?airMaterialContext():{hasCalculation:!!(calcParams&&calcResult)}});
+  const context=typeof airMaterialContext==="function"?airMaterialContext():{hasCalculation:!!(calcParams&&calcResult),businessScenario:rlBusinessScenario()};
+  return ReportLogicCore.prompt(rlProjectType(),chapterName,secTitle,{projectText:rlProjectText(),businessScenario:rlBusinessScenario(),context});
 }
 
 // 按章节标题匹配最相关的参考资料（关键词2元组打分，无需向量库）
@@ -823,7 +868,8 @@ async function generateSection(c, s, onChunk){
     if(v && String(v).trim()) collector.projectFields.push(k);
   });
   const excelContext=s.numeric?(excelSourceRetrieve(collector)+await mappedExcelSourceRetrieve(collector)):"";
-  const logicRules=window.ReportLogicCore?ReportLogicCore.match(rlProjectType(),c.name,s.t,{projectText:rlProjectText()}):[];
+  const logicRules=window.ReportLogicCore?ReportLogicCore.match(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),businessScenario:rlBusinessScenario()}):[];
+  s.logicSnapshot=reportSectionLogicSnapshot(c,s,logicRules);
   const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t, collector) + kbRetrieve(c.name, s.t, collector) + webEvidenceRetrieve(c.name,s.t,collector) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t, collector);
 
   let text = await callGen(sys, user, onChunk);
@@ -845,6 +891,7 @@ async function generateSection(c, s, onChunk){
     if(projectWorkflow&&projectWorkflow.currentAnalysisSnapshotId){prov.analysisSnapshotId=projectWorkflow.currentAnalysisSnapshotId;prov.analysisSnapshotVersion=projectWorkflow.currentAnalysisSnapshotVersion||null;}
     prov.confidence = provConfidence(prov);
     prov.reportLogic = logicRules.map(r=>({id:r.id,sourceNo:r.sourceNo,version:(ReportLogicCore.current(rlProjectType())||{}).version||1}));
+    if(window.ReportLogicCore?.sourcePlan)prov.sourcePlan=ReportLogicCore.sourcePlan(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),businessScenario:rlBusinessScenario(),context:typeof airMaterialContext==="function"?airMaterialContext():{hasCalculation:!!(calcParams&&calcResult)}});
     s.prov = prov;
   }
   return text;
