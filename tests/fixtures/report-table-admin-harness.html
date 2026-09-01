@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>标准表格后台三类入口验收</title>
+  <style>:root{--bp:#2d72ac;--bp-deep:#174e79;--line:#c9dbea;--soft:#64788a;--ink:#172b3a;--red:#c33}body{font-family:Arial,"Microsoft YaHei",sans-serif;margin:24px;background:#f8fbfd;color:var(--ink)}.btn{border:0;border-radius:6px;padding:8px 12px;background:var(--bp);color:#fff}.ghost{background:#fff;color:var(--bp);border:1px solid var(--bp)}.empty{padding:20px;color:var(--soft)}</style>
+</head>
+<body>
+  <main id="root"></main>
+  <script>window.authHeaders=()=>({});window.unlockStdEdit=fn=>fn();window.confirm=()=>true;window.alert=console.log;window.msg=console.log;const nativeFetch=window.fetch.bind(window);window.fetch=(url,options)=>String(url).startsWith('/api/reporttables')?Promise.resolve({ok:true,json:async()=>({ok:true,config:{version:1,status:'baseline',overrides:{projectType:'rent',templates:{},deletedTemplateIds:[],addedTemplates:[]}}})}):nativeFetch(String(url).startsWith('data/')?'/'+url:url,options);</script>
+  <script src="../../report-table-templates.js"></script>
+  <script src="../../report-table-admin.js"></script>
+  <script>window.ReportTableAdmin.mount(document.getElementById('root'),'gaibao-housing');</script>
+</body>
+</html>

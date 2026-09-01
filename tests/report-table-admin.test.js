@@ -5,7 +5,20 @@ const path=require("node:path");
 
 const root=path.resolve(__dirname,"..");
 const templateSet=JSON.parse(fs.readFileSync(path.join(root,"data","report-table-templates-rent-v1.json"),"utf8"));
-const {chapterGroups}=require("../report-table-admin.js");
+const {chapterGroups,LABELS,TYPES}=require("../report-table-admin.js");
+
+test("后台把出租、非居改保和商业改造作为三个同级表格库入口",()=>{
+  assert.deepEqual(TYPES,["rent","gaibao-housing","gaibao-commercial"]);
+  assert.equal(LABELS["gaibao-housing"],"非居改保（住房改造）");
+  assert.equal(LABELS["gaibao-commercial"],"商业改造（自持改造）");
+});
+
+test("非居和商业表格按各自Word章节归组且数量完整",()=>{
+  const housing=JSON.parse(fs.readFileSync(path.join(root,"data","report-table-templates-gaibao-housing-v1.json"),"utf8"));
+  const commercial=JSON.parse(fs.readFileSync(path.join(root,"data","report-table-templates-gaibao-commercial-v1.json"),"utf8"));
+  assert.equal(chapterGroups(housing.templates,false).flatMap(group=>group.items).length,14);
+  assert.equal(chapterGroups(commercial.templates,false).flatMap(group=>group.items).length,22);
+});
 
 test("出租类标准表格先按章节归组，再保留章内原始表格顺序",()=>{
   const body=chapterGroups(templateSet.templates,false);

@@ -420,6 +420,7 @@ function stepReview(){
   const staleCount=active.reduce((n,c)=>n+c.sections.filter(s=>s.syncStatus==="stale"||s.syncStatus==="locked-stale").length,0);
   let inner = active.map(c=>'<div class="chapter-block"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
     + c.sections.map((s,si)=>'<div class="section-block" data-cn="'+c.cn+'" data-si="'+si+'"><h4>'+s.t+'<button class="regen-btn" data-cn="'+c.cn+'" data-si="'+si+'" title="用AI重写本节">↻ 重写</button><button class="regen-btn rev-toggle" data-cn="'+c.cn+'" data-si="'+si+'" title="提修改意见，AI按要求改">✎ AI修改</button></h4>'
+        +renderSectionLogicHtml(c,s)
         +'<div class="body" contenteditable="true">'+(s.content||s.editedHtml?renderSectionContent(c,s,true):"（该子章节未生成）")+'</div>'
         + workflowSectionHtml(c,s,si)
         +'<div class="revise-bar" style="display:none;"><input type="text" class="rev-input" placeholder="修改意见，如：数据分析太浅，应结合敏感性分析展开；语气再正式一些…"><button class="btn rev-go" data-cn="'+c.cn+'" data-si="'+si+'" style="padding:7px 16px; font-size:12px; flex-shrink:0;">按要求修改</button></div>'
@@ -470,7 +471,7 @@ function workflowSectionHtml(c,s,si){
     +(Array.isArray(s.undoStack)&&s.undoStack.length?'<button class="ub-btn wf-undo" data-cn="'+c.cn+'" data-si="'+si+'">撤销</button>':'')+'</div>';
   if(s.staleReason)h+='<div class="wf-stale-note">'+escapeHtml(s.staleReason)+(s.locked?'；本节已锁定，不会自动覆盖。':'')+'</div>';
   if(s.pendingRevision)h+='<div class="wf-candidate">'+window.ProjectWorkflow.simpleDiffHtml(s.pendingRevision.before,s.pendingRevision.after)
-    +'<div class="wf-candidate-actions"><button class="btn wf-accept" data-cn="'+c.cn+'" data-si="'+si+'">接受修改</button><button class="btn ghost wf-reject" data-cn="'+c.cn+'" data-si="'+si+'">拒绝</button></div></div>';
+    +'<div class="wf-candidate-actions"><button class="btn wf-accept" data-cn="'+c.cn+'" data-si="'+si+'">接受修改</button>'+(s.pendingRevision.logicRevision?'<button class="btn ghost wf-adopt" data-cn="'+c.cn+'" data-si="'+si+'">接受并采纳为后台逻辑</button>':'')+'<button class="btn ghost wf-reject" data-cn="'+c.cn+'" data-si="'+si+'">拒绝</button></div></div>';
   return h;
 }
 

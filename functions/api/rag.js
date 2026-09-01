@@ -32,6 +32,10 @@ async function ensureExactSchema(env){
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS rag_text_chunks (id TEXT PRIMARY KEY, title TEXT NOT NULL, chapter TEXT DEFAULT '', section TEXT DEFAULT '', text TEXT NOT NULL, category TEXT DEFAULT '', doc_no TEXT DEFAULT '', issuer TEXT DEFAULT '', source_ref TEXT DEFAULT '', created_at "+tsType+" NOT NULL)").run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_rag_text_chunks_title ON rag_text_chunks(title)").run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_rag_text_chunks_doc_no ON rag_text_chunks(doc_no)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS rag_source_objects (content_hash TEXT PRIMARY KEY,storage_key TEXT NOT NULL UNIQUE,file_name TEXT NOT NULL DEFAULT '',mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',size_bytes "+tsType+" NOT NULL DEFAULT 0,created_by INTEGER,created_at "+tsType+" NOT NULL,verified_at "+tsType+" NOT NULL DEFAULT 0)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS rag_source_links (title TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1,content_hash TEXT NOT NULL,linked_at "+tsType+" NOT NULL,PRIMARY KEY(title,version))").run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_rag_source_links_hash ON rag_source_links(content_hash)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS source_asset_objects (asset_id TEXT NOT NULL,version_no TEXT NOT NULL DEFAULT '',content_hash TEXT NOT NULL,linked_at "+tsType+" NOT NULL,PRIMARY KEY(asset_id,version_no))").run();
   exactSchemaReady = true;
 }
 function exactText(v, n){ return String(v||"").trim().slice(0,n); }
@@ -70,6 +74,24 @@ export async function onRequestPost(context){
     }
   }
 
+  // 本地原件对象存储：浏览器解析前先保存原始二进制。云端未绑定对象存储时明确降级，不影响既有解析链路。
+  if(body.action === "storeOriginal"){
+    if(!isAdmin(env,user)) return json({ok:false,error:"仅管理员"},403);
+    if(!passOk(env,request)) return json({ok:false,error:"管理员密码校验失败，请重新进入后台"},403);
+    if(!env.RAG_OBJECTS || typeof env.RAG_OBJECTS.put !== "function") return json({ok:true,stored:false,warning:"当前部署未配置RAG原件对象存储；解析内容仍可入库，但原件不会随迁移包保存"});
+    const name=exactText(body.name||"source.bin",240),mimeType=exactText(body.mimeType||"application/octet-stream",120),b64=String(body.dataBase64||"");
+    if(!b64)return json({ok:false,error:"原件内容为空"},400);
+    if(b64.length>90*1024*1024)return json({ok:false,error:"原件超过约65MB，请拆分或改用受控文件导入"},400);
+    try{
+      const bin=atob(b64),bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+      const stored=await env.RAG_OBJECTS.put({bytes,fileName:name,mimeType});
+      const old=await env.DB.prepare("SELECT content_hash FROM rag_source_objects WHERE content_hash=?").bind(stored.contentHash).first(),now=Date.now();
+      if(old)await env.DB.prepare("UPDATE rag_source_objects SET file_name=?,mime_type=?,size_bytes=?,verified_at=? WHERE content_hash=?").bind(stored.fileName,stored.mimeType,stored.sizeBytes,now,stored.contentHash).run();
+      else await env.DB.prepare("INSERT INTO rag_source_objects(content_hash,storage_key,file_name,mime_type,size_bytes,created_by,created_at,verified_at) VALUES(?,?,?,?,?,?,?,?)").bind(stored.contentHash,stored.storageKey,stored.fileName,stored.mimeType,stored.sizeBytes,user.userId,now,now).run();
+      return json({ok:true,stored:true,object:stored});
+    }catch(e){return json({ok:false,error:"原件保存失败："+e.message},500);}
+  }
+
   // 上传预检：判断这份文件是"全新"、"内容完全重复"还是"同名旧版需替换"
   if(body.action === "precheck"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
@@ -97,6 +119,11 @@ export async function onRequestPost(context){
   if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
     const chunks = (body.chunks||[]).slice(0, 20);   // 每请求最多20块
     if(!chunks.length) return json({ok:false, error:"无内容"}, 400);
+    const requestedSourceHash=/^[a-f0-9]{64}$/i.test(String(body.sourceObjectHash||""))?String(body.sourceObjectHash).toLowerCase():"";
+    if(requestedSourceHash && body.isFirstBatch){
+      const sourceObject=await env.DB.prepare("SELECT content_hash FROM rag_source_objects WHERE content_hash=?").bind(requestedSourceHash).first();
+      if(!sourceObject)return json({ok:false,error:"原件对象不存在或尚未保存，请重新选择文件上传"},400);
+    }
     const texts = chunks.map(c=>String(c.text||"").slice(0, 2500));
     const docNo = exactText(body.docNo,80), issuer = exactText(body.issuer,60), sourceRef = exactText(body.sourceRef,240);
     const vecs = await embed(env, texts);
@@ -158,17 +185,23 @@ export async function onRequestPost(context){
       const effD = dateOk(body.effectiveDate);
       const expD = dateOk(body.expiryDate);
       const ids = items.map(it=>it.id);
-      const chash = String(body.contentHash||"").slice(0,64);
+      const chash = String(body.contentHash||"").slice(0,64),sourceObjectHash=requestedSourceHash;
       const row = await env.DB.prepare("SELECT ids, chunks, version FROM rag_files_v2 WHERE title=?").bind(title).first();
+      let newVer=1;
       if(row){
         const all = JSON.parse(row.ids||"[]").concat(ids);
         // 版本号：替换模式的第一批次才+1，同一次上传的后续批次不重复递增
-        const newVer = (body.replaceMode && body.isFirstBatch) ? (parseInt(row.version)||1) + 1 : (parseInt(row.version)||1);
+        newVer = (body.replaceMode && body.isFirstBatch) ? (parseInt(row.version)||1) + 1 : (parseInt(row.version)||1);
         await env.DB.prepare("UPDATE rag_files_v2 SET ids=?, chunks=?, category=?, level=?, security=?, dept_scope=?, effective_date=?, expiry_date=?, content_hash=?, version=?, updated_at=? WHERE title=?")
           .bind(JSON.stringify(all), all.length, cat, lvl, sec, dscope, effD, expD, chash, newVer, Date.now(), title).run();
       }else{
         await env.DB.prepare("INSERT INTO rag_files_v2(title, ids, chunks, category, level, enabled, security, dept_scope, effective_date, expiry_date, content_hash, version, updated_at, created_at) VALUES(?,?,?,?,?,1,?,?,?,?,?,1,?,?)")
           .bind(title, JSON.stringify(ids), ids.length, cat, lvl, sec, dscope, effD, expD, chash, Date.now(), Date.now()).run();
+      }
+      if(sourceObjectHash && body.isFirstBatch){
+        const link=await env.DB.prepare("SELECT title FROM rag_source_links WHERE title=? AND version=?").bind(title,newVer).first();
+        if(link)await env.DB.prepare("UPDATE rag_source_links SET content_hash=?,linked_at=? WHERE title=? AND version=?").bind(sourceObjectHash,Date.now(),title,newVer).run();
+        else await env.DB.prepare("INSERT INTO rag_source_links(title,version,content_hash,linked_at) VALUES(?,?,?,?)").bind(title,newVer,sourceObjectHash,Date.now()).run();
       }
     }catch(e){}
     return json({ok:true, count: items.length, replacedOld});
@@ -452,7 +485,7 @@ export async function onRequestPost(context){
   if(body.action === "list"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
   if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
-    const rows = await env.DB.prepare("SELECT f.title, f.chunks, f.category, f.level, f.enabled, f.security, f.dept_scope, f.effective_date, f.expiry_date, f.version, f.updated_at, f.created_at, m.doc_no, m.issuer, m.source_ref FROM rag_files_v2 f LEFT JOIN rag_file_meta m ON f.title=m.title ORDER BY f.created_at DESC LIMIT 500").all();
+    const rows = await env.DB.prepare("SELECT f.title, f.chunks, f.category, f.level, f.enabled, f.security, f.dept_scope, f.effective_date, f.expiry_date, f.version, f.updated_at, f.created_at, m.doc_no, m.issuer, m.source_ref, o.content_hash AS source_object_hash, o.file_name AS source_file_name, o.size_bytes AS source_size_bytes FROM rag_files_v2 f LEFT JOIN rag_file_meta m ON f.title=m.title LEFT JOIN rag_source_links sl ON sl.title=f.title AND sl.version=f.version LEFT JOIN rag_source_objects o ON o.content_hash=sl.content_hash ORDER BY f.created_at DESC LIMIT 500").all();
     return json({ok:true, files: rows.results||[]});
   }
 
@@ -643,14 +676,26 @@ export async function onRequestPost(context){
     const row = await env.DB.prepare("SELECT ids FROM rag_files_v2 WHERE title=?").bind(title).first();
     if(!row) return json({ok:false, error:"台账中未找到该文件（可能是早期版本入库，需重建索引清理）"}, 404);
     const ids = JSON.parse(row.ids);
+    let sourceObjects=[];try{const links=await env.DB.prepare("SELECT o.content_hash,o.storage_key FROM rag_source_links l JOIN rag_source_objects o ON o.content_hash=l.content_hash WHERE l.title=?").bind(title).all();sourceObjects=links.results||[];}catch(e){}
     for(let i=0; i<ids.length; i+=100){
       await env.VECTORIZE.deleteByIds(ids.slice(i, i+100));
     }
     try{
       await env.DB.prepare("DELETE FROM rag_text_chunks WHERE title=?").bind(title).run();
       await env.DB.prepare("DELETE FROM rag_file_meta WHERE title=?").bind(title).run();
+      await env.DB.prepare("DELETE FROM rag_source_links WHERE title=?").bind(title).run();
     }catch(e){}
     await env.DB.prepare("DELETE FROM rag_files_v2 WHERE title=?").bind(title).run();
+    for(const object of sourceObjects){
+      try{
+        const linked=await env.DB.prepare("SELECT COUNT(*) AS n FROM rag_source_links WHERE content_hash=?").bind(object.content_hash).first();
+        const asset=await env.DB.prepare("SELECT COUNT(*) AS n FROM source_asset_objects WHERE content_hash=?").bind(object.content_hash).first();
+        if(Number(linked&&linked.n||0)===0&&Number(asset&&asset.n||0)===0){
+          if(env.RAG_OBJECTS&&typeof env.RAG_OBJECTS.remove==="function")await env.RAG_OBJECTS.remove(object.storage_key);
+          await env.DB.prepare("DELETE FROM rag_source_objects WHERE content_hash=?").bind(object.content_hash).run();
+        }
+      }catch(e){}
+    }
     return json({ok:true, deleted: ids.length});
   }
 

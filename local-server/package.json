@@ -5,7 +5,10 @@
   "type": "module",
   "description": "可研报告工坊 · 本地部署服务器",
   "scripts": {
-    "start": "node --env-file=.env server.js"
+    "start": "node --env-file=.env server.js",
+    "rag:export": "node --env-file=.env rag-migrate.js export",
+    "rag:verify": "node rag-migrate.js verify",
+    "rag:import": "node --env-file=.env rag-migrate.js import"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

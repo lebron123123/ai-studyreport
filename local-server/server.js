@@ -31,6 +31,7 @@ import { ensureTemplatePreviews, resolvePreviewFile, resolveStoredTemplate } fro
 import { createLimiter, generatePptImage, imageProviderStatus } from "./ppt-image-generation.js";
 import { providerStatus as llmProviderStatus } from "../functions/api/_llm-providers.js";
 import { startAgentWorker } from "./agent-worker.js";
+import { createRagObjectStore } from "./rag-object-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 公司内网模型与第三方生图单独放在.env.company，避免改写原.env中的数据库及云端兜底密钥。
@@ -53,6 +54,7 @@ const ai = createAIAdapter({
   ollamaUrl: process.env.OLLAMA_URL || "http://127.0.0.1:11434",
   embedModel: process.env.EMBED_MODEL || "bge-m3",
 });
+const ragObjects = createRagObjectStore(process.env.RAG_OBJECT_ROOT || path.join(ROOT, "local-data", "rag-objects"));
 
 const ENV = {
   ...process.env,
@@ -60,6 +62,7 @@ const ENV = {
   DB: db,
   VECTORIZE: vectorize,
   AI: ai,
+  RAG_OBJECTS: ragObjects,
 };
 
 /* ---------- 2. 启动自检：早点发现问题，别等用户点了才报错 ---------- */
@@ -102,6 +105,9 @@ async function selfCheck() {
 
   try { const d = await vectorize.describe(); line(true, "向量库可访问（当前 " + d.vectorsCount + " 条向量）"); }
   catch (e) { line(false, "向量表读取失败，请确认已执行 schema-postgres.sql 且装了 pgvector 扩展"); }
+
+  try { line(existsSync(ragObjects.root), "RAG原件对象目录已就绪"); }
+  catch (e) { line(false, "RAG原件对象目录不可用：" + e.message); }
 
   const llmStatus = llmProviderStatus(ENV);
   for (const provider of llmStatus.providers) {

@@ -20,6 +20,8 @@ async function ensureSchema(env){
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_source_assets_project ON source_assets(project_no,project_type,region)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS source_asset_versions (id TEXT PRIMARY KEY,asset_id TEXT NOT NULL,version_no TEXT DEFAULT '',content_hash TEXT DEFAULT '',content_text TEXT DEFAULT '',effect_status TEXT DEFAULT 'unknown',created_at "+ts+" NOT NULL)").run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_source_asset_versions_asset ON source_asset_versions(asset_id,created_at DESC)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS source_asset_objects (asset_id TEXT NOT NULL,version_no TEXT NOT NULL DEFAULT '',content_hash TEXT NOT NULL,linked_at "+ts+" NOT NULL,PRIMARY KEY(asset_id,version_no))").run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_source_asset_objects_hash ON source_asset_objects(content_hash)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS source_asset_relations (id TEXT PRIMARY KEY,from_asset_id TEXT NOT NULL,target_doc_no TEXT NOT NULL,relation_type TEXT NOT NULL,note TEXT DEFAULT '',created_at "+ts+" NOT NULL)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS excel_workbooks (id TEXT PRIMARY KEY,asset_id TEXT,title TEXT NOT NULL,filename TEXT DEFAULT '',content_hash TEXT DEFAULT '',sheet_count INTEGER NOT NULL DEFAULT 0,created_by INTEGER,created_at "+ts+" NOT NULL,updated_at "+ts+" NOT NULL)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS excel_sheets (id TEXT PRIMARY KEY,workbook_id TEXT NOT NULL,name TEXT NOT NULL,sheet_index INTEGER NOT NULL DEFAULT 0,used_range TEXT DEFAULT '',headers TEXT DEFAULT '[]',row_count INTEGER NOT NULL DEFAULT 0,col_count INTEGER NOT NULL DEFAULT 0,created_at "+ts+" NOT NULL,UNIQUE(workbook_id,name))").run();
@@ -57,6 +59,8 @@ export async function onRequestPost(context){
     else await env.DB.prepare("INSERT INTO source_assets(id,title,document_type,category,lifecycle,effect_status,doc_no,issuer,issue_date,effective_date,expiry_date,project_no,project_type,region,source_ref,version_no,content_hash,rag_title,note,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,...vals,user.userId,now,now).run();
     const content=text(p.content_text,200000), ver=fields.version_no||("v"+now);
     if(content||fields.content_hash){const dup=await env.DB.prepare("SELECT id FROM source_asset_versions WHERE asset_id=? AND content_hash=? LIMIT 1").bind(id,fields.content_hash).first(); if(!dup)await env.DB.prepare("INSERT INTO source_asset_versions(id,asset_id,version_no,content_hash,content_text,effect_status,created_at) VALUES(?,?,?,?,?,?,?)").bind(pageId("aver_"),id,ver,fields.content_hash,content,fields.effect_status,now).run();}
+    const sourceObjectHash=/^[a-f0-9]{64}$/i.test(String(p.source_object_hash||""))?String(p.source_object_hash).toLowerCase():"";
+    if(sourceObjectHash){const link=await env.DB.prepare("SELECT asset_id FROM source_asset_objects WHERE asset_id=? AND version_no=?").bind(id,ver).first();if(link)await env.DB.prepare("UPDATE source_asset_objects SET content_hash=?,linked_at=? WHERE asset_id=? AND version_no=?").bind(sourceObjectHash,now,id,ver).run();else await env.DB.prepare("INSERT INTO source_asset_objects(asset_id,version_no,content_hash,linked_at) VALUES(?,?,?,?)").bind(id,ver,sourceObjectHash,now).run();}
     const targetDoc=text(p.replaces_doc_no,80), relation=["replaces","revises","abolishes","cites"].includes(p.relation_type)?p.relation_type:""; if(targetDoc&&relation){await env.DB.prepare("INSERT INTO source_asset_relations(id,from_asset_id,target_doc_no,relation_type,note,created_at) VALUES(?,?,?,?,?,?)").bind(pageId("rel_"),id,targetDoc,relation,text(p.relation_note,500),now).run();if(relation!=="cites"){await env.DB.prepare("UPDATE source_assets SET effect_status=?,lifecycle='superseded',updated_at=? WHERE doc_no=?").bind(relation==="abolishes"?"expired":"revised",now,targetDoc).run();try{await env.DB.prepare("UPDATE rag_files_v2 SET enabled=0 WHERE title IN (SELECT title FROM rag_file_meta WHERE doc_no=?)").bind(targetDoc).run();}catch(e){}}}
     const saved=await env.DB.prepare("SELECT * FROM source_assets WHERE id=?").bind(id).first(); return json({ok:true,asset:assetOut(saved),updated:!!old});
   }
@@ -151,6 +155,7 @@ export async function onRequestPost(context){
     await env.DB.prepare("DELETE FROM excel_workbooks WHERE asset_id=?").bind(id).run();
     await env.DB.prepare("DELETE FROM source_asset_versions WHERE asset_id=?").bind(id).run();
     await env.DB.prepare("DELETE FROM source_asset_relations WHERE from_asset_id=?").bind(id).run();
+    await env.DB.prepare("DELETE FROM source_asset_objects WHERE asset_id=?").bind(id).run();
     await env.DB.prepare("DELETE FROM source_assets WHERE id=?").bind(id).run(); return json({ok:true});
   }
   return json({ok:false,error:"未知操作"},400);

@@ -105,6 +105,11 @@
   function blockToElems(b){
     if(b.type==="table" && b.rows && b.rows.length) return [makeTable(b.rows), new D.Paragraph({children:[], spacing:{after:60}})];
     if(b.type==="templateTable" && b.template) return templateTableElems(b.template);
+    if(b.type==="logic" && b.text) return [new D.Paragraph({
+      children:[run(b.text,{size:19,color:"24814D"})],
+      shading:{fill:"EAF7EE"},border:{left:{color:"55A46D",size:12,space:6,style:D.BorderStyle.SINGLE}},
+      spacing:{before:40,after:120,line:310,lineRule:D.LineRuleType.AUTO}
+    })];
     // 小标题：正文里的 ## 三级标题，加粗略大，与正文拉开层次
     if(b.type==="h" && b.text) return [new D.Paragraph({
       children:[run(b.text,{size:24, bold:true})],

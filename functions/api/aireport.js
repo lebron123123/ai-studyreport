@@ -240,7 +240,8 @@ async function doExtract(context, body){
     + "只输出一个JSON对象，不要任何解释文字，不要markdown代码块围栏。字段如下：\n"
     + "projectName：项目名称，没有明确名称时可用地点+类型自拟一个合理名称；\n"
     + "location：建设地点，尽量具体到区/街道；\n"
-    + "calcType：仅能是以下三选一——\"rent\"（长期持有出租经营，如公租房/保租房/出租）、\"sale\"（以出售/配售为主，如配售房/商品房）、\"gaibao\"（非居物业改造为保障性住房，如商业改造/非居改保）；实在无法判断填null；\n"
+    + "calcType：仅能是以下三选一——\"rent\"（长期持有出租经营）、\"sale\"（以出售/配售为主）、\"gaibao\"（既有非居物业改造项目）；实在无法判断填null；\n"
+    + "businessScenario：calcType为gaibao时必须在\"housing_conversion\"（非居改保，改为保障性住房）与\"commercial_renovation\"（商业改造、自持经营）中二选一；用户未明确时填null；其他calcType填null；\n"
     + "landArea：用地面积，单位平方米，数字，没提到填null；\n"
     + "landPrice：地价，单位万元，数字，没提到填null；\n"
     + "startYear：建设/开工年份，数字，没提到填null；\n"
@@ -280,10 +281,13 @@ async function doExtract(context, body){
   const missing = [];
   if(!parsed.location) missing.push("location");
   if(!parsed.calcType || !TYPE_CN[parsed.calcType]) missing.push("calcType");
+  const businessScenario=["housing_conversion","commercial_renovation"].includes(parsed.businessScenario)?parsed.businessScenario:null;
+  if(parsed.calcType==="gaibao"&&!businessScenario)missing.push("businessScenario");
   return json({ok:true, data:{
     projectName: parsed.projectName || null,
     location: parsed.location || null,
     calcType: TYPE_CN[parsed.calcType] ? parsed.calcType : null,
+    businessScenario,
     landArea: (typeof parsed.landArea==="number") ? parsed.landArea : null,
     landPrice: (typeof parsed.landPrice==="number") ? parsed.landPrice : null,
     startYear: (typeof parsed.startYear==="number") ? parsed.startYear : null,

@@ -16,16 +16,23 @@ function loadTools(fetchImpl){
 test("批量联网检索按章节和小节合并规则，忽略非网搜缺口",()=>{
   const tools=loadTools();
   const targets=tools.buildBatchTargets([
-    {ruleId:"r1",sourceNo:1,chapter:"第三章 项目市场分析",section:"人口分析",title:"人口规模",requiredSources:"街道常住人口",missing:["web_search"]},
-    {ruleId:"r2",sourceNo:2,chapter:"第三章 项目市场分析",section:"人口分析",title:"人口结构",requiredSources:"年龄结构",missing:["web_search","manual_upload"]},
+    {ruleId:"r1",sourceNo:1,chapter:"第三章 项目市场分析",section:"人口分析",title:"人口规模",requiredSources:"街道常住人口",missing:["web_search"],dataRequirement:{requirementId:"req:r1",webAllowed:true,evidenceGoal:"取得常住人口",query:"龙华区 常住人口 统计公报 官方",budget:{maxQueries:1,maxResults:5}}},
+    {ruleId:"r2",sourceNo:2,chapter:"第三章 项目市场分析",section:"人口分析",title:"人口结构",requiredSources:"年龄结构",missing:["web_search","manual_upload"],dataRequirement:{requirementId:"req:r2",webAllowed:true,evidenceGoal:"取得人口结构",query:"龙华区 人口结构 统计公报 官方",budget:{maxQueries:1,maxResults:5}}},
     {ruleId:"r3",sourceNo:3,chapter:"第三章 项目市场分析",section:"住房需求",title:"内部需求",requiredSources:"内部名单",missing:["manual_upload"]},
     {ruleId:"r4",sourceNo:4,chapter:"第六章 项目地址及建设条件",section:"交通条件",title:"交通",requiredSources:"轨道和公交",missing:["web_search"]}
   ]);
   assert.equal(targets.length,2);
   assert.deepEqual([...targets[0].logicIds],["r1","r2"]);
-  assert.match(targets[0].requirement,/街道常住人口/);
-  assert.match(targets[0].requirement,/年龄结构/);
+  assert.match(targets[0].requirement,/取得常住人口/);
+  assert.match(targets[0].requirement,/取得人口结构/);
+  assert.doesNotMatch(tools.batchSearchQuery(targets[0]),/街道常住人口|年龄结构/);
+  assert.ok(tools.batchSearchQuery(targets[0]).length<=180);
   assert.equal(targets[1].section,"交通条件");
+});
+
+test("项目内部事实即使误标网搜也不会进入联网任务",()=>{
+  const tools=loadTools(),targets=tools.buildBatchTargets([{ruleId:"internal",chapter:"第一章",section:"项目概况",missing:["web_search"],requiredSources:"项目批复和合同原件",dataRequirement:{requirementId:"req:internal",webAllowed:false}}]);
+  assert.equal(targets.length,0);
 });
 
 test("已经取得联网依据的逻辑项不会再次进入批量任务",()=>{
@@ -42,6 +49,11 @@ test("采用的联网依据生成带溯源和幂等键的知识库审核材料",
   assert.match(item.content,/第一章｜项目背景/);
   assert.equal(item.meta.sourceChannel,"web_research");
   assert.equal(item.meta.webCategory,"政策制度");
+  assert.equal(item.region,"深圳市");
+  assert.equal(item.meta.regionLevel,"city");
+  assert.deepEqual([...item.meta.regionPath],["深圳市"]);
+  const national=tools.knowledgeContributionItem({evidenceId:"evi_n",title:"国务院政策",url:"https://www.gov.cn/policy",publisher:"国务院",snippet:"国家政策摘要"},{chapter:"第二章",section:"政策依据"});
+  assert.equal(national.region,"全国");assert.equal(national.meta.regionLevel,"national");
 });
 
 test("联网依据按业务类型分类而不是堆进孤立的网上搜索库",()=>{

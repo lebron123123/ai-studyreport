@@ -184,7 +184,8 @@ export async function wrSearchProvider(env,provider,query,options={}){
   if(provider==="deepseek-web"){
     const apiKey=wrFirstEnv(env,["DEEPSEEK_API_KEY","LLM_API_KEY"]);if(!apiKey)throw new Error("未配置 DEEPSEEK_API_KEY 或 LLM_API_KEY");
     const model=wrFirstEnv(env,["DEEPSEEK_WEB_SEARCH_MODEL","DEEPSEEK_MODEL","LLM_MODEL"])||"deepseek-v4-flash";
-    response=await wrFetchWithTimeout(wrDeepSeekResponsesUrl(env),{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+apiKey},body:JSON.stringify({model,input:"请联网搜索以下内容，优先返回政府官方网站、统计部门和原始发布页；只引用真实可访问网页，并给出标题、发布时间和原始网址。\n\n检索词："+query,tools:[{type:"web_search"}],tool_choice:{type:"web_search"},reasoning:{effort:"low"},max_output_tokens:Math.max(700,Math.min(1800,limit*120))})},Number(env.DEEPSEEK_WEB_SEARCH_TIMEOUT_MS)||30000);
+    const outputBudget=Math.max(500,Math.min(1000,Number(options.maxOutputTokens)||900));
+    response=await wrFetchWithTimeout(wrDeepSeekResponsesUrl(env),{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+apiKey},body:JSON.stringify({model,input:"请联网搜索以下精确数据需求。只返回能直接回答检索词的政府官网、统计部门或原始发布页；最多返回"+limit+"条，不扩展到无关背景材料，并给出标题、发布时间和原始网址。\n\n精确检索词："+query,tools:[{type:"web_search"}],tool_choice:{type:"web_search"},reasoning:{effort:"low"},max_output_tokens:outputBudget})},Number(env.DEEPSEEK_WEB_SEARCH_TIMEOUT_MS)||30000);
     payload=await response.json();
     if(!response.ok)throw new Error(wrText(payload?.error?.message||payload?.message||("HTTP "+response.status),240));
     const results=wrNormalizeDeepSeekSearchResponse(payload,provider).slice(0,limit);

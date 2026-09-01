@@ -232,9 +232,12 @@ function buildExportPayload(){
 
   const chs = active.map(c=>({ cn:c.cn, name:c.name, num: chapters.indexOf(c)+1,
     sections: c.sections.map((s,si)=>{
+      if(!String(s.content||"").trim()&&!String(s.editedHtml||"").trim())return null;
       const el = elMap[c.cn+'_'+si];
       const htmlStr = el? el.innerHTML : (s.editedHtml || renderContent(s.content||""));
       const blocks=htmlToBlocks(htmlStr);
+      const logicText=typeof reportLogicText==="function"?reportLogicText(c,s,false):"";
+      if(logicText)blocks.unshift({type:"logic",text:"本节生成逻辑\n"+logicText});
       const type=typeof reportTableProjectType==="function"?reportTableProjectType():null;
       if(type&&window.ReportTableTemplates){
         const used=new Set(blocks.filter(b=>b.type==="templateTable").map(b=>b.template&&b.template.id));
@@ -243,8 +246,8 @@ function buildExportPayload(){
         });
       }
       return { title:s.title||s.t, blocks };
-    })
-  }));
+    }).filter(Boolean)
+  })).filter(c=>c.sections.length);
 
   // 溯源清单：逐节记录生成依据与置信度，作为附录随报告一并交付（满足可追溯审计要求）
   const provRows = [["章节", "小节", "置信度", "主要依据"]];
@@ -347,24 +350,26 @@ async function collectReportImages(){
 }
 
 async function exportWord(){
-  const btn = document.getElementById("exportWordBtn");
+  const btn = document.getElementById("exportWordBtn")||document.getElementById("exportWordDraftBtn");
   if(btn){ btn.disabled = true; btn.textContent = "正在生成 .docx…"; }
   try{
     await ensureDocxLib();
     if(typeof ensureReportTableTemplates==="function")await ensureReportTableTemplates();
     const payload = buildExportPayload();
+    if(!payload.chapters.length)throw new Error("当前还没有已生成的小节可供导出");
     payload.images = await collectReportImages();
     const doc = window.buildDocxDocument(window.docx, payload);
     const blob = await window.docx.Packer.toBlob(doc);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = (project.name||"可行性研究报告")+".docx";
+    const versions=projectWorkflow&&Array.isArray(projectWorkflow.reportVersions)?projectWorkflow.reportVersions:[],current=versions.find(v=>v.id===projectWorkflow.currentReportVersionId)||versions[versions.length-1];
+    a.href = url; a.download = (project.name||"可行性研究报告")+(signed?"_正式版":"_阶段稿"+(current?"V"+current.version:""))+".docx";
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }catch(e){
     alert("导出失败："+e.message);
   }
-  if(btn){ btn.disabled = false; btn.textContent = "导出 Word"; }
+  if(btn){ btn.disabled = false; btn.textContent = btn.id==="exportWordDraftBtn"?"下载当前阶段 Word":"导出 Word"; }
 }
 
 /* ================= 测算说明书 Word 导出 =================

@@ -355,6 +355,18 @@ function htmlToStructuredText(html){
     .replace(/\n{3,}/g, "\n\n").trim();
 }
 
+async function ragFileBase64(f){
+  if(f.size>65*1024*1024)throw new Error("原件超过65MB，请拆分后上传");
+  const bytes=new Uint8Array(await f.arrayBuffer());let binary="";const CH=0x8000;
+  for(let i=0;i<bytes.length;i+=CH)binary+=String.fromCharCode.apply(null,bytes.subarray(i,i+CH));
+  return btoa(binary);
+}
+async function ragStoreOriginal(f){
+  const r=await fetch("/api/rag",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"storeOriginal",name:f.name,mimeType:f.type||"application/octet-stream",dataBase64:await ragFileBase64(f)})});
+  const d=await r.json();if(!d.ok)throw new Error(d.error||"原件保存失败");
+  if(!d.stored)return {contentHash:"",warning:d.warning||"当前部署未保存原件"};
+  return d.object||{};
+}
 async function ragParseFile(f){
   const ext = (f.name.split(".").pop()||"").toLowerCase();
   if(ext==="txt") return await f.text();
@@ -394,13 +406,7 @@ async function ragParseFile(f){
   const SERVER_PARSE = ["png","jpg","jpeg","webp","svg","xlsx","xls","xlsm","csv","html","htm","xml","ods","odt","numbers"];
   if(SERVER_PARSE.includes(ext)){
     if(f.size > 8*1024*1024) throw new Error("文件超过8MB，请压缩或拆分后再上传");
-    const buf = await f.arrayBuffer();
-    // ArrayBuffer → base64（分片处理，避免大文件时调用栈溢出）
-    const bytes = new Uint8Array(buf);
-    let binary = "";
-    const CH = 0x8000;
-    for(let i=0;i<bytes.length;i+=CH) binary += String.fromCharCode.apply(null, bytes.subarray(i, i+CH));
-    const b64 = btoa(binary);
+    const b64 = await ragFileBase64(f);
     const r = await fetch("/api/rag",{method:"POST",headers:authHeaders(),
       body:JSON.stringify({action:"parseFile", name:f.name, dataBase64:b64})});
     const d = await r.json();
@@ -770,9 +776,11 @@ async function ragIngest(files){
   for(let fi=0; fi<files.length; fi++){
     const f = files[fi];
     prog.textContent = "解析 "+(fi+1)+"/"+files.length+"：《"+f.name+"》（"+ingestCat+"："+prof.note+"）…";
-    let chunks, contentHash = "", replaceMode = false, parsedText = "";
+    let chunks, contentHash = "", sourceObjectHash = "", replaceMode = false, parsedText = "";
     const fileTitle = f.name.replace(/\.[^.]+$/,"");
     try{
+      const sourceObject=await ragStoreOriginal(f);sourceObjectHash=sourceObject.contentHash||"";
+      if(sourceObject.warning)msg(sourceObject.warning,"err");
       const text = await ragParseFile(f); parsedText = text;
       contentHash = await ragContentHash(text);
       // 上传预检：识别重复 / 同名旧版
@@ -796,7 +804,7 @@ async function ragIngest(files){
     totalChunks += chunks.length;
     let assetId = "";
     try{
-      const ar = await fetch("/api/materials",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"saveAsset",asset:{title:fileTitle,category:ingestCat,lifecycle:"active",doc_no:ingestDocNo,issuer:ingestIssuer,effective_date:ingestEffD,expiry_date:ingestExpD,source_ref:ingestSourceRef,content_hash:contentHash,content_text:parsedText,rag_title:fileTitle,...ingestAssetMeta}})});
+      const ar = await fetch("/api/materials",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"saveAsset",asset:{title:fileTitle,category:ingestCat,lifecycle:"active",doc_no:ingestDocNo,issuer:ingestIssuer,effective_date:ingestEffD,expiry_date:ingestExpD,source_ref:ingestSourceRef,content_hash:contentHash,source_object_hash:sourceObjectHash,content_text:parsedText,rag_title:fileTitle,...ingestAssetMeta}})});
       const ad = await ar.json(); if(ad.ok) assetId = ad.asset.id;
     }catch(e){ failed.push(f.name+"（资料台账登记失败）"); }
     for(let i=0; i<chunks.length; i+=10){
@@ -810,7 +818,7 @@ async function ragIngest(files){
           body:JSON.stringify({action:"upsert", chunks:chunks.slice(i,i+10), category:cat, level:lvl, security:sec, deptScope:dept,
                                effectiveDate:ingestEffD, expiryDate:ingestExpD,
                                docNo:ingestDocNo, issuer:ingestIssuer, sourceRef:ingestSourceRef,
-                               contentHash, replaceMode, isFirstBatch: i===0})});
+                               contentHash, sourceObjectHash, replaceMode, isFirstBatch: i===0})});
         const d = await r.json();
         if(d.ok) okChunks += d.count; else{ failed.push(f.name+"批次"+i+"："+d.error); break; }
       }catch(e){ failed.push(f.name+"批次"+i+"：网络错误"); break; }
@@ -933,6 +941,7 @@ async function refreshRagFiles(){
       +'<span style="font-size:11px; color:'+(f.security==3?"#B7302B":f.security==2?"#8A6D1B":"#1F7A3D")+';">'+SECN[parseInt(f.security)||1]+'</span>'
       +(f.doc_no?'<span title="'+esc((f.issuer?f.issuer+'｜':'')+(f.source_ref||''))+'" style="font-size:11px; padding:1px 6px; background:#EEF3FA; color:#2C6CA6;">'+esc(f.doc_no)+'</span>':'')
       +(f.dept_scope && f.dept_scope!=="全部门" ? '<span style="font-size:11px; padding:1px 6px; background:#EEF; color:#33a;">'+esc(f.dept_scope)+'</span>' : '')
+      +(f.source_object_hash?'<span title="原件：'+esc(f.source_file_name||f.title)+'｜SHA-256 '+esc(f.source_object_hash)+'｜'+Math.round(Number(f.source_size_bytes||0)/1024)+'KB" style="font-size:11px;padding:1px 6px;background:#E7F6ED;color:#18794E;">✓ 原件已保存</span>':'<span title="该记录在原件对象存储上线前入库" style="font-size:11px;padding:1px 6px;background:#FFF4CE;color:#9A6700;">仅解析内容</span>')
       +((parseInt(f.version)||1) > 1 ? '<span title="'+(f.updated_at?"最近更新 "+new Date(f.updated_at).toLocaleDateString("zh-CN"):"")+'" style="font-size:11px; padding:1px 6px; border-radius:3px; background:#EEF3FA; color:#2C6CA6;">v'+f.version+'</span>' : '')
       +ragLifeBadge(f.effective_date, f.expiry_date)
       +'<span style="color:var(--soft);">'+f.chunks+'块</span>'
@@ -2858,6 +2867,6 @@ if(pptTemplateNav)pptTemplateNav.onclick=()=>{document.querySelectorAll(".nav-it
 <script src="ppt-template-admin-v2.js?v=1.0"></script>
 <script src="ppt-asset-admin.js?v=1.0"></script>
 <script src="report-table-templates.js?v=1.2"></script>
-<script src="report-table-admin.js?v=1.2"></script>
-<script src="report-logic-admin.js?v=1.4"></script>
+<script src="report-table-admin.js?v=1.3"></script>
+<script src="report-logic-admin.js?v=1.5"></script>
 <script src="report-golden-admin.js?v=1.0"></script>

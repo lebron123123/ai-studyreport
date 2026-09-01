@@ -25,6 +25,23 @@ test("普通用户投稿只进入待审核台账，不直接写正式模块",asy
   const DB=dbMock(),env={SESSION_SECRET:"s1",ADMIN_USERS:"admin",ADMIN_PASS:"pass",DEPLOY_MODE:"local",DB};
   const r=await call(env,"user",{action:"submit",item:{kind:"wiki",title:"租金口径",content:"建议正文",source_ref:"制度第12条"}});
   assert.equal(r.data.ok,true);assert.equal(DB.state.items[0].status,"pending");assert.equal(DB.state.wiki.length,0);
+  assert.equal(DB.state.items[0].region,"深圳市");
+  assert.equal(JSON.parse(DB.state.items[0].meta).regionLevel,"city");
+});
+
+test("普通用户的小节定稿逻辑进入专用审核类型，不会直接改正式规则",async()=>{
+  const DB=dbMock(),env={SESSION_SECRET:"logic",ADMIN_USERS:"zgbyd",DEPLOY_MODE:"local",DB};
+  const r=await call(env,"user",{action:"submit",item:{kind:"report_logic",title:"项目背景逻辑修订",content:JSON.stringify({writingLogic:"按定稿论证链生成"}),source_ref:"project:p1/section:1.1",project_type:"gaibao",meta:{baseRuleId:"gaibao-logic-001",revision:{writingLogic:"按定稿论证链生成"}}}});
+  assert.equal(r.data.ok,true);assert.equal(DB.state.items[0].kind,"report_logic");assert.equal(DB.state.items[0].status,"pending");assert.equal(DB.state.calls.some(x=>x.sql.includes("INSERT INTO report_logic_sets")),false);
+});
+
+test("联网依据按全国、市、区、街道四级规范化后进入审核队列",async()=>{
+  const DB=dbMock(),env={SESSION_SECRET:"scope",ADMIN_USERS:"admin",ADMIN_PASS:"pass",DEPLOY_MODE:"local",DB};
+  const r=await call(env,"user",{action:"submit",item:{kind:"wiki",title:"街道政策",content:"经核验的政策摘要",source_ref:"https://example.com/policy",region:"深圳市龙华区民治街道",project_type:"housing_conversion",meta:{sourceChannel:"web_research"}}});
+  assert.equal(r.data.ok,true);assert.equal(DB.state.items[0].region,"龙华区民治街道");
+  const meta=JSON.parse(DB.state.items[0].meta);assert.equal(meta.regionLevel,"street");assert.deepEqual(meta.regionPath,["深圳市","龙华区","民治街道"]);
+  const review=await call(env,"admin",{action:"listReview",status:"pending"},true);
+  assert.equal(review.data.items[0].region,"龙华区民治街道");assert.equal(review.data.items[0].meta.regionLevel,"street");
 });
 
 test("同一联网证据重复提交时复用已有审核记录并返回所处阶段",async()=>{
