@@ -114,7 +114,7 @@
   function createReportVersion(state,chapters,meta){
     state=state||{}; state.reportVersions=Array.isArray(state.reportVersions)?state.reportVersions:[];
     meta=meta||{};const trust=root.ReportTrust,evidenceApi=root.ReportEvidenceGraph,dependencyApi=root.ReportDependency;
-    const body=(chapters||[]).map(c=>({cn:c.cn,name:c.name,checked:c.checked,sections:(c.sections||[]).map(s=>({t:s.t,numeric:!!s.numeric,content:s.content||"",editedHtml:s.editedHtml||null,locked:!!s.locked,syncStatus:s.syncStatus||"current",prov:clone(s.prov||null),trust:trust?trust.buildSectionProfile(s,{hasCalculation:!!state.currentCalcSnapshotId}):null}))}));
+    const body=(chapters||[]).map(c=>({cn:c.cn,name:c.name,checked:c.checked,sections:(c.sections||[]).map(s=>({t:s.t,numeric:!!s.numeric,content:s.content||"",editedHtml:s.editedHtml||null,locked:!!s.locked,syncStatus:s.syncStatus||"current",prov:clone(s.prov||null),logicSnapshot:clone(s.logicSnapshot||null),trust:trust?trust.buildSectionProfile(s,{hasCalculation:!!state.currentCalcSnapshotId}):null}))}));
     const nextVersion=state.reportVersions.reduce((n,x)=>Math.max(n,Number(x.version)||0),0)+1;
     const lineage=trust?trust.buildLineage(state,meta):null;
     const evidenceAudit=evidenceApi?evidenceApi.preSubmitAudit(chapters):null;
@@ -125,23 +125,24 @@
       evidenceAudit,dependencyGraph:dependencyGraph?{schemaVersion:dependencyGraph.schemaVersion,parameters:dependencyGraph.parameters,metrics:dependencyGraph.metrics,sections:dependencyGraph.sections,hash:hash(dependencyGraph)}:null};
     const prev=state.reportVersions[state.reportVersions.length-1];
     if(prev&&prev.hash===ver.hash&&prev.calcSnapshotId===ver.calcSnapshotId&&prev.analysisSnapshotId===ver.analysisSnapshotId&&(!lineage||prev.lineage&&prev.lineage.hash===lineage.hash))return prev;
-    state.reportVersions.push(ver);if(state.reportVersions.length>5)state.reportVersions.splice(0,state.reportVersions.length-5);state.currentReportVersionId=ver.id; return ver;
+    state.reportVersions.push(ver);if(state.reportVersions.length>50)state.reportVersions.splice(0,state.reportVersions.length-50);state.currentReportVersionId=ver.id; return ver;
   }
-  function setCandidate(section,newText,instruction){
+  function setCandidate(section,newText,instruction,meta){
     if(!section)return null;
-    const candidate={id:uid("patch"),createdAt:new Date().toISOString(),instruction:String(instruction||""),before:currentText(section),after:String(newText||"")};
+    meta=meta||{};
+    const candidate={id:uid("patch"),createdAt:new Date().toISOString(),instruction:String(instruction||""),before:currentText(section),after:String(newText||""),logicRevision:clone(meta.logicRevision||null)};
     section.pendingRevision=candidate; return candidate;
   }
   function acceptCandidate(section){
     if(!section||!section.pendingRevision)return null;
     section.undoStack=Array.isArray(section.undoStack)?section.undoStack:[];
-    section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null});
-    const c=section.pendingRevision; section.content=c.after; section.editedHtml=null; section.pendingRevision=null; clearSectionStale(section); return c;
+    section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null,logicSnapshot:clone(section.logicSnapshot||null)});
+    const c=section.pendingRevision; section.content=c.after; section.editedHtml=null;if(c.logicRevision)section.logicSnapshot=clone(c.logicRevision); section.pendingRevision=null; clearSectionStale(section); return c;
   }
   function rejectCandidate(section){ if(!section)return; section.pendingRevision=null; }
   function undoSection(section){
     if(!section||!Array.isArray(section.undoStack)||!section.undoStack.length)return false;
-    const prev=section.undoStack.pop(); section.content=prev.content; section.editedHtml=prev.editedHtml; return true;
+    const prev=section.undoStack.pop(); section.content=prev.content; section.editedHtml=prev.editedHtml;section.logicSnapshot=clone(prev.logicSnapshot||null); return true;
   }
   function escapeHtml(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
   function simpleDiffHtml(before,after){
@@ -172,7 +173,13 @@
     if(!Array.isArray(s.calcSnapshots))s.calcSnapshots=[];
     if(!Array.isArray(s.analysisSnapshots))s.analysisSnapshots=[];
     if(!Array.isArray(s.reportVersions))s.reportVersions=[];
+    if(!s.modules||typeof s.modules!=="object")s.modules={};
     return s;
+  }
+  function touchModule(state,key,meta){
+    state=ensureState(state);const previous=state.modules[key]||{};
+    const next={version:(Number(previous.version)||0)+1,updatedAt:new Date().toISOString(),reason:String(meta&&meta.reason||"模块已更新"),hash:hash(meta&&meta.value!==undefined?meta.value:meta||{})};
+    state.modules[key]=next;return next;
   }
   function bulkConfirm(items){
     let changed=0;
@@ -249,7 +256,7 @@
   }
 
   const api={clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,
-    createCalcSnapshot,createReportVersion,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,bulkConfirm,
+    createCalcSnapshot,createReportVersion,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
     aiReportStage,aiReportStageRank,previousAiReportStage,locationTokens,rankLocationCandidates,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
     impactedAnalysisSections,markAnalysisImpacted,METRIC_LABELS,ANALYSIS_DOMAIN_WORDS};
   root.ProjectWorkflow=api;

@@ -43,3 +43,26 @@ outputs/ppt-native-samples/
 outputs/ppt-template-timeline-pages/
 outputs/ppt-web-native-render/
 outputs/ppt-wysiwyg-render/
+
+# 外部 Housing / anju-pc 参考项目的分析产物仅保留在外部学习资料目录，不进入本仓库
+outputs/**/*anju-pc*
+outputs/**/*anju_pc*
+outputs/**/*Housing*Investment_OS*
+outputs/**/*Housing*规划基线*
+
+# 本地检查、解析脚本和第三方便携依赖缓存
+.tmp/
+tools/vendor/
+**/__pycache__/
+*.pyc
+
+# 宠物正式网页素材进入 assets/pets；制作源片、PSD、Blender和QA抽帧仅本地保留
+outputs/pet-3d-source/**/*.blend
+outputs/pet-3d-source/**/*.blend1
+outputs/pet-3d-source/**/*.png
+outputs/pet-live2d-source/**/*.psd
+outputs/pet-live2d-source/**/*.cmo3
+outputs/pet-live2d-source/**/*.png
+outputs/pet-video-source/**/*.mp4
+outputs/pet-video-source/**/*.png
+outputs/pet-video-source/**/*.json

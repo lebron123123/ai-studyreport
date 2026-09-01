@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>蓝猫动作视频逐段采样</title>
+<style>
+  body{margin:0;padding:12px;background:#263743;color:#fff;font:12px system-ui;display:grid;grid-template-columns:repeat(7,minmax(130px,1fr));gap:8px}
+  figure{margin:0;text-align:center}video{display:block;width:100%;aspect-ratio:1;object-fit:contain;background:#00ff00;margin-bottom:3px}
+</style>
+<script>
+  const allFiles=["cat-jump-up-v1.mp4","cat-jump-down-v1.mp4","cat-run-start-v1.mp4","cat-run-loop-v1.mp4","cat-run-stop-v1.mp4"],selected=new URLSearchParams(location.search).get("file");
+  const files=selected?[allFiles[Math.max(0,Math.min(allFiles.length-1,Number(selected)))]]:allFiles;
+  const points=[.03,.12,.22,.32,.5,.72,.94];
+  addEventListener("DOMContentLoaded",()=>files.forEach(file=>points.forEach(point=>{
+    const figure=document.createElement("figure"),video=document.createElement("video");video.muted=true;video.playsInline=true;video.preload="auto";
+    video.src="/assets/pets/videos/"+file+"?qa=1";video.addEventListener("loadedmetadata",()=>video.currentTime=Math.min(video.duration-.04,video.duration*point),{once:true});video.addEventListener("seeked",()=>video.pause());
+    figure.append(video,file.replace("cat-","").replace("-v1.mp4","")+" "+Math.round(point*100)+"%");document.body.append(figure);
+  })));
+</script>
+</html>

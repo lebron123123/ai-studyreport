@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>蓝猫上下跑视频五点检查</title>
+<style>html,body{min-height:100%;margin:0;background:#263743}body{display:grid;place-items:center}body.grid{display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;padding:12px;box-sizing:border-box}figure{margin:0;color:#fff;font:12px system-ui;text-align:center}video{width:min(82vw,720px);max-height:90vh;background:#00ff00}body.grid video{width:100%;max-height:none}</style>
+<video id="video" muted playsinline preload="auto"></video>
+<script>
+  const query=new URLSearchParams(location.search),video=document.getElementById("video");
+  function loadFrame(target,direction,point){target.src="/assets/pets/videos/cat-run-"+direction+"-v1.mp4?v=1";target.addEventListener("loadedmetadata",()=>{target.currentTime=Math.max(0,Math.min(target.duration-.04,target.duration*point));},{once:true});target.addEventListener("seeked",()=>target.pause());}
+  if(query.get("grid")==="1"){
+    document.body.className="grid";video.remove();
+    for(const direction of ["down","up"])for(const point of [.05,.25,.5,.75,.95]){const figure=document.createElement("figure"),item=document.createElement("video");item.muted=true;item.playsInline=true;item.preload="auto";figure.append(item,direction+" "+Math.round(point*100)+"%");document.body.append(figure);loadFrame(item,direction,point);}
+  }else{
+    const direction=query.get("direction")==="down"?"down":"up",point=Math.max(0,Math.min(1,Number(query.get("point")||0)));loadFrame(video,direction,point);
+  }
+</script>
+</html>

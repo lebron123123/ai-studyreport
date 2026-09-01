@@ -783,7 +783,7 @@
   const AW_POS_KEYS={button:"studyreport:agent-button-position:v1",panel:"studyreport:agent-panel-position:v1"};
   function awReadPosition(key){try{const p=JSON.parse(localStorage.getItem(key)||"null");return p&&Number.isFinite(p.left)&&Number.isFinite(p.top)?p:null;}catch(_){return null;}}
   function awClamp(el,left,top){const margin=8,w=el.offsetWidth||72,h=el.offsetHeight||82;return{left:Math.max(margin,Math.min(left,innerWidth-w-margin)),top:Math.max(margin,Math.min(top,innerHeight-h-margin))};}
-  function awSetPosition(el,pos){if(!pos)return;const p=awClamp(el,pos.left,pos.top);el.style.left=p.left+"px";el.style.top=p.top+"px";el.style.right="auto";el.style.bottom="auto";}
+  function awSetPosition(el,pos){if(!pos)return;const p=awClamp(el,pos.left,pos.top);el.style.left=p.left+"px";el.style.top=p.top+"px";el.style.right="auto";el.style.bottom="auto";el.dispatchEvent(new CustomEvent("awpositionchange"));}
   function awSavePosition(el,key){try{localStorage.setItem(key,JSON.stringify({left:parseFloat(el.style.left)||el.offsetLeft,top:parseFloat(el.style.top)||el.offsetTop}));}catch(_){}}
   function awPlacePanelNearButton(){
     if(awReadPosition(AW_POS_KEYS.panel))return;

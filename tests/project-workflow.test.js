@@ -35,6 +35,12 @@ test("AI候选稿拒绝不改正文，接受后可撤销",()=>{
   WF.setCandidate(s,"建议稿","更正式");WF.acceptCandidate(s);assert.equal(s.content,"建议稿");assert.equal(s.pendingRevision,null);assert.equal(WF.undoSection(s),true);assert.equal(s.content,"原稿");
 });
 
+test("候选稿携带的生成逻辑随接受和撤销同步变化",()=>{
+  const oldLogic={version:1,rules:[{id:"r1",writingLogic:"旧逻辑"}]},newLogic={version:1,rules:[{id:"r1",writingLogic:"新逻辑"}]},s={content:"原稿",logicSnapshot:oldLogic};
+  WF.setCandidate(s,"建议稿","加强论证",{logicRevision:newLogic});WF.acceptCandidate(s);
+  assert.equal(s.logicSnapshot.rules[0].writingLogic,"新逻辑");assert.equal(WF.undoSection(s),true);assert.equal(s.logicSnapshot.rules[0].writingLogic,"旧逻辑");
+});
+
 test("拖选局部修改只替换唯一命中的片段并保护重复文本",()=>{
   let r=WF.replaceSelectedText("第一段原文。\n\n第二段原文。","第二段原文。","第二段修改稿。");
   assert.equal(r.ok,true);assert.equal(r.text,"第一段原文。\n\n第二段修改稿。");
@@ -43,15 +49,15 @@ test("拖选局部修改只替换唯一命中的片段并保护重复文本",()=
 });
 
 test("报告版本保存锁定、同步状态和溯源，不只保存正文",()=>{
-  const state=WF.ensureState({}),cs=chapters();cs[1].sections[1].syncStatus="locked-stale";cs[1].sections[1].prov={model:"x",kbDocs:[{title:"依据"}]};
+  const state=WF.ensureState({}),cs=chapters();cs[1].sections[1].syncStatus="locked-stale";cs[1].sections[1].prov={model:"x",kbDocs:[{title:"依据"}]};cs[1].sections[1].logicSnapshot={version:3,rules:[{id:"r1",writingLogic:"本节逻辑"}]};
   const v=WF.createReportVersion(state,cs,{reason:"复核版"}),saved=v.chapters[1].sections[1];
-  assert.equal(saved.locked,true);assert.equal(saved.syncStatus,"locked-stale");assert.equal(saved.prov.kbDocs[0].title,"依据");
+  assert.equal(saved.locked,true);assert.equal(saved.syncStatus,"locked-stale");assert.equal(saved.prov.kbDocs[0].title,"依据");assert.equal(saved.logicSnapshot.rules[0].writingLogic,"本节逻辑");
 });
 
-test("完整报告版本最多保留5份且版本号持续递增，避免项目JSON无限膨胀",()=>{
+test("持续迭代报告最多保留50份且版本号持续递增",()=>{
   const state=WF.ensureState({}),cs=chapters();
-  for(let i=1;i<=8;i++){cs[0].sections[0].content="版本"+i;WF.createReportVersion(state,cs,{reason:"v"+i});}
-  assert.equal(state.reportVersions.length,5);assert.deepEqual(state.reportVersions.map(x=>x.version),[4,5,6,7,8]);assert.equal(state.currentReportVersionId,state.reportVersions[4].id);
+  for(let i=1;i<=55;i++){cs[0].sections[0].content="版本"+i;WF.createReportVersion(state,cs,{reason:"v"+i});}
+  assert.equal(state.reportVersions.length,50);assert.deepEqual(state.reportVersions.map(x=>x.version),Array.from({length:50},(_,i)=>i+6));assert.equal(state.currentReportVersionId,state.reportVersions[49].id);
 });
 
 test("批量人工确认只勾选未确认项并返回准确数量，不触发后续测算",()=>{

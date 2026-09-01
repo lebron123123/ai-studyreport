@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>宠物视频五点检查</title>
+<style>
+  body{margin:0;background:#152330;color:#fff;font:14px sans-serif;display:grid;place-items:center;min-height:100vh}
+  main{display:grid;gap:12px;width:min(720px,92vw)}video{width:100%;background:#000}.controls{display:flex;gap:8px;flex-wrap:wrap}
+  button{padding:8px 12px;border:1px solid #7fc7ee;border-radius:5px;background:#173f5d;color:#fff;cursor:pointer}output{font-family:monospace}
+</style>
+<main><video id="video" muted playsinline preload="auto"></video><div class="controls" id="controls"></div><output id="state">加载中</output></main>
+<script>
+  const video=document.getElementById("video"),state=document.getElementById("state"),points=[0.05,0.25,0.5,0.75,0.95];
+  video.src=new URLSearchParams(location.search).get("src")||"";
+  const show=()=>state.value=JSON.stringify({duration:video.duration,currentTime:video.currentTime,readyState:video.readyState,error:video.error&&video.error.code});
+  video.addEventListener("loadedmetadata",()=>{points.forEach((point,index)=>{const button=document.createElement("button");button.textContent=`${Math.round(point*100)}%`;button.dataset.point=String(index);button.onclick=()=>{video.pause();video.currentTime=Math.max(0,Math.min(video.duration-.02,video.duration*point));};controls.appendChild(button);});show();});
+  video.addEventListener("seeked",show);video.addEventListener("error",show);
+</script>
+</html>

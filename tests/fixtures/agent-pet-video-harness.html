@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<base href="/">
+<title>桌宠视频动作测试</title>
+<style>
+  body{margin:0;min-height:100vh;background:#eef5fa}
+  #awBtn{position:fixed;left:calc(100vw - 170px);top:calc(100vh - 180px);width:140px;min-height:140px;border:0;background:transparent}
+  .aw-name{display:block;margin-top:4px;padding:5px;background:#fff;border-radius:12px;color:#245f8d}
+  #awPanel{display:none}.aw-avatar{display:none}
+</style>
+<button id="awBtn"><span class="aw-name">蓝喵</span></button>
+<div id="awPanel"></div>
+<a id="awPetToggle"></a>
+<script>window.__pageErrors=[];addEventListener("error",function(e){window.__pageErrors.push(String(e.message||e.error||"error"));});addEventListener("unhandledrejection",function(e){window.__pageErrors.push(String(e.reason||"rejection"));});</script>
+<script>
+  (function(){var q=new URLSearchParams(location.search),corner=q.get("corner");if(q.get("route")==="clockwise")Math.random=function(){return .9;};
+    if(q.get("form")==="anju"||q.get("form")==="cat")localStorage.setItem("studyreport:agent-pet-form:v1",q.get("form"));
+    if(corner==="tl"){awBtn.style.left="18px";awBtn.style.top="18px";}
+    if(corner==="tr"){awBtn.style.left="calc(100vw - 158px)";awBtn.style.top="18px";}
+    if(corner==="bl"){awBtn.style.left="18px";awBtn.style.top="calc(100vh - 158px)";}
+    if(corner==="br"){awBtn.style.left="calc(100vw - 158px)";awBtn.style.top="calc(100vh - 158px)";}
+  })();
+</script>
+<script src="/pet-video-manifest.js?v=3.1"></script>
+<script src="/agent-pet.js?v=2.54"></script>
+<script>
+  setTimeout(function(){
+    var action=new URLSearchParams(location.search).get("action")||"jump";
+    if(window.AgentPet)window.AgentPet.perform(action);
+  },900);
+</script>
+</html>

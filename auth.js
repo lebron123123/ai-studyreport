@@ -199,6 +199,8 @@ async function startApp(){
       document.getElementById("draftDiscard").onclick = ()=>{ clearDraft(); document.getElementById("draftBar").remove(); };
     }
   }
+  const projectRoute=window.UiRouteState&&window.UiRouteState.projectRoute&&window.UiRouteState.projectRoute();
+  if(projectRoute&&projectRoute.projectId)setTimeout(()=>openProjectsPanel(),60);
 }
 function checkLogin(){
   if(getToken()){ startApp(); }

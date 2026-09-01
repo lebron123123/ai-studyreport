@@ -4,7 +4,8 @@
   const KEY="studyreport:last-view:v1";
   const MODES=new Set([null,"report","calc","review","office","aireport","collaboration","personalKnowledge","analysis"]);
   const OFFICE_VIEWS=new Set(["chat","ppt","assets"]);
-  function hashState(){const raw=String(location.hash||"").replace(/^#\/?/,"");if(!raw)return{};const parts=raw.split("/").map(decodeURIComponent);const mode=parts[0]||null;return{mode:MODES.has(mode)?mode:null,officeView:OFFICE_VIEWS.has(parts[1])?parts[1]:"chat"};}
+  function projectRoute(hash){const m=String(hash==null?location.hash:hash).match(/^#project\/([A-Za-z0-9_-]{8,100})\/(overview|data|files|decisions|spatial|members)$/);return m?{projectId:m[1],projectView:m[2]}:null;}
+  function hashState(){const pr=projectRoute();if(pr)return pr;const raw=String(location.hash||"").replace(/^#\/?/,"");if(!raw)return{};const parts=raw.split("/").map(decodeURIComponent);const mode=parts[0]||null;return{mode:MODES.has(mode)?mode:null,officeView:OFFICE_VIEWS.has(parts[1])?parts[1]:"chat"};}
   function read(){try{return{...JSON.parse(sessionStorage.getItem(KEY)||"{}"),...hashState()};}catch(_){return hashState();}}
   function write(){
     try{
@@ -16,8 +17,8 @@
         pptProjectId:ppt&&ppt.current&&ppt.current.id||"",
         pptSlide:ppt&&Number.isFinite(ppt.selected)?ppt.selected:0
       }));
-      const route=appMode===null?"":encodeURIComponent(appMode)+(appMode==="office"?"/"+encodeURIComponent(typeof officeView!=="undefined"&&OFFICE_VIEWS.has(officeView)?officeView:"chat"):"");
-      history.replaceState(null,"",location.pathname+location.search+(route?"#"+route:""));
+      const activeProject=projectRoute();if(activeProject)return;
+      const route=appMode===null?"":encodeURIComponent(appMode)+(appMode==="office"?"/"+encodeURIComponent(typeof officeView!=="undefined"&&OFFICE_VIEWS.has(officeView)?officeView:"chat"):"");history.replaceState(null,"",location.pathname+location.search+(route?"#"+route:""));
     }catch(_){ }
   }
   function restore(){
@@ -42,5 +43,5 @@
   }
   setTimeout(restorePpt,350);
   root.addEventListener("beforeunload",write);
-  root.UiRouteState={read,write,restore};
+  root.UiRouteState={read,write,restore,projectRoute,writeProject:(projectId,view)=>history.pushState(null,"",location.pathname+location.search+"#project/"+encodeURIComponent(projectId)+"/"+(view||"overview"))};
 })(window);
