@@ -105,11 +105,40 @@ test("地点候选优先匹配用户填写行政区，不把宝安候选排在�
   assert.equal(ranked[1].locationMatch,"conflict");
 });
 
+test("批量分析点位最多保留6个且始终只有一个主项目",()=>{
+  const sites=WF.normalizeAnalysisSites(Array.from({length:8},(_,i)=>({name:"项目"+(i+1),address:"深圳市第"+(i+1)+"区",role:i<2?"primary":"secondary"})));
+  assert.equal(sites.length,6);assert.equal(sites.filter(x=>x.role==="primary").length,1);assert.equal(sites[0].role,"primary");
+  assert.equal(sites[5].name,"项目6");
+});
+
+test("批量点位写作计划明确主项目精写、次项目合并压缩",()=>{
+  const plan=WF.siteWritingPlan([{name:"核心项目",address:"A区",role:"primary"},{name:"次项目甲",address:"B区"},{name:"次项目乙",address:"C区"}]);
+  assert.equal(plan.isBatch,true);assert.equal(plan.primary.name,"核心项目");assert.equal(plan.secondary.length,2);
+  assert.match(plan.strategy,/完整展开/);assert.match(plan.strategy,/合并为一段/);assert.match(plan.strategy,/2—3句/);
+});
+
+test("单点位保持旧流程兼容，不错误启用批量压缩",()=>{
+  const plan=WF.siteWritingPlan([{name:"单一项目",location:"龙华区"}]);
+  assert.equal(plan.isBatch,false);assert.equal(plan.primary.address,"龙华区");assert.equal(plan.sites[0].role,"primary");
+});
+
 test("刷新草稿时保留AI可研入口，普通旧草稿仍回到传统报告流程",()=>{
   assert.equal(WF.resumeAppMode("report",true),"aireport");
   assert.equal(WF.resumeAppMode("aireport",true),"aireport");
   assert.equal(WF.resumeAppMode(undefined,false),"report");
   assert.equal(WF.resumeAppMode("calc",false),"calc");
+});
+
+test("旧项目没有AI对话时以项目事实建立可研入口且不伪造历史对话",()=>{
+  const seed=WF.aiReportProjectSeed({name:"华越龙苑",location:"龙华区",type:"非居改保",owner:"投资部",businessScenario:"residential_conversion"},{calcSnapshots:[{calcType:"gaibao"}]},"baozhang_gaibao");
+  assert.equal(seed.projectName,"华越龙苑");assert.equal(seed.location,"龙华区");assert.equal(seed.calcType,"gaibao");assert.equal(seed.owner,"投资部");assert.equal(seed.__projectSeed,true);
+  assert.equal(WF.aiReportProjectSeed({}, {}, null),null);
+});
+
+test("普通刷新不擅自弹出项目信息卡，只有明确进入AI可研才允许项目预填",()=>{
+  assert.equal(WF.aiReportShouldSeedProject(null),false);
+  assert.equal(WF.aiReportShouldSeedProject({name:"最近项目"}),false);
+  assert.equal(WF.aiReportShouldSeedProject({name:"用户点击进入的项目",explicitAiEntry:true}),true);
 });
 
 test("报告完成后可用自然语言直接进入复核，但普通咨询不会误跳转",()=>{

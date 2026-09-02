@@ -236,8 +236,8 @@ function buildExportPayload(){
       const el = elMap[c.cn+'_'+si];
       const htmlStr = el? el.innerHTML : (s.editedHtml || renderContent(s.content||""));
       const blocks=htmlToBlocks(htmlStr);
-      const logicText=typeof reportLogicText==="function"?reportLogicText(c,s,false):"";
-      if(logicText)blocks.unshift({type:"logic",text:"本节生成逻辑\n"+logicText});
+      // 绿色“本节生成逻辑”只用于网页解释和交互，不属于正式报告正文，禁止进入Word。
+      // 导出只读取 .body 或正式正文状态，不读取相邻的逻辑卡、材料框架卡和操作按钮。
       const type=typeof reportTableProjectType==="function"?reportTableProjectType():null;
       if(type&&window.ReportTableTemplates){
         const used=new Set(blocks.filter(b=>b.type==="templateTable").map(b=>b.template&&b.template.id));

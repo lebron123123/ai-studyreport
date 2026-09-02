@@ -19,7 +19,11 @@ export function poiSearchContext(address){
     const cityMatch=raw.match(/^([\u4e00-\u9fa5]{2,8}市)/);
     if(cityMatch){city=cityMatch[1];keyword=raw.slice(city.length)||raw;}
   }
-  return {raw,city,keyword};
+  // 用户经常只写“福田区上梅林”而省略深圳市。此时若不限定城市，高德会在全国
+  // 搜索同名POI，甚至直接返回空。只对深圳法定行政区做确定性补全，不猜其他城市。
+  if(!city&&/(?:福田|罗湖|南山|盐田|宝安|龙岗|龙华|坪山|光明)区|大鹏新区/.test(raw))city="深圳市";
+  const fullAddress=city&&!raw.startsWith(city)?city+raw:raw;
+  return {raw,city,keyword,fullAddress};
 }
 
 export function poiSearchQueries(address,projectName){
@@ -33,7 +37,9 @@ export function poiSearchQueries(address,projectName){
     shortAddress && shortAddress!==ctx.keyword ? shortAddress : "",
     project,
     project ? project.replace(/(?:建设)?项目$/,'').trim() : "",
-  ].filter(x=>x&&x.length>=2))].slice(0,4);
+    project&&!/(?:小区|花园|家园|苑|村|公寓|大厦|广场)$/.test(project) ? project+"小区" : "",
+    project ? ctx.keyword+project : "",
+  ].filter(x=>x&&x.length>=2))].slice(0,6);
 }
 
 export function mergePoiCandidates(groups,limit=15){
@@ -65,7 +71,7 @@ export async function onRequestPost(context){
   if(body.action === "search"){
     const address = String(body.address||"").trim().slice(0, 100);
     if(!address) return json({ok:false, error:"请输入项目/小区名称"}, 400);
-    const {city}=poiSearchContext(address),queries=poiSearchQueries(address,body.projectName);
+    const context=poiSearchContext(address),{city}=context,projectName=String(body.projectName||"").trim().slice(0,80),queries=poiSearchQueries(address,projectName);
     const groups=[],failures=[];let providerResponded=false;
     // 精确地址、短地址和项目名称分别检索；某一路失败不会再拖垮整个确认流程。
     for(const kw of queries){
@@ -82,20 +88,23 @@ export async function onRequestPost(context){
         else failures.push(pd.info||("检索“"+kw+"”未返回结果"));
       }catch(e){failures.push("检索“"+kw+"”连接失败");}
     }
-    // 结构化地址始终地理编码一次。行政区/街道输入时，地理编码通常比同名POI更可靠；
-    // 两类候选都交给前端按行政区匹配排序并由用户人工确认。
-    try{
-      const geo=await amapJson("https://restapi.amap.com/v3/geocode/geo?key="+env.AMAP_KEY
-        +"&address="+encodeURIComponent(address)+(city? "&city="+encodeURIComponent(city):""));
-      providerResponded=true;
-      if(geo.status==="1" && geo.geocodes && geo.geocodes.length){
-        const geoCands=geo.geocodes.slice(0,3).map(gc=>({
-          name: gc.formatted_address, district: (gc.province||"")+(gc.city||"")+(gc.district||"")+(gc.township||""),
-          address: "（按完整地址解析，精度"+(gc.level||"未知")+"）", location: gc.location,matchedBy:"完整地址解析",
-        })).filter(c=>c.location);
-        groups.unshift(geoCands);
-      }
-    }catch(e){failures.push("完整地址解析连接失败");}
+    // 先解析规范地址，再尝试“地址+项目名”。后者可命中只在互联网页面中带小区名、
+    // 但高德POI别名不完整的住宅项目；所有结果仍须在前端人工确认，不自动采用。
+    const geocodeInputs=[context.fullAddress,projectName?context.fullAddress+projectName:""].filter((value,index,list)=>value&&list.indexOf(value)===index);
+    for(const geoAddress of geocodeInputs){
+      try{
+        const geo=await amapJson("https://restapi.amap.com/v3/geocode/geo?key="+env.AMAP_KEY
+          +"&address="+encodeURIComponent(geoAddress)+(city? "&city="+encodeURIComponent(city):""));
+        providerResponded=true;
+        if(geo.status==="1" && geo.geocodes && geo.geocodes.length){
+          const geoCands=geo.geocodes.slice(0,3).map(gc=>({
+            name: gc.formatted_address, district: (gc.province||"")+(gc.city||"")+(gc.district||"")+(gc.township||""),
+            address: "（按"+(geoAddress===context.fullAddress?"规范地址":"地址＋项目名")+"解析，精度"+(gc.level||"未知")+"）", location: gc.location,matchedBy:geoAddress,
+          })).filter(c=>c.location);
+          groups.unshift(geoCands);
+        }
+      }catch(e){failures.push("地址解析“"+geoAddress+"”连接失败");}
+    }
     const cands=mergePoiCandidates(groups,15);
     if(!cands.length){
       const networkBlocked=!providerResponded;

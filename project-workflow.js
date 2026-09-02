@@ -221,6 +221,34 @@
       return Object.assign({},item,{matchScore:score,matchedTokens:matched,conflictTokens:conflicts,locationMatch:conflicts.length?"conflict":matched.length?"matched":"uncertain"});
     }).sort((a,b)=>b.matchScore-a.matchScore);
   }
+  function normalizeAnalysisSites(sites,fallback){
+    const source=Array.isArray(sites)&&sites.length?sites:[fallback||{}],out=[];
+    source.slice(0,6).forEach((item,index)=>{
+      item=item||{};
+      const name=String(item.name||item.projectName||"").trim(),address=String(item.address||item.location||"").trim();
+      out.push(Object.assign({},item,{id:String(item.id||("site-"+(index+1))),name,address,role:item.role==="primary"?"primary":"secondary"}));
+    });
+    if(!out.length)out.push({id:"site-1",name:"",address:"",role:"primary"});
+    let primary=out.findIndex(x=>x.role==="primary");if(primary<0)primary=0;
+    return out.map((item,index)=>Object.assign({},item,{role:index===primary?"primary":"secondary"}));
+  }
+  function siteWritingPlan(sites){
+    const normalized=normalizeAnalysisSites(sites),primary=normalized.find(x=>x.role==="primary")||normalized[0],secondary=normalized.filter(x=>x!==primary);
+    const strategy=secondary.length
+      ? "主项目“"+(primary.name||primary.address||"未命名主项目")+"”完整展开论证；其余"+secondary.length+"个次项目只写影响结论的差异，优先合并为一段，确需分列时每个最多2—3句，不重复主项目的通用分析。"
+      : "仅有一个分析点位，按本节逻辑正常展开论证。";
+    return {sites:normalized,primary,secondary,isBatch:secondary.length>0,strategy};
+  }
+  function aiReportProjectSeed(project,state,domainKey){
+    project=project||{};state=state||{};
+    if(!String(project.name||"").trim())return null;
+    const snapshots=Array.isArray(state.calcSnapshots)?state.calcSnapshots:[],latest=snapshots[snapshots.length-1]||{};
+    const raw=String(latest.calcType||project.calcType||project.type||"").toLowerCase();
+    const calcType=["rent","sale","gaibao"].includes(raw)?raw:(domainKey==="baozhang_gaibao"||/改保|改造/.test(raw)?"gaibao":/出售|配售|sale/.test(raw)?"sale":"rent");
+    return {projectName:String(project.name||""),location:String(project.location||""),analysisSites:normalizeAnalysisSites(project.analysisSites,{name:project.name,location:project.location,role:"primary"}),calcType,businessScenario:project.businessScenario||null,
+      landArea:project.landArea??null,landPrice:project.landPrice??null,startYear:project.startYear??null,owner:String(project.owner||""),landNature:String(project.landNature||""),desc:String(project.desc||""),__manual:true,__projectSeed:true};
+  }
+  function aiReportShouldSeedProject(entryContext){return !!(entryContext&&entryContext.explicitAiEntry===true);}
   function resumeAppMode(savedMode,hasAiSession){
     if(hasAiSession)return "aireport";
     return ["report","calc","review","office","aireport"].includes(savedMode)?savedMode:"report";
@@ -257,7 +285,7 @@
 
   const api={clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,
     createCalcSnapshot,createReportVersion,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
-    aiReportStage,aiReportStageRank,previousAiReportStage,locationTokens,rankLocationCandidates,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
+    aiReportStage,aiReportStageRank,previousAiReportStage,locationTokens,rankLocationCandidates,normalizeAnalysisSites,siteWritingPlan,aiReportProjectSeed,aiReportShouldSeedProject,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
     impactedAnalysisSections,markAnalysisImpacted,METRIC_LABELS,ANALYSIS_DOMAIN_WORDS};
   root.ProjectWorkflow=api;
   if(typeof module==="object"&&module.exports)module.exports=api;

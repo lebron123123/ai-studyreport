@@ -29,7 +29,7 @@ import { enrichCustomTemplatePlan } from "./ppt-custom-template-export.js";
 import { analyzeTemplateBuffer } from "./ppt-template-analyzer.js";
 import { ensureTemplatePreviews, resolvePreviewFile, resolveStoredTemplate } from "./ppt-template-preview.js";
 import { createLimiter, generatePptImage, imageProviderStatus } from "./ppt-image-generation.js";
-import { providerStatus as llmProviderStatus } from "../functions/api/_llm-providers.js";
+import { providerStatus as llmProviderStatus, probeProviderNetwork } from "../functions/api/_llm-providers.js";
 import { startAgentWorker } from "./agent-worker.js";
 import { createRagObjectStore } from "./rag-object-store.js";
 
@@ -113,6 +113,12 @@ async function selfCheck() {
   for (const provider of llmStatus.providers) {
     line(provider.available, "大模型 " + provider.label + (provider.id === llmStatus.defaultProvider ? "（默认）" : ""));
   }
+  try{
+    const probe=await probeProviderNetwork(ENV,llmStatus.defaultProvider,fetch,5000);
+    line(probe.reachable,probe.reachable
+      ?"默认AI Provider网络可达（HTTP "+probe.status+"，只验证连通性）"
+      :"默认AI Provider网络不可达："+(probe.code||probe.error||"连接失败")+"。请确认服务由正常终端启动，未继承受限网络权限");
+  }catch(error){line(false,"默认AI Provider连通性检查失败："+String(error&&error.message||error));}
   if (!process.env.SESSION_SECRET) {
     console.log("  ⚠️  未配置 SESSION_SECRET，登录会失败");
   }

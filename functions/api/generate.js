@@ -100,6 +100,8 @@ export async function onRequestPost(context) {
     temperature: 0.3,
     stream: wantStream,
   };
+  // 信息抽取等场景可显式要求JSON对象；只允许固定类型，禁止把任意上游参数透传。
+  if(body.response_format&&body.response_format.type==="json_object")dsPayload.response_format={type:"json_object"};
   if(Array.isArray(body.tools) && body.tools.length){
     dsPayload.tools = body.tools;
     dsPayload.tool_choice = body.tool_choice || "auto";

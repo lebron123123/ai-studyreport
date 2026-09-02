@@ -10,7 +10,7 @@
    - 测算与生成阶段直接复用 calc.js / report.js 里已经跑通的逻辑，不重写
    ============================================================ */
 
-const AI_TYPE_CN = { rent:"出租类（长期持有经营）", sale:"出售类（配售/出售为主）", gaibao:"非居改保" };
+const AI_TYPE_CN = { rent:"出租类（长期持有经营）", sale:"出售类（配售/出售为主）", gaibao:"中资产（非居改保/商业改造等）" };
 const AI_GAIBAO_SCENARIO_CN = { housing_conversion:"非居改保（住房改造）", commercial_renovation:"商业改造（自持改造）" };
 function airBusinessScenario(){
   const value=aiReportExtracted&&aiReportExtracted.businessScenario;
@@ -22,7 +22,7 @@ const AI_DOMAIN_OF = { rent:"baozhang_xinjian", sale:"baozhang_xinjian", gaibao:
 const AI_CATEGORY_OPTIONS = [
   { key:"rent", label:"出租类（公租房/保租房）" },
   { key:"sale", label:"出售类（配售/出售）" },
-  { key:"gaibao", label:"非居改保" },
+  { key:"gaibao", label:"中资产（非居改保/商业改造等）" },
 ];
 
 let aiReportChat = [];        // 对话记录 [{role, kind, content, id, ...}]
@@ -36,6 +36,10 @@ let aiReportStopFlag = false;
 let aiReportChatLoaded = false;  // 本次页面会话是否已尝试从云端恢复过
 let aiReportHasDoc = false;      // 本轮是否已经有可预览的报告内容（生成开始过一次即为true）
 let aiReportDocVisible = false;  // 报告预览面板当前是否展开（用户可关/开）
+let aiReportDocZoom = 100;       // 网页预览缩放，不改变Word字号与正式正文
+let aiReportChatCollapsed = false; // 收起左侧对话后让报告预览占满可用宽度
+let aiReportOutlineCollapsed = false; // 章节导航可独立收起
+let aiReportDocFullscreen = false; // 仅改变网页阅读方式，不改变报告内容
 let aiReportPendingCalcChange = null; // AgentCore只生成预演，用户确认后才写入
 let aiReportAgentRegistered = false;
 let aiReportParamsConfirmed = false; // 只表示本次AI可研会话已通过人工确认；不得复用其他测算模块的全局calcParams
@@ -45,6 +49,10 @@ let aiReportCanEnhanceLogic = false; // 仅控制管理员增强入口显示；�
 let aiReportLogicEnhanceState = null; // 当前逐项增强会话
 let aiReportLocationCandidates = []; // 地图候选必须由用户确认，禁止默认取第一条
 let aiReportLocationConfirmed = null; // {name,district,address,location,query}
+let aiReportSiteSearches = []; // 最多6个分析点位的独立候选，任何一个都不默认选中
+let aiReportSiteLocations = []; // 已人工确认的主/次点位；主点位同时写回旧字段保持兼容
+let aiReportEntryContext = null; // 从项目库显式传入；只补旧会话空字段，不覆盖已有AI可研内容
+let aiReportMaterialAutoRetryStarted = false; // 每次页面会话最多自动重试一次，避免上游持续故障时刷新反复耗费请求
 
 function airCurrentStage(){
   const state={chat:aiReportChat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,
@@ -62,7 +70,12 @@ function airClearLocalState(){try{localStorage.removeItem(airLocalStateKey());}c
 
 function airSwitchProjectSession(){
   aiReportStopFlag=true;aiReportChat=[];aiReportExtracted=null;aiReportSuggested=null;aiReportProgressMsg=null;aiReportPendingTasks=null;
-  aiReportHasDoc=false;aiReportDocVisible=false;aiReportPendingCalcChange=null;aiReportBusy=false;aiReportChatLoaded=false;aiReportParamsConfirmed=false;aiReportMaterialTarget=null;aiReportBatchFiles=[];aiReportLogicEnhanceState=null;aiReportLocationCandidates=[];aiReportLocationConfirmed=null;
+  aiReportHasDoc=false;aiReportDocVisible=false;aiReportDocZoom=100;aiReportChatCollapsed=false;aiReportOutlineCollapsed=false;aiReportDocFullscreen=false;aiReportPendingCalcChange=null;aiReportBusy=false;aiReportChatLoaded=false;aiReportParamsConfirmed=false;aiReportMaterialTarget=null;aiReportBatchFiles=[];aiReportLogicEnhanceState=null;aiReportLocationCandidates=[];aiReportLocationConfirmed=null;aiReportSiteSearches=[];aiReportSiteLocations=[];aiReportMaterialAutoRetryStarted=false;
+  aiReportEntryContext=null;
+}
+function airSetProjectEntryContext(context){
+  aiReportEntryContext=context&&typeof context==="object"?Object.assign({},context):null;
+  if(aiReportChatLoaded&&window.ProjectWorkflow?.aiReportShouldSeedProject(aiReportEntryContext)){if(aiReportExtracted)airFillCurrentProjectGaps();else airSeedCurrentProject();}
 }
 
 function airDocPaneEmptyHtml(){
@@ -75,7 +88,7 @@ function renderAiReportModule(){
     +'<div class="air-restart-row"><button type="button" class="btn ghost air-back-btn" id="airBackStepBtn">← 返回上一步</button><button type="button" class="btn ghost air-restart-btn" id="airRestartBtn">🔄 重新开始</button></div>'
     +'<div class="doc-eyebrow">AI可研生成 · 对话式</div>'
     +'<h1 class="doc-title">AI可研生成</h1>'
-    +'<div class="step-desc">一句话描述项目，AI会自动抽取信息、从历史案例库推荐一整套测算参数初值；'
+    +'<div class="step-desc">可以先批量上传项目材料，也可以一句话描述项目；AI会抽取待确认信息、从历史案例库推荐一整套测算参数初值。'
     +'你只需要确认<b>7个真正影响结论的关键参数</b>，其余系统自动填好。测算数字仍然全部来自确定性引擎，AI不会替你编造IRR。'
     +'开始测算后会弹出报告预览，实时显示AI正在撰写的内容，随时可以收起或展开。</div>'
     +'<div class="air-module-bar"><span>独立模块：</span><button type="button" data-module="project">项目信息</button><button type="button" data-module="materials">数据与材料</button><button type="button" data-module="params">关键参数</button><button type="button" data-module="logic">可研逻辑</button><button type="button" data-module="report">报告生成/修订</button><button type="button" data-module="word">下载当前阶段 Word</button></div>'
@@ -131,8 +144,8 @@ function airBackStep(){
     aiReportSuggested=null;aiReportParamsConfirmed=false;
     aiReportChat=aiReportChat.filter(m=>!["confirmCard","genConfirm","materialCheck","calcPreview"].includes(m.kind));
   }else if(stage==="info"){
-    aiReportLocationCandidates=[];aiReportLocationConfirmed=null;
-    aiReportChat=aiReportChat.filter(m=>m.kind!=="locationCard");
+    aiReportLocationCandidates=[];aiReportLocationConfirmed=null;aiReportSiteSearches=[];aiReportSiteLocations=[];
+    aiReportChat=aiReportChat.filter(m=>!["locationCard","locationResult"].includes(m.kind));
   }
   airRepairFlowCards();renderAiReportMsgs();airSaveState();
 }
@@ -177,6 +190,23 @@ function bindAiReportEvents(){
       if(web){window.WebResearch?.searchFromButton(web,()=>{airApplyDocMaterialStatuses();airSaveState();}).catch(error=>alert(error.message));return;}
       const enhance=e.target.closest(".air-section-enhance");
       if(enhance){airOpenSectionLogicEnhancement(enhance.dataset.cn,+enhance.dataset.si);return;}
+      const logicEdit=e.target.closest(".air-section-logic-edit");
+      if(logicEdit){airOpenSectionLogicEditor(logicEdit.dataset.cn,+logicEdit.dataset.si);return;}
+      const refine=e.target.closest(".air-refine-requirement");
+      if(refine){
+        let requirement=null;try{requirement=JSON.parse(decodeURIComponent(refine.dataset.requirementSchema||"null"));}catch(error){}
+        if(requirement)window.WebResearch?.openRequirementRefinement(requirement,()=>{airApplyDocMaterialStatuses();airSaveState();});
+        return;
+      }
+      const chatToggle=e.target.closest(".air-doc-chat-toggle");
+      if(chatToggle){aiReportChatCollapsed=!aiReportChatCollapsed;airApplyDocViewState();return;}
+      const outlineToggle=e.target.closest(".air-doc-outline-toggle");
+      if(outlineToggle){aiReportOutlineCollapsed=!aiReportOutlineCollapsed;airApplyDocViewState();return;}
+      if(e.target.closest(".air-doc-zoom-out")){aiReportDocZoom=Math.max(70,aiReportDocZoom-10);airApplyDocViewState();return;}
+      if(e.target.closest(".air-doc-zoom-in")){aiReportDocZoom=Math.min(160,aiReportDocZoom+10);airApplyDocViewState();return;}
+      if(e.target.closest(".air-doc-zoom-reset")){aiReportDocZoom=100;airApplyDocViewState();return;}
+      if(e.target.closest(".air-doc-download")){exportWord();return;}
+      if(e.target.closest(".air-doc-fullscreen")){aiReportDocFullscreen=!aiReportDocFullscreen;airApplyDocViewState();return;}
       const close = e.target.closest(".air-doc-close");
       if(close){ airSetDocVisible(false); return; }
       const chip = e.target.closest(".air-doc-outline .chip");
@@ -227,7 +257,21 @@ function airSetDocVisible(v){
   aiReportDocVisible = v;
   const shell = document.querySelector(".air-shell");
   if(shell) shell.classList.toggle("solo", !v);
+  if(!v)aiReportDocFullscreen=false;
+  airApplyDocViewState();
   airRenderDocToggle();
+}
+function airApplyDocViewState(){
+  const shell=document.querySelector(".air-shell"),pane=document.getElementById("airDocPane");
+  if(shell)shell.classList.toggle("chat-collapsed",aiReportChatCollapsed&&aiReportDocVisible);
+  if(!pane)return;
+  pane.classList.toggle("outline-collapsed",aiReportOutlineCollapsed);
+  pane.classList.toggle("fullscreen",aiReportDocFullscreen);
+  pane.style.setProperty("--air-doc-zoom",String(aiReportDocZoom/100));
+  const zoom=pane.querySelector(".air-doc-zoom-value");if(zoom)zoom.textContent=aiReportDocZoom+"%";
+  const chat=pane.querySelector(".air-doc-chat-toggle");if(chat)chat.textContent=aiReportChatCollapsed?"展开对话":"收起对话";
+  const outline=pane.querySelector(".air-doc-outline-toggle");if(outline)outline.textContent=aiReportOutlineCollapsed?"展开章节":"收起章节";
+  const full=pane.querySelector(".air-doc-fullscreen");if(full)full.textContent=aiReportDocFullscreen?"退出全屏":"全屏阅读";
 }
 function airRenderDocToggle(){
   const el = document.getElementById("airDocToggle");
@@ -313,19 +357,41 @@ async function airRunExtract(text){
     }else{
       aiReportExtracted = Object.assign({ projectName:"", location:"", calcType:null, businessScenario:null, landArea:null, landPrice:null, startYear:null, owner:"", landNature:"", desc:text }, d.data);
       if(!aiReportExtracted.projectName) aiReportExtracted.projectName = (aiReportExtracted.location||"") + "项目";
+      aiReportExtracted.analysisSites=airAnalysisSites(aiReportExtracted);
       airResolve(loading, {kind:"infoCard"});
     }
-    project.name=aiReportExtracted.projectName||project.name||"AI可研未命名项目";project.location=aiReportExtracted.location||project.location||"";project.businessScenario=aiReportExtracted.businessScenario||"";
+    project.name=aiReportExtracted.projectName||project.name||"AI可研未命名项目";project.location=aiReportExtracted.location||project.location||"";project.analysisSites=airAnalysisSites(aiReportExtracted);project.businessScenario=aiReportExtracted.businessScenario||"";
     saveDraft();airSaveState();
   }catch(e){
     airResolve(loading, {kind:"text", content:"网络异常，信息抽取失败："+e.message, retry:{type:"extract", text}});
   }
 }
 
+function airAnalysisSites(value){
+  const v=value||aiReportExtracted||{},fallback={name:v.projectName||"",location:v.location||"",role:"primary"};
+  return window.ProjectWorkflow?ProjectWorkflow.normalizeAnalysisSites(v.analysisSites,fallback):[Object.assign({id:"site-1",address:fallback.location},fallback)];
+}
+function airSiteRowsHtml(v){
+  return airAnalysisSites(v).map((site,index)=>'<div class="air-site-row" data-site-index="'+index+'">'
+    +'<label class="air-site-role"><input type="radio" name="airSitePrimary" value="'+index+'" '+(site.role==="primary"?'checked':'')+'> '+(site.role==="primary"?'主项目':'设为主项目')+'</label>'
+    +'<input class="air-site-name" value="'+escapeHtml(site.name||'')+'" placeholder="点位/子项目名称">'
+    +'<input class="air-site-address" value="'+escapeHtml(site.address||'')+'" placeholder="城市＋区＋街道＋社区/道路/门牌">'
+    +(index?'<button type="button" class="btn ghost air-site-remove" data-site-remove="'+index+'">删除</button>':'<span class="air-site-required">必填</span>')
+    +'</div>').join('');
+}
+function airReadSiteRows(){
+  return Array.from(document.querySelectorAll('.air-site-row')).map((row,index)=>({id:(airAnalysisSites()[index]||{}).id||('site-'+(index+1)),name:String(row.querySelector('.air-site-name')?.value||'').trim(),address:String(row.querySelector('.air-site-address')?.value||'').trim(),role:row.querySelector('input[name="airSitePrimary"]')?.checked?'primary':'secondary'}));
+}
+function airCaptureInfoCard(){
+  const g=id=>document.getElementById(id);if(!g('air_name'))return;
+  aiReportExtracted=Object.assign({},aiReportExtracted,{projectName:g('air_name').value.trim(),analysisSites:airReadSiteRows(),calcType:g('air_ctype').value,businessScenario:g('air_business_scenario')?.value||'',owner:g('air_owner').value.trim(),landArea:g('air_landarea').value?parseFloat(g('air_landarea').value):null,startYear:g('air_startyear').value?parseInt(g('air_startyear').value):null,landNature:g('air_landnature').value.trim(),desc:g('air_desc').value});
+}
+
 function airInfoCardHtml(){
   const v = aiReportExtracted || {};
-  if(airStageAtLeast("suggested")) return '<div class="air-card air-step-done"><b>✓ 项目信息已确认</b><span>'+escapeHtml(v.projectName||"未命名项目")+'｜'+escapeHtml(v.location||"")+'｜'+escapeHtml(v.calcType==="gaibao"?(AI_GAIBAO_SCENARIO_CN[v.businessScenario]||"改造场景待确认"):(AI_TYPE_CN[v.calcType]||""))+'</span></div>';
-  if(aiReportChat.some(m=>m.kind==="locationCard"))return '<div class="air-card air-step-done"><b>✓ 核心信息已填写，等待确认地图位置</b><span>'+escapeHtml(v.projectName||"未命名项目")+'｜填写地点：'+escapeHtml(v.location||"")+'。请在下方候选中人工选择，系统不会自动套用第一条结果。</span></div>';
+  const siteCount=airAnalysisSites(v).length;
+  if(airStageAtLeast("suggested")) return '<div class="air-card air-step-done"><b>✓ 项目信息已确认</b><span>'+escapeHtml(v.projectName||"未命名项目")+'｜'+siteCount+'个分析点位｜主项目：'+escapeHtml((airAnalysisSites(v).find(x=>x.role==='primary')||{}).name||v.location||"")+'｜'+escapeHtml(v.calcType==="gaibao"?(AI_GAIBAO_SCENARIO_CN[v.businessScenario]||"改造场景待确认"):(AI_TYPE_CN[v.calcType]||""))+'</span></div>';
+  if(aiReportChat.some(m=>m.kind==="locationCard"))return '<div class="air-card air-step-done"><b>✓ 核心信息已填写，等待逐个确认地图位置</b><span>'+escapeHtml(v.projectName||"未命名项目")+'｜共'+siteCount+'个点位。请在下方为各点位选择真实候选，系统不会自动套用第一条结果。</span></div>';
   const opt = (val,label)=>'<option value="'+val+'" '+(v.calcType===val?"selected":"")+'>'+label+'</option>';
   const introText = v.__manual
     ? "请填写项目核心信息（都是真实信息，不是AI猜的）："
@@ -333,11 +399,12 @@ function airInfoCardHtml(){
   const btnLabel = v.__manual ? "信息填写完毕，生成参数建议 →" : "信息确认无误，生成参数建议 →";
   const hint = v.__manual ? "" : '<span style="font-size:11px; color:var(--ink-faint,#8A97A8);">信息不对？直接在下方输入框说一句就行，比如"不对，是2026年开工"</span>';
   return '<div class="air-card">'
+    +(airMaterialExtractionNeedsRetry(v)?'<div class="air-location-tip"><b>已保存材料，等待重新AI提取</b><span>这是接口恢复前留下的降级草稿。系统会自动用已保存材料重试；你也可以立即手动触发，不需要重新上传文件。</span><button type="button" class="btn ghost" id="airRetryMaterialExtraction">重新用公网DeepSeek提取</button></div>':'')
     +'<div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:8px;">'+introText+'</div>'
+    +'<div><label>报告/批次名称</label><input id="air_name" type="text" value="'+escapeHtml(v.projectName||"")+'"><small class="air-field-help">例如“市税务局6处非居改保项目”。具体点位在下方分别填写。</small></div>'
+    +'<div class="air-sites-box"><div class="air-sites-head"><span><b>批量分析点位（1—6个）</b><small>地图将逐个检索；请选择一个影响最大的主项目。主项目精写，其他项目合并压缩。</small></span><button type="button" class="btn ghost" id="airAddSite" '+(airAnalysisSites(v).length>=6?'disabled':'')+'>＋增加点位</button></div>'
+    +'<div id="airSiteRows">'+airSiteRowsHtml(v)+'</div></div>'
     +'<div class="grid2">'
-    +'<div><label>项目名称</label><input id="air_name" type="text" value="'+escapeHtml(v.projectName||"")+'"></div>'
-    +'<div><label>建设地点（用于地图定位，建议填完整地址）</label><input id="air_loc" type="text" value="'+escapeHtml(v.location||"")+'"><small class="air-field-help">请在这里填：城市＋区＋街道＋社区/道路/门牌。例如“深圳市光明区凤凰街道光谷苑”；未建地块可填最近道路交叉口或已上图地标。</small></div>'
-    +'</div><div class="grid2">'
     +'<div><label>测算类型</label><select id="air_ctype"><option value="">请选择…</option>'
       + opt("rent","出租类（公租房/保租房）") + opt("sale","出售类（配售/出售）") + opt("gaibao","改造项目") + '</select></div>'
     +'<div><label>建设/委托单位（选填）</label><input id="air_owner" type="text" value="'+escapeHtml(v.owner||"")+'"></div>'
@@ -361,15 +428,18 @@ async function aiReportConfirmInfo(){
   if(aiReportBusy) return;
   const g = id=>document.getElementById(id);
   const calcType = g("air_ctype").value;
-  if(!calcType){ alert("请先选择测算类型（出租类/出售类/非居改保）"); return; }
-  const name = g("air_name").value.trim();
-  const loc = g("air_loc").value.trim();
-  if(!name || !loc){ alert("请至少填写项目名称和建设地点"); return; }
+  if(!calcType){ alert("请先选择测算类型（出租类/出售类/中资产）"); return; }
+  const name = g("air_name").value.trim(),sites=airReadSiteRows();
+  if(!name){alert("请填写报告/批次名称");return;}
+  if(!sites.length||sites.some(x=>!x.name||!x.address)){alert("请完整填写每个点位的名称和建设地点");return;}
+  if(!sites.some(x=>x.role==="primary")){alert("请指定一个影响最大的主项目");return;}
+  const primary=sites.find(x=>x.role==="primary")||sites[0],loc=primary.address;
   const businessScenario=calcType==="gaibao"?g("air_business_scenario").value:"";
   if(calcType==="gaibao"&&!businessScenario){alert("请选择‘非居改保（住房改造）’或‘商业改造（自持改造）’，系统才能加载正确逻辑");return;}
   aiReportExtracted = Object.assign({}, aiReportExtracted, {
     projectName: name,
     location: loc,
+    analysisSites: sites,
     calcType,
     businessScenario,
     owner: g("air_owner").value.trim(),
@@ -379,52 +449,91 @@ async function aiReportConfirmInfo(){
     desc: g("air_desc").value,
     __manual: false,   // 已经走到确认这一步，后续走"多轮修正"逻辑时不用再当成空白表单处理
   });
+  project.name=name;project.location=loc;project.analysisSites=sites;project.owner=aiReportExtracted.owner||project.owner||"";project.businessScenario=businessScenario;project.landArea=aiReportExtracted.landArea;project.startYear=aiReportExtracted.startYear;project.landNature=aiReportExtracted.landNature;project.desc=aiReportExtracted.desc||project.desc||"";
+  saveDraft();
   airSetBusy(true);
   await airSearchLocationCandidates();
   airSetBusy(false);
 }
 
-async function airSearchLocationCandidates(overrideQuery){
-  const ex=aiReportExtracted||{},query=String(overrideQuery||ex.location||"").trim();
-  if(!query){alert("请在建设地点中填写城市、区、街道和社区/道路后再检索。");return;}
-  if(overrideQuery)aiReportExtracted.location=query;
-  aiReportLocationConfirmed=null;aiReportLocationCandidates=[];
-  const loading=airPushLoading("正在核对建设地点，请稍后选择正确地址…");
+async function airFetchLocationSite(site){
   try{
-    const r=await fetch("/api/poi",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({action:"search",address:query,projectName:ex.projectName||""})});
-    const d=await r.json();
-    if(!d.ok||!(d.candidates||[]).length){
-      airResolve(loading,{kind:"locationCard",query,candidates:[],error:d.error||"未找到匹配地址"});return;
-    }
-    aiReportLocationCandidates=window.ProjectWorkflow?.rankLocationCandidates?ProjectWorkflow.rankLocationCandidates(query,d.candidates):d.candidates;
-    airResolve(loading,{kind:"locationCard",query,candidates:aiReportLocationCandidates});airSaveState();
-  }catch(e){airResolve(loading,{kind:"locationCard",query,candidates:[],error:e.message});}
+    const r=await fetch("/api/poi",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({action:"search",address:site.address,projectName:site.name})});
+    const d=await r.json(),raw=d.candidates||[];
+    return Object.assign({},site,{query:site.address,candidates:window.ProjectWorkflow?.rankLocationCandidates?ProjectWorkflow.rankLocationCandidates(site.address,raw):raw,error:d.ok&&raw.length?"":(d.error||"未找到匹配地址"),selectedIndex:null,searching:false});
+  }catch(e){return Object.assign({},site,{query:site.address,candidates:[],error:e.message,selectedIndex:null,searching:false});}
+}
+function airCaptureLocationSelections(){
+  aiReportSiteSearches.forEach((site,index)=>{const checked=document.querySelector('input[name="airLocationCandidate_'+index+'"]:checked');if(checked)site.selectedIndex=+checked.value;});
+}
+async function airSearchLocationSite(index){
+  const input=document.querySelector('.air-location-site-address[data-site-index="'+index+'"]'),address=String(input&&input.value||"").trim();
+  if(!address){alert("请先填写这个点位的城市、区、街道、社区/道路或附近地标。");return;}
+  airCaptureLocationSelections();
+  const current=aiReportSiteSearches[index];if(!current)return;
+  current.address=address;current.query=address;current.searching=true;current.error="";current.candidates=[];current.selectedIndex=null;
+  const extractedSites=airAnalysisSites();if(extractedSites[index])extractedSites[index].address=address;
+  aiReportExtracted.analysisSites=extractedSites;const primary=extractedSites.find(site=>site.role==='primary')||extractedSites[0];aiReportExtracted.location=primary?.address||aiReportExtracted.location;
+  const card=aiReportChat.find(message=>message.kind==="locationCard");if(card)card.sites=aiReportSiteSearches;
+  renderAiReportMsgs();airSaveState();
+  aiReportSiteSearches[index]=await airFetchLocationSite(current);
+  if(card)card.sites=aiReportSiteSearches;
+  const primarySearch=aiReportSiteSearches.find(site=>site.role==='primary')||aiReportSiteSearches[0];aiReportLocationCandidates=primarySearch?.candidates||[];
+  renderAiReportMsgs();airSaveState();
+}
+
+async function airSearchLocationCandidates(overrideQuery){
+  const ex=aiReportExtracted||{},sites=airAnalysisSites(ex);
+  if(overrideQuery&&sites.length===1){sites[0].address=String(overrideQuery).trim();ex.location=sites[0].address;ex.analysisSites=sites;}
+  if(sites.some(x=>!x.address)){alert("请为每个点位填写城市、区、街道和社区/道路后再检索。");return;}
+  aiReportLocationConfirmed=null;aiReportLocationCandidates=[];aiReportSiteLocations=[];
+  const loading=airPushLoading("正在批量核对 "+sites.length+" 个建设地点，请稍后逐个确认…");
+  aiReportSiteSearches=await Promise.all(sites.map(airFetchLocationSite));
+  const primary=aiReportSiteSearches.find(x=>x.role==="primary")||aiReportSiteSearches[0];
+  aiReportLocationCandidates=primary?.candidates||[];
+  airResolve(loading,{kind:"locationCard",sites:aiReportSiteSearches});airSaveState();
 }
 
 function airLocationCardHtml(m){
-  const candidates=m.candidates||aiReportLocationCandidates||[],query=m.query||(aiReportExtracted&&aiReportExtracted.location)||"";
-  const tips='<div class="air-location-tip"><b>在哪里填、什么最影响结果？</b><span>就在下方“重新检索地址”框填写：城市＋区＋街道＋社区/道路/门牌；精确坐标/完整门牌 ＞ 区＋街道＋社区/道路 ＞ 仅区名。系统会合并精确地址、短地址和项目名称检索，最多展示15条真实相似候选，由你人工确认。</span></div>';
-  const search='<div class="air-location-retry"><input id="airLocationRetryInput" value="'+escapeHtml(query)+'" placeholder="例：深圳市光明区凤凰街道光谷苑"><button type="button" class="btn ghost" id="airLocationSearchAgain">重新检索地址</button></div>';
-  const rows=candidates.slice(0,15).map((c,i)=>'<label class="air-location-option '+(c.locationMatch==='conflict'?'conflict':'')+'"><input type="radio" name="airLocationCandidate" value="'+i+'"><span><b>'+escapeHtml(c.name||"未命名位置")+'</b><small>'+escapeHtml([c.district,c.address].filter(Boolean).join(" · ")||"无详细地址")+'</small></span><em>'+(c.locationMatch==='matched'?'行政区匹配':c.locationMatch==='conflict'?'行政区不一致':'请人工核对')+'</em></label>').join("");
-  const count=rows?'<div class="air-location-query">已汇总 <b>'+candidates.length+'</b> 条真实候选（不伪造凑数），请选择与你项目一致的一项：</div>':'';
-  return '<div class="air-card">'+tips+search+count+(rows?'<div class="air-location-list">'+rows+'</div>':'<div class="air-location-error">'+escapeHtml(m.error||"暂未找到真实候选")+'。请直接在上方补充街道、社区/道路、门牌或附近地标后重试，不需要重新开始整个流程。</div>')+'<div class="air-location-actions"><button type="button" class="btn" id="airConfirmLocation" '+(rows?'':'disabled')+'>确认所选地址并继续 →</button><button type="button" class="btn ghost" id="airRetryLocation">返回修改项目信息</button><button type="button" class="btn ghost" id="airSkipLocation">跳过地图检索</button></div></div>';
+  const sites=(m.sites&&m.sites.length?m.sites:aiReportSiteSearches).slice(0,6);
+  const tips='<div class="air-location-tip"><b>批量位置确认（'+sites.length+'个点位）</b><span>每个点位都独立检索、独立确认，不会把同一区的候选混到另一个项目。完整门牌 ＞ 区＋街道＋社区/道路 ＞ 仅区名；没有真实候选的点位会保留为待补，不伪造位置。</span></div>';
+  const blocks=sites.map((site,si)=>{
+    const rows=(site.candidates||[]).slice(0,15).map((c,i)=>'<label class="air-location-option '+(c.locationMatch==='conflict'?'conflict':'')+'"><input type="radio" name="airLocationCandidate_'+si+'" value="'+i+'" '+(site.selectedIndex===i?'checked':'')+'><span><b>'+escapeHtml(c.name||"未命名位置")+'</b><small>'+escapeHtml([c.district,c.address].filter(Boolean).join(" · ")||"无详细地址")+'</small></span><em>'+(c.locationMatch==='matched'?'行政区匹配':c.locationMatch==='conflict'?'行政区不一致':'请人工核对')+'</em></label>').join('');
+    const retry='<div class="air-location-retry"><input class="air-location-site-address" data-site-index="'+si+'" value="'+escapeHtml(site.address||site.query||'')+'" placeholder="补充或修改本点位地址"><button type="button" class="btn ghost air-location-site-refresh" data-site-index="'+si+'" '+(site.searching?'disabled':'')+'>'+(site.searching?'正在重搜…':'↻ 仅重搜此点位')+'</button></div>';
+    return '<section class="air-location-site"><div class="air-location-site-title"><b>'+(site.role==='primary'?'主项目':'次项目')+'｜'+escapeHtml(site.name||('点位'+(si+1)))+'</b><span>其他点位不会受影响</span></div>'+retry+(rows?'<div class="air-location-query">真实候选 '+(site.candidates||[]).length+' 条，请选择一项：</div><div class="air-location-list">'+rows+'</div>':'<div class="air-location-error">'+escapeHtml(site.searching?'正在单独检索此点位':(site.error||'暂未找到真实候选'))+(site.searching?'':'。可在上方补充道路、门牌或附近地标后，仅重搜这一项。')+'</div>')+'</section>';
+  }).join('');
+  return '<div class="air-card">'+tips+blocks+'<div class="air-location-actions"><button type="button" class="btn" id="airConfirmLocation">确认各点位并继续 →</button><button type="button" class="btn ghost" id="airRetryLocation">返回修改点位</button><button type="button" class="btn ghost" id="airLocationSearchAgain">按当前点位重新批量检索</button><button type="button" class="btn ghost" id="airSkipLocation">全部跳过地图检索</button></div></div>';
+}
+
+function airLocationResultHtml(m){
+  const sites=(m.sites&&m.sites.length?m.sites:aiReportSiteLocations).slice(0,6),primary=sites.find(site=>site.role==='primary')||sites[0],confirmed=sites.filter(site=>site.confirmed&&site.location).length,pending=sites.length-confirmed;
+  const rows=sites.map((site,index)=>'<div class="air-completed-location-row"><span><b>'+(site.role==='primary'?'主项目':'次项目')+'｜'+escapeHtml(site.projectName||site.name||('点位'+(index+1)))+'</b><small>'+escapeHtml(site.query||site.address||'未填写地址')+'</small></span><em>'+(site.confirmed&&site.location?'已确认：'+escapeHtml(site.candidateName||site.formattedName||site.name||'地图位置'):'待补地图位置')+'</em></div>').join('');
+  const target='airLocationResultDetail_'+m.id;
+  return '<div class="air-completed-step"><div class="air-completed-step-head"><span><b>✓ 位置确认已完成</b><small>共'+sites.length+'个点位，已确认'+confirmed+'个'+(pending?'，待补'+pending+'个':'')+'；主项目“'+escapeHtml(primary?.projectName||primary?.name||'未命名')+'”将重点分析。</small></span><button type="button" class="air-card-detail-toggle" data-detail-target="'+target+'">查看详情</button></div><div class="air-completed-step-detail" id="'+target+'" hidden>'+rows+'</div></div>';
 }
 
 async function airConfirmLocation(){
-  const checked=document.querySelector('input[name="airLocationCandidate"]:checked');
-  if(!checked){alert("请先点击选择与你项目一致的地址。");return;}
-  const selected=aiReportLocationCandidates[+checked.value];if(!selected)return;
-  if(selected.locationMatch==='conflict'&&!confirm("该候选行政区与填写地点不一致，仍要采用吗？建议取消并选择正确地址。"))return;
-  aiReportLocationConfirmed=Object.assign({query:aiReportExtracted.location},selected);
-  project.poiLoc=selected.location;project.poiLocLabel=selected.name;project.poiKw=aiReportExtracted.location;
-  aiReportChat=aiReportChat.filter(m=>m.kind!=="locationCard");
-  airPush({role:"assistant",kind:"text",content:"📍 已人工确认项目位置："+selected.name+"（"+([selected.district,selected.address].filter(Boolean).join("，")||"地图坐标已确认")+"）。后续周边、职住和竞品分析均以该坐标为准。"});
-  airSetBusy(true);await airRunSurvey(selected);await airRunSuggest();airSetBusy(false);airSaveState();
+  const confirmed=[];
+  for(let si=0;si<aiReportSiteSearches.length;si++){
+    const site=aiReportSiteSearches[si],checked=document.querySelector('input[name="airLocationCandidate_'+si+'"]:checked');
+    if((site.candidates||[]).length&&!checked){alert('请先为“'+(site.name||('点位'+(si+1)))+'”选择正确地址。');return;}
+    if(!checked){confirmed.push(Object.assign({},site,{candidates:undefined,skipped:true}));continue;}
+    const selected=site.candidates[+checked.value];
+    if(selected.locationMatch==='conflict'&&!confirm('“'+site.name+'”的候选行政区与填写地点不一致，仍要采用吗？'))return;
+    confirmed.push(Object.assign({},site,selected,{name:site.name,projectName:site.projectName||site.name,candidateName:selected.name,candidates:undefined,query:site.address||site.query,confirmed:true}));
+  }
+  aiReportSiteLocations=confirmed;const primary=confirmed.find(x=>x.role==='primary')||confirmed[0];
+  aiReportLocationConfirmed=primary;aiReportLocationCandidates=primary?.candidates||[];
+  project.analysisSites=confirmed;project.poiLoc=primary?.location||'';project.poiLocLabel=primary?.name||'';project.poiKw=primary?.query||'';
+  const locationCard=aiReportChat.find(m=>m.kind==="locationCard");
+  if(locationCard){locationCard.kind="locationResult";locationCard.sites=confirmed;locationCard.content="";}
+  else airPush({role:"assistant",kind:"locationResult",content:"",sites:confirmed});
+  airSetBusy(true);if(primary?.location)await airRunSurvey(primary);await airRunSecondarySurveys(confirmed.filter(x=>x!==primary&&x.location));await airRunSuggest();airSetBusy(false);airSaveState();
 }
 
 async function airSkipLocation(){
   if(!confirm("跳过后不会生成地图周边、竞品和POI职住代理数据，但不影响参数推荐与可研框架生成。是否继续？"))return;
-  aiReportLocationConfirmed={skipped:true,query:aiReportExtracted.location};aiReportChat=aiReportChat.filter(m=>m.kind!=="locationCard");
+  aiReportSiteLocations=airAnalysisSites().map(x=>Object.assign({},x,{projectName:x.name,skipped:true,query:x.address}));aiReportLocationConfirmed=aiReportSiteLocations.find(x=>x.role==='primary')||aiReportSiteLocations[0];project.analysisSites=aiReportSiteLocations;const locationCard=aiReportChat.find(m=>m.kind==="locationCard");if(locationCard){locationCard.kind="locationResult";locationCard.sites=aiReportSiteLocations;locationCard.content="";}
   airPush({role:"assistant",kind:"text",content:"已按你的选择跳过地图检索。报告中需要周边实测数据的位置会标注待补，不会套用其他行政区结果。"});
   airSetBusy(true);await airRunSuggest();airSetBusy(false);airSaveState();
 }
@@ -457,12 +566,13 @@ async function airRunSurvey(confirmedCandidate){
         if(items && items.length) poiLines.push(lab+"："+items.map(p=>p.name+(p.dist!=null?"（约"+p.dist+"km）":"")).join("、"));
       });
     }
-    if(poiLines.length) project.poiDesc = poiLines.join("\n");
+    if(poiLines.length){project.poiDesc = poiLines.join("\n");best.poiDesc=project.poiDesc;}
 
     let cpText = "";
     if(cpRes.ok && (cpRes.competitors||[]).length){
       project.competitors = cpRes.competitors.map(c=>({ name:c.name, dist:c.dist!=null?String(c.dist):"", rent:"", occ:"",
         note:"（地图抓取，租金/出租率须人工调研）" }));
+      best.competitors=project.competitors;
       cpText = cpRes.competitors.slice(0,6).map(c=>c.name+(c.dist!=null?"（约"+c.dist+"km）":"")).join("、");
     }
     saveDraft();
@@ -477,6 +587,28 @@ async function airRunSurvey(confirmedCandidate){
   }catch(e){
     airResolve(loading, {kind:"text", content:"周边检索出了点问题（"+e.message+"），已跳过，不影响后续测算。", retry:{type:"survey"}});
   }
+}
+
+async function airRunSecondarySurveys(sites){
+  if(!sites.length)return;
+  const loading=airPushLoading("正在按次项目精简模式检索其余 "+sites.length+" 个点位的周边差异…"),summaries=[];
+  for(const site of sites){
+    try{
+      const [poiRes,cpRes,popRes]=await Promise.all([
+        fetch("/api/poi",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({location:site.location})}).then(r=>r.json()).catch(()=>({ok:false})),
+        fetch("/api/poi",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({action:"competitors",location:site.location})}).then(r=>r.json()).catch(()=>({ok:false})),
+        fetch("/api/population?lookup=1&location="+encodeURIComponent(site.address||site.query||""),{headers:authHeaders()}).then(r=>r.json()).catch(()=>({ok:false})),
+      ]);
+      const balData=await fetch("/api/poi",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({action:"balance",location:site.location})}).then(r=>r.json()).catch(()=>({ok:false}));
+      const poiLines=[];if(poiRes.ok)Object.entries(poiRes.pois||{}).forEach(([label,items])=>{if(items?.length)poiLines.push(label+'：'+items.map(p=>p.name+(p.dist!=null?'（约'+p.dist+'km）':'')).join('、'));});
+      site.poiDesc=poiLines.join('\n');site.competitors=cpRes.ok?(cpRes.competitors||[]).slice(0,6):[];
+      if(popRes.ok&&popRes.item){const it=popRes.item;site.populationText=(it.street?it.city+it.district+it.street:it.city+it.district)+'常住人口约'+it.population+'万人（'+it.year+'年，来源：'+(it.source||'人工整理')+'）';}
+      if(balData.ok&&(balData.resiCount+balData.jobCount)>0){const total=balData.resiCount+balData.jobCount,jobRatio=Math.round(balData.jobCount/total*100);site.balanceText='3公里内住宅小区类POI '+balData.resiCount+'个，企业/写字楼/产业园类POI '+balData.jobCount+'个，岗位类POI占比约'+jobRatio+'%';}
+      summaries.push('“'+site.name+'”已取得'+(poiLines.length?poiLines.length+'类周边配套':'0类周边配套')+'、'+site.competitors.length+'个竞品候选'+(site.populationText?'、人口依据':'、人口待补')+(site.balanceText?'、职住代理指标':'、职住待补'));
+    }catch(e){site.surveyError=e.message;summaries.push('“'+site.name+'”周边检索待补');}
+  }
+  project.analysisSites=aiReportSiteLocations;saveDraft();
+  airResolve(loading,{kind:"text",content:'次项目批量检索完成：'+summaries.join('；')+'。生成正文时只提炼与主项目不同、且会影响结论的内容。'});
 }
 
 /* 人口 + 职住平衡：跟周边配套分开发一条消息，因为这两样的"能查到多少"差异很大——
@@ -495,6 +627,7 @@ async function airRunDemandSurvey(ex, best){
       const it = popRes.item;
       const label = (it.street? it.city+it.district+it.street : it.city+it.district);
       project.populationText = label+"常住人口约"+it.population+"万人（"+it.year+"年，来源："+(it.source||"人工整理")+"）";
+      best.populationText=project.populationText;
       lines.push("👥 人口参考："+project.populationText);
     }else{
       lines.push("👥 人口参考：本地未收录「"+(ex.location||"")+"」的人口数据，需求分析章节会标注「待人工核实统计部门最新数据」，不会编造人口数字。");
@@ -504,6 +637,7 @@ async function airRunDemandSurvey(ex, best){
       const total = balData.resiCount + balData.jobCount;
       const jobRatio = Math.round(balData.jobCount/total*100);
       project.balanceText = "3公里内住宅小区类POI "+balData.resiCount+"个，企业/写字楼/产业园类POI "+balData.jobCount+"个，岗位类POI占比约"+jobRatio+"%";
+      best.balanceText=project.balanceText;
       lines.push("🏢 职住平衡参考（POI密度，非官方职住比）："+project.balanceText+"。");
     }
 
@@ -834,7 +968,7 @@ function airRenderCompletedSection(chapter,section,si){
   const tools=el.querySelector('.air-section-tools');
   if(tools)tools.outerHTML=airSectionToolsHtml(chapter,section,si);else el.querySelector('.air-section-material')?.insertAdjacentHTML('afterend',airSectionToolsHtml(chapter,section,si));
   const body=el.querySelector('.body');if(body)body.innerHTML=renderContent(airSectionDisplayContent(chapter,section));
-  el.querySelector(':scope > .rpt-logic-note')?.remove();el.querySelector('h4')?.insertAdjacentHTML('afterend',renderSectionLogicHtml(chapter,section));
+  el.querySelector(':scope > .rpt-logic-note')?.remove();el.querySelector('h4')?.insertAdjacentHTML('afterend',renderSectionLogicHtml(chapter,section,true));
   el.querySelector('.air-section-candidate')?.remove();
   if(body)body.insertAdjacentHTML('afterend',airCandidateHtml(chapter,section,si));
 }
@@ -900,6 +1034,33 @@ async function airResolveRevision(cn,si,action){
   else if(action==='undo'){if(!ProjectWorkflow.undoSection(info.section))return;ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta('在AI可研预览撤销修改'));}
   saveDraft();airSaveState();airRefreshSection(cn,si);
 }
+function airOpenSectionLogicEditor(cn,si){
+  const info=findChapterSection(cn,si);if(!info)return;
+  const backendRules=window.ReportLogicCore?ReportLogicCore.match(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",info.chapter.name,info.section.t,{projectText:[project.name,project.type,project.location,project.desc].filter(Boolean).join(" "),businessScenario:airBusinessScenario()}):[];
+  const snapshot=info.section.logicSnapshot?.localOverride?info.section.logicSnapshot:reportSectionLogicSnapshot(info.chapter,info.section,backendRules);
+  document.getElementById("airSectionLogicModal")?.remove();
+  const rows=(snapshot.rules||[]).map((rule,index)=>'<div class="air-logic-edit-row" data-index="'+index+'"><b>'+(rule.sourceNo?'第'+escapeHtml(rule.sourceNo)+'项':'逻辑'+(index+1))+' · '+escapeHtml(rule.title||info.section.t)+'</b><label>生成方法<textarea class="air-logic-writing" rows="4">'+escapeHtml(rule.writingLogic||'')+'</textarea></label><label>输出形式<input class="air-logic-output" value="'+escapeHtml(rule.outputForm||'文字')+'"></label></div>').join("");
+  document.body.insertAdjacentHTML("beforeend",'<div class="air-modal-overlay" id="airSectionLogicModal"><div class="air-modal-card air-section-logic-modal"><div class="air-modal-head"><div><b>调整本节生成逻辑 · '+escapeHtml(info.section.t)+'</b><span>仅作用于当前项目和本小节。保存后可生成候选稿，但不会直接改后台规则，也不会进入下载的 Word。</span></div><button type="button" class="air-modal-close">×</button></div><div class="air-logic-edit-list">'+(rows||'<p>本节暂未匹配到可编辑规则。</p>')+'</div><div class="air-enhance-guard">安全边界：这里先形成项目级临时逻辑；正文须人工接受。若以后选择“接受并采纳为后台逻辑”，仍需通过自动评测与管理员权限。</div><div class="air-modal-actions"><button type="button" class="btn ghost air-logic-reset">恢复后台逻辑</button><button type="button" class="btn ghost air-modal-close">取消</button><button type="button" class="btn air-logic-save">仅保存逻辑</button><button type="button" class="btn air-logic-generate">保存并生成候选稿</button></div></div></div>');
+  const modal=document.getElementById("airSectionLogicModal"),close=()=>modal?.remove();
+  modal.querySelectorAll(".air-modal-close").forEach(button=>button.onclick=close);
+  modal.querySelector(".air-logic-reset").onclick=()=>{info.section.logicSnapshot=reportSectionLogicSnapshot(info.chapter,info.section,backendRules);saveDraft();airSaveState();close();airRefreshSection(cn,si);};
+  modal.querySelector(".air-logic-save").onclick=()=>airSaveSectionLogicEditor(info,cn,si,false);
+  modal.querySelector(".air-logic-generate").onclick=()=>airSaveSectionLogicEditor(info,cn,si,true);
+}
+async function airSaveSectionLogicEditor(info,cn,si,generateCandidate){
+  const modal=document.getElementById("airSectionLogicModal");if(!modal)return;
+  const base=reportSectionLogicSnapshot(info.chapter,info.section),rules=[...modal.querySelectorAll(".air-logic-edit-row")].map((row,index)=>Object.assign({},base.rules?.[index]||{}, {writingLogic:row.querySelector(".air-logic-writing").value.trim(),outputForm:row.querySelector(".air-logic-output").value.trim()||"文字",changeReason:"当前项目人工调整"}));
+  if(!rules.length)return alert("本节暂未匹配到生成逻辑，不能保存。");
+  info.section.logicSnapshot=Object.assign({},base,{rules,localOverride:true,updatedAt:new Date().toISOString(),changeReason:"当前项目人工调整"});
+  saveDraft();airSaveState();
+  if(!generateCandidate){modal.remove();airRefreshSection(cn,si);return;}
+  const button=modal.querySelector(".air-logic-generate");button.disabled=true;button.textContent="正在生成候选稿…";
+  try{
+    const text=await generateSection(info.chapter,info.section);
+    ProjectWorkflow.setCandidate(info.section,text,"按项目级生成逻辑重新起草",{logicRevision:info.section.logicSnapshot});
+    saveDraft();airSaveState();modal.remove();airRefreshSection(cn,si);
+  }catch(error){button.disabled=false;button.textContent="保存并生成候选稿";alert("候选稿生成失败："+error.message);}
+}
 function airSectionMaterialState(chapter,section){
   if(!window.ReportLogicCore)return {rules:[],missing:[],ready:false};
   const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",ctx=airMaterialContext(),rules=ReportLogicCore.match(type,chapter.name,section.t,{projectText:[project.name,project.type,project.location,project.desc].filter(Boolean).join(" "),businessScenario:ctx.businessScenario});
@@ -907,16 +1068,30 @@ function airSectionMaterialState(chapter,section){
   const criticalRules=rules.filter((rule,index)=>statuses[index]&&statuses[index].level==="critical"),frameworkRules=rules.filter((rule,index)=>statuses[index]&&statuses[index].level==="framework");
   return {rules,statuses,missing,criticalRules,frameworkRules,ready:!!rules.length&&!missing.length,level:criticalRules.length?"critical":frameworkRules.length?"framework":"ready"};
 }
+function airRequirementChinese(value,kind){
+  const maps={
+    time:{effective_at_generation:"以报告生成日为准",latest_12_months:"最近12个月",latest_3_years:"最近3年",current_model_version:"当前测算模型版本",project_current:"本项目当前有效资料"},
+    geo:{city:"所在城市",district:"所在行政区",street:"所在街道",radius:"项目周边范围",project:"本项目",multi_level:"国家与地方多层级",national:"全国",applicable_area:"政策适用区域"}
+  };
+  return maps[kind]?.[value]||(kind==="time"?"按本节所需统计时点":"按本项目适用范围");
+}
+function airRequirementSummary(requirement){
+  const fields=(requirement.fields||[]).slice(0,4).map(field=>field.label).join("、")||"本节必要字段";
+  const time=airRequirementChinese(requirement.timeScope?.kind,"time"),geo=airRequirementChinese(requirement.geoScope?.level,"geo");
+  const quality=requirement.quality||{},budget=requirement.budget||{},version=Number(requirement.refinementVersion||0);
+  return requirement.title+"〔字段："+fields+"；时点："+time+"；范围："+geo+"；质量：不低于"+(quality.minScore||80)+"分"+(quality.crossCheck?"、需交叉核验":"")+"；检索上限："+(budget.maxQueries||1)+"次/"+(budget.maxResults||5)+"条；"+(version?"已人工细化至第"+version+"版":"系统初始判断")+"〕";
+}
 function airSectionMaterialHtml(chapter,section,si){
   const st=airSectionMaterialState(chapter,section),type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",ctx=airMaterialContext(),plan=window.ReportLogicCore?.sourcePlan?ReportLogicCore.sourcePlan(type,chapter.name,section.t,{projectText:[project.name,project.type,project.location,project.desc].filter(Boolean).join(" "),location:project.location||"",businessScenario:ctx.businessScenario,context:ctx}):{needs:[],requirements:[]};
   const enhance=aiReportCanEnhanceLogic&&st.rules.length?'<button type="button" class="air-logic-enhance air-section-enhance" data-cn="'+chapter.cn+'" data-si="'+si+'">🛠 从本节成稿提炼增强规则</button>':'';
-  if(st.ready)return '<div class="air-section-material ok"><b>✓ 本节依据已找到</b><span>测算或项目材料已经匹配，可据此生成并保留来源。</span>'+(enhance?'<div class="air-section-material-actions">'+enhance+'</div>':'')+'</div>';
-  const needs=plan.needs||[],needed=needs.filter(x=>!x.ready),requirements=plan.requirements||[],planText=(needed.length?needed:needs).map(x=>x.label+"："+x.task).join("；"),exactText=requirements.slice(0,3).map(x=>x.title+"〔"+x.fields.slice(0,3).map(f=>f.label).join("、")+"；"+x.timeScope.kind+"；"+x.geoScope.level+"；预算"+x.budget.maxQueries+"次/"+x.budget.maxResults+"条〕").join("；");
-  const css=st.level==="critical"?"missing":"pending",title=st.level==="critical"?"框架将先生成，以下关键依据待补":"可先生成通用框架，项目事实后续核实";
+  const needs=plan.needs||[],needed=needs.filter(x=>!x.ready),requirements=plan.requirements||[],planText=(needed.length?needed:needs).map(x=>x.label+"："+x.task).join("；"),exactText=requirements.slice(0,3).map(airRequirementSummary).join("；");
+  const css=st.ready?"ok":st.level==="critical"?"missing":"pending",title=st.ready?"本节依据已找到，智能数据需求仍可继续细化":st.level==="critical"?"框架将先生成，以下关键依据待补":"可先生成通用框架，项目事实后续核实";
   const ids=escapeHtml(st.rules.map(r=>r.id).join(",")),required=escapeHtml(planText);
   const upload='<button type="button" class="air-material-upload" data-rule-id="'+ids+'" data-chapter="'+escapeHtml(chapter.name)+'" data-section="'+escapeHtml(section.t)+'" data-cn="'+chapter.cn+'" data-si="'+si+'">＋ 上传材料并补强本节</button>';
   const webRequirement=requirements.find(x=>x.webAllowed),schema=webRequirement?encodeURIComponent(JSON.stringify(webRequirement)):"",web=st.missing.includes("web_search")&&webRequirement?'<button type="button" class="air-web-search" data-rule-id="'+ids+'" data-chapter="'+escapeHtml(chapter.name)+'" data-section="'+escapeHtml(section.t)+'" data-query="'+escapeHtml(webRequirement.query)+'" data-requirement-schema="'+schema+'" data-required-sources="'+required+'">🌐 精确联网（最多1次/5条）</button>':'';
-  return '<div class="air-section-material '+css+'"><b>↳ '+title+'</b><span>AI精确数据需求：'+escapeHtml(exactText||"根据论证任务识别字段、时点、空间和质量门槛")+'</span><span>寻源顺序：'+escapeHtml(planText||"优先使用已有项目材料、知识库、数据接口和测算结果")+'</span><div class="air-section-material-actions">'+web+upload+enhance+'</div></div>';
+  const editableRequirement=requirements[0],editSchema=editableRequirement?encodeURIComponent(JSON.stringify(editableRequirement)):"",refine=editableRequirement?'<button type="button" class="air-logic-enhance air-refine-requirement" data-requirement-schema="'+editSchema+'">🎯 调整本节数据需求</button>':'';
+  const stop='系统按“已有资料 → 知识库 → 数据接口/测算 → 必要时精确联网 → 人工材料”寻源；字段和质量门槛满足即停止，不会无边界搜索。';
+  return '<div class="air-section-material '+css+'"><b>↳ '+title+'</b><span><strong>智能判断的数据需求：</strong>'+escapeHtml(exactText||"根据论证任务识别字段、时点、地域、来源和质量门槛")+'</span><span><strong>当前寻源任务：</strong>'+escapeHtml(planText||"优先使用已有项目材料、知识库、数据接口和测算结果")+'</span><span>'+stop+'</span><div class="air-section-material-actions">'+web+refine+upload+enhance+'</div></div>';
 }
 function airChapterMaterialLevel(chapter){const levels=chapter.sections.map(s=>airSectionMaterialState(chapter,s).level);return levels.includes("critical")?"missing":levels.includes("framework")?"pending":"ok";}
 function airApplyDocMaterialStatuses(){
@@ -930,16 +1105,17 @@ function airBuildDocPane(){
   const totalSec = active.reduce((n,c)=>n+c.sections.length,0);
   const outline = active.map(c=>{const level=airChapterMaterialLevel(c);return '<span class="chip" data-cn="'+c.cn+'"><i class="air-material-dot '+level+'" title="'+(level==='ok'?'本章材料已确认齐全':level==='missing'?'本章有关键依据待补':'本章可先生成，部分来源待核实')+'"></i>'+c.cn+'·'+c.name+'</span>';}).join("");
   const body = active.map(c=>'<div class="chapter-block" id="block_'+c.cn+'"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
-    + c.sections.map((s,si)=>{const ready=!!(s.content||s.editedHtml),content=ready?renderContent(airSectionDisplayContent(c,s)):'<span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:70%"></span>';return '<div class="section-block '+(ready?'':'pending')+'" id="sec_'+c.cn+'_'+si+'" data-status="'+(ready?'done':'pending')+'"><h4>'+s.t+(s.numeric?' ⚠数据':'')+(ready?'<span class="done-stamp">已拟</span>'+airTrustBadgeHtml(s):'')+'</h4>'+(ready?renderSectionLogicHtml(c,s):'')+airSectionMaterialHtml(c,s,si)+(ready?airSectionToolsHtml(c,s,si):'')+'<div class="body">'+content+'</div>'+airCandidateHtml(c,s,si)+'</div>';}).join("")
+    + c.sections.map((s,si)=>{const ready=!!(s.content||s.editedHtml),content=ready?renderContent(airSectionDisplayContent(c,s)):'<span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:70%"></span>';return '<div class="section-block '+(ready?'':'pending')+'" id="sec_'+c.cn+'_'+si+'" data-status="'+(ready?'done':'pending')+'"><h4>'+s.t+(s.numeric?' ⚠数据':'')+(ready?'<span class="done-stamp">已拟</span>'+airTrustBadgeHtml(s):'')+'</h4>'+(ready?renderSectionLogicHtml(c,s,true):'')+airSectionMaterialHtml(c,s,si)+(ready?airSectionToolsHtml(c,s,si):'')+'<div class="body">'+content+'</div>'+airCandidateHtml(c,s,si)+'</div>';}).join("")
     +'</div>').join("");
-  pane.innerHTML = '<div class="air-doc-head"><button type="button" class="air-doc-close" title="收起预览">✕</button>'
-    +'<div class="air-doc-title">'+escapeHtml(project.name||"未命名项目")+'</div>'
+  pane.innerHTML = '<div class="air-doc-head"><div class="air-doc-heading"><div class="air-doc-title">'+escapeHtml(project.name||"未命名项目")+'</div>'
     +'<div class="air-doc-meta">'+escapeHtml(project.industry||"")+' · 共 '+active.length+' 章 / '+totalSec+' 个子标题</div></div>'
+    +'<div class="air-doc-actions"><button type="button" class="air-doc-tool air-doc-chat-toggle">收起对话</button><button type="button" class="air-doc-tool air-doc-outline-toggle">收起章节</button><span class="air-doc-zoom"><button type="button" class="air-doc-tool air-doc-zoom-out" title="缩小">−</button><button type="button" class="air-doc-tool air-doc-zoom-reset" title="恢复100%"><span class="air-doc-zoom-value">100%</span></button><button type="button" class="air-doc-tool air-doc-zoom-in" title="放大">＋</button></span><button type="button" class="air-doc-tool air-doc-download">下载 Word</button><button type="button" class="air-doc-tool air-doc-fullscreen">全屏阅读</button><button type="button" class="air-doc-close" title="关闭报告预览">✕</button></div></div>'
     +'<div class="air-doc-outline">'+outline+'</div>'
-    +'<input type="file" id="airDocMaterialFile" accept=".txt,.md,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
+    +'<input type="file" id="airDocMaterialFile" accept=".txt,.md,.doc,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
     +'<div class="air-doc-scroll" id="airDocScroll">'+body+'</div>';
   aiReportHasDoc = true;
   airSetDocVisible(true);
+  airApplyDocViewState();
 }
 function airUpdateChapterChipStatus(cn){
   const chip = document.querySelector('.air-doc-outline .chip[data-cn="'+cn+'"]');
@@ -1036,13 +1212,13 @@ function airMaterialCheckHtml(m){
   const inv=m.inventory||{summary:{},chapters:[]},sum=inv.summary||{},labels={knowledge_base:"知识库检索",web_search:"网上检索",provider:"数据接口",calculation_engine:"测算引擎",manual_upload:"人工上传",derived_section:"其他章节",system_rule:"系统规则",unclassified:"来源待确认"};
   const batch=window.WebResearch?.batchStatus?.(),batchLabel=batch?(batch.status==="completed"?"🌐 查看批量检索结果（"+batch.done+"/"+batch.total+"）":batch.status==="paused"?"🌐 批量检索已暂停（"+batch.done+"/"+batch.total+"）":"🌐 查看批量检索进度（"+batch.done+"/"+batch.total+"）"):"🌐 自动批量检索全部网上缺口（"+(sum.pendingWeb||0)+"）";
   const stat=(num,label,color)=>'<div style="border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:#fff;"><b style="display:block;font-size:18px;color:'+color+';">'+(num||0)+'</b><span style="font-size:11px;color:var(--ink-soft);">'+label+'</span></div>';
-  const rowHtml=item=>{const status=item.ready?'<span style="color:var(--ok-green);">✓ 已确认找到</span>':'<span style="color:var(--red);">● 待补充/待检索</span>';const kinds=(item.sourceKinds||[]).length?item.sourceKinds:["unclassified"];const channels=kinds.map(kind=>'<span style="display:inline-block;border:1px solid '+(item.missing.includes(kind)?'#e6a5a0':'#b7ddc6')+';background:'+(item.missing.includes(kind)?'#fff0ef':'#edf8f1')+';color:'+(item.missing.includes(kind)?'var(--red)':'var(--ok-green)')+';padding:1px 5px;border-radius:8px;margin:1px;font-size:10.5px;">'+escapeHtml(labels[kind]||kind)+'</span>').join(""),req=item.dataRequirement||null,reqHtml=req?'<div style="color:var(--ok-green);margin-top:4px;">精确需求'+(req.refinementVersion?' v'+req.refinementVersion:'')+'：'+escapeHtml(req.fields.slice(0,4).map(x=>x.label).join("、"))+'；'+escapeHtml(req.timeScope.kind)+'；'+escapeHtml(req.geoScope.value||req.geoScope.level)+'</div>':'',web=item.missing.includes("web_search")&&req?.webAllowed?'<button type="button" class="air-web-search" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'" data-query="'+escapeHtml(req.query)+'" data-requirement-schema="'+encodeURIComponent(JSON.stringify(req))+'" data-required-sources="'+escapeHtml(item.requiredSources)+'">🌐 精确联网</button>':'';return '<tr><td style="white-space:nowrap;">第'+item.sourceNo+'项</td><td><b>'+escapeHtml(item.title)+'</b><div style="color:var(--ink-soft);margin-top:3px;white-space:pre-line;">'+escapeHtml(item.requiredSources)+'</div>'+reqHtml+'</td><td>'+channels+'</td><td><div class="air-material-row-actions">'+status+(item.blocking?'<span style="font-size:10px;color:var(--red);">重要阻断</span>':'')+(req?'<button type="button" class="air-refine-requirement" data-requirement="'+encodeURIComponent(JSON.stringify(req))+'">🎯 精化需求</button>':'')+web+'<button type="button" class="air-material-upload" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'">＋ 上传补充</button></div></td></tr>';};
+  const rowHtml=item=>{const status=item.ready?'<span style="color:var(--ok-green);">✓ 已确认找到</span>':'<span style="color:var(--red);">● 待补充/待检索</span>';const kinds=(item.sourceKinds||[]).length?item.sourceKinds:["unclassified"];const channels=kinds.map(kind=>'<span style="display:inline-block;border:1px solid '+(item.missing.includes(kind)?'#e6a5a0':'#b7ddc6')+';background:'+(item.missing.includes(kind)?'#fff0ef':'#edf8f1')+';color:'+(item.missing.includes(kind)?'var(--red)':'var(--ok-green)')+';padding:1px 5px;border-radius:8px;margin:1px;font-size:10.5px;">'+escapeHtml(labels[kind]||kind)+'</span>').join(""),req=item.dataRequirement||null,reqHtml=req?'<div style="color:var(--ok-green);margin-top:4px;">'+escapeHtml(airRequirementSummary(req))+'</div>':'',web=item.missing.includes("web_search")&&req?.webAllowed?'<button type="button" class="air-web-search" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'" data-query="'+escapeHtml(req.query)+'" data-requirement-schema="'+encodeURIComponent(JSON.stringify(req))+'" data-required-sources="'+escapeHtml(item.requiredSources)+'">🌐 精确联网</button>':'';return '<tr><td style="white-space:nowrap;">第'+item.sourceNo+'项</td><td><b>'+escapeHtml(item.title)+'</b><div style="color:var(--ink-soft);margin-top:3px;white-space:pre-line;">'+escapeHtml(item.requiredSources)+'</div>'+reqHtml+'</td><td>'+channels+'</td><td><div class="air-material-row-actions">'+status+(item.blocking?'<span style="font-size:10px;color:var(--red);">重要阻断</span>':'')+(req?'<button type="button" class="air-refine-requirement" data-requirement="'+encodeURIComponent(JSON.stringify(req))+'">🎯 调整数据需求</button>':'')+web+'<button type="button" class="air-material-upload" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'">＋ 上传补充</button></div></td></tr>';};
   return '<div class="air-card"><div class="air-step-done" style="margin-bottom:10px;"><b>材料完整性台账 · 逻辑 v'+inv.version+'</b><span>共'+inv.total+'项、'+inv.chapters.length+'章。以下来源数量允许交叉，例如同一小节可能同时需要知识库和人工材料。</span></div>'
     +(aiReportCanEnhanceLogic?'<div class="air-enhance-entry-tip"><b>管理员增强模式已开启</b><span>请先生成右侧正文并持续修改；定稿后从对应小节点击“从本节成稿提炼增强规则”，AI会比较版本并交由管理员审定。</span></div>':'')
     +'<div style="display:grid;grid-template-columns:repeat(7,minmax(86px,1fr));gap:7px;margin-bottom:10px;">'+stat(sum.ready,"已确认找到","var(--ok-green)")+stat(sum.system_rule,"系统规则直接生成","var(--bp)")+stat(sum.pendingKnowledge,"需从知识库检索","var(--red)")+stat(sum.pendingWeb,"需网上检索","var(--red)")+stat(sum.pendingProvider,"需调用数据接口","var(--red)")+stat(sum.pendingCalculation,"需从测算引擎取得","var(--red)")+stat(sum.pendingManual,"需人工上传","var(--red)")+'</div>'
     +'<div style="display:flex;gap:7px;margin-bottom:8px;flex-wrap:wrap;"><button type="button" class="btn sm ghost" id="airMaterialExpandAll">展开全部</button><button type="button" class="btn sm ghost" id="airMaterialCollapseAll">收起全部</button><button type="button" class="btn sm ghost air-material-ask" data-prompt="请把全报告'+inv.total+'项材料需求按章节列成完整Markdown表格，列出序号、材料名称、获取渠道、当前状态和是否阻断，不要省略。">让AI列完整材料表</button><button type="button" class="btn sm air-batch-web-search" id="airBatchWebSearch" '+(sum.pendingWeb||batch?'':'disabled')+'>'+batchLabel+'</button><button type="button" class="btn sm air-batch-material-upload" id="airBatchMaterialUpload">＋ 批量上传材料</button></div>'
     +'<div style="max-height:470px;overflow:auto;border:1px solid var(--line);border-radius:8px;">'+inv.chapters.map(g=>'<details class="air-material-chapter" style="border-bottom:1px solid var(--line);"><summary style="cursor:pointer;padding:11px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b style="min-width:210px;">'+escapeHtml(g.chapter)+'</b><span style="color:var(--ok-green);">已找到 '+g.counts.ready+'/'+g.total+'</span><span style="color:var(--red);">需知识库检索 '+g.counts.pendingKnowledge+'</span><span style="color:var(--red);">需网搜 '+g.counts.pendingWeb+'</span><span style="color:var(--red);">需接口 '+g.counts.pendingProvider+'</span><span style="color:var(--red);">需测算 '+g.counts.pendingCalculation+'</span><span style="color:var(--red);">需上传 '+g.counts.pendingManual+'</span></summary><div style="padding:0 10px 11px;"><table class="air-material-table" style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr style="text-align:left;background:#f5f8fb;"><th style="padding:7px;">序号</th><th style="padding:7px;">具体需要的内容/材料</th><th style="padding:7px;">获取渠道</th><th style="padding:7px;min-width:150px;">当前状态/补充</th></tr></thead><tbody>'+g.items.map(rowHtml).join("")+'</tbody></table><button type="button" class="btn sm ghost air-material-ask" style="margin-top:8px;" data-prompt="请把'+escapeHtml(g.chapter)+'全部材料需求列成表格，并告诉我应该先补哪几项。">询问本章补充顺序</button></div></details>').join("")+'</div>'
-    +'<input type="file" id="airMaterialFile" accept=".txt,.md,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
+    +'<input type="file" id="airMaterialFile" accept=".txt,.md,.doc,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;"><button class="btn air-start-gen">先联网检索并集中确认 →</button><button class="btn" id="airBackgroundSearchGenerate">后台检索并立即开始可研生成 →</button><button class="btn ghost air-material-ask" data-prompt="请按重要程度汇总全报告必须由我人工补充的材料清单，并列成表格">仅汇总人工材料</button></div><div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">“先联网检索”会等待你集中采用依据后再生成；“后台检索并立即生成”会让联网任务继续运行，同时先按现有资料起草可研，完成后可回到批量检索采用高价值来源并更新受影响章节。上传材料只关联你选择的逻辑项。</div></div>';
 }
 
@@ -1068,6 +1244,13 @@ async function airBatchWebPreflight(continueAfter,backgroundImmediately){
 async function airParseProjectMaterial(file){
   const lower=String(file.name||"").toLowerCase();let text="";
   if(/\.(txt|md)$/.test(lower)) text=await file.text();
+  else if(lower.endsWith(".doc")){
+    if(Number(file.size||0)>12*1024*1024)throw new Error("旧版 .doc 单文件不能超过12MB");
+    const bytes=new Uint8Array(await file.arrayBuffer());let binary="";for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
+    const response=await fetch("/api/aireport",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({action:"parseLegacyDoc",name:file.name,dataBase64:btoa(binary)})}),data=await response.json().catch(()=>({}));
+    if(!response.ok||!data.ok)throw new Error(data.error||"旧版 .doc 解析失败，请另存为 .docx 后重试");
+    text=data.text||"";
+  }
   else if(lower.endsWith(".docx")){
     if(!window.mammoth)await loadScript("mammoth.min.js");
     text=(await window.mammoth.extractRawText({arrayBuffer:await file.arrayBuffer()})).value||"";
@@ -1081,10 +1264,130 @@ async function airParseProjectMaterial(file){
     if(!window.XLSX)await loadScript("xlsx.full.min.js");
     const wb=window.XLSX.read(await file.arrayBuffer(),{type:"array",cellFormula:true,cellDates:true});
     text=wb.SheetNames.map(name=>"[工作表 "+name+"]\n"+window.XLSX.utils.sheet_to_csv(wb.Sheets[name])).join("\n\n");
-  }else throw new Error("暂不支持该格式，请上传 Word、PDF、Excel、CSV、TXT 或 Markdown");
+  }else throw new Error("暂不支持该格式，请上传 Word（.doc/.docx）、PDF、Excel、CSV、TXT 或 Markdown");
   text=String(text||"").replace(/\n{4,}/g,"\n\n").trim();
   if(!text)throw new Error("未提取到文字；若为扫描件PDF，请先OCR后上传");
   return text.slice(0,80000)+(text.length>80000?"\n…（超长材料已保留前8万字）":"");
+}
+function airInitialMaterialExcerpt(text,limit){
+  const raw=String(text||""),lines=raw.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),keywords=/项目|地块|地址|地点|坐落|位置|街道|社区|道路|区|建设单位|委托单位|业主|改造|保障房|公租房|保租房|商业|出租|出售|面积|开工|工期|土地性质/;
+  const selected=[],seen=new Set();
+  [...lines.filter(x=>keywords.test(x)),...lines.slice(0,35)].forEach(line=>{const value=line.slice(0,500);if(value&&!seen.has(value)){seen.add(value);selected.push(value);}});
+  return selected.join("\n").slice(0,Math.max(1200,limit||4000));
+}
+function airSavedInitialMaterials(){
+  const names=new Set((aiReportExtracted&&aiReportExtracted.sourceFileNames||[]).map(String));
+  return (kbEntries||[]).filter(entry=>entry&&entry.sourceType==="project_upload"&&entry.content&&(entry.intake===true||names.has(String(entry.fileName||""))));
+}
+function airInitialMaterialRows(value){
+  const supplied=Array.isArray(value&&value.files)?value.files:Array.isArray(aiReportExtracted&&aiReportExtracted.sourceFiles)?aiReportExtracted.sourceFiles:[];
+  const saved=airSavedInitialMaterials(),byName=new Map(saved.map(entry=>[String(entry.fileName||entry.title||""),entry]));
+  const names=(aiReportExtracted&&aiReportExtracted.sourceFileNames||[]).map(fileName=>({fileName})),base=supplied.length?supplied:saved.length?saved:names;
+  const rows=base.map(entry=>{const name=String(entry.fileName||entry.name||entry.title||"未命名材料"),stored=byName.get(name)||{};return Object.assign({},stored,entry,{fileName:name,parsedChars:Number(entry.parsedChars||entry.content?.length||stored.content?.length||0),sizeBytes:Number(entry.sizeBytes||stored.sizeBytes||0),objectStored:entry.objectStored===true||stored.objectStored===true});});
+  const seen=new Set();return rows.filter(row=>row.fileName&&!seen.has(row.fileName)&&(seen.add(row.fileName),true));
+}
+function airFormatBytes(bytes){const n=Number(bytes)||0;if(!n)return "大小未记录";if(n<1024)return n+" B";if(n<1024*1024)return (n/1024).toFixed(1)+" KB";return (n/1024/1024).toFixed(1)+" MB";}
+function airMaterialResultHtml(message){
+  const files=airInitialMaterialRows(message),stored=files.filter(file=>file.objectStored).length;
+  const chips=files.map(file=>'<span class="air-saved-file-chip" title="'+escapeHtml(file.fileName)+'">📄 '+escapeHtml(file.fileName)+'</span>').join("");
+  const rows=files.map(file=>{const status=file.objectStored?'<b class="air-storage-ok">原件已归档</b>':'<b class="air-storage-legacy">原件未归档'+(file.storageWarning?'':'（旧上传）')+'</b>',hash=file.contentHash?'<small>SHA-256：'+escapeHtml(String(file.contentHash).slice(0,16))+'…</small>':'';return '<div class="air-saved-file-row"><span><b>'+escapeHtml(file.fileName)+'</b><small>'+airFormatBytes(file.sizeBytes)+'｜已解析 '+Number(file.parsedChars||0).toLocaleString("zh-CN")+' 字</small></span><span>'+status+hash+(file.storageWarning?'<small>'+escapeHtml(file.storageWarning)+'</small>':'')+'</span></div>';}).join("");
+  const extraction=message.extractionStatus==="degraded"?'文件已解析；AI字段抽取曾降级，信息卡仍需人工核对。':'文件已解析，并已形成待核对的信息草稿。';
+  return '<div class="air-completed-step air-material-result"><div class="air-completed-step-head"><span><b>✓ 已处理 '+files.length+' 份项目材料</b><small>'+escapeHtml(extraction)+'</small></span></div><div class="air-saved-file-chips">'+chips+'</div><div class="air-material-storage-summary"><span>解析文本：已保存到浏览器草稿，并随登录项目同步到项目数据库。</span><span>原件：'+stored+'/'+files.length+' 份已进入 SHA-256 对象存储。'+(stored<files.length?'未归档的旧文件需重新选择一次才能补存原件。':'')+'</span></div><details class="air-native-detail"><summary>查看存储详情</summary><div class="air-completed-step-detail">'+rows+'</div></details></div>';
+}
+async function airFileToBase64(file){
+  const bytes=new Uint8Array(await file.arrayBuffer()),parts=[];for(let offset=0;offset<bytes.length;offset+=32768)parts.push(String.fromCharCode(...bytes.subarray(offset,offset+32768)));return btoa(parts.join(""));
+}
+async function airStoreProjectOriginal(file){
+  if(!currentProjectId)return {objectStored:false,storageWarning:"项目尚未建立，原件未归档"};
+  try{
+    const response=await fetch("/api/projectworkspace",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({action:"storeProjectOriginal",projectId:currentProjectId,name:file.name,mimeType:file.type||"application/octet-stream",dataBase64:await airFileToBase64(file)})}),data=await response.json();
+    if(!response.ok||!data.ok)return {objectStored:false,storageWarning:data.error||"原件对象存储暂不可用"};
+    if(!data.stored)return {objectStored:false,storageWarning:data.warning||"当前部署未配置原件对象存储"};
+    return {objectStored:true,contentHash:data.object&&data.object.contentHash||"",storageKey:data.object&&data.object.storageKey||"",sizeBytes:Number(data.object&&data.object.sizeBytes||file.size||0),fileId:data.fileId||"",version:data.version||1,deduplicated:!!(data.object&&data.object.deduplicated)};
+  }catch(error){return {objectStored:false,storageWarning:"原件归档失败："+error.message};}
+}
+function airInitialMaterialsPrompt(parsed){
+  const perFile=Math.max(1800,Math.floor(28000/Math.max(1,parsed.length)));
+  return parsed.map((entry,index)=>"【材料"+(index+1)+"："+(entry.fileName||entry.title||("材料"+(index+1)))+"】\n"+airInitialMaterialExcerpt(entry.content,perFile)).join("\n\n").slice(0,30000);
+}
+function airMaterialExtractionNeedsRetry(value){
+  const v=value||aiReportExtracted||{};
+  if(v.__materialExtractionDegraded===true)return true;
+  if(!v.__fromMaterials||!(v.sourceFileNames||[]).length)return false;
+  const blank=!v.projectName&&!v.location&&!v.calcType&&!v.owner&&v.landArea==null&&v.startYear==null;
+  return blank&&aiReportChat.some(message=>/外部AI暂时不可用|本地字段标签.*保守预填/.test(String(message&&message.content||"")));
+}
+function airNullableExtractedText(value){
+  const text=String(value==null?"":value).trim();
+  return !text||/^(?:null|undefined|none|未提及|不详)$/i.test(text)?null:text;
+}
+function airMergeMaterialExtraction(extracted){
+  const current=Object.assign({},aiReportExtracted||{}),incoming=extracted||{};
+  ["projectName","location","owner","landNature","desc"].forEach(key=>{incoming[key]=airNullableExtractedText(incoming[key]);});
+  ["projectName","location","calcType","businessScenario","landArea","landPrice","startYear","owner","landNature","desc"].forEach(key=>{
+    if((current[key]==null||current[key]==="")&&incoming[key]!=null&&incoming[key]!=="")current[key]=incoming[key];
+  });
+  const hasUsableSites=Array.isArray(current.analysisSites)&&current.analysisSites.some(site=>site&&(site.name||site.address));
+  if(!hasUsableSites&&Array.isArray(incoming.analysisSites)&&incoming.analysisSites.length)current.analysisSites=incoming.analysisSites;
+  current.__manual=false;current.__fromMaterials=true;current.__materialExtractionDegraded=false;current.__materialRetryAt=Date.now();
+  current.analysisSites=airAnalysisSites(current);return current;
+}
+async function airRetrySavedMaterialExtraction(automatic=false){
+  if(aiReportBusy)return;
+  const parsed=airSavedInitialMaterials();
+  if(!parsed.length){if(!automatic)alert("没有找到已保存的原始解析材料，请重新选择文件一次。");return;}
+  if(document.getElementById("air_name"))airCaptureInfoCard();
+  aiReportExtracted.__materialRetryAt=Date.now();airSaveState();
+  const loading=airPushLoading("正在用已恢复的公网DeepSeek重新提取 "+parsed.length+" 份已保存材料…");airSetBusy(true);
+  try{
+    const response=await fetch("/api/aireport",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({action:"extract",text:airInitialMaterialsPrompt(parsed),materialMode:true})}),data=await response.json();
+    if(!response.ok||!data.ok)throw new Error(data.error||"重新提取失败");
+    if(data.degraded){aiReportExtracted.__materialExtractionDegraded=true;throw new Error(data.degradedReason||"公网DeepSeek未形成有效抽取结果，已保留当前材料和填写内容");}
+    aiReportExtracted=airMergeMaterialExtraction(data.data);
+    const oldWarning=aiReportChat.find(message=>message.kind==="text"&&/外部AI暂时不可用|本地字段标签.*保守预填/.test(String(message.content||"")));
+    if(oldWarning)Object.assign(oldWarning,{kind:"materialResult",content:"",files:airInitialMaterialRows(),extractionStatus:"extracted"});
+    const materialResult=aiReportChat.find(message=>message.kind==="materialResult");if(materialResult)materialResult.extractionStatus="extracted";
+    aiReportChat=aiReportChat.filter(message=>!/^重新AI提取暂未完成：/.test(String(message&&message.content||"")));
+    airResolve(loading,{kind:"text",content:"✓ 已重新提取并自动回填信息卡；原材料没有重复上传，已有人工填写内容也不会被覆盖。"});
+    saveDraft();airSaveState();renderAiReportMsgs();
+  }catch(error){airResolve(loading,{kind:"text",content:"重新AI提取暂未完成："+error.message+"。材料和当前填写内容均已保留，可稍后点击信息卡顶部按钮重试。"});airSaveState();}
+  finally{airSetBusy(false);}
+}
+function airMaybeAutoRetryMaterialExtraction(){
+  if(aiReportMaterialAutoRetryStarted||!airMaterialExtractionNeedsRetry())return;
+  const last=Number(aiReportExtracted&&aiReportExtracted.__materialRetryAt||0);if(last&&Date.now()-last<60000)return;
+  aiReportMaterialAutoRetryStarted=true;setTimeout(()=>airRetrySavedMaterialExtraction(true),250);
+}
+async function airPrepareInitialProjectFiles(files){
+  files=Array.from(files||[]);if(!files.length||aiReportBusy)return;
+  if(files.length>12){alert("一次最多上传12份材料；如材料更多，请先上传最能确定项目名称、地点和类型的文件。");return;}
+  const totalBytes=files.reduce((sum,file)=>sum+(Number(file.size)||0),0);
+  if(totalBytes>50*1024*1024){alert("本批材料超过50MB，请分批上传，优先选择项目基本情况、资产清单和地址表。");return;}
+  if(!currentProjectId){currentProjectId=genProjectId();rememberActiveProjectId(currentProjectId);}
+  if(!project.name)project.name="AI可研待确认项目";
+  const loading=airPushLoading("正在本地解析 "+files.length+" 份材料，并提取项目名称、点位和类型候选…");airSetBusy(true);
+  try{
+    if(typeof cloudSaveNow==="function"&&getToken())await cloudSaveNow();
+    const parsed=[];for(const file of files){const content=await airParseProjectMaterial(file),storage=await airStoreProjectOriginal(file);parsed.push(Object.assign({fileName:file.name,content,sizeBytes:Number(file.size)||0,mimeType:file.type||"application/octet-stream",parsedChars:content.length},storage));}
+    const text=airInitialMaterialsPrompt(parsed);
+    parsed.forEach(entry=>{if(!kbEntries.some(x=>x.sourceType==="project_upload"&&x.fileName===entry.fileName&&x.content===entry.content))kbEntries.push({title:String(entry.fileName).replace(/\.[^.]+$/,"")||"项目材料",content:entry.content,fileName:entry.fileName,sourceType:"project_upload",ruleIds:[],intake:true,uploadedAt:Date.now()});});
+    parsed.forEach(entry=>{const saved=kbEntries.find(x=>x.sourceType==="project_upload"&&x.fileName===entry.fileName&&x.content===entry.content);if(saved)Object.assign(saved,entry);});
+    saveDraft();
+    let data;
+    try{const response=await fetch("/api/aireport",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({action:"extract",text,materialMode:true})});data=await response.json();if(!response.ok||!data.ok){const failure=new Error(data.error||"材料信息抽取失败");failure.authFailure=response.status===401||response.status===403;throw failure;}}
+    catch(error){if(error&&error.authFailure)throw error;data={ok:true,degraded:true,degradedReason:"AI接口暂不可用",data:{projectName:"",location:"",analysisSites:null,calcType:null,businessScenario:null,landArea:null,landPrice:null,startYear:null,owner:"",landNature:"",desc:""}};}
+    const extracted=data.data||{},sourceFiles=parsed.map(({content,...entry})=>entry);
+    aiReportExtracted=Object.assign({projectName:"",location:"",calcType:null,businessScenario:null,landArea:null,landPrice:null,startYear:null,owner:"",landNature:"",desc:""},extracted,{__manual:false,__fromMaterials:true,__materialExtractionDegraded:!!data.degraded,__materialRetryAt:data.degraded?Date.now():0,sourceFileNames:parsed.map(x=>x.fileName),sourceFiles});
+    aiReportExtracted.analysisSites=airAnalysisSites(aiReportExtracted);
+    if(aiReportExtracted.calcType&&!aiReportChat.some(m=>m.kind==="typeTag")){
+      const option=AI_CATEGORY_OPTIONS.find(x=>x.key===aiReportExtracted.calcType);if(option)aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"typeTag",content:option.label,calcType:option.key});
+    }
+    aiReportChat=aiReportChat.filter(m=>m.kind!=="infoCard");
+    airResolve(loading,{kind:"materialResult",content:"",files:sourceFiles,extractionStatus:data.degraded?"degraded":"extracted"});
+    aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"infoCard",content:""});
+    saveDraft();airSaveState();renderAiReportMsgs();
+  }catch(error){airResolve(loading,{kind:"text",content:"批量材料解析失败："+error.message+"。你可以删减文件后重试，或直接选择测算类型手动填写。"});}
+  finally{airSetBusy(false);}
 }
 function airOpenMaterialUpload(button){
   aiReportMaterialTarget={ruleIds:String(button.dataset.ruleId||"").split(",").filter(Boolean),chapter:button.dataset.chapter||"",section:button.dataset.section||"",cn:button.dataset.cn||"",si:button.dataset.si===""||button.dataset.si==null?null:+button.dataset.si};
@@ -1282,9 +1585,15 @@ function airRenderChips(){
   const el = document.getElementById("airChips");
   if(!el) return;
   if(aiReportChat.length){ el.innerHTML = ""; return; }
-  el.innerHTML = '<div class="air-chips"><div class="air-chips-label">或者直接选测算类型，自己手动填项目信息：</div>'
+  el.innerHTML = '<div class="air-intake-upload" id="airInitialUploadDrop"><div><b>先批量上传项目材料，由AI预填信息</b><span>支持 Word（.doc/.docx）、PDF、Excel、CSV、TXT、Markdown；解析后只调用一次信息抽取。项目名称、1—6个地图点位和类型等都要由你在信息卡中复核确认。</span></div><button type="button" class="btn" id="airInitialUploadButton">＋ 选择多份材料</button><input type="file" id="airInitialUploadFile" accept=".txt,.md,.doc,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden></div>'
+    +'<div class="air-intake-or"><span>或者</span></div>'
+    +'<div class="air-chips"><div class="air-chips-label">直接选测算类型，自己手动填项目信息：</div>'
     + AI_CATEGORY_OPTIONS.map(c=>'<button type="button" class="air-chip-ex air-chip-'+c.key+'" data-type="'+c.key+'">'+c.label+'</button>').join("")
     + '</div>';
+  const input=document.getElementById("airInitialUploadFile"),button=document.getElementById("airInitialUploadButton"),drop=document.getElementById("airInitialUploadDrop");
+  if(button&&input)button.onclick=()=>{input.value="";input.click();};
+  if(input)input.onchange=e=>airPrepareInitialProjectFiles([...e.target.files]);
+  if(drop){drop.ondragover=e=>{e.preventDefault();drop.classList.add("drag")};drop.ondragleave=()=>drop.classList.remove("drag");drop.ondrop=e=>{e.preventDefault();drop.classList.remove("drag");airPrepareInitialProjectFiles([...e.dataTransfer.files]);};}
   el.querySelectorAll(".air-chip-ex").forEach(b=>{
     b.onclick = ()=>airPickCategory(b.dataset.type);
   });
@@ -1312,6 +1621,7 @@ function airPickCategory(calcType){
 function renderAiReportMsgs(){
   const box = document.getElementById("airMsgs");
   if(!box) return;
+  box.style.minHeight=aiReportChat.length?"80px":"0";
   const backButton=document.getElementById("airBackStepBtn");
   if(backButton)backButton.disabled=!(window.ProjectWorkflow&&ProjectWorkflow.previousAiReportStage(airCurrentStage()));
   box.innerHTML = aiReportChat.map(m=>{
@@ -1320,8 +1630,10 @@ function renderAiReportMsgs(){
       return '<div class="air-typetag-row"><span class="air-typetag air-typetag-'+m.calcType+'">✓ 已选择测算类型：'+escapeHtml(m.content)+'</span></div>';
     }
     let body;
-    if(m.kind==="infoCard") body = airInfoCardHtml();
+    if(m.kind==="materialResult") body = airMaterialResultHtml(m);
+    else if(m.kind==="infoCard") body = airInfoCardHtml();
     else if(m.kind==="locationCard") body = airLocationCardHtml(m);
+    else if(m.kind==="locationResult") body = airLocationResultHtml(m);
     else if(m.kind==="confirmCard") body = airConfirmCardHtml();
     else if(m.kind==="genConfirm") body = airGenConfirmHtml();
     else if(m.kind==="materialCheck") body = airMaterialCheckHtml(m);
@@ -1332,23 +1644,35 @@ function renderAiReportMsgs(){
     else if(m.kind==="loading") body = '<div class="air-loading"><span class="air-dots"><span></span><span></span><span></span></span>'
       +'<span class="air-loading-label">'+escapeHtml(m.content)+'</span></div>';
     else body = (window.MD? window.MD.renderHtml(m.content||"") : escapeHtml(m.content||"").replace(/\n/g,"<br>"));
+    const collapsibleText=m.role==="assistant"&&m.kind==="text"&&(String(m.content||"").trim().length>120||/\r?\n/.test(String(m.content||"")));
+    if(collapsibleText){
+      const detailId="airMsgDetail_"+m.id,firstLine=String(m.content||"").split(/\r?\n/).map(line=>line.trim()).find(Boolean)||"查看本步骤完整结果";
+      body='<div class="air-msg-summary">'+escapeHtml(firstLine.length>105?firstLine.slice(0,105)+'…':firstLine)+'</div><div class="air-msg-detail" id="'+detailId+'" hidden>'+body+'</div>';
+    }
     const copyBtn = (m.role==="assistant" && m.kind==="text") ? '<button class="air-msg-copy" data-copy="'+m.id+'">复制</button>' : "";
+    const detailBtn = collapsibleText ? '<button class="air-msg-detail-toggle" data-detail-target="airMsgDetail_'+m.id+'">查看详情</button>' : "";
     const retryBtn = m.retry ? '<div style="margin-top:8px;"><button class="btn ghost air-msg-retry" data-retry="'+m.id+'" style="padding:4px 12px; font-size:11.5px;">重试</button></div>' : "";
     return '<div class="air-msg '+(m.role==="user"?"user":"assistant")+'">'
-      +(m.role==="user"?"<b>你：</b>":"<b>AI：</b>")+copyBtn+body+retryBtn+'</div>';
+      +(m.role==="user"?"<b>你：</b>":"<b>AI：</b>")+copyBtn+detailBtn+body+retryBtn+'</div>';
   }).join("");
   box.scrollTop = box.scrollHeight;
   const s = id=>document.getElementById(id);
   if(s("airConfirmInfo")) s("airConfirmInfo").onclick = aiReportConfirmInfo;
+  if(s("airRetryMaterialExtraction"))s("airRetryMaterialExtraction").onclick=()=>airRetrySavedMaterialExtraction(false);
   if(s("air_ctype"))s("air_ctype").onchange=()=>{const row=s("air_gaibao_scenario_row");if(row)row.style.display=s("air_ctype").value==="gaibao"?"":"none";};
+  if(s("airAddSite"))s("airAddSite").onclick=()=>{airCaptureInfoCard();const sites=airAnalysisSites();if(sites.length>=6)return;sites.push({id:'site-'+(Date.now()),name:'',address:'',role:'secondary'});aiReportExtracted.analysisSites=sites;renderAiReportMsgs();};
+  document.querySelectorAll('.air-site-remove').forEach(btn=>btn.onclick=()=>{airCaptureInfoCard();const sites=airAnalysisSites(),index=+btn.dataset.siteRemove,removed=sites.splice(index,1)[0];if(removed?.role==='primary'&&sites[0])sites[0].role='primary';aiReportExtracted.analysisSites=sites;renderAiReportMsgs();});
+  document.querySelectorAll('input[name="airSitePrimary"]').forEach(radio=>radio.onchange=()=>{document.querySelectorAll('.air-site-role').forEach((label,index)=>{const input=label.querySelector('input');label.lastChild.textContent=' '+(input.checked?'主项目':'设为主项目');});});
   if(s("airConfirmLocation")) s("airConfirmLocation").onclick = airConfirmLocation;
+  document.querySelectorAll('.air-card-detail-toggle,.air-msg-detail-toggle').forEach(button=>button.onclick=()=>{const detail=document.getElementById(button.dataset.detailTarget);if(!detail)return;const opening=detail.hidden;detail.hidden=!opening;button.textContent=opening?'收起详情':'查看详情';const summary=button.closest('.air-msg')?.querySelector('.air-msg-summary');if(summary)summary.hidden=opening;});
+  document.querySelectorAll('.air-location-site-refresh').forEach(button=>button.onclick=()=>airSearchLocationSite(+button.dataset.siteIndex));
+  document.querySelectorAll('.air-location-site-address').forEach(input=>input.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();airSearchLocationSite(+input.dataset.siteIndex);}});
   if(s("airSkipLocation")) s("airSkipLocation").onclick = airSkipLocation;
   if(s("airLocationSearchAgain")){
-    const run=()=>airSearchLocationCandidates(String(s("airLocationRetryInput")?.value||"").trim());
+    const run=()=>airSearchLocationCandidates();
     s("airLocationSearchAgain").onclick=run;
-    if(s("airLocationRetryInput"))s("airLocationRetryInput").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();run();}};
   }
-  if(s("airRetryLocation")) s("airRetryLocation").onclick = ()=>{aiReportLocationCandidates=[];aiReportLocationConfirmed=null;aiReportChat=aiReportChat.filter(m=>m.kind!=="locationCard");renderAiReportMsgs();airSaveState();};
+  if(s("airRetryLocation")) s("airRetryLocation").onclick = ()=>{aiReportLocationCandidates=[];aiReportLocationConfirmed=null;aiReportSiteSearches=[];aiReportSiteLocations=[];aiReportChat=aiReportChat.filter(m=>m.kind!=="locationCard");renderAiReportMsgs();airSaveState();};
   if(s("airConfirmParams")) s("airConfirmParams").onclick = aiReportConfirmParams;
   document.querySelectorAll(".air-kf-confirm").forEach(box=>box.addEventListener("change",airSyncConfirmButtonState));
   if(s("airConfirmAll")) s("airConfirmAll").onclick = ()=>{
@@ -1519,12 +1843,13 @@ function airSerializableState(){
     if(m.kind==="genProgress"){ chat.push({role:"assistant",kind:"genProgress",total:m.total,done:m.done,failed:m.failed,active:false,stopped:true}); return; }
     if(m.kind==="calcPreview")return;
     if(m.kind==="typeTag"){ chat.push({role:m.role, kind:"typeTag", content:m.content||"", calcType:m.calcType}); return; }
-    if(m.kind==="locationCard"){chat.push({role:m.role,kind:m.kind,content:"",query:m.query||"",candidates:m.candidates||[]});return;}
+    if(m.kind==="materialResult"){chat.push({role:m.role,kind:"materialResult",content:"",files:airInitialMaterialRows(m),extractionStatus:m.extractionStatus||"extracted"});return;}
+    if(m.kind==="locationCard"||m.kind==="locationResult"){chat.push({role:m.role,kind:m.kind,content:"",sites:m.sites||(m.kind==="locationResult"?aiReportSiteLocations:aiReportSiteSearches)||[]});return;}
     chat.push({role:m.role, kind:m.kind, content:m.content||""});
   });
   return { savedAt:Date.now(),stage:airCurrentStage(),chat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,paramsConfirmed:aiReportParamsConfirmed,
     materialCheckOpen:aiReportChat.some(m=>m.kind==="materialCheck"),
-    locationCandidates:aiReportLocationCandidates,locationConfirmed:aiReportLocationConfirmed,
+    locationCandidates:aiReportLocationCandidates,locationConfirmed:aiReportLocationConfirmed,siteSearches:aiReportSiteSearches,siteLocations:aiReportSiteLocations,
     calcType:calcType||(calcResult&&calcResult.__ctype)||null,calcParams:calcParams||null,calcSummary:calcResult&&calcResult.summary||null,
     currentCalcSnapshotId:projectWorkflow&&projectWorkflow.currentCalcSnapshotId||null,currentReportVersionId:projectWorkflow&&projectWorkflow.currentReportVersionId||null,
     pendingTaskKeys:(aiReportPendingTasks||[]).map(t=>({cn:t.c.cn,si:t.si})) };
@@ -1544,6 +1869,25 @@ function airRestoredConfirmation(state){
   if(state.paramsConfirmed===false)return false;
   const chat=Array.isArray(state.chat)?state.chat:[];
   return !!(state.calcParams&&chat.some(m=>m&&["genProgress","deliver"].includes(m.kind)));
+}
+function airSeedCurrentProject(){
+  const seed=window.ProjectWorkflow&&ProjectWorkflow.aiReportProjectSeed(Object.assign({},project,aiReportEntryContext||{}),projectWorkflow,domainKey);
+  if(!seed||aiReportExtracted)return false;
+  aiReportExtracted=seed;aiReportHasDoc=chapters.some(c=>c.sections.some(s=>String(s.editedHtml||s.content||"").trim()));
+  const option=AI_CATEGORY_OPTIONS.find(x=>x.key===seed.calcType);
+  if(option)aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"typeTag",content:option.label,calcType:seed.calcType});
+  aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"infoCard",content:""});
+  renderAiReportMsgs();
+  if(aiReportHasDoc)airRestoreDocPaneIfNeeded();
+  return true;
+}
+function airFillCurrentProjectGaps(){
+  const seed=window.ProjectWorkflow&&ProjectWorkflow.aiReportProjectSeed(Object.assign({},project,aiReportEntryContext||{}),projectWorkflow,domainKey);
+  if(!seed||!aiReportExtracted)return false;
+  ["projectName","location","owner","businessScenario","landArea","landPrice","startYear","landNature","desc"].forEach(key=>{if(aiReportExtracted[key]==null||aiReportExtracted[key]==="")aiReportExtracted[key]=seed[key];});
+  if(!Array.isArray(aiReportExtracted.analysisSites)||!aiReportExtracted.analysisSites.length)aiReportExtracted.analysisSites=seed.analysisSites;
+  if(!aiReportExtracted.calcType)aiReportExtracted.calcType=seed.calcType;
+  return true;
 }
 async function airRestoreMaterialCheck(state){
   if(!state?.materialCheckOpen||!window.ReportLogicCore||aiReportChat.some(m=>m.kind==="materialCheck"))return;
@@ -1569,14 +1913,17 @@ async function airLoadState(){
     if(state && (state.extracted||state.suggested||state.calcParams||state.hasDoc||(Array.isArray(state.chat)&&state.chat.length))){
       aiReportChat = (Array.isArray(state.chat)?state.chat:[]).map(m=>Object.assign({id: ++aiReportMsgSeq}, m));
       aiReportExtracted = state.extracted || null;
+      airFillCurrentProjectGaps();
       aiReportSuggested = state.suggested || null;
       aiReportLocationCandidates=Array.isArray(state.locationCandidates)?state.locationCandidates:[];
       aiReportLocationConfirmed=state.locationConfirmed||null;
+      aiReportSiteSearches=Array.isArray(state.siteSearches)?state.siteSearches:[];
+      aiReportSiteLocations=Array.isArray(state.siteLocations)?state.siteLocations:[];
       aiReportHasDoc=!!state.hasDoc;
       aiReportParamsConfirmed=airRestoredConfirmation(state);
       if(state.calcType)calcType=state.calcType;
       if(aiReportParamsConfirmed&&state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;}catch(e){aiReportParamsConfirmed=false;}}
-      airRepairFlowCards();
+      const repairedState=airRepairFlowCards();
       await airRestoreMaterialCheck(state);
       aiReportProgressMsg=aiReportChat.find(m=>m.kind==="genProgress")||null;
       if(Array.isArray(state.pendingTaskKeys)&&state.pendingTaskKeys.length&&chapters.length){
@@ -1585,24 +1932,50 @@ async function airLoadState(){
       }
       if(aiReportHasDoc&&chapters.length)airRestoreDocPaneIfNeeded();
       renderAiReportMsgs();
-    }
+      if(repairedState)airSaveState();
+      airMaybeAutoRetryMaterialExtraction();
+    }else if(window.ProjectWorkflow?.aiReportShouldSeedProject(aiReportEntryContext))airSeedCurrentProject();
   }catch(e){
     const state=airLoadLocalState();
     if(state){
-      aiReportChat=(state.chat||[]).map(m=>Object.assign({id:++aiReportMsgSeq},m));aiReportExtracted=state.extracted||null;aiReportSuggested=state.suggested||null;aiReportLocationCandidates=Array.isArray(state.locationCandidates)?state.locationCandidates:[];aiReportLocationConfirmed=state.locationConfirmed||null;aiReportHasDoc=!!state.hasDoc;aiReportParamsConfirmed=airRestoredConfirmation(state);
+      aiReportChat=(state.chat||[]).map(m=>Object.assign({id:++aiReportMsgSeq},m));aiReportExtracted=state.extracted||null;airFillCurrentProjectGaps();aiReportSuggested=state.suggested||null;aiReportLocationCandidates=Array.isArray(state.locationCandidates)?state.locationCandidates:[];aiReportLocationConfirmed=state.locationConfirmed||null;aiReportHasDoc=!!state.hasDoc;aiReportParamsConfirmed=airRestoredConfirmation(state);
       if(state.calcType)calcType=state.calcType;if(aiReportParamsConfirmed&&state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;}catch(_){aiReportParamsConfirmed=false;} }
-      airRepairFlowCards();await airRestoreMaterialCheck(state);renderAiReportMsgs();
-    }
+      const repairedState=airRepairFlowCards();await airRestoreMaterialCheck(state);renderAiReportMsgs();if(repairedState)airSaveState();airMaybeAutoRetryMaterialExtraction();
+    }else if(window.ProjectWorkflow?.aiReportShouldSeedProject(aiReportEntryContext))airSeedCurrentProject();
   }
 }
 
 /* 兼容历史存档：旧版本可能只存了参数/测算结果，没有存对应的“下一步”卡片。
    恢复时补齐唯一必要的动作卡，同时删除同类重复卡，避免刷新后倒退或重复执行。 */
 function airRepairFlowCards(){
+  let repaired=false;
+  if(aiReportExtracted){
+    ["projectName","location","owner","landNature","desc"].forEach(key=>{
+      const normalized=airNullableExtractedText(aiReportExtracted[key]);
+      if(normalized!==aiReportExtracted[key]){aiReportExtracted[key]=normalized||"";repaired=true;}
+    });
+    if(!airMaterialExtractionNeedsRetry(aiReportExtracted)){
+      const before=aiReportChat.length;
+      aiReportChat=aiReportChat.filter(message=>!/^重新AI提取暂未完成：/.test(String(message&&message.content||"")));
+      if(aiReportChat.length!==before)repaired=true;
+    }
+  }
+  if(aiReportExtracted&&airInitialMaterialRows().length&&!aiReportChat.some(message=>message.kind==="materialResult")){
+    const oldIndex=aiReportChat.findIndex(message=>message.kind==="text"&&/(?:公网DeepSeek已恢复.*保存的\s*\d+\s*份材料|已保存并解析\s*\d+\s*份材料|已解析\s*\d+\s*份材料并形成)/.test(String(message.content||"")));
+    if(oldIndex>=0){aiReportChat.splice(oldIndex,1,{id:aiReportChat[oldIndex].id,role:"assistant",kind:"materialResult",content:"",files:airInitialMaterialRows(),extractionStatus:aiReportExtracted.__materialExtractionDegraded?"degraded":"extracted"});repaired=true;}
+  }
   // 兼容旧存档：历史财务结果是普通文本，恢复后升级为带“进入详情”操作的结果卡。
   aiReportChat.forEach(m=>{if(m.kind==="text"&&/^✅ 财务测算完成：/.test(m.content||""))m.kind="calcResult";});
+  if(aiReportSiteLocations.length&&!aiReportChat.some(m=>m.kind==="locationResult")){
+    const originals=airAnalysisSites(),restored=aiReportSiteLocations.map((site,index)=>Object.assign({},site,{candidateName:site.candidateName||site.name,projectName:site.projectName||originals[index]?.name||site.name,name:originals[index]?.name||site.name}));
+    aiReportSiteLocations=restored;project.analysisSites=restored;
+    const oldIndex=aiReportChat.findIndex(m=>m.kind==="text"&&/^📍 已完成 \d+ 个点位的位置确认/.test(String(m.content||"")));
+    const result={id:oldIndex>=0?aiReportChat[oldIndex].id:++aiReportMsgSeq,role:"assistant",kind:"locationResult",content:"",sites:restored};
+    if(oldIndex>=0)aiReportChat.splice(oldIndex,1,result);else{const infoIndex=aiReportChat.findIndex(m=>m.kind==="infoCard");aiReportChat.splice(infoIndex>=0?infoIndex+1:0,0,result);}
+    repaired=true;
+  }
   const dedupe=kind=>{let seen=false;aiReportChat=aiReportChat.filter(m=>m.kind!==kind||(!seen&&(seen=true)));};
-  ["infoCard","locationCard","confirmCard","genConfirm","deliver"].forEach(dedupe);
+  ["infoCard","locationCard","locationResult","confirmCard","genConfirm","deliver"].forEach(dedupe);
   const has=kind=>aiReportChat.some(m=>m.kind===kind);
   if(aiReportExtracted&&!has("infoCard"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"infoCard"});
   if(aiReportExtracted&&!aiReportSuggested&&!aiReportLocationConfirmed&&aiReportLocationCandidates.length&&!has("locationCard"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"locationCard",query:aiReportExtracted.location||"",candidates:aiReportLocationCandidates});
@@ -1610,4 +1983,5 @@ function airRepairFlowCards(){
   const stage=airCurrentStage();
   if(stage==="calculated"&&!has("genConfirm"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"genConfirm"});
   if(stage==="delivered"&&!has("deliver"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"deliver"});
+  return repaired;
 }

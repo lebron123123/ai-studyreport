@@ -7,15 +7,33 @@
    |-----------|-------------------------|--------------------|------|
    | 向量化     | @cf/baai/bge-m3         | ollama 的 bge-m3   | ✅ 同源同维(1024) |
    | 重排       | @cf/baai/bge-reranker   | Ollama 不支持重排器 | ⚠️ 优雅降级 |
-   | 文件转md   | toMarkdown              | 无对应              | ⚠️ 优雅降级 |
+   | 文件转md   | toMarkdown              | 旧版Word本地解析     | ⚠️ 部分支持 |
 
    两处降级都是"如实降级"，不伪造结果：
    · 重排：返回空列表。业务代码 (rag.js) 判断 ranked.length 为空就跳过重排，
      保留纯向量排序。检索仍然可用，只是精排少了一层。这比返回假分数好得多——
      假分数会让排序看起来正常，实际是错的，属于静默失效。
-   · 文件转md：抛出清晰错误。前端本来就能解析 docx/pdf/txt，
-     只有复杂格式才会走到这里，届时提示用户换格式即可。
+   · 文件转md：旧版二进制 .doc 用纯 Node 解析；docx/pdf/txt 仍由浏览器端解析。
+     其他复杂格式继续抛出清晰错误，不伪造解析结果。
    ============================================================ */
+
+import WordExtractor from "word-extractor";
+
+const localWordExtractor = new WordExtractor();
+
+function decodeLegacyHtml(buffer) {
+  const source = buffer.toString("utf8").replace(/^\uFEFF/, "");
+  if (!/^\s*(?:<!doctype\s+html|<html\b)/i.test(source)) return "";
+  const entities = { amp:"&", lt:"<", gt:">", quot:'"', apos:"'", nbsp:" " };
+  return source
+    .replace(/<!--[\s\S]*?-->/g, " ").replace(/<(?:style|script|head)\b[^>]*>[\s\S]*?<\/(?:style|script|head)>/gi, " ")
+    .replace(/<\s*br\s*\/?>/gi, "\n").replace(/<\/(?:p|div|h[1-6]|tr|li|table)>/gi, "\n").replace(/<\/?(?:td|th)\b[^>]*>/gi, "\t")
+    .replace(/<[^>]+>/g, " ").replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, key) => {
+      if (key[0] === "#") { const code = key[1].toLowerCase() === "x" ? parseInt(key.slice(2),16) : parseInt(key.slice(1),10); return Number.isFinite(code) ? String.fromCodePoint(code) : match; }
+      return entities[key.toLowerCase()] ?? match;
+    })
+    .replace(/[ \t]+\n/g, "\n").replace(/\n[ \t]+/g, "\n").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
 
 export function createAIAdapter(opts = {}) {
   const base = (opts.ollamaUrl || "http://127.0.0.1:11434").replace(/\/+$/, "");
@@ -96,11 +114,24 @@ export function createAIAdapter(opts = {}) {
       throw new Error("[本地部署] 暂不支持的模型：" + model);
     },
 
-    async toMarkdown() {
-      throw new Error(
-        "[本地部署] 服务端文件解析(toMarkdown)在本地环境不可用。" +
-        "请在网页上传时使用 docx / pdf / txt 格式——这几种由浏览器端解析，不受影响。"
-      );
+    async toMarkdown(files) {
+      const list = Array.isArray(files) ? files : [];
+      return Promise.all(list.map(async (file) => {
+        const name = String(file && file.name || "file");
+        if (!/\.doc$/i.test(name)) {
+          throw new Error("[本地部署] 服务端目前只补充解析旧版 .doc；docx / pdf / txt 请继续使用浏览器端解析");
+        }
+        const blob = file && file.blob;
+        if (!blob || typeof blob.arrayBuffer !== "function") throw new Error("旧版 Word 文件内容为空");
+        const buffer = Buffer.from(await blob.arrayBuffer());
+        let data = decodeLegacyHtml(buffer);
+        if (!data) {
+          const document = await localWordExtractor.extract(buffer);
+          data = [document.getBody(), document.getFootnotes(), document.getEndnotes()]
+            .map(value => String(value || "").trim()).filter(Boolean).join("\n\n");
+        }
+        return { name, data, mimeType:"application/msword" };
+      }));
     },
 
     /** 供启动自检用 */

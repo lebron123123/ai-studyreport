@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { callConfiguredLlm, normalizeChatUrl, providerOrder, providerStatus } from "../functions/api/_llm-providers.js";
+import { callConfiguredLlm, normalizeChatUrl, probeProviderNetwork, providerOrder, providerStatus } from "../functions/api/_llm-providers.js";
 
 test("公司完整推理URL原样使用，OpenAI v1自动补全", () => {
   assert.equal(normalizeChatUrl("http://intranet/inference/deepseek"), "http://intranet/inference/deepseek");
@@ -37,6 +37,7 @@ test("默认模型失败后自动回退GLM，并使用各自模型名", async ()
   const result = await callConfiguredLlm(env, "", { messages: [] }, fetchImpl);
   assert.equal(result.provider, "glm");
   assert.equal(calls[0].body.model, "ds-model");
+  assert.deepEqual(calls[0].body.thinking,{type:"disabled"});
   assert.equal(calls[1].body.model, "glm-model");
   assert.equal(calls[1].options.headers.Authorization, "Bearer glm-key");
 });
@@ -66,4 +67,17 @@ test("交互模式不会串行等待不可达内网模型，会延迟竞速云�
   assert.ok(Date.now() - started < 1000);
   assert.equal(calls.includes("https://cloud-ds"), true);
   assert.ok(calls.length <= 2, "熔断后可直接跳过已知故障Provider；首次调用最多主备两路");
+});
+
+test("启动连通性探针只检查网络，不发送密钥或生成请求",async()=>{
+  let received;
+  const env={DEEPSEEK_API_URL:"https://cloud-ds",DEEPSEEK_API_KEY:"secret"};
+  const result=await probeProviderNetwork(env,"deepseek-cloud",async(url,options)=>{received={url,options};return new Response(null,{status:401});},1000);
+  assert.equal(result.reachable,true);assert.equal(result.status,401);assert.equal(received.options.method,"HEAD");
+  assert.equal(received.options.headers,undefined);assert.equal(received.options.body,undefined);
+});
+
+test("网络权限故障返回可操作提示而不是裸fetch failed",async()=>{
+  const env={DEEPSEEK_API_URL:"https://cloud-ds",DEEPSEEK_API_KEY:"secret"};
+  await assert.rejects(()=>callConfiguredLlm(env,"",{messages:[]},async()=>{throw new TypeError("fetch failed");}),/正常网络权限.*代理、VPN、防火墙/);
 });

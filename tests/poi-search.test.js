@@ -13,6 +13,15 @@ test("地点检索同时使用完整地址、短地址和项目名称",()=>{
   assert.ok(queries.some(x=>x.includes("光谷苑保障房")));
 });
 
+test("省略深圳市时按深圳行政区补全城市并组合项目名检索",()=>{
+  const ctx=poiSearchContext("福田区上梅林");
+  assert.equal(ctx.city,"深圳市");
+  assert.equal(ctx.fullAddress,"深圳市福田区上梅林");
+  const queries=poiSearchQueries("福田区上梅林","梅兴苑");
+  assert.ok(queries.includes("梅兴苑"));
+  assert.ok(queries.some(query=>query.includes("上梅林")&&query.includes("梅兴苑")));
+});
+
 test("多路地点结果按坐标去重并最多保留15个真实候选",()=>{
   const a=Array.from({length:12},(_,i)=>({name:"候选"+i,location:i+","+i}));
   const b=[{name:"重复坐标",location:"1,1"},...Array.from({length:8},(_,i)=>({name:"补充"+i,location:(i+20)+","+(i+20)}))];

@@ -110,6 +110,17 @@ async function aiPositionSuggest(){
 // 周边调研与定位摘要(注入生成prompt;有真实数据才输出)
 function surveyBrief(){
   let out = "";
+  const sitePlan=window.ProjectWorkflow?.siteWritingPlan?ProjectWorkflow.siteWritingPlan(project.analysisSites||[]):null;
+  if(sitePlan?.isBatch){
+    out += "\n【批量点位分析（已人工指定主次）】\n写作策略："+sitePlan.strategy+"\n";
+    sitePlan.sites.forEach(site=>{
+      out += (site.role==="primary"?"主项目":"次项目")+"｜"+(site.name||"未命名")+"｜"+(site.query||site.address||"地点待补")+(site.district?"｜"+site.district:"")+"\n";
+      if(site.poiDesc)out += "周边："+String(site.poiDesc).replace(/\n/g,"；")+"\n";
+      if(Array.isArray(site.competitors)&&site.competitors.length)out += "竞品候选："+site.competitors.map(x=>x.name).filter(Boolean).join("、")+"\n";
+      if(site.populationText)out += "人口："+site.populationText+"\n";
+      if(site.balanceText)out += "职住代理："+site.balanceText+"（非官方职住比）\n";
+    });
+  }
   const cps = (project.competitors||[]).filter(c=>c.name);
   if(cps.length){
     out += "\n【周边竞品调研（真实数据，市场分析必须引用，不得另行编造其他竞品）】\n竞品|距离km|租金(元/㎡/月)|出租率|备注\n";
@@ -132,4 +143,3 @@ function surveyBrief(){
   }
   return out;
 }
-

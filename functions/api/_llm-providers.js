@@ -71,13 +71,17 @@ async function callOne(cfg, payload, fetchImpl, timeoutMs, externalSignal) {
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
   const startedAt = Date.now();
   try {
+    const providerPayload={...payload,model:cfg.model};
+    // DeepSeek V4默认开启思考模式；强制工具选择、结构化抽取和既有Agent循环均按非思考模式设计。
+    // 只对DeepSeek注入该参数，避免GLM/Qwen等OpenAI兼容网关因未知字段拒绝请求。
+    if(/deepseek/i.test(cfg.id+" "+cfg.model)&&!providerPayload.thinking)providerPayload.thinking={type:"disabled"};
     const response = await fetchImpl(cfg.url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer " + cfg.apiKey,
       },
-      body: JSON.stringify({ ...payload, model: cfg.model }),
+      body: JSON.stringify(providerPayload),
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -93,11 +97,28 @@ async function callOne(cfg, payload, fetchImpl, timeoutMs, externalSignal) {
     return { response, provider: cfg.id, model: cfg.model, latencyMs: Date.now() - startedAt };
   } catch (error) {
     if (timedOut) throw timeoutError(cfg.id, timeoutMs);
+    if (/fetch failed|network|econn|eacces|enetunreach|etimedout/i.test(String(error && error.message || error))) {
+      const causeCode=String(error && error.cause && error.cause.code || "").trim();
+      const wrapped=new Error(cfg.id+"网络连接失败"+(causeCode?"（"+causeCode+"）":"")+"；请确认本地服务在正常网络权限下启动，并检查代理、VPN、防火墙和Provider地址");
+      wrapped.code=causeCode||"LLM_NETWORK_ERROR";throw wrapped;
+    }
     throw error;
   } finally {
     clearTimeout(timer);
     if (externalSignal) externalSignal.removeEventListener("abort", abortFromParent);
   }
+}
+
+export async function probeProviderNetwork(env, name, fetchImpl=fetch, timeoutMs=5000){
+  const cfg=getProviderConfig(env,name);
+  if(!cfg||!cfg.available)return {reachable:false,provider:String(name||""),error:"Provider配置不完整"};
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),Math.max(500,timeoutMs));
+  try{
+    const response=await fetchImpl(cfg.url,{method:"HEAD",signal:controller.signal});
+    return {reachable:true,provider:cfg.id,status:response.status};
+  }catch(error){
+    return {reachable:false,provider:cfg.id,error:String(error&&error.message||error||"网络连接失败"),code:String(error&&error.cause&&error.cause.code||"")};
+  }finally{clearTimeout(timer);}
 }
 
 function first(env, keys) {

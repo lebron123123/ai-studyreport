@@ -406,24 +406,40 @@ function renderSectionContent(c,s,useEdited){
   const tables=type&&window.ReportTableTemplates?window.ReportTableTemplates.renderSection(type,c.name,s.t):"";
   return base+tables;
 }
+function reportSiteWritingPlan(){
+  if(!window.ProjectWorkflow?.siteWritingPlan)return null;
+  const plan=ProjectWorkflow.siteWritingPlan(project.analysisSites||[]);
+  return plan.isBatch?plan:null;
+}
 function reportSectionLogicSnapshot(c,s,rules){
   if(s?.pendingRevision?.logicRevision)return s.pendingRevision.logicRevision;
-  if(!Array.isArray(rules)&&s?.logicSnapshot)return s.logicSnapshot;
+  if(!Array.isArray(rules)&&s?.logicSnapshot)return Object.assign({},s.logicSnapshot,{siteStrategy:s.logicSnapshot.siteStrategy||reportSiteWritingPlan()?.strategy||""});
   const matched=Array.isArray(rules)?rules:(window.ReportLogicCore?ReportLogicCore.match(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),businessScenario:rlBusinessScenario()}):[]),set=window.ReportLogicCore&&ReportLogicCore.current(rlProjectType());
-  return {version:set?.version||0,updatedAt:new Date().toISOString(),rules:matched.map(r=>({id:r.id,sourceNo:r.sourceNo,title:r.displayTitle||r.pointTitle||r.section,writingLogic:r.writingLogic||"按本节标题和已核实资料完成论证",outputForm:r.outputForm||"文字",changeReason:""}))};
+  return {version:set?.version||0,updatedAt:new Date().toISOString(),siteStrategy:reportSiteWritingPlan()?.strategy||"",rules:matched.map(r=>({id:r.id,sourceNo:r.sourceNo,title:r.displayTitle||r.pointTitle||r.section,writingLogic:r.writingLogic||"按本节标题和已核实资料完成论证",outputForm:r.outputForm||"文字",changeReason:""}))};
 }
 function reportLogicRevision(c,s,instruction){
   const base=reportSectionLogicSnapshot(c,s),reason=String(instruction||"按本次意见调整").replace(/\s+/g," ").trim().slice(0,500);
-  return {version:base.version||0,updatedAt:new Date().toISOString(),changeReason:reason,rules:(base.rules||[]).map(r=>Object.assign({},r,{writingLogic:String(r.writingLogic||"").replace(/\n?本次定稿调整：[\s\S]*$/,"")+(reason?"\n本次定稿调整："+reason:""),changeReason:reason}))};
+  return {version:base.version||0,updatedAt:new Date().toISOString(),changeReason:reason,siteStrategy:base.siteStrategy||reportSiteWritingPlan()?.strategy||"",rules:(base.rules||[]).map(r=>Object.assign({},r,{writingLogic:String(r.writingLogic||"").replace(/\n?本次定稿调整：[\s\S]*$/,"")+(reason?"\n本次定稿调整："+reason:""),changeReason:reason}))};
 }
 function reportLogicText(c,s,pending){
   const snap=pending&&s?.pendingRevision?.logicRevision?s.pendingRevision.logicRevision:reportSectionLogicSnapshot(c,s);
-  return (snap?.rules||[]).map((r,i)=>((r.sourceNo?"第"+r.sourceNo+"项：":"逻辑"+(i+1)+"：")+(r.writingLogic||"")+(r.outputForm?"；输出："+r.outputForm:""))).filter(Boolean).join("\n");
+  const lines=(snap?.rules||[]).map((r,i)=>((r.sourceNo?"第"+r.sourceNo+"项：":"逻辑"+(i+1)+"：")+(r.writingLogic||"")+(r.outputForm?"；输出："+r.outputForm:""))).filter(Boolean);
+  if(snap?.siteStrategy)lines.unshift("批量点位主次策略："+snap.siteStrategy);
+  return lines.join("\n");
 }
-function renderSectionLogicHtml(c,s){
+function renderSectionLogicHtml(c,s,interactive){
   const pending=!!s?.pendingRevision?.logicRevision,text=reportLogicText(c,s,pending);
   if(!text)return "";
-  return '<div class="rpt-logic-note '+(pending?'pending':'')+'"><b>'+(pending?'本次候选稿对应生成逻辑（接受后生效）':'本节生成逻辑')+'</b><div>'+escapeHtml(text).replace(/\n/g,"<br>")+'</div></div>';
+  const si=Array.isArray(c?.sections)?c.sections.indexOf(s):-1,edit=interactive&&!pending&&si>=0?'<button type="button" class="rpt-logic-edit air-section-logic-edit" data-cn="'+c.cn+'" data-si="'+si+'">调整本节生成逻辑</button>':'';
+  return '<div class="rpt-logic-note '+(pending?'pending':'')+'"><div class="rpt-logic-head"><b>'+(pending?'本次候选稿对应生成逻辑（接受后生效）':'本节生成逻辑')+'</b>'+edit+'</div><div>'+escapeHtml(text).replace(/\n/g,"<br>")+'</div></div>';
+}
+
+// 项目级临时逻辑只约束当前项目的当前小节，不直接改写后台规则。
+// 只有候选正文被接受并通过既有自动评测/管理员流程后，才允许沉淀到正式规则库。
+function reportLocalLogicPrompt(s){
+  const snap=s?.logicSnapshot;
+  if(!snap?.localOverride||!Array.isArray(snap.rules)||!snap.rules.length)return "";
+  return '\n\n【本项目本节临时生成逻辑｜仅作为内部约束，严禁写入报告正文】\n'+snap.rules.map((r,i)=>(r.sourceNo?'第'+r.sourceNo+'项':'逻辑'+(i+1))+'：'+(r.writingLogic||'按本节标题和已核实资料完成论证')+(r.outputForm?'；输出形式：'+r.outputForm:'')).join('\n');
 }
 async function adoptReportLogicRevision(c,s,revision){
   const snap=revision||s?.pendingRevision?.logicRevision,rule=snap?.rules?.[0];
@@ -825,6 +841,7 @@ async function reviseSection(c, s, instruction, onChunk){
     +'\n\n【修改意见】\n'+instruction
     +'\n\n请输出按意见修改后的完整小节正文。'
     + rlRetrieve(c.name,s.t)
+    + reportLocalLogicPrompt(s)
     + kbRetrieve(c.name, s.t);
   return callGen(sys, user, onChunk);
 }
@@ -842,7 +859,7 @@ async function reviseSectionExcerpt(c,s,selected,instruction,onChunk){
     +'\n\n【完整小节（仅供理解上下文）】\n'+current
     +'\n\n【需要替换的原片段】\n'+String(selected||'')
     +'\n\n【修改意见】\n'+String(instruction||'请使表述更准确、正式、简洁')
-    +'\n\n请只输出替换片段。'+rlRetrieve(c.name,s.t)+kbRetrieve(c.name,s.t);
+    +'\n\n请只输出替换片段。'+rlRetrieve(c.name,s.t)+reportLocalLogicPrompt(s)+kbRetrieve(c.name,s.t);
   return callGen(sys,user,onChunk);
 }
 
@@ -851,6 +868,7 @@ async function generateSection(c, s, onChunk){
   if(window.ReportLogicCore){try{await ReportLogicCore.load(rlProjectType());}catch(e){}}
   await ensureReportTableTemplates();
   const formalTemplates=sectionFormalTemplates(c,s);
+  const sitePlan=reportSiteWritingPlan(),siteInstruction=sitePlan?'\n6. 本报告含多个分析点位。'+sitePlan.strategy+'凡本节涉及区位、市场、建设条件、实施影响或风险时，先围绕主项目形成完整判断，再用一个压缩段落概括次项目差异；与本节无关时不要机械罗列点位。不得给每个次项目复制一套完整模板。':'';
   const digest = s.numeric ? buildCalcDigest() : null;
   if(digest) collector.hasCalcData = true;
   let tableHint = "";
@@ -861,7 +879,7 @@ async function generateSection(c, s, onChunk){
   } else if(s.numeric){
     tableHint = '\n本子标题涉及具体数字或测算，请：①用文字说明测算口径、方法与逻辑；②生成一个结构完整的数据表格，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔，每行一个换行）：\n[[TABLE]]\n列1|列2|列3\n项目A|待填|待填\n[[/TABLE]]\n表格中的具体数值一律填"待填"，绝不编造精确数字；但表格的行项目、列结构要专业完整、贴合真实可研报告。';
   }
-  const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 材料不足时仍须先完成专业的分析框架、论证方法、逻辑链和表格结构，禁止整节只返回待补提示或空内容；只有项目专属事实、关键数字、批复、证照、合同等依据在对应位置简短标注“【待补：具体依据】”。\n3. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n4. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n5. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+tableHint;
+  const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 材料不足时仍须先完成专业的分析框架、论证方法、逻辑链和表格结构，禁止整节只返回待补提示或空内容；只有项目专属事实、关键数字、批复、证照、合同等依据在对应位置简短标注“【待补：具体依据】”。\n3. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n4. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n5. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+siteInstruction+tableHint;
   // 记录本节用到了哪些项目信息字段（L2溯源的一部分）
   [["项目名称",project.name],["建设/委托单位",project.owner],["建设地点",project.location],
    ["投资规模",project.scale],["项目概况",project.desc]].forEach(([k,v])=>{
@@ -869,8 +887,8 @@ async function generateSection(c, s, onChunk){
   });
   const excelContext=s.numeric?(excelSourceRetrieve(collector)+await mappedExcelSourceRetrieve(collector)):"";
   const logicRules=window.ReportLogicCore?ReportLogicCore.match(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),businessScenario:rlBusinessScenario()}):[];
-  s.logicSnapshot=reportSectionLogicSnapshot(c,s,logicRules);
-  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t, collector) + kbRetrieve(c.name, s.t, collector) + webEvidenceRetrieve(c.name,s.t,collector) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t, collector);
+  if(!s.logicSnapshot?.localOverride)s.logicSnapshot=reportSectionLogicSnapshot(c,s,logicRules);
+  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +(sitePlan?'\n【本节必须执行的主次写作逻辑】\n'+sitePlan.strategy+'\n':'')+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + reportLocalLogicPrompt(s) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t, collector) + kbRetrieve(c.name, s.t, collector) + webEvidenceRetrieve(c.name,s.t,collector) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t, collector);
 
   let text = await callGen(sys, user, onChunk);
   if(!text || text === "（未返回内容）" || reportBodyContainsInternalLogic(text)){

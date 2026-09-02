@@ -8,7 +8,7 @@ import { verifyAuth, json } from "./_auth.js";
 import { adaptEnv } from "./_adapters.js";
 import { catalogFor, ROLE_OPTIONS, VOLATILITY_OPTIONS, CONFIRM_OPTIONS, SOURCE_POLICY_OPTIONS } from "./_paramcatalog.js";
 
-const TYPE_CN = { rent:"出租类", sale:"出售类", gaibao:"非居改保" };
+const TYPE_CN = { rent:"出租类", sale:"出售类", gaibao:"中资产（非居改保/商业改造等）" };
 
 /* ===== 阶段②：参数推荐 —— 行业默认值（字段与 calc.js 的 readRentForm/readSaleForm/readCalcForm 完全对齐，
    数值取自各表单里"照Excel对数过"的默认值，保证没有历史案例时也能算出一套自洽的结果） ===== */
@@ -189,9 +189,32 @@ export async function onRequestPost(context){
   try{ body = await request.json(); }catch(e){ return json({ok:false, error:"请求格式有误"}, 400); }
 
   if(body.action === "extract") return doExtract(context, body);
+  if(body.action === "parseLegacyDoc") return doParseLegacyDoc(context, body);
   if(body.action === "suggest") return doSuggest(context, body);
   if(body.action === "saveState") return doSaveState(context, body, user);
   return json({ok:false, error:"未知操作"}, 400);
+}
+
+/* 旧版二进制 Word（.doc）无法由浏览器端 mammoth 读取，因此只把这一种格式交给服务端。
+   云端使用 Workers AI toMarkdown；本地适配器使用纯 Node 的 word-extractor，不依赖 Office。 */
+async function doParseLegacyDoc(context, body){
+  const env = adaptEnv(context.env);
+  const name = String(body.name||"").trim().slice(0,120);
+  const b64 = String(body.dataBase64||"");
+  if(!/\.doc$/i.test(name)) return json({ok:false,error:"该接口只接收旧版 .doc 文件"},400);
+  if(!b64) return json({ok:false,error:"旧版 Word 文件内容为空"},400);
+  if(b64.length>18*1024*1024) return json({ok:false,error:"旧版 .doc 单文件不能超过约12MB"},413);
+  if(!env.AI || typeof env.AI.toMarkdown!=="function") return json({ok:false,error:"当前部署未启用旧版 .doc 解析；请用 Word 另存为 .docx 后重试"},501);
+  try{
+    const bin=atob(b64),bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+    const results=await env.AI.toMarkdown([{name,blob:new Blob([bytes],{type:"application/msword"})}]);
+    const first=Array.isArray(results)?results[0]:results,text=String(first&&first.data||"").trim();
+    if(!text)return json({ok:false,error:"未从该 .doc 提取到文字；文件可能已损坏、加密或只有图片"},422);
+    const clipped=text.slice(0,80000);
+    return json({ok:true,text:clipped+(text.length>80000?"\n…（超长材料已保留前8万字）":""),truncated:text.length>80000});
+  }catch(error){
+    return json({ok:false,error:"旧版 .doc 解析失败："+String(error&&error.message||error||"未知错误")+"。可尝试用 Word 另存为 .docx 后重试"},422);
+  }
 }
 
 /* ===== 会话存档：整段对话状态覆盖式保存，每人一份（同 office_chats 的做法） ===== */
@@ -225,6 +248,28 @@ async function doSaveState(context, body, user){
   return json({ok:true});
 }
 
+function materialFallbackExtraction(text, reason){
+  const source=String(text||"").replace(/\r/g,"");
+  const exactValue=labels=>{
+    const escaped=labels.map(label=>label.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|");
+    const match=source.match(new RegExp("(?:^|\\n)\\s*(?:"+escaped+")\\s*[：:]\\s*([^\\n]{2,180})","i"));
+    return match?String(match[1]).replace(/[；;。].*$/,"").trim():null;
+  };
+  const projectName=exactValue(["项目名称","工程名称","项目名"]),location=exactValue(["建设地点","项目地址","建设地址","项目位置","坐落位置"]);
+  const owner=exactValue(["建设单位","委托单位","项目业主","业主单位"]),landNature=exactValue(["土地性质","用地性质"]);
+  const yearRaw=exactValue(["开工年份","建设年份","计划开工时间","开工时间"]),areaRaw=exactValue(["用地面积","土地面积"]);
+  const typeRaw=exactValue(["测算类型","项目类型","业务类型","改造类型"]),typeText=String(typeRaw||"");
+  let calcType=null,businessScenario=null;
+  if(/商业改造|自持改造/.test(typeText)){calcType="gaibao";businessScenario="commercial_renovation";}
+  else if(/非居改保|住房改造/.test(typeText)){calcType="gaibao";businessScenario="housing_conversion";}
+  else if(/出售|配售/.test(typeText))calcType="sale";else if(/出租|公租房|保租房/.test(typeText))calcType="rent";
+  const startYear=yearRaw&&String(yearRaw).match(/(?:19|20)\d{2}/),landArea=areaRaw&&String(areaRaw).replace(/,/g,"").match(/\d+(?:\.\d+)?/);
+  const analysisSites=projectName&&location?[{id:"site-1",name:projectName,address:location,role:"primary"}]:null;
+  const data={projectName,location,analysisSites,calcType,businessScenario,landArea:landArea?Number(landArea[0]):null,landPrice:null,startYear:startYear?Number(startYear[0]):null,owner,landNature,desc:null};
+  data.missing=Object.entries({projectName,location,calcType}).filter(([,value])=>!value).map(([key])=>key);
+  return {ok:true,degraded:true,degradedReason:String(reason||"AI信息抽取暂不可用").slice(0,300),data};
+}
+
 /* ===== 阶段①：信息抽取 —— 借道 /api/generate 完成AI调用，
    这样鉴权、限额、上游密钥都只有一处实现，不必在这里重复一份。
    带 previous 时是"追加修正"：用户已经确认过一版信息，又补了一句话（比如"不对，是2026年开工"），
@@ -240,6 +285,7 @@ async function doExtract(context, body){
     + "只输出一个JSON对象，不要任何解释文字，不要markdown代码块围栏。字段如下：\n"
     + "projectName：项目名称，没有明确名称时可用地点+类型自拟一个合理名称；\n"
     + "location：建设地点，尽量具体到区/街道；\n"
+    + "analysisSites：用户明确提到多个待分析项目/地块时，输出1至6项数组，每项含name、address、role；影响最大或用户指定重点的唯一一项role为primary，其余为secondary。只有一个项目或没有逐项信息时填null，绝不能把同一地址拆成多个点位；\n"
     + "calcType：仅能是以下三选一——\"rent\"（长期持有出租经营）、\"sale\"（以出售/配售为主）、\"gaibao\"（既有非居物业改造项目）；实在无法判断填null；\n"
     + "businessScenario：calcType为gaibao时必须在\"housing_conversion\"（非居改保，改为保障性住房）与\"commercial_renovation\"（商业改造、自持经营）中二选一；用户未明确时填null；其他calcType填null；\n"
     + "landArea：用地面积，单位平方米，数字，没提到填null；\n"
@@ -254,6 +300,15 @@ async function doExtract(context, body){
       + "已有信息（JSON）：" + JSON.stringify(previous)
       + "\n请只输出用户这句新话里明确提到、需要新增或修改的字段；没提到的字段一律填null（前端会保留原值，不会被你的null覆盖）。";
   }
+  if(body.materialMode===true){
+    sys += "\n\n本次输入来自批量上传的项目材料。只能抽取文件中明确出现的事实，不得根据文件名、常识或相似项目补全。"
+      + "项目名称不明确就填null；多个文件存在冲突就保留null交人工确认。analysisSites只能放实际待分析/待改造的项目点位，不得把联系地址、主管单位地址、政策适用地区、周边竞品或案例地址当成项目点位。最多6项且只能有一个primary。";
+  }
+
+  const extractionTool={type:"function",function:{name:"submit_project_info",description:"提交从用户描述或项目材料中明确抽取到的项目信息；不确定字段可以省略",parameters:{type:"object",properties:{
+    projectName:{type:"string"},location:{type:"string"},analysisSites:{type:"array",maxItems:6,items:{type:"object",properties:{name:{type:"string"},address:{type:"string"},role:{type:"string",enum:["primary","secondary"]}},required:["name","address","role"]}},
+    calcType:{type:"string",enum:["rent","sale","gaibao"]},businessScenario:{type:"string",enum:["housing_conversion","commercial_renovation"]},landArea:{type:"number"},landPrice:{type:"number"},startYear:{type:"number"},owner:{type:"string"},landNature:{type:"string"},desc:{type:"string"}
+  }}}};
 
   let upstream;
   try{
@@ -261,39 +316,56 @@ async function doExtract(context, body){
     upstream = await fetch(origin + "/api/generate", {
       method:"POST",
       headers: Object.assign({"Content-Type":"application/json"}, {"Authorization": request.headers.get("authorization")||""}),
-      body: JSON.stringify({ system: sys, messages:[{role:"user", content:text}], kind:"chat" }),
+      body: JSON.stringify({ system: sys, messages:[{role:"user", content:text}], kind:"chat", tools:[extractionTool], tool_choice:{type:"function",function:{name:"submit_project_info"}} }),
     });
   }catch(e){
+    if(body.materialMode===true)return json(materialFallbackExtraction(text,"AI服务连接失败："+String(e&&e.message||e||"未知错误")));
     return json({ok:false, error:"AI服务连接失败："+e.message}, 502);
   }
   const data = await upstream.json().catch(()=>({}));
   if(!upstream.ok || data.error){
+    if(body.materialMode===true)return json(materialFallbackExtraction(text,"AI抽取接口返回"+upstream.status+"："+String(data.error||"上游调用失败")));
     // 原样透传 /api/generate 的状态码（401未登录/429限额/502上游失败），不要把它们都压成200——
     // 前端目前只看 ok/error 字段，不受影响，但状态码留着方便以后按状态区分处理（比如限额单独提示）
     return json({ok:false, error: data.error || "AI抽取信息失败，请稍后重试"}, upstream.status || 500);
   }
+  const toolCall=(Array.isArray(data.tool_calls)?data.tool_calls:[]).find(call=>call&&call.function&&call.function.name==="submit_project_info");
+  const toolArgs=toolCall&&toolCall.function&&toolCall.function.arguments;
   const raw = ((data.content||[])[0]||{}).text || "";
   const cleaned = raw.replace(/```json/gi,"").replace(/```/g,"").trim();
   let parsed;
-  try{ parsed = JSON.parse(cleaned); }catch(e){
+  try{parsed=typeof toolArgs==="string"?JSON.parse(toolArgs):(toolArgs&&typeof toolArgs==="object"?toolArgs:JSON.parse(cleaned));}catch(e){
+    try{const start=cleaned.indexOf("{"),end=cleaned.lastIndexOf("}");if(start<0||end<=start)throw e;parsed=JSON.parse(cleaned.slice(start,end+1));}
+    catch(_){
+    if(body.materialMode===true)return json(materialFallbackExtraction(text,"AI已响应，但返回内容不是有效JSON；请点击重新提取"));
     return json({ok:false, error:"AI没能理解这段描述，请换个说法，或直接说明：地块所在区域/街道、做出租还是出售、大概哪年开工"});
+    }
   }
+  const nullableExtractedText=value=>{
+    const text=String(value==null?"":value).trim();
+    return !text||/^(?:null|undefined|none|未提及|不详)$/i.test(text)?null:text;
+  };
   const missing = [];
   if(!parsed.location) missing.push("location");
   if(!parsed.calcType || !TYPE_CN[parsed.calcType]) missing.push("calcType");
   const businessScenario=["housing_conversion","commercial_renovation"].includes(parsed.businessScenario)?parsed.businessScenario:null;
   if(parsed.calcType==="gaibao"&&!businessScenario)missing.push("businessScenario");
+  const rawSites=Array.isArray(parsed.analysisSites)?parsed.analysisSites.slice(0,6).map((site,index)=>({
+    id:"site-"+(index+1),name:String(nullableExtractedText(site&&site.name)||"").slice(0,100),address:String(nullableExtractedText(site&&site.address)||"").slice(0,160),role:site&&site.role==="primary"?"primary":"secondary",
+  })).filter(site=>site.name&&site.address):[];
+  if(rawSites.length){let primary=rawSites.findIndex(site=>site.role==="primary");if(primary<0)primary=0;rawSites.forEach((site,index)=>site.role=index===primary?"primary":"secondary");}
   return json({ok:true, data:{
-    projectName: parsed.projectName || null,
-    location: parsed.location || null,
+    projectName: nullableExtractedText(parsed.projectName),
+    location: (rawSites.find(site=>site.role==="primary")||{}).address || nullableExtractedText(parsed.location),
+    analysisSites: rawSites.length?rawSites:null,
     calcType: TYPE_CN[parsed.calcType] ? parsed.calcType : null,
     businessScenario,
     landArea: (typeof parsed.landArea==="number") ? parsed.landArea : null,
     landPrice: (typeof parsed.landPrice==="number") ? parsed.landPrice : null,
     startYear: (typeof parsed.startYear==="number") ? parsed.startYear : null,
-    owner: parsed.owner || null,
-    landNature: parsed.landNature || null,
-    desc: parsed.desc || null,
+    owner: nullableExtractedText(parsed.owner),
+    landNature: nullableExtractedText(parsed.landNature),
+    desc: nullableExtractedText(parsed.desc),
     missing,
   }});
 }

@@ -128,7 +128,7 @@ function newProject(){
 }
 async function openProjectsPanel(){
   if(window.ProjectManager)return window.ProjectManager.open({
-    headers:authHeaders,currentId:()=>currentProjectId,genId:genProjectId,openProject,newProject,
+    headers:authHeaders,currentId:()=>currentProjectId,genId:genProjectId,openProject,openAiReport:openAiReportProject,newProject,
     updateCurrentMeta:(meta,updatedAt)=>{currentProjectUpdatedAt=Number(updatedAt)||currentProjectUpdatedAt;projectWorkflow=window.ProjectWorkflow?ProjectWorkflow.ensureState(projectWorkflow):projectWorkflow;projectWorkflow.management=Object.assign(projectWorkflow.management||{},meta||{});saveDraft();}
   });
   const old = document.getElementById("projPanel"); if(old) old.remove();
@@ -165,7 +165,7 @@ async function openProject(id){
   try{
     const resp = await fetch("/api/projects?id="+encodeURIComponent(id), {headers:authHeaders()});
     const d = await resp.json();
-    if(!d.ok){ alert(d.error||"打开失败"); return; }
+    if(!d.ok){ alert(d.error||"打开失败"); return false; }
     if(id!==currentProjectId&&typeof airSwitchProjectSession==="function")airSwitchProjectSession();
     currentProjectId = id;
     currentProjectUpdatedAt=Number(d.project.updated_at)||null;
@@ -173,7 +173,18 @@ async function openProject(id){
     const panel = document.getElementById("projPanel"); if(panel) panel.remove();
     const bar = document.getElementById("draftBar"); if(bar) bar.remove();
     restoreDraft(d.project.data);
-  }catch(e){ alert("打开失败，请重试"); }
+    if(!String(project.name||"").trim()&&d.project.name)project.name=d.project.name;
+    return d.project;
+  }catch(e){ alert("打开失败，请重试"); return false; }
+}
+async function openAiReportProject(id){
+  const opened=await openProject(id);if(!opened)return false;
+  if(typeof airSetProjectEntryContext==="function")airSetProjectEntryContext(Object.assign({},opened.data&&opened.data.project||{},{name:opened.name||opened.data?.project?.name||"",explicitAiEntry:true}));
+  appMode="aireport";
+  try{history.replaceState(null,"",location.pathname+location.search+"#aireport");}catch(_){}
+  if(window.UiRouteState)window.UiRouteState.write();
+  renderTOC();renderSheet();
+  return true;
 }
 
 async function startApp(){
