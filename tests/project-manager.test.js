@@ -39,3 +39,8 @@ test("归档项目在标题区可恢复也可彻底删除",()=>{
   assert.match(html,/>恢复<\/button>/);
   assert.match(html,/删除项目/);
 });
+
+test("项目进度为当前稿和每个历史报告版本提供独立预览入口",()=>{
+  const html=PM.renderDetail(project({reportVersionItems:[{id:"report-1",version:1,reason:"初稿",createdAt:"2026-09-01",current:false},{id:"report-2",version:2,reason:"复核稿",createdAt:"2026-09-02",current:true}]}),null,null,null,null,null,null,null,"overview",null);
+  assert.match(html,/data-pm-preview-version="current"/);assert.match(html,/data-pm-preview-version="report-1"/);assert.match(html,/data-pm-preview-version="report-2"/);assert.match(html,/只读预览/);
+});

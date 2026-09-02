@@ -29,11 +29,12 @@ export function summarizeProjectRow(row){
   const generated=sections.filter(s=>String(s.editedHtml||s.content||"").trim()).length;
   const stale=sections.filter(s=>s.syncStatus==="stale"||s.syncStatus==="locked-stale").length;
   const locked=sections.filter(s=>!!s.locked).length,stage=projectStage(data),project=data.project||{};
+  const reportVersionItems=(Array.isArray(wf.reportVersions)?wf.reportVersions:[]).slice(-20).reverse().map(v=>({id:String(v.id||""),version:Number(v.version)||0,createdAt:String(v.createdAt||""),reason:String(v.reason||"报告版本"),current:String(v.id||"")===String(wf.currentReportVersionId||"")}));
   return {id:row.id,name:row.name,updated_at:Number(row.updated_at)||0,archived:!!mg.archived,archivedAt:Number(mg.archivedAt)||0,
     status:String(mg.status||stage.key),stage:stage.label,progress:stage.progress,type:String(project.type||((wf.calcSnapshots||[]).slice(-1)[0]||{}).calcType||""),
     location:String(project.location||""),owner:String(project.owner||""),tags:Array.isArray(mg.tags)?mg.tags.slice(0,8):[],
     chapters:chapters.length,sections:sections.length,generated,stale,locked,materials:Array.isArray(data.kb)?data.kb.length:0,
-    calcVersions:Array.isArray(wf.calcSnapshots)?wf.calcSnapshots.length:0,reportVersions:Array.isArray(wf.reportVersions)?wf.reportVersions.length:0,
+    calcVersions:Array.isArray(wf.calcSnapshots)?wf.calcSnapshots.length:0,reportVersions:Array.isArray(wf.reportVersions)?wf.reportVersions.length:0,reportVersionItems,
     currentStep:Number(data.currentStep)||0,activity:Array.isArray(mg.activity)?mg.activity.slice(-8).reverse():[],dataBytes:String(row.data||"").length};
 }
 function appendActivity(data,type,text,user){

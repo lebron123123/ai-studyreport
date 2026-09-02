@@ -60,6 +60,21 @@ test("持续迭代报告最多保留50份且版本号持续递增",()=>{
   assert.equal(state.reportVersions.length,50);assert.deepEqual(state.reportVersions.map(x=>x.version),Array.from({length:50},(_,i)=>i+6));assert.equal(state.currentReportVersionId,state.reportVersions[49].id);
 });
 
+test("完整报告被项目级生成锁拦截，部分报告只允许单个活动任务",()=>{
+  const complete=chapters(),state=WF.ensureState({});
+  const status=WF.reportGenerationStatus(complete);assert.deepEqual(status,{total:5,generated:5,remaining:0,complete:true});
+  assert.equal(WF.claimReportGeneration(state,complete).reason,"already_complete");
+  complete[0].sections[0].content="";
+  const first=WF.claimReportGeneration(state,complete);assert.equal(first.ok,true);assert.equal(first.status.remaining,1);
+  assert.equal(WF.claimReportGeneration(state,complete).reason,"generation_active");
+  assert.equal(WF.releaseReportGeneration(state,first.lock.id,"completed"),true);assert.equal(state.reportGenerationLock.status,"completed");
+});
+
+test("37/37完成态刷新后保持完成，不再伪装成暂停和继续0节",()=>{
+  assert.deepEqual(WF.persistedGenerationProgress({total:37,done:37,failed:0,active:true},0),{role:"assistant",kind:"genProgress",total:37,done:37,failed:0,active:false,stopped:false});
+  assert.equal(WF.persistedGenerationProgress({total:37,done:20},17).stopped,true);
+});
+
 test("批量人工确认只勾选未确认项并返回准确数量，不触发后续测算",()=>{
   const boxes=[{checked:false},{checked:true},{checked:false}];
   const r=WF.bulkConfirm(boxes);

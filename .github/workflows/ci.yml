@@ -1,0 +1,33 @@
+name: 质量与发布门禁
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 安装根项目与本地服务依赖
+        run: npm install
+      - name: JavaScript 语法检查
+        run: npm run check:syntax
+      - name: 规则、表格、API 与迁移一致性
+        run: npm run check:release
+      - name: Golden Project 定向回归
+        run: npm run test:golden
+      - name: 全仓自动化测试
+        run: npm test

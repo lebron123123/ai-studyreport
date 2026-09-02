@@ -16,6 +16,10 @@
     return issues.slice(0,3);
   }
   function matches(p,q){q=String(q||"").trim().toLowerCase();if(!q)return true;return [p.name,p.location,p.owner,p.type,p.stage].concat(p.tags||[]).join(" ").toLowerCase().includes(q);}
+  function reportVersionsHtml(p){
+    const versions=Array.isArray(p.reportVersionItems)?p.reportVersionItems:[],current=p.generated?'<button type="button" class="pm-report-version current" data-pm-preview-project="'+esc(p.id)+'" data-pm-preview-version="current"><b>当前工作稿</b><span>'+p.generated+'/'+p.sections+' 小节 · 刷新后仍可直接打开</span><i>进入预览</i></button>':'';
+    return '<div class="pm-detail-section pm-report-versions"><h3>可研进度与报告版本</h3><p class="pm-hint">每一版都是独立只读预览；打开历史版不会覆盖当前工作稿，也不会调用AI。</p><div class="pm-report-version-list">'+current+versions.map(v=>'<button type="button" class="pm-report-version" data-pm-preview-project="'+esc(p.id)+'" data-pm-preview-version="'+esc(v.id)+'"><b>报告 V'+Number(v.version||0)+(v.current?' · 当前正式版':'')+'</b><span>'+esc(v.reason||'报告版本')+' · '+esc(when(v.createdAt))+'</span><i>查看该版</i></button>').join('')+(current||versions.length?'':'<div class="pm-detail-empty"><span>尚未生成可研正文。</span></div>')+'</div></div>';
+  }
   function projectCard(p,active,intelligence){
     const hs=health(p),real=intelligence&&intelligence.progress,hasReal=!!(real&&real.configured),progress=hasReal?Number(real.value)||0:0;
     return '<button type="button" class="pm-project '+(active?'active':'')+'" data-pm-select="'+esc(p.id)+'">'
@@ -69,6 +73,7 @@
     return head
       +'<div class="pm-phase"><div><b>生命周期：'+esc(intelligence?.stage?.label||p.stage)+'</b><span>'+(intelligence?.progress?.configured?'项目真实进度 '+Number(intelligence.progress.value||0)+'%':'项目真实进度待配置')+'</span></div><i><em style="width:'+(intelligence?.progress?.configured?Number(intelligence.progress.value||0):0)+'%"></em></i></div>'
       +'<div class="pm-kpis"><div><b>'+p.generated+'/'+p.sections+'</b><span>已生成小节</span></div><div><b>'+p.materials+'</b><span>项目资料</span></div><div><b>V'+p.calcVersions+'</b><span>测算快照</span></div><div><b>V'+p.reportVersions+'</b><span>报告版本</span></div></div>'
+      +reportVersionsHtml(p)
       +intelligenceHtml(intelligence,intelligenceError)
       +brainHtml(brain,error)
       +opsHtml(ops,opsError)
@@ -85,6 +90,16 @@
     let projects=[],selected=initialRoute&&initialRoute.projectId||null,view=initialRoute&&initialRoute.view||"overview",tab="active",query="",sort="updated",brainCache={},brainErrors={},brainLoading=new Set(),opsCache={},opsErrors={},opsLoading=new Set(),intelligenceCache={},intelligenceErrors={},intelligenceLoading=new Set(),workspaceCache={},workspaceErrors={},workspaceLoading=new Set();
     const headers=()=>typeof options.headers==="function"?options.headers():{};
     async function api(body){const r=await fetch("/api/projects",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},headers()),body:JSON.stringify(body)}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"操作失败");return d;}
+    async function openReportPreview(projectId,versionId){
+      const r=await fetch("/api/projects?id="+encodeURIComponent(projectId),{headers:headers()}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"报告版本加载失败");
+      const data=d.project?.data||{},wf=data.workflow||{};let chapters=data.chapters||[],label="当前工作稿",reason="当前保存的报告正文";
+      if(versionId!=="current"){
+        const version=(wf.reportVersions||[]).find(v=>String(v.id)===String(versionId));if(!version)throw new Error("该报告版本不存在或已被清理");chapters=version.chapters||[];label="报告 V"+(Number(version.version)||0);reason=version.reason||"历史报告版本";
+      }
+      const active=chapters.filter(c=>c.checked!==false),render=value=>typeof root.renderContent==="function"?root.renderContent(value):'<p>'+esc(value).replace(/\n/g,'<br>')+'</p>',body=active.map(c=>'<section class="pm-version-chapter"><h2>'+esc(c.cn)+' '+esc(c.name)+'</h2>'+(c.sections||[]).map(s=>'<article><h3>'+esc(s.t)+'</h3>'+render(s.editedHtml&&typeof root.blocksToSource==="function"?root.blocksToSource(s.editedHtml):(s.content||""))+'</article>').join('')+'</section>').join('');
+      document.getElementById("pmReportPreview")?.remove();document.body.insertAdjacentHTML("beforeend",'<div id="pmReportPreview" class="air-modal-overlay pm-version-preview"><div class="air-modal-card"><div class="air-modal-head"><div><b>'+esc(d.project.name)+' · '+esc(label)+'</b><span>'+esc(reason)+' · 只读预览，不调用AI、不覆盖当前稿</span></div><button type="button" class="air-modal-close" aria-label="关闭">×</button></div><div class="pm-version-preview-body">'+(body||'<p>这一版没有可显示的正文。</p>')+'</div></div></div>');
+      const modal=document.getElementById("pmReportPreview"),close=()=>modal?.remove();modal.querySelector(".air-modal-close").onclick=close;modal.onclick=e=>{if(e.target===modal)close();};
+    }
     async function brainApi(body){const r=await fetch("/api/projectbrain",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},headers()),body:JSON.stringify(body)}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"项目大脑操作失败");return d;}
     async function opsApi(body){const r=await fetch("/api/investmentops",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},headers()),body:JSON.stringify(body)}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"投资管理操作失败");return d;}
     async function intelligenceApi(body){const r=await fetch("/api/projectintelligence",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},headers()),body:JSON.stringify(body)}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"项目智能模型操作失败");return d;}
@@ -124,6 +139,7 @@
       detailEl.querySelectorAll('[data-pm-slo]').forEach(b=>b.onclick=async()=>{const concurrency=prompt("实测并发人数（目标50）","50");if(concurrency===null)return;const p95Ms=prompt("核心路径P95耗时（毫秒）","5000");if(p95Ms===null)return;const successRate=prompt("成功率（0—100）","99");if(successRate===null)return;const recoveryRate=prompt("失败恢复率（0—100）","95");if(recoveryRate===null)return;const result={concurrency:Number(concurrency)||0,p95Ms:Number(p95Ms)||0,successRate:(Number(successRate)||0)/100,recoveryRate:(Number(recoveryRate)||0)/100,passed:Number(concurrency)>=50&&Number(p95Ms)<=5000&&Number(successRate)>=99&&Number(recoveryRate)>=95};try{await opsApi({action:"saveEvaluation",projectId:selected,type:"slo_load",status:result.passed?"passed":"failed",result});delete opsCache[selected];await loadOps(selected);}catch(e){alert(e.message);}});
       detailEl.querySelectorAll('[data-pm-opt]').forEach(b=>b.onclick=async()=>{const title=document.getElementById("pmOptTitle")?.value.trim(),evidence=document.getElementById("pmOptEvidence")?.value.trim(),actualBenefit=document.getElementById("pmOptBenefit")?.value.trim();if(!title){alert("请填写优化事项");return;}try{await opsApi({action:"saveOptimization",projectId:selected,title,evidence,actualBenefit,status:actualBenefit?"verified":"candidate"});delete opsCache[selected];await loadOps(selected);}catch(e){alert(e.message);}});
       detailEl.querySelectorAll('[data-pm-ai]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{if(options.openAiReport)await options.openAiReport(b.dataset.pmAi);else if(options.openProject)await options.openProject(b.dataset.pmAi);}catch(e){alert(e.message||"进入 AI 可研失败");}finally{b.disabled=false;}});
+      detailEl.querySelectorAll('[data-pm-preview-project]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await openReportPreview(b.dataset.pmPreviewProject,b.dataset.pmPreviewVersion);}catch(e){alert(e.message||"打开报告预览失败");}finally{b.disabled=false;}});
       detailEl.querySelectorAll('[data-pm-open]').forEach(b=>b.onclick=()=>options.openProject&&options.openProject(b.dataset.pmOpen));
       detailEl.querySelectorAll('[data-pm-copy]').forEach(b=>b.onclick=async()=>{const src=projects.find(p=>p.id===b.dataset.pmCopy),name=prompt("副本名称",(src?.name||"未命名项目")+"（副本）");if(!name)return;await api({action:"duplicate",sourceId:b.dataset.pmCopy,id:options.genId(),name});await load();});
       detailEl.querySelectorAll('[data-pm-archive]').forEach(b=>b.onclick=async()=>{const archived=b.dataset.value==="1";if(!confirm(archived?"归档后不会出现在进行中列表，可随时恢复。是否继续？":"恢复该项目到进行中列表？"))return;await api({action:"setArchived",id:b.dataset.pmArchive,archived});if(archived&&options.currentId&&b.dataset.pmArchive===options.currentId())options.newProject&&options.newProject(true);await load();});

@@ -7,7 +7,7 @@
 </head>
 <body>
   <main id="root"></main>
-  <script>window.authHeaders=()=>({});window.unlockStdEdit=fn=>fn();window.confirm=()=>true;window.alert=console.log;window.msg=console.log;const nativeFetch=window.fetch.bind(window);window.fetch=(url,options)=>String(url).startsWith('/api/reporttables')?Promise.resolve({ok:true,json:async()=>({ok:true,config:{version:1,status:'baseline',overrides:{projectType:'rent',templates:{},deletedTemplateIds:[],addedTemplates:[]}}})}):nativeFetch(String(url).startsWith('data/')?'/'+url:url,options);</script>
+  <script>window.authHeaders=()=>({});window.unlockStdEdit=fn=>fn();window.confirm=()=>true;window.prompt=()=>null;window.alert=console.log;window.msg=console.log;const nativeFetch=window.fetch.bind(window);window.fetch=(url,options)=>String(url).includes('action=history')?Promise.resolve({ok:true,json:async()=>({ok:true,history:[{version:3,status:'published',createdBy:'admin',createdAt:Date.now(),reason:'测试发布'}]})}):String(url).startsWith('/api/reporttables')?Promise.resolve({ok:true,json:async()=>({ok:true,config:{version:1,status:'baseline',overrides:{projectType:'rent',templates:{},deletedTemplateIds:[],addedTemplates:[]}}})}):nativeFetch(String(url).startsWith('data/')?'/'+url:url,options);</script>
   <script src="../../report-table-templates.js"></script>
   <script src="../../report-table-admin.js"></script>
   <script>window.ReportTableAdmin.mount(document.getElementById('root'),'gaibao-housing');</script>

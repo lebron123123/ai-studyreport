@@ -41,6 +41,7 @@
     return '<div class="rta-library-tabs" role="tablist" aria-label="标准表格库类型">'+TYPES.map(type=>'<button type="button" role="tab" data-rta-type="'+type+'" aria-selected="'+(type===activeType)+'" class="'+(type===activeType?'active':'')+'">'+escHtml(LABELS[type])+'</button>').join('')+'</div>'
       +'<div class="rta-toolbar"><div><b>'+escHtml(LABELS[activeType])+'标准表格库</b><span>'+stats.templates+'套逻辑表 · '+stats.physicalTables+'张源Word物理表 · 当前 v'+Number(config.version||1)+'</span></div><div class="rta-actions">'
       +'<button class="btn sm ghost" id="rtaExport">📄 导出表格Word版</button>'
+      +(!editing?'<button class="btn sm ghost" id="rtaHistory">↩ 版本记录与恢复</button>':'')
       +(editing?'<button class="btn sm ghost" id="rtaAdd">＋新增表格</button><button class="btn sm" id="rtaPublish">保存并同步到前台</button><button class="btn sm ghost" id="rtaCancel">取消修改</button>':'<button class="btn sm" id="rtaEdit">🔓 修改表格模板</button>')+'</div></div>';
   }
   function chapterGroups(templates,appendix){
@@ -68,7 +69,7 @@
     mountedRoot.innerHTML='<style>.rta-wrap{margin-top:20px;border-top:2px solid var(--bp);padding-top:16px}.rta-library-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.rta-library-tabs button{border:1px solid var(--line);background:#fff;color:var(--bp-deep);padding:9px 17px;border-radius:20px;cursor:pointer}.rta-library-tabs button.active{background:var(--bp);border-color:var(--bp);color:#fff}.rta-toolbar{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:10px}.rta-toolbar>div:first-child{display:flex;flex-direction:column}.rta-toolbar span{font-size:11px;color:var(--soft);margin-top:3px}.rta-actions{display:flex;gap:7px;flex-wrap:wrap}.rta-help{background:#F3F8FC;border:1px solid var(--line);padding:10px 13px;border-radius:8px;color:var(--soft);font-size:12px;line-height:1.7}.rta-group{margin-top:14px}.rta-group>h3{font-size:14px;color:var(--bp-deep);margin:0 0 8px}.rta-chapter{border:1px solid #C9DBEA;border-radius:10px;background:#fff;margin:9px 0;overflow:hidden}.rta-chapter>summary{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:13px 16px;cursor:pointer;background:#EDF5FB;color:var(--bp-deep)}.rta-chapter>summary span{display:flex;align-items:baseline;gap:10px}.rta-chapter>summary b{font-size:14px}.rta-chapter>summary small,.rta-chapter>summary em{font-size:11px;color:var(--soft);font-style:normal;font-weight:400}.rta-chapter[open]>summary{border-bottom:1px solid #C9DBEA}.rta-chapter-body{padding:7px 11px 11px;background:#FAFCFE}.rta-card{border:1px solid var(--line);border-radius:8px;background:#fff;margin:7px 0;overflow:hidden}.rta-card>summary{display:flex;justify-content:space-between;gap:14px;padding:10px 13px;cursor:pointer;background:#fff}.rta-card[open]>summary{background:#F7FAFD;border-bottom:1px solid var(--line)}.rta-card>summary span{font-size:11px;color:var(--soft)}.rta-lazy{padding:12px;overflow:auto}.rta-title-edit{display:grid;grid-template-columns:90px minmax(260px,1fr);align-items:center;gap:8px;margin-bottom:10px}.rta-title-edit label{margin:0}.rta-title-edit input[readonly]{background:#F7FAFD;color:var(--ink)}.rta-edit-note{font-size:11px;color:#276796;background:#EDF6FC;padding:7px 10px;margin-bottom:9px}.rta-wrap .rpt-template-card{margin:0;border:0}.rta-wrap .rpt-template-card figcaption{display:none}.rta-wrap .rpt-template-scroll{overflow:auto;max-height:520px}.rta-wrap .rpt-fixed-template{border-collapse:collapse;table-layout:fixed;width:100%;min-width:720px}.rta-wrap .rpt-fixed-template th,.rta-wrap .rpt-fixed-template td{border:1px solid #9FAFBE;padding:4px 5px;font-size:11px;line-height:1.35;vertical-align:middle}.rta-wrap .rpt-fixed-template th{background:#E8F0F7}.rta-wrap [contenteditable=true]{outline:1px dashed #77A9D3;background:#F4FAFF;color:#174E79}.rta-wrap [data-role=value]{background:#F5F6F7;color:#999}.rta-wrap .rpt-template-segment-title{text-align:center;font-weight:700;margin:8px 0}.rta-wrap .rpt-template-period{margin:8px 0}.rta-wrap .rpt-template-period>summary{cursor:pointer;color:var(--bp-deep);font-size:12px}@media(max-width:850px){.rta-toolbar{align-items:flex-start;flex-direction:column}.rta-title-edit{grid-template-columns:1fr}.rta-chapter>summary span{align-items:flex-start;flex-direction:column;gap:2px}}</style>'
       +'<section class="rta-wrap">'+toolbarHtml(config)+'<div class="rta-help">逐表点击即可查看完整行列。管理员修改只保存与原Word的差异，原始1:1结构始终可恢复；发布后，前台生成、复核预览和Word导出会同时采用新版本。</div>'
       +[['正文表格',false],['财务附表',true]].map(([label,appendix])=>'<div class="rta-group"><h3>'+label+'（'+templates.filter(t=>!!t.appendix===appendix).length+'套）</h3>'+chapterGroups(templates,appendix).map(chapterHtml).join('')+'</div>').join('')+'</section>';
-    lazyBind();document.getElementById("rtaExport").onclick=exportWord;mountedRoot.querySelectorAll("[data-rta-type]").forEach(button=>button.onclick=async()=>{const type=button.dataset.rtaType;if(type===activeType)return;activeType=type;editing=false;await ensureLoaded(false);render();});
+    lazyBind();document.getElementById("rtaExport").onclick=exportWord;const history=document.getElementById("rtaHistory");if(history)history.onclick=showHistory;mountedRoot.querySelectorAll("[data-rta-type]").forEach(button=>button.onclick=async()=>{const type=button.dataset.rtaType;if(type===activeType)return;activeType=type;editing=false;await ensureLoaded(false);render();});
     if(editing){document.getElementById("rtaAdd").onclick=addTemplate;document.getElementById("rtaPublish").onclick=publish;document.getElementById("rtaCancel").onclick=cancel;}else document.getElementById("rtaEdit").onclick=beginEdit;
   }
   async function beginEdit(){
@@ -84,6 +85,26 @@
       const response=await fetch("/api/reporttables",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"publish",projectType:activeType,overrides})}),result=await response.json();
       if(!response.ok||!result.ok)throw new Error(result.error||"表格模板发布失败");editing=false;await ensureLoaded(true);render();if(typeof msg==="function")msg(LABELS[activeType]+"表格模板已发布为 v"+result.config.version,"ok");
     }catch(error){button.disabled=false;button.textContent="保存并同步到前台";alert("发布失败："+error.message);}finally{busy=false;}
+  }
+  async function showHistory(){
+    if(busy)return;busy=true;
+    try{
+      const response=await fetch("/api/reporttables?action=history&projectType="+encodeURIComponent(activeType),{headers:authHeaders()}),result=await response.json();
+      if(!response.ok||!result.ok)throw new Error(result.error||"版本记录读取失败");
+      const rows=result.history||[];
+      if(!rows.length){alert("当前还没有已发布的后台修改版本，正在使用原始 v1 基线。");return;}
+      const current=rows.find(row=>row.status==="published"),lines=rows.map(row=>"V"+row.version+"｜"+(row.status==="published"?"当前正式版":"历史版")+"｜"+(row.createdBy||"未知操作人")+"｜"+new Date(row.createdAt).toLocaleString()+"｜"+(row.reason||"无备注"));
+      const value=prompt("版本记录：\n\n"+lines.join("\n")+"\n\n如需恢复，请输入目标历史版本号；取消则只查看记录。","");
+      if(value==null||!String(value).trim())return;
+      const targetVersion=Number(value);
+      if(!Number.isInteger(targetVersion)||targetVersion<1||!rows.some(row=>row.version===targetVersion)){alert("请输入列表中存在的历史版本号。");return;}
+      if(current?.version===targetVersion){alert("该版本已经是当前正式版。");return;}
+      const reason=prompt("请输入本次恢复原因（将写入审计记录）：","恢复 V"+targetVersion+" 的表格配置");if(reason==null)return;
+      if(!confirm("确认复制 V"+targetVersion+" 的内容并发布为新的正式版本？历史版本不会被删除。"))return;
+      const rollbackResponse=await fetch("/api/reporttables",{method:"POST",headers:authHeaders(),body:JSON.stringify({action:"rollback",projectType:activeType,targetVersion,reason})}),rollbackResult=await rollbackResponse.json();
+      if(!rollbackResponse.ok||!rollbackResult.ok)throw new Error(rollbackResult.error||"版本恢复失败");
+      await ensureLoaded(true);render();if(typeof msg==="function")msg("已把 V"+targetVersion+" 的内容恢复为新正式版 V"+rollbackResult.config.version,"ok");
+    }catch(error){alert("版本记录操作失败："+error.message);}finally{busy=false;}
   }
   function catalogPayload(){
     readAll();const templates=workingSet?.templates||[],toSections=list=>list.map(template=>({title:template.title,blocks:[{type:"templateTable",template:clone(template)}]}));

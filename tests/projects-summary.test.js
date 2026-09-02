@@ -22,3 +22,9 @@ test("投资全周期显式阶段优先显示且不被旧可研进度覆盖",()=
   const out=summarizeProjectRow({id:"project-789",name:"实施中项目",data:JSON.stringify(data),updated_at:789});
   assert.equal(out.stage,"项目实施");assert.equal(out.progress,78);assert.equal(out.status,"implementation");
 });
+
+test("项目索引返回每个报告版本的只读预览入口元数据",()=>{
+  const data={workflow:{currentReportVersionId:"r2",reportVersions:[{id:"r1",version:1,reason:"初稿",createdAt:"2026-09-01T00:00:00Z",chapters:[{sections:[{content:"不应进入列表"}]}]},{id:"r2",version:2,reason:"复核稿",createdAt:"2026-09-02T00:00:00Z",chapters:[]}]},chapters:[{sections:[{content:"当前稿"}]}]};
+  const out=summarizeProjectRow({id:"project-versions",name:"版本项目",data:JSON.stringify(data),updated_at:1});
+  assert.equal(out.reportVersionItems.length,2);assert.equal(out.reportVersionItems[0].id,"r2");assert.equal(out.reportVersionItems[0].current,true);assert.equal("chapters" in out.reportVersionItems[1],false);
+});

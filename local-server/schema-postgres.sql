@@ -452,3 +452,12 @@ CREATE TABLE IF NOT EXISTS project_file_extractions (id TEXT PRIMARY KEY,project
 CREATE INDEX IF NOT EXISTS idx_project_file_extractions_project ON project_file_extractions(project_id,file_id,review_status,updated_at DESC);
 CREATE TABLE IF NOT EXISTS project_data_issues (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,item_kind TEXT NOT NULL,item_key TEXT NOT NULL,issue_type TEXT NOT NULL,severity TEXT NOT NULL DEFAULT 'medium',description TEXT DEFAULT '',status TEXT NOT NULL DEFAULT 'open',resolution TEXT DEFAULT '',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_project_data_issues_project ON project_data_issues(project_id,status,severity,updated_at DESC);
+
+-- 可研标准表格模板版本、发布与可审计回滚
+CREATE TABLE IF NOT EXISTS report_table_template_versions (
+  id TEXT PRIMARY KEY,project_type TEXT NOT NULL,version INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'published',overrides TEXT NOT NULL,
+  created_at BIGINT NOT NULL,created_by TEXT DEFAULT '',reason TEXT NOT NULL DEFAULT '',
+  restored_from_version INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_report_table_versions_type ON report_table_template_versions(project_type,status,version DESC);

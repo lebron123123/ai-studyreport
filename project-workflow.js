@@ -127,6 +127,25 @@
     if(prev&&prev.hash===ver.hash&&prev.calcSnapshotId===ver.calcSnapshotId&&prev.analysisSnapshotId===ver.analysisSnapshotId&&(!lineage||prev.lineage&&prev.lineage.hash===lineage.hash))return prev;
     state.reportVersions.push(ver);if(state.reportVersions.length>50)state.reportVersions.splice(0,state.reportVersions.length-50);state.currentReportVersionId=ver.id; return ver;
   }
+  function reportGenerationStatus(chapters){
+    const sections=(chapters||[]).filter(c=>c&&c.checked!==false).flatMap(c=>Array.isArray(c.sections)?c.sections:[]),generated=sections.filter(s=>String(s&&((s.editedHtml&&typeof s.editedHtml==="string"?s.editedHtml:"")||s.content)||"").trim()).length;
+    return {total:sections.length,generated,remaining:Math.max(0,sections.length-generated),complete:sections.length>0&&generated===sections.length};
+  }
+  function claimReportGeneration(state,chapters,options){
+    state=state||{};options=options||{};const status=reportGenerationStatus(chapters),now=Date.now(),old=state.reportGenerationLock;
+    if(status.complete&&!options.force)return {ok:false,reason:"already_complete",status};
+    if(old&&old.status==="active"&&now-Number(old.startedAt||0)<30*60*1000&&!options.force)return {ok:false,reason:"generation_active",status,lock:clone(old)};
+    const lock={id:uid("report-generation"),status:"active",startedAt:now,generatedAtStart:status.generated,totalAtStart:status.total,force:!!options.force};state.reportGenerationLock=lock;
+    return {ok:true,status,lock:clone(lock)};
+  }
+  function releaseReportGeneration(state,lockId,status){
+    if(!state||!state.reportGenerationLock||state.reportGenerationLock.id!==lockId)return false;
+    state.reportGenerationLock.status=String(status||"completed");state.reportGenerationLock.finishedAt=Date.now();return true;
+  }
+  function persistedGenerationProgress(progress,pendingCount){
+    progress=progress||{};const total=Math.max(0,Number(progress.total)||0),done=Math.max(0,Math.min(total,Number(progress.done)||0)),pending=Math.max(0,Number(pendingCount)||0);
+    return {role:"assistant",kind:"genProgress",total,done,failed:Math.max(0,Number(progress.failed)||0),active:false,stopped:pending>0&&done<total};
+  }
   function setCandidate(section,newText,instruction,meta){
     if(!section)return null;
     meta=meta||{};
@@ -284,7 +303,7 @@
   }
 
   const api={clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,
-    createCalcSnapshot,createReportVersion,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
+    createCalcSnapshot,createReportVersion,reportGenerationStatus,claimReportGeneration,releaseReportGeneration,persistedGenerationProgress,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
     aiReportStage,aiReportStageRank,previousAiReportStage,locationTokens,rankLocationCandidates,normalizeAnalysisSites,siteWritingPlan,aiReportProjectSeed,aiReportShouldSeedProject,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
     impactedAnalysisSections,markAnalysisImpacted,METRIC_LABELS,ANALYSIS_DOMAIN_WORDS};
   root.ProjectWorkflow=api;

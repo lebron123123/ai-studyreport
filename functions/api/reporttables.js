@@ -9,7 +9,13 @@ const passOk=(env,request)=>!env.ADMIN_PASS||request.headers.get("x-admin-pass")
 
 async function ensureSchema(env){
   const ts=env.DEPLOY_MODE==="local"?"BIGINT":"INTEGER";
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS report_table_template_versions (id TEXT PRIMARY KEY,project_type TEXT NOT NULL,version INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'published',overrides TEXT NOT NULL,created_at "+ts+" NOT NULL,created_by TEXT DEFAULT '')").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS report_table_template_versions (id TEXT PRIMARY KEY,project_type TEXT NOT NULL,version INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'published',overrides TEXT NOT NULL,created_at "+ts+" NOT NULL,created_by TEXT DEFAULT '',reason TEXT NOT NULL DEFAULT '',restored_from_version INTEGER)").run();
+  for(const sql of [
+    "ALTER TABLE report_table_template_versions ADD COLUMN reason TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE report_table_template_versions ADD COLUMN restored_from_version INTEGER"
+  ]){
+    try{await env.DB.prepare(sql).run();}catch(error){if(!/already exists|duplicate column/i.test(String(error?.message||error)))throw error;}
+  }
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_report_table_versions_type ON report_table_template_versions(project_type,status,version DESC)").run();
 }
 
@@ -49,13 +55,18 @@ function validateOverrides(input,expectedType="rent"){
   return output;
 }
 
-function rowOut(row){return row?{id:row.id,projectType:row.project_type,version:Number(row.version||0),status:row.status,overrides:parse(row.overrides,{projectType:row.project_type,templates:{}}),createdAt:Number(row.created_at||0),createdBy:row.created_by||""}:null;}
+function rowOut(row){return row?{id:row.id,projectType:row.project_type,version:Number(row.version||0),status:row.status,overrides:parse(row.overrides,{projectType:row.project_type,templates:{}}),createdAt:Number(row.created_at||0),createdBy:row.created_by||"",reason:row.reason||"",restoredFromVersion:row.restored_from_version==null?null:Number(row.restored_from_version)}:null;}
 
 export async function onRequestGet(context){
   const env=adaptEnv(context.env),user=await verifyAuth(context.request,env);
   if(!user)return json({ok:false,error:"未登录"},401);
   try{await ensureSchema(env);}catch(error){return json({ok:false,error:"表格模板配置初始化失败："+error.message},500);}
-  const projectType=clean(new URL(context.request.url).searchParams.get("projectType")||"rent",30);
+  const url=new URL(context.request.url),projectType=clean(url.searchParams.get("projectType")||"rent",30),action=clean(url.searchParams.get("action"),30);
+  if(action==="history"){
+    if(!isAdmin(env,user))return json({ok:false,error:"仅管理员可查看表格模板版本历史"},403);
+    const rows=(await env.DB.prepare("SELECT * FROM report_table_template_versions WHERE project_type=? ORDER BY version DESC LIMIT 100").bind(projectType).all()).results||[];
+    return json({ok:true,projectType,history:rows.map(rowOut)});
+  }
   const row=await env.DB.prepare("SELECT * FROM report_table_template_versions WHERE project_type=? AND status='published' ORDER BY version DESC LIMIT 1").bind(projectType).first();
   return json({ok:true,config:rowOut(row)||{projectType,version:1,status:"baseline",overrides:{projectType,templates:{}}}});
 }
@@ -66,14 +77,26 @@ export async function onRequestPost(context){
   if(!isAdmin(env,user)||!passOk(env,context.request))return json({ok:false,error:"仅管理员可发布表格模板修改"},403);
   try{await ensureSchema(env);}catch(error){return json({ok:false,error:"表格模板配置初始化失败："+error.message},500);}
   let body;try{body=await context.request.json();}catch(_){return json({ok:false,error:"请求格式有误"},400);}
-  if(clean(body.action,30)!=="publish")return json({ok:false,error:"未知操作"},400);
+  const action=clean(body.action,30);
+  if(!["publish","rollback"].includes(action))return json({ok:false,error:"未知操作"},400);
   try{
-    const projectType=clean(body.projectType||"rent",30),overrides=validateOverrides(body.overrides,projectType);
+    const projectType=clean(body.projectType||"rent",30);
     const latest=await env.DB.prepare("SELECT version FROM report_table_template_versions WHERE project_type=? ORDER BY version DESC LIMIT 1").bind(projectType).first();
     const version=Math.max(1,Number(latest?.version||1)+1),now=Date.now(),id=`report-tables-${projectType}-v${version}-${now.toString(36)}`;
+    let overrides,restoredFromVersion=null,reason=clean(body.reason,500);
+    if(action==="rollback"){
+      restoredFromVersion=Math.max(1,Number(body.targetVersion||0));
+      const target=await env.DB.prepare("SELECT * FROM report_table_template_versions WHERE project_type=? AND version=? LIMIT 1").bind(projectType,restoredFromVersion).first();
+      if(!target)return json({ok:false,error:"找不到要恢复的历史版本"},404);
+      overrides=validateOverrides(parse(target.overrides,{}),projectType);
+      reason=reason||`恢复历史版本 V${restoredFromVersion}`;
+    }else{
+      overrides=validateOverrides(body.overrides,projectType);
+      reason=reason||"发布表格模板修改";
+    }
     await env.DB.prepare("UPDATE report_table_template_versions SET status='archived' WHERE project_type=? AND status='published'").bind(projectType).run();
-    await env.DB.prepare("INSERT INTO report_table_template_versions(id,project_type,version,status,overrides,created_at,created_by) VALUES(?,?,?,?,?,?,?)")
-      .bind(id,projectType,version,"published",JSON.stringify(overrides),now,user.username||String(user.userId)).run();
+    await env.DB.prepare("INSERT INTO report_table_template_versions(id,project_type,version,status,overrides,created_at,created_by,reason,restored_from_version) VALUES(?,?,?,?,?,?,?,?,?)")
+      .bind(id,projectType,version,"published",JSON.stringify(overrides),now,user.username||String(user.userId),reason,restoredFromVersion).run();
     return json({ok:true,config:rowOut(await env.DB.prepare("SELECT * FROM report_table_template_versions WHERE id=?").bind(id).first())});
   }catch(error){return json({ok:false,error:error.message},400);}
 }

@@ -4,7 +4,12 @@
   "version": "1.0.0",
   "description": "可研报告生成工具 —— 财务测算引擎回归测试",
   "scripts": {
+    "postinstall": "npm --prefix local-server ci --ignore-scripts",
     "test": "node --test",
+    "check:syntax": "node scripts/check-javascript-syntax.mjs",
+    "check:release": "node scripts/check-release-consistency.mjs",
+    "test:golden": "node --test tests/reportgolden-api.test.js tests/report-dependency-evidence-golden.test.js",
+    "generate:reportlogic-seed": "node scripts/generate-reportlogic-runtime-seed.mjs",
     "sensitivity": "node scripts/sensitivity.js"
   }
 }

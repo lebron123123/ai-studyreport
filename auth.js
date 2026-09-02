@@ -177,9 +177,9 @@ async function openProject(id){
     return d.project;
   }catch(e){ alert("打开失败，请重试"); return false; }
 }
-async function openAiReportProject(id){
+async function openAiReportProject(id,entryOptions){
   const opened=await openProject(id);if(!opened)return false;
-  if(typeof airSetProjectEntryContext==="function")airSetProjectEntryContext(Object.assign({},opened.data&&opened.data.project||{},{name:opened.name||opened.data?.project?.name||"",explicitAiEntry:true}));
+  if(typeof airSetProjectEntryContext==="function")airSetProjectEntryContext(Object.assign({},opened.data&&opened.data.project||{},{name:opened.name||opened.data?.project?.name||"",explicitAiEntry:true},entryOptions||{}));
   appMode="aireport";
   try{history.replaceState(null,"",location.pathname+location.search+"#aireport");}catch(_){}
   if(window.UiRouteState)window.UiRouteState.write();
