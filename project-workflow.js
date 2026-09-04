@@ -92,8 +92,26 @@
     (chapters||[]).forEach(c=>(c.sections||[]).forEach((s,si)=>{const title=String(s.t||"");if(unrelated.test(title))return;const q=String(c.name||"")+" "+title,why=ds.filter(d=>ANALYSIS_DOMAIN_WORDS[d].test(q));if(why.length)out.push({cn:c.cn,si,title:s.t,chapter:c.name,domains:why,locked:!!s.locked});}));return out;
   }
   function markAnalysisImpacted(chapters,domains,reason){const hits=impactedAnalysisSections(chapters,domains);hits.forEach(h=>{const c=(chapters||[]).find(x=>String(x.cn)===String(h.cn)),s=c&&c.sections[h.si];if(!s)return;s.syncStatus=s.locked?"locked-stale":"stale";s.staleReason=reason||("分析数据变化："+h.domains.join("、"));s.staleKeys=h.domains.slice();});return hits;}
+  function logicSnapshotCore(snapshot){
+    return {rules:(snapshot&&Array.isArray(snapshot.rules)?snapshot.rules:[]).map(rule=>({id:rule.id||"",title:rule.title||"",requiredSources:rule.requiredSources||"",dataRequirement:rule.dataRequirement||null,writingLogic:rule.writingLogic||"",outputForm:rule.outputForm||"",missingPolicy:rule.missingPolicy||""}))};
+  }
+  function logicSnapshotDiff(before,after){
+    const a=logicSnapshotCore(before),b=logicSnapshotCore(after),fields=[];
+    ["title","requiredSources","dataRequirement","writingLogic","outputForm","missingPolicy"].forEach(field=>{
+      if(JSON.stringify(a.rules.map(rule=>rule[field]))!==JSON.stringify(b.rules.map(rule=>rule[field])))fields.push(field);
+    });
+    if(a.rules.length!==b.rules.length)fields.unshift("rules");
+    return {changed:fields.length>0,fields,beforeHash:hash(a),afterHash:hash(b)};
+  }
+  function markLogicImpacted(chapters,changes,reason){
+    const hits=[];(changes||[]).forEach(change=>{const c=(chapters||[]).find(x=>String(x.cn)===String(change.cn)),s=c&&c.sections[Number(change.si)];if(!s)return;
+      const diff=logicSnapshotDiff(s.logicSnapshot,change.logicSnapshot);if(!diff.changed&&!change.force)return;
+      if(change.logicSnapshot)s.logicSnapshot=clone(change.logicSnapshot);s.syncStatus=s.locked?"locked-stale":"stale";s.staleKind="logic";s.staleReason=change.reason||reason||"报告生成逻辑已调整，当前正文需要复核";s.staleKeys=["report_logic"];
+      hits.push({cn:c.cn,chapter:c.name,si:Number(change.si),title:s.t,locked:!!s.locked,reason:s.staleReason,diff});
+    });return hits;
+  }
   function clearSectionStale(section){
-    if(!section)return; section.syncStatus="current"; section.staleReason=""; section.staleKeys=[];
+    if(!section)return; section.syncStatus="current"; section.staleReason=""; section.staleKeys=[];section.staleKind="";
   }
   function summaryDiff(before,after){
     const keys=[...new Set(Object.keys(before||{}).concat(Object.keys(after||{})))];
@@ -135,7 +153,7 @@
     return (Array.isArray(state&&state.reportVersions)?state.reportVersions:[]).reduce((max,item)=>Math.max(max,Number(item&&item.version)||0),0)+1;
   }
   function mergeReportDraft(templateChapters,savedChapters){
-    const saved=Array.isArray(savedChapters)?savedChapters:[],used=new Set(),sectionFields=["content","editedHtml","locked","syncStatus","staleReason","staleKeys","pendingRevision","undoStack","prov","logicSnapshot"];
+    const saved=Array.isArray(savedChapters)?savedChapters:[],used=new Set(),sectionFields=["content","editedHtml","locked","syncStatus","staleReason","staleKeys","staleKind","pendingRevision","undoStack","prov","logicSnapshot"];
     return (Array.isArray(templateChapters)?templateChapters:[]).map((chapter,chapterIndex)=>{
       let savedIndex=saved.findIndex((item,index)=>!used.has(index)&&String(item&&item.cn||"")===String(chapter&&chapter.cn||"")&&String(item&&item.name||"")===String(chapter&&chapter.name||""));
       if(savedIndex<0)savedIndex=saved.findIndex((item,index)=>!used.has(index)&&String(item&&item.name||"")===String(chapter&&chapter.name||""));
@@ -354,7 +372,7 @@
       guardrails:["财务数字来自白箱测算结果","异常结论来自硬规则检查","知识资料仅按检索匹配度作为依据","未提供的数据必须明确写暂无，不能推测","本工具只诊断，不修改参数或正文"]};
   }
 
-  const api={clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,
+  const api={clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,logicSnapshotCore,logicSnapshotDiff,markLogicImpacted,
     createCalcSnapshot,createReportVersion,reportGenerationStatus,nextReportVersionNumber,mergeReportDraft,recoverCompletedReport,selectProjectDraft,claimReportGeneration,releaseReportGeneration,persistedGenerationProgress,reconcileGenerationProgress,latestCompleteReportVersion,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
     aiReportStage,aiReportStageRank,previousAiReportStage,locationTokens,rankLocationCandidates,normalizeAnalysisSites,siteWritingPlan,aiReportProjectSeed,aiReportShouldSeedProject,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
     impactedAnalysisSections,markAnalysisImpacted,METRIC_LABELS,ANALYSIS_DOMAIN_WORDS};

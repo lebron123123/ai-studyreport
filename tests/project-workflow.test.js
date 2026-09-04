@@ -41,6 +41,20 @@ test("候选稿携带的生成逻辑随接受和撤销同步变化",()=>{
   assert.equal(s.logicSnapshot.rules[0].writingLogic,"新逻辑");assert.equal(WF.undoSection(s),true);assert.equal(s.logicSnapshot.rules[0].writingLogic,"旧逻辑");
 });
 
+test("大逻辑变更只标记实际选中的受影响小节并保护锁定内容",()=>{
+  const cs=chapters(),before={rules:[{id:"r1",writingLogic:"旧逻辑",outputForm:"文字"}]},after={rules:[{id:"r1",writingLogic:"新逻辑",outputForm:"文字+表格"}]};
+  cs[0].sections[0].logicSnapshot=before;cs[1].sections[1].logicSnapshot=before;
+  const hits=WF.markLogicImpacted(cs,[{cn:"三",si:0,logicSnapshot:after,reason:"经理调整市场分析框架"},{cn:"十",si:1,logicSnapshot:after,reason:"经理调整敏感性表格"}]);
+  assert.equal(hits.length,2);assert.equal(cs[0].sections[0].syncStatus,"stale");assert.equal(cs[1].sections[1].syncStatus,"locked-stale");
+  assert.equal(cs[0].sections[1].syncStatus,undefined);assert.deepEqual(cs[0].sections[0].staleKeys,["report_logic"]);assert.equal(cs[0].sections[0].logicSnapshot.rules[0].writingLogic,"新逻辑");
+});
+
+test("生成逻辑比较忽略时间戳但识别写法、数据和输出结构变化",()=>{
+  const base={updatedAt:"old",rules:[{id:"r1",writingLogic:"按现状分析",outputForm:"文字",dataRequirement:{fields:["出租率"]}}]},same={updatedAt:"new",rules:[{id:"r1",writingLogic:"按现状分析",outputForm:"文字",dataRequirement:{fields:["出租率"]}}]};
+  assert.equal(WF.logicSnapshotDiff(base,same).changed,false);
+  same.rules[0].outputForm="文字+表格";assert.deepEqual(WF.logicSnapshotDiff(base,same).fields,["outputForm"]);
+});
+
 test("拖选局部修改只替换唯一命中的片段并保护重复文本",()=>{
   let r=WF.replaceSelectedText("第一段原文。\n\n第二段原文。","第二段原文。","第二段修改稿。");
   assert.equal(r.ok,true);assert.equal(r.text,"第一段原文。\n\n第二段修改稿。");

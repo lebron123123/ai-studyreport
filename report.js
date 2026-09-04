@@ -20,13 +20,15 @@ function buildDraftData(){
     project: project, calcParams: calcParams, kb: kbEntries, workflow: projectWorkflow,
     chapters: chapters.map(c=>({cn:c.cn, name:c.name, checked:c.checked,
       sections:c.sections.map(s=>({t:s.t, numeric:s.numeric, content:s.content, editedHtml:s.editedHtml||null,
-        locked:!!s.locked,syncStatus:s.syncStatus||"current",staleReason:s.staleReason||"",staleKeys:s.staleKeys||[],
+        locked:!!s.locked,syncStatus:s.syncStatus||"current",staleReason:s.staleReason||"",staleKeys:s.staleKeys||[],staleKind:s.staleKind||"",
         pendingRevision:s.pendingRevision||null,undoStack:s.undoStack||[],prov:s.prov||null,logicSnapshot:s.logicSnapshot||null}))}))
   };
 }
 function saveDraft(){
   reportDocumentRevision++;
-  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(buildDraftData())); }catch(e){}
+  let savedLocally=false;
+  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(buildDraftData())); savedLocally=true; }catch(e){}
+  if(savedLocally&&typeof setSaveState==="function")setSaveState("local");
   scheduleCloudSave();
 }
 function loadDraft(){

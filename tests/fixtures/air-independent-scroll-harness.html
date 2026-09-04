@@ -1,0 +1,23 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>AI可研双栏滚动验证</title>
+<style>
+body{margin:0;padding:18px 28px 640px;background:#eef4f8;font-family:"Microsoft YaHei",sans-serif}.verify-state{position:fixed;z-index:20;right:20px;top:12px;padding:8px 12px;border:1px solid #9ebfd7;background:#fff}.air-shell{width:min(1500px,calc(100vw - 56px))}.air-chat-pane,.air-doc-pane{background:#fff;border:1px solid #bdd4e5}.air-chat-pane{padding:14px}.air-doc-pane{padding:0}.air-doc-head{background:#f3f8fc}.air-doc-scroll{padding:14px 18px}.verify-row{height:42px;border-bottom:1px solid #e1eaf0;padding:8px;box-sizing:border-box}.page-tail{height:520px;padding-top:40px;text-align:center;color:#55758b}
+</style></head><body>
+<output class="verify-state" id="verifyState">整页 0｜左栏 0｜右栏 0</output>
+<div class="air-shell">
+  <section class="air-chat-pane" id="leftPane"><h2>左侧对话区</h2><div id="leftRows"></div></section>
+  <section class="air-doc-pane" id="rightPane"><header class="air-doc-head"><h2>右侧报告区</h2></header><div class="air-doc-scroll"><div id="rightRows"></div></div></section>
+</div>
+<div class="page-tail">中间空隙滚轮与最右侧大滚动条控制整页</div>
+<script>
+(async()=>{
+  const html=await fetch("/index.html").then(response=>response.text());
+  const parsed=new DOMParser().parseFromString(html,"text/html");
+  parsed.querySelectorAll("style").forEach(style=>document.head.append(style.cloneNode(true)));
+  const rows=Array.from({length:42},(_,index)=>'<div class="verify-row">滚动验证内容 '+(index+1)+'</div>').join("");
+  document.getElementById("leftRows").innerHTML=rows;
+  document.getElementById("rightRows").innerHTML=rows;
+  const left=document.getElementById("leftPane"),right=document.getElementById("rightPane"),out=document.getElementById("verifyState");
+  const show=()=>{out.textContent='整页 '+Math.round(scrollY)+'｜左栏 '+Math.round(left.scrollTop)+'｜右栏 '+Math.round(right.scrollTop);};
+  addEventListener("scroll",show);left.addEventListener("scroll",show);right.addEventListener("scroll",show);show();
+})();
+</script></body></html>
