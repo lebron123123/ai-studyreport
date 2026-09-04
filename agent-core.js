@@ -135,9 +135,10 @@ window.AgentCore = (function(){
 
   function buildContextLayers(input){
     input=input||{};
+    const pc=input.projectContext||null;
     return {
       instruction:{system:String(input.system||""),latestUser:String(input.latestUser||"")},
-      working:{projectId:String(input.projectId||""),state:input.state||{},recentMessages:(input.recentMessages||[]).slice(-12)},
+      working:{projectId:String(input.projectId||(pc&&pc.identity&&pc.identity.projectId)||""),projectContext:pc?{contextId:String(pc.contextId||""),contextHash:String(pc.contextHash||""),identity:pc.identity||{},scenario:pc.scenario||{},versions:pc.versions||{},focus:pc.focus||{},governance:pc.governance||{}}:null,state:input.state||{},recentMessages:(input.recentMessages||[]).slice(-12)},
       knowledge:{rag:input.rag||[],wiki:input.wiki||[],rules:input.rules||[]},
       memory:{preferences:input.preferences||[],skills:input.skills||[],historySummary:String(input.historySummary||"")},
     };
@@ -145,6 +146,7 @@ window.AgentCore = (function(){
   function contextLayersToPrompt(layers){
     if(!layers) return "";
     const x=layers.instruction ? layers : buildContextLayers(layers), parts=[];
+    if(x.working && x.working.projectContext) parts.push("【已锁定项目上下文】\n"+JSON.stringify(x.working.projectContext));
     if(x.working && Object.keys(x.working.state||{}).length) parts.push("【当前任务状态】\n"+JSON.stringify(x.working.state));
     if(x.knowledge && (x.knowledge.rules||[]).length) parts.push("【适用规则】\n"+x.knowledge.rules.join("\n"));
     if(x.memory && (x.memory.skills||[]).length) parts.push("【已审核技能】\n"+x.memory.skills.join("\n"));
@@ -239,6 +241,7 @@ window.AgentCore = (function(){
     const maxRepeatCalls = Math.max(1, Number(opt.maxRepeatCalls)||2);
     const deferRuntime = opt.deferRuntime === true;
     const callFingerprints = {};
+    const activeContextLayers = opt.contextLayers ? (opt.contextLayers.instruction ? opt.contextLayers : buildContextLayers(opt.contextLayers)) : null;
     let runtimeRunId = "";
     let waitingApproval = false;
     const runtimeCreatePayload = {
@@ -247,7 +250,7 @@ window.AgentCore = (function(){
       securityLevel:opt.securityLevel||1, executionMode:"client",
       budgetInputTokens:opt.budgetInputTokens||0, budgetOutputTokens:opt.budgetOutputTokens||0,
       budgetCostMicros:opt.budgetCostMicros||0,
-      input:{toolset:opt.toolset||"",allowedTools:allow||[],messageCount:(opt.messages||[]).length},
+      input:{toolset:opt.toolset||"",allowedTools:allow||[],messageCount:(opt.messages||[]).length,contextId:activeContextLayers&&activeContextLayers.working&&activeContextLayers.working.projectContext&&activeContextLayers.working.projectContext.contextId||"",contextHash:activeContextLayers&&activeContextLayers.working&&activeContextLayers.working.projectContext&&activeContextLayers.working.projectContext.contextHash||""},
     };
     const created = deferRuntime ? null : await runtimeCall("create", runtimeCreatePayload);
     if(created && created.run) runtimeRunId=created.run.id;
@@ -255,7 +258,7 @@ window.AgentCore = (function(){
     let convo = (opt.messages || []).slice();
     // 长期记忆：自动加载并注入系统提示词(可用 opt.useMemory=false 关闭)
     let sysWithMem = opt.system || "";
-    sysWithMem += contextLayersToPrompt(opt.contextLayers);
+    sysWithMem += contextLayersToPrompt(activeContextLayers);
     if(opt.useMemory !== false){
       try{
         const mem = await loadMemory();

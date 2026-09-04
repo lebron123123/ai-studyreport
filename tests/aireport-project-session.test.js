@@ -34,3 +34,13 @@ test("项目级会话拒绝非法projectId，避免越界键",async()=>{
   const request=new Request("http://x/api/aireport",{method:"POST",headers:{authorization,"content-type":"application/json"},body:JSON.stringify({action:"saveState",projectId:"../bad",state:{}})});
   const res=await onRequestPost({request,env});assert.equal(res.status,400);assert.match((await res.json()).error,/项目ID非法/);
 });
+
+test("较慢到达的旧AI进度不会覆盖更新的42节完成状态",async()=>{
+  const env={DB:memoryDb(),SESSION_SECRET:"secret"},authorization=await auth(env),projectId="project-version-race";
+  const save=async state=>{const request=new Request("http://x/api/aireport",{method:"POST",headers:{authorization,"content-type":"application/json"},body:JSON.stringify({action:"saveState",projectId,state})});return (await onRequestPost({request,env})).json();};
+  await save({stateRevision:12,savedAt:200,status:"complete",done:42,total:42});
+  const stale=await save({stateRevision:11,savedAt:300,status:"partial",done:27,total:42});
+  assert.equal(stale.staleIgnored,true);
+  const request=new Request("http://x/api/aireport?projectId="+projectId,{headers:{authorization}}),loaded=await (await onRequestGet({request,env})).json();
+  assert.equal(loaded.state.status,"complete");assert.equal(loaded.state.done,42);assert.equal(loaded.state.stateRevision,12);
+});

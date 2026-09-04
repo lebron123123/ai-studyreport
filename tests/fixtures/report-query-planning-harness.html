@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>可研核心数据需求与最少检索验证</title></head>
+<body>
+  <h1>可研核心数据需求与最少检索验证</h1>
+  <output id="result">验证中</output>
+  <script>
+  window.authHeaders=()=>({});
+  const harnessFetch=window.fetch.bind(window);
+  let searchRequests=0;
+  window.fetch=async(url,options)=>{
+    if(String(url).startsWith("/api/reportlogic?")){
+      const data=await harnessFetch("/data/report-logic-rent-v1.json").then(response=>response.json());
+      return new Response(JSON.stringify({ok:true,set:{id:"query-planning-harness",projectType:"rent",version:1,data}}),{status:200,headers:{"content-type":"application/json"}});
+    }
+    if(String(url)==="/api/webresearch"){
+      const body=JSON.parse(options&&options.body||"{}");
+      if(body.action==="searchSection")searchRequests++;
+      return new Response(JSON.stringify({ok:true,evidence:[],refinements:{}}),{status:200,headers:{"content-type":"application/json"}});
+    }
+    return harnessFetch(url,options);
+  };
+  </script>
+  <script src="/report-logic-core.js"></script>
+  <script src="/web-research-tools.js"></script>
+  <script>
+  (async()=>{
+    const core=window.ReportLogicCore,web=window.WebResearch;
+    await core.load("rent");
+    const rule={id:"market",sourceNo:2,chapter:"市场分析",section:"租金",displayTitle:"周边租金市场",requiredSources:"网上搜索周边租金",sourceKinds:["web_search"],importance:"★★★"};
+    const first=core.dataRequirement(rule,{location:"深圳市龙华区"});
+    const refined=core.dataRequirement(rule,{location:"深圳市龙华区",requirementOverrides:{market:{version:2,requirement:{fields:[{key:"rent",label:"近12个月月租金",dataType:"number",required:true}],geoScope:{level:"district",value:"龙华区"},timeScope:{kind:"latest_12_months",maxAgeMonths:12},allowedChannels:["web_search"],quality:{minScore:90,minAuthority:"A"}}}}});
+    const base={...first,decision:{...first.decision,reuseKey:"market_observation:深圳市龙华区:rent_market:latest_12_months"}};
+    const targets=web.buildBatchTargets([
+      {ruleId:"r1",sourceNo:1,chapter:"第三章",section:"市场分析",title:"租金",missing:["web_search"],dataRequirement:{...base,requirementId:"req:r1"}},
+      {ruleId:"r2",sourceNo:9,chapter:"第八章",section:"财务测算",title:"租金假设",missing:["web_search"],dataRequirement:{...base,requirementId:"req:r2"}}
+    ]);
+    const internal=core.dataRequirement({id:"internal",chapter:"项目概况",section:"权属",displayTitle:"项目权属与面积",requiredSources:"项目产权证、批复原件和实际面积台账",sourceKinds:["manual_upload","provider"]},{location:"深圳市龙华区"});
+    const blockedTargets=web.buildBatchTargets([{ruleId:"internal",chapter:"第一章",section:"项目概况",missing:["web_search"],dataRequirement:internal}]);
+    const result={priority:first.decision.priority,level:first.decision.level,reason:first.decision.reason,queryBudget:first.budget.maxQueries,targetCount:targets.length,bindingCount:targets[0]&&targets[0].bindings.length,label:web.batchDecisionLabel(targets[0]),refinementInvalidates:first.decision.reuseKey!==refined.decision.reuseKey,internalFactBlocked:!internal.webAllowed&&blockedTargets.length===0,searchRequests};
+    const passed=result.priority>=90&&result.queryBudget===1&&result.targetCount===1&&result.bindingCount===2&&result.refinementInvalidates&&result.internalFactBlocked&&result.searchRequests===0;
+    document.getElementById("result").textContent=(passed?"PASS ":"FAIL ")+JSON.stringify(result);
+    document.documentElement.dataset.testStatus=passed?"passed":"failed";
+  })().catch(error=>{document.getElementById("result").textContent="FAIL "+error.message;document.documentElement.dataset.testStatus="failed";console.error(error);});
+  </script>
+</body>
+</html>

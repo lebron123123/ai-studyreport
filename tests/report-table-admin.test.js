@@ -9,7 +9,7 @@ const {chapterGroups,LABELS,TYPES}=require("../report-table-admin.js");
 
 test("后台把出租、非居改保和商业改造作为三个同级表格库入口",()=>{
   assert.deepEqual(TYPES,["rent","gaibao-housing","gaibao-commercial"]);
-  assert.equal(LABELS["gaibao-housing"],"非居改保（住房改造）");
+  assert.equal(LABELS["gaibao-housing"],"非居改保、居改居等（住房改造）");
   assert.equal(LABELS["gaibao-commercial"],"商业改造（自持改造）");
 });
 

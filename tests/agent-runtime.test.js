@@ -24,6 +24,13 @@ test("四层上下文只将明确状态、规则和已审核技能注入提示�
   assert.equal(layers.working.projectId,"p1");
 });
 
+test("项目上下文只注入固定身份、版本与审批摘要",async()=>{
+  const m=await import(pathToFileURL(path.resolve(__dirname,"../functions/api/_agent-contracts.js")).href);
+  const layers=m.buildAgentContextLayers({projectContext:{contextId:"ctx1",contextHash:"sha256:abc",identity:{projectId:"p1"},scenario:{projectType:"非居改保"},versions:{report:"v2"},focus:{chapterId:"10"},governance:{approvalStatus:"review"},largePayload:{ignored:true}}});
+  const prompt=m.contextLayersToPrompt(layers);
+  assert.equal(layers.working.projectId,"p1");assert.match(prompt,/ctx1/);assert.match(prompt,/sha256:abc/);assert.doesNotMatch(prompt,/largePayload/);
+});
+
 test("AgentCore把模型轮次、工具步骤、检查点和完成状态写入运行账本",async()=>{
   const oldWindow=global.window, oldFetch=global.fetch;
   const calls=[]; let generateRound=0;
@@ -48,11 +55,12 @@ test("AgentCore把模型轮次、工具步骤、检查点和完成状态写入�
   const core=require("../agent-core.js");
   core.registerTool("lookup",{risk:"read",toolset:"report",schema:{type:"function",function:{name:"lookup",parameters:{type:"object",properties:{q:{type:"string"}}}}},run:async()=>"正式快照：坪山区",validate:()=>({ok:true})});
   const visibleTrace=[];
-  const out=await core.run({system:"test",messages:[{role:"user",content:"分析"}],tools:["lookup"],traceQuery:"分析",useMemory:false,selfCheck:false,maxRounds:3,onTrace:lines=>visibleTrace.push(lines.slice())});
+  const out=await core.run({system:"test",messages:[{role:"user",content:"分析"}],tools:["lookup"],traceQuery:"分析",useMemory:false,selfCheck:false,maxRounds:3,contextLayers:{projectContext:{contextId:"ctx_runtime",contextHash:"sha256:runtime",identity:{projectId:"p1"}}},onTrace:lines=>visibleTrace.push(lines.slice())});
   assert.equal(out.runId,"run_test");
   assert.equal(out.text,"已根据正式快照完成分析。");
   assert.ok(calls.some(x=>x.body.action==="checkpoint"));
   assert.ok(calls.some(x=>x.body.action==="complete"));
+  assert.equal(calls.find(x=>x.body.action==="create").body.input.contextId,"ctx_runtime");
   assert.equal(out.toolCalls[0].risk,"read");
   assert.match(out.trace.join("\n"),/正在理解/);
   assert.match(out.trace.join("\n"),/正在判断/);

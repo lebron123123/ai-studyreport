@@ -112,6 +112,19 @@
     if(/人口/.test(text)&&nature==="official_statistic")rows=[["residentPopulation","常住人口","number"],["populationGrowth","人口增速","number"],["employmentPopulation","就业人口","number"],["period","统计期","text"],["statisticalScope","统计口径","text"]];
     return rows.map(([key,label,dataType])=>({key,label,dataType,required:true}));
   }
+  function requirementDecision(rule,nature,text,location,timeKind){
+    const topicPatterns=[
+      ["population",/人口|就业|收入|普查|统计/],["rent_market",/租金|出租率|空置率/],["sale_market",/售价|房价|成交|去化/],
+      ["housing_supply",/住房|房源|保障房|保租房|供需|库存/],["planning",/规划|国土空间|用地|容积率/],["transport",/交通|轨道|公交|道路/],
+      ["public_service",/教育|医疗|商业|公共服务|配套/],["construction",/建设|工程|消防|施工|竣工/],["environment",/环境|环评|节能|绿色建筑/],
+      ["finance_policy",/财政|资金|税|补贴|专项债/]
+    ];
+    const topic=(topicPatterns.find(([,pattern])=>pattern.test(text))||[])[0]||normalize(rule?.displayTitle||rule?.pointTitle||rule?.section||"public").slice(0,24)||"public";
+    const importance=String(rule?.importance||""),base={policy:90,official_statistic:88,market_observation:84,public_evidence:72,project_fact:96,calculation:96,derived:76}[nature]||70;
+    const priority=Math.min(100,base+(/^★★★/.test(importance)?6:/^★★/.test(importance)?3:0)+(criticalPattern.test(text)?2:0));
+    const level=priority>=92?"core":priority>=82?"important":"supporting",uses={policy:"确认合规边界与适用依据",official_statistic:"判断需求规模与区域趋势",market_observation:"校准市场假设与经营参数",public_evidence:"补强外部事实论证",project_fact:"确认项目边界和基础事实",calculation:"形成投资与财务结论",derived:"复用已确认的报告结论"};
+    return {level,priority,reason:uses[nature]||uses.public_evidence,topic,reuseKey:[nature,normalize(location||"unspecified"),topic,timeKind].join(":"),queryPolicy:"优先复用同地域、同主题、同统计期证据；仅在尚无合格证据时查询一次"};
+  }
   function dataRequirement(rule,options){
     const opts=options||{},text=requirementText(rule),nature=inferRequirementNature(rule),location=String(opts.location||opts.context?.location||"").trim();
     const internal=nature==="project_fact"||nature==="calculation"||nature==="derived",sourceKinds=rule?.sourceKinds||[];
@@ -122,7 +135,8 @@
     const timeKind=nature==="policy"?"effective_at_generation":nature==="market_observation"?"latest_12_months":nature==="official_statistic"?"latest_3_years":nature==="calculation"?"current_model_version":"project_current";
     const fields=requirementFields(nature,text),title=String(rule?.displayTitle||rule?.pointTitle||rule?.subsection||rule?.section||"本节依据").replace(/^\d+(?:\.\d+)*\s*/,"").slice(0,80);
     const terms=[location,title,...fields.slice(0,3).map(x=>x.label),nature==="policy"?"现行有效 官方":nature==="official_statistic"?"统计公报 官方":nature==="market_observation"?"市场监测":""] .filter(Boolean);
-    const base={schemaVersion:DATA_REQUIREMENT_SCHEMA_VERSION,requirementId:`req:${rule?.id||rule?.sourceNo||title}`,ruleId:rule?.id||"",sourceNo:rule?.sourceNo||0,chapter:rule?.chapter||"",section:rule?.section||"",title,evidenceGoal:`取得可验证的${title}数据或依据`,dataNature:nature,fields,timeScope:{kind:timeKind,maxAgeMonths:nature==="market_observation"?12:nature==="official_statistic"?36:null},geoScope:{level:geoLevel,value:location||geoLevel},preferredChannels:preferred,allowedChannels:preferred,webAllowed:!internal&&preferred.includes("web_search"),queryTerms:terms.slice(0,6),query:terms.join(" ").replace(/\s+/g," ").slice(0,160),budget:{maxQueries:1,maxResults:5,maxOutputTokens:900,maxSourcesAccepted:2},quality:{minScore:80,minAuthority:nature==="market_observation"?"B":"A",requireCrossCheck:nature==="market_observation"||nature==="official_statistic"},stopConditions:["已有证据覆盖全部必填字段且质量达标即停止","达到查询或结果预算立即停止","连续一次查询无合格结果即转人工补充"],fallback:internal?["保留待补标记并请求项目材料"]:["转知识库或数据接口","仍不足时保留待补标记"],validation:["核对统计期或生效日期","核对空间范围与项目一致","记录来源机构和原始链接"]};
+    const decision=requirementDecision(rule,nature,text,location||geoLevel,timeKind);decision.reuseKey+=":"+fields.map(x=>x.key).sort().join("+");
+    const base={schemaVersion:DATA_REQUIREMENT_SCHEMA_VERSION,requirementId:`req:${rule?.id||rule?.sourceNo||title}`,ruleId:rule?.id||"",sourceNo:rule?.sourceNo||0,chapter:rule?.chapter||"",section:rule?.section||"",title,evidenceGoal:`取得可验证的${title}数据或依据`,dataNature:nature,decision,fields,timeScope:{kind:timeKind,maxAgeMonths:nature==="market_observation"?12:nature==="official_statistic"?36:null},geoScope:{level:geoLevel,value:location||geoLevel},preferredChannels:preferred,allowedChannels:preferred,webAllowed:!internal&&preferred.includes("web_search"),queryTerms:terms.slice(0,6),query:terms.join(" ").replace(/\s+/g," ").slice(0,160),budget:{maxQueries:1,maxResults:5,maxOutputTokens:900,maxSourcesAccepted:2},quality:{minScore:80,minAuthority:nature==="market_observation"?"B":"A",requireCrossCheck:nature==="market_observation"||nature==="official_statistic"},stopConditions:["已有证据覆盖全部必填字段且质量达标即停止","达到查询或结果预算立即停止","连续一次查询无合格结果即转人工补充"],fallback:internal?["保留待补标记并请求项目材料"]:["转知识库或数据接口","仍不足时保留待补标记"],validation:["核对统计期或生效日期","核对空间范围与项目一致","记录来源机构和原始链接"]};
     const overrides=opts.requirementOverrides||opts.context?.requirementOverrides||{},saved=overrides[base.ruleId]||overrides[base.requirementId];
     if(!saved)return base;
     const patch=saved.requirement||saved,allowed=new Set(["knowledge_base","provider","web_search","manual_upload","calculation_engine","derived_section"]);
@@ -133,7 +147,7 @@
     if(patch.quality&&typeof patch.quality==="object")base.quality=Object.assign({},base.quality,patch.quality);
     if(patch.budget&&typeof patch.budget==="object")base.budget=Object.assign({},base.budget,patch.budget);
     base.webAllowed=!internal&&base.allowedChannels.includes("web_search");
-    const labels=base.fields.map(x=>x.label).filter(Boolean).slice(0,4);base.queryTerms=[base.geoScope.value,base.title,...labels].filter(Boolean).slice(0,6);base.query=base.queryTerms.join(" ").replace(/\s+/g," ").slice(0,160);base.refinementVersion=Number(saved.version||patch.version||1);base.refinementFeedback=String(saved.feedback||patch.feedback||"").slice(0,500);return base;
+    const labels=base.fields.map(x=>x.label).filter(Boolean).slice(0,4);base.queryTerms=[base.geoScope.value,base.title,...labels].filter(Boolean).slice(0,6);base.query=base.queryTerms.join(" ").replace(/\s+/g," ").slice(0,160);base.decision=requirementDecision(Object.assign({},rule,{displayTitle:base.title}),nature,[base.title,...labels].join(" "),base.geoScope.value,base.timeScope.kind);base.decision.reuseKey+=":"+base.fields.map(x=>x.key).sort().join("+");base.refinementVersion=Number(saved.version||patch.version||1);base.refinementFeedback=String(saved.feedback||patch.feedback||"").slice(0,500);return base;
   }
   function dataRequirementSchema(projectType,chapterName,sectionTitle,options){return match(projectType,chapterName,sectionTitle,options||{}).map(rule=>dataRequirement(rule,options));}
   function generationReadiness(rule, context){
@@ -184,7 +198,7 @@
     const rules = match(projectType, chapterName, sectionTitle, options), opts=options||{};
     if (!rules.length) return "";
     const scenario=scenarioOf(projectType,opts),scenarioGuard=scenario
-      ? `当前业务场景：${scenario==="commercial_renovation"?"商业改造（自持改造）":"非居改保（住房改造）"}。Excel原始逻辑中的【通用】内容应保留；遇到【非居改保】或【商业改造】标签时，只采用当前业务场景对应内容，禁止混用另一场景。\n`
+      ? `当前业务场景：${scenario==="commercial_renovation"?"商业改造（自持改造）":"非居改保、居改居等（住房改造）"}。Excel原始逻辑中的【通用】内容应保留；遇到【住房改造】或【商业改造】标签时，只采用当前业务场景对应内容，禁止混用另一场景。\n`
       : "";
     return "\n\n【内部生成约束｜严禁写入报告正文】（以下仅供模型规划写作，不是报告内容；不得复述其中的字段名、规则原文、编号或‘写作逻辑’字样。）\n"
       + scenarioGuard

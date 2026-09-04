@@ -11,7 +11,7 @@
    ============================================================ */
 
 const AI_TYPE_CN = { rent:"出租类（长期持有经营）", sale:"出售类（配售/出售为主）", gaibao:"中资产（非居改保/商业改造等）" };
-const AI_GAIBAO_SCENARIO_CN = { housing_conversion:"非居改保（住房改造）", commercial_renovation:"商业改造（自持改造）" };
+const AI_GAIBAO_SCENARIO_CN = { housing_conversion:"非居改保、居改居等（住房改造）", commercial_renovation:"商业改造（自持改造）" };
 function airBusinessScenario(){
   const value=aiReportExtracted&&aiReportExtracted.businessScenario;
   return value==="commercial_renovation"?value:"housing_conversion";
@@ -54,6 +54,9 @@ let aiReportSiteLocations = []; // 已人工确认的主/次点位；主点位�
 let aiReportEntryContext = null; // 从项目库显式传入；只补旧会话空字段，不覆盖已有AI可研内容
 let aiReportMaterialAutoRetryStarted = false; // 每次页面会话最多自动重试一次，避免上游持续故障时刷新反复耗费请求
 let aiReportGenerationLockId = null; // 项目级生成锁；刷新/重复点击不得重复消耗模型
+let aiReportStateRevision = 0; // AI会话保存序号；防止较慢的旧请求覆盖较新的完成状态
+let aiReportStateSaveInFlight = Promise.resolve();
+let aiReportCollapsedCards = {params:null,materials:null}; // null采用流程默认值；用户手动收起后按项目本地保存
 
 function airCurrentStage(){
   const state={chat:aiReportChat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,
@@ -71,8 +74,8 @@ function airClearLocalState(){try{localStorage.removeItem(airLocalStateKey());}c
 
 function airSwitchProjectSession(){
   aiReportStopFlag=true;aiReportChat=[];aiReportExtracted=null;aiReportSuggested=null;aiReportProgressMsg=null;aiReportPendingTasks=null;
-  aiReportHasDoc=false;aiReportDocVisible=false;aiReportDocZoom=100;aiReportChatCollapsed=false;aiReportOutlineCollapsed=false;aiReportDocFullscreen=false;aiReportPendingCalcChange=null;aiReportBusy=false;aiReportChatLoaded=false;aiReportParamsConfirmed=false;aiReportMaterialTarget=null;aiReportBatchFiles=[];aiReportLogicEnhanceState=null;aiReportLocationCandidates=[];aiReportLocationConfirmed=null;aiReportSiteSearches=[];aiReportSiteLocations=[];aiReportMaterialAutoRetryStarted=false;
-  aiReportEntryContext=null;aiReportGenerationLockId=null;
+  aiReportHasDoc=false;aiReportDocVisible=false;aiReportDocZoom=100;aiReportChatCollapsed=false;aiReportOutlineCollapsed=false;aiReportDocFullscreen=false;aiReportPendingCalcChange=null;aiReportBusy=false;aiReportChatLoaded=false;aiReportParamsConfirmed=false;aiReportMaterialTarget=null;aiReportBatchFiles=[];aiReportLogicEnhanceState=null;aiReportLocationCandidates=[];aiReportLocationConfirmed=null;aiReportSiteSearches=[];aiReportSiteLocations=[];aiReportMaterialAutoRetryStarted=false;aiReportCollapsedCards={params:null,materials:null};
+  aiReportEntryContext=null;aiReportGenerationLockId=null;aiReportStateRevision=0;aiReportStateSaveInFlight=Promise.resolve();
 }
 function airSetProjectEntryContext(context){
   aiReportEntryContext=context&&typeof context==="object"?Object.assign({},context):null;
@@ -208,6 +211,7 @@ function bindAiReportEvents(){
       if(e.target.closest(".air-doc-zoom-reset")){aiReportDocZoom=100;airApplyDocViewState();return;}
       if(e.target.closest(".air-doc-download")){exportWord();return;}
       if(e.target.closest(".air-doc-fullscreen")){aiReportDocFullscreen=!aiReportDocFullscreen;airApplyDocViewState();return;}
+      if(e.target.closest(".air-doc-current-draft")){airRestoreDocPaneIfNeeded();return;}
       const close = e.target.closest(".air-doc-close");
       if(close){ airSetDocVisible(false); return; }
       const chip = e.target.closest(".air-doc-outline .chip");
@@ -215,13 +219,18 @@ function bindAiReportEvents(){
     });
     docPane.addEventListener("mouseup",airHandleTextSelection);
     docPane.addEventListener("scroll",airHideSelectionAction,true);
-    docPane.addEventListener("change",e=>{if(e.target&&e.target.id==="airDocMaterialFile")airHandleMaterialFiles([...e.target.files]);});
+    docPane.addEventListener("change",airHandleDocPaneChange);
   }
   renderAiReportMsgs();
   airCheckAdminLogicCapability();
   airRenderDocToggle();
   airLoadState();
   airRestoreDocPaneIfNeeded();
+}
+function airHandleDocPaneChange(e){
+  if(e.target&&e.target.id==="airDocMaterialFile"){airHandleMaterialFiles([...e.target.files]);return;}
+  const selector=e.target&&e.target.closest&&e.target.closest(".air-doc-version-select");
+  if(selector){if(selector.value==="current")airRestoreDocPaneIfNeeded();else airOpenReportVersionById(selector.value);}
 }
 
 async function airOpenIndependentModule(module){
@@ -410,7 +419,7 @@ function airInfoCardHtml(){
       + opt("rent","出租类（公租房/保租房）") + opt("sale","出售类（配售/出售）") + opt("gaibao","改造项目") + '</select></div>'
     +'<div><label>建设/委托单位（选填）</label><input id="air_owner" type="text" value="'+escapeHtml(v.owner||"")+'"></div>'
     +'</div><div class="grid2" id="air_gaibao_scenario_row" style="'+(v.calcType==="gaibao"?'':'display:none;')+'">'
-    +'<div><label>改造业务场景（必选）</label><select id="air_business_scenario"><option value="">请选择…</option><option value="housing_conversion" '+(v.businessScenario==="housing_conversion"?'selected':'')+'>非居改保（住房改造）</option><option value="commercial_renovation" '+(v.businessScenario==="commercial_renovation"?'selected':'')+'>商业改造（自持改造）</option></select><small class="air-field-help">系统将据此自动选择对应的市场分析、定位、改造、运营与财务逻辑，两套逻辑不会混用。</small></div><div></div>'
+    +'<div><label>改造业务场景（必选）</label><select id="air_business_scenario"><option value="">请选择…</option><option value="housing_conversion" '+(v.businessScenario==="housing_conversion"?'selected':'')+'>非居改保、居改居等（住房改造）</option><option value="commercial_renovation" '+(v.businessScenario==="commercial_renovation"?'selected':'')+'>商业改造（自持改造）</option></select><small class="air-field-help">系统将据此自动选择对应的市场分析、定位、改造、运营与财务逻辑，两套逻辑不会混用。</small></div><div></div>'
     +'</div><div class="grid2">'
     +'<div><label>用地面积（㎡，选填）</label><input id="air_landarea" type="number" value="'+(v.landArea!=null?v.landArea:"")+'"></div>'
     +'<div><label>开工/建设起始年（选填）</label><input id="air_startyear" type="number" value="'+(v.startYear!=null?v.startYear:"")+'"></div>'
@@ -436,7 +445,7 @@ async function aiReportConfirmInfo(){
   if(!sites.some(x=>x.role==="primary")){alert("请指定一个影响最大的主项目");return;}
   const primary=sites.find(x=>x.role==="primary")||sites[0],loc=primary.address;
   const businessScenario=calcType==="gaibao"?g("air_business_scenario").value:"";
-  if(calcType==="gaibao"&&!businessScenario){alert("请选择‘非居改保（住房改造）’或‘商业改造（自持改造）’，系统才能加载正确逻辑");return;}
+  if(calcType==="gaibao"&&!businessScenario){alert("请选择‘非居改保、居改居等（住房改造）’或‘商业改造（自持改造）’，系统才能加载正确逻辑");return;}
   aiReportExtracted = Object.assign({}, aiReportExtracted, {
     projectName: name,
     location: loc,
@@ -667,7 +676,7 @@ async function airRunSuggest(){
       : "案例库中暂无「"+AI_TYPE_CN[calcType]+"」的已确认历史案例，以下参数为行业默认值，请务必人工核实。";
     airResolve(loading, {kind:"text", content:"已自动填好全套测算参数（约"+Object.keys(d.params).length+"项）。"+caseNote+" 下面这7项对结果影响最大，请重点确认（点「查看依据」能看到具体是哪几个历史项目）："});
     airPush({role:"assistant", kind:"confirmCard"});
-    airSaveState();
+    await airSaveState();
   }catch(e){
     airResolve(loading, {kind:"text", content:"网络异常，参数推荐失败：" + e.message, retry:{type:"suggest"}});
   }
@@ -689,6 +698,13 @@ function airFormatParamValue(value,meta){
     return numberText(value)+(unit&&unit!=="—"?" "+unit:"");
   }
   return String(value);
+}
+
+function airPersistentCardHtml(kind,title,summary,content,defaultCollapsed){
+  const saved=aiReportCollapsedCards&&aiReportCollapsedCards[kind],collapsed=saved==null?!!defaultCollapsed:!!saved;
+  return '<details class="air-persistent-card" data-air-card="'+escapeHtml(kind)+'" '+(collapsed?'':'open')+'>'
+    +'<summary><span><b>'+escapeHtml(title)+'</b><small>'+escapeHtml(summary||"")+'</small></span><span class="air-persistent-card-toggle"><i class="when-open">收起</i><i class="when-closed">展开</i></span></summary>'
+    +'<div class="air-persistent-card-content">'+content+'</div></details>';
 }
 
 function airConfirmCardHtml(){
@@ -724,7 +740,7 @@ function airConfirmCardHtml(){
   const otherDetails=otherKeys.length?'<details style="margin-top:10px;"><summary style="font-size:12px;cursor:pointer;">查看其余 '+otherKeys.length+' 项参数及来源</summary><div class="air-other-param-list">'
     +'<div class="air-other-param-row head"><span>参数</span><span>当前值</span><span>来源/依据</span><span>确认状态</span></div>'
     +otherKeys.map(k=>{const s=sug.sources[k]||{},m=(sug.paramMeta&&sug.paramMeta[k])||{},value=shownParams[k];return '<div class="air-other-param-row"><span><b>'+escapeHtml(m.label||k)+'</b><br><code>'+escapeHtml(k)+'</code></span><span class="air-other-param-value">'+escapeHtml(airFormatParamValue(value,m))+'</span><span>'+escapeHtml(s.from||"来源待确认")+'</span><span>'+(s.requiresManualConfirmation?'待批量确认':'资料已给定')+'</span></div>';}).join("")+'</div></details>':'';
-  return '<div class="air-card">'
+  const content = '<div class="air-card">'
     +'<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">来源层级：'+escapeHtml((sug.sourceHierarchy||[]).join(" → "))+'</div>'
     +'<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">本次全量来源：'+escapeHtml(sourceSummary)+'</div>'
     +(alreadyCalculated?'<div class="air-step-done"><b>✓ 参数已经人工确认，财务测算已完成</b><span>当前参数只读展示；如需调整，可在下方对话中直接说明要修改的参数和值，系统会先预演影响。</span></div>':'<div class="air-bulk-confirm"><div><b>已逐项核对数值和依据？</b><span>可一次勾选本卡片全部待人工确认项；不会自动开始测算。</span></div><button type="button" class="btn" id="airConfirmAll">批量人工确认全部</button><span id="airConfirmAllState"></span></div>')
@@ -735,6 +751,7 @@ function airConfirmCardHtml(){
     +(alreadyCalculated?'<span class="air-complete-pill">测算步骤已完成</span>':'<button class="btn" id="airConfirmParams">确认，开始测算 →</button>')
     +'<span style="font-size:11.5px; color:var(--ink-soft);">其余约'+(Object.keys(sug.params).length-sug.keyFields.length)+'项参数的当前值、单位和来源已列在上方折叠区</span>'
     +'</div></div>';
+  return airPersistentCardHtml("params",alreadyCalculated?"关键参数（已确认）":"关键参数确认",alreadyCalculated?"测算已完成，可展开查看参数与来源":"请核对7个关键参数后开始测算",content,alreadyCalculated);
 }
 
 /* ================= 阶段③④ 确认→测算：读7个字段，合并成完整参数，跑确定性引擎 ================= */
@@ -805,6 +822,51 @@ function airReportGenerationStatus(){
   const all=chapters.filter(c=>c.checked!==false).flatMap(c=>c.sections||[]),generated=all.filter(s=>String(s.editedHtml||s.content||"").trim()).length;
   return {total:all.length,generated,remaining:Math.max(0,all.length-generated),complete:all.length>0&&generated===all.length};
 }
+function airIsIncompleteGenerationMessage(message){
+  return !!message&&(message.kind==="generationIncomplete"||(
+    message.kind==="text"&&/^本轮实际完成\s*\d+\/\d+\s*个子标题，仍有\s*\d+\s*个没有正文/.test(String(message.content||""))
+  ));
+}
+function airGenerationIncompleteHtml(message){
+  const coverage=airReportGenerationStatus();
+  if(coverage.complete)return '<div class="air-step-done"><b>✓ 当前报告已完整生成</b><span>已完成 '+coverage.generated+'/'+coverage.total+' 个子标题。</span></div>';
+  const content=message&&message.content||("本轮实际完成 "+coverage.generated+"/"+coverage.total+" 个子标题，仍有 "+coverage.remaining+" 个没有正文。不会标记为完成，也不会覆盖上一完整版本。");
+  return '<div class="air-card"><div>'+(window.MD?window.MD.renderHtml(content):escapeHtml(content))+'</div>'
+    +'<div style="margin-top:12px;"><button type="button" class="btn air-resume-inline-btn">▶ 继续生成剩余 '+coverage.remaining+' 节</button></div></div>';
+}
+function airRebuildPendingGenerationTasks(){
+  const tasks=[];
+  chapters.filter(c=>c.checked!==false).forEach(c=>(c.sections||[]).forEach((s,si)=>{
+    if(!String(s&&s.editedHtml||s&&s.content||"").trim())tasks.push({c,s,si});
+  }));
+  aiReportPendingTasks=tasks;
+  return tasks;
+}
+async function airResumeGeneration(){
+  if(aiReportBusy)return;
+  const coverage=airReportGenerationStatus();
+  if(coverage.complete){airOpenExistingReport("当前报告已经完整生成，已为你打开报告预览。");return;}
+  const tasks=airRebuildPendingGenerationTasks();
+  if(!tasks.length){airOpenExistingReport("没有发现需要继续生成的小节，已为你打开现有报告预览。");return;}
+  const claim=window.ProjectWorkflow?.claimReportGeneration?ProjectWorkflow.claimReportGeneration(projectWorkflow,chapters,{force:false}):{ok:true,lock:{id:"local-"+Date.now()}};
+  if(!claim.ok){alert("该项目已有生成任务在运行。请等待完成或刷新查看进度，不会重复启动。");return;}
+  aiReportGenerationLockId=claim.lock.id;
+  const targetReportVersion=window.ProjectWorkflow?.nextReportVersionNumber?ProjectWorkflow.nextReportVersionNumber(projectWorkflow):(projectWorkflow.reportVersions||[]).length+1;
+  if(!aiReportProgressMsg){
+    aiReportProgressMsg={role:"assistant",kind:"genProgress",total:coverage.total,done:coverage.generated,failed:0,active:true,stopped:false,targetReportVersion,generationId:"generation-"+Date.now().toString(36)};
+    airPush(aiReportProgressMsg);
+  }else{
+    aiReportProgressMsg.total=coverage.total;aiReportProgressMsg.done=coverage.generated;
+    aiReportProgressMsg.active=true;aiReportProgressMsg.stopped=false;
+  }
+  aiReportStopFlag=false;airSetBusy(true);saveDraft();airSaveState();renderAiReportMsgs();
+  try{await airRunGenTasks();}
+  catch(e){airPush({role:"assistant",kind:"text",content:"继续生成失败："+e.message+"。已保留现有内容，可以再次点击继续。"});}
+  finally{
+    if(window.ProjectWorkflow?.releaseReportGeneration&&aiReportGenerationLockId){const status=aiReportStopFlag?"paused":(airReportGenerationStatus().complete?"completed":"incomplete");ProjectWorkflow.releaseReportGeneration(projectWorkflow,aiReportGenerationLockId,status);}
+    aiReportGenerationLockId=null;saveDraft();airSaveState();airSetBusy(false);
+  }
+}
 function airOpenExistingReport(message){
   airRestoreDocPaneIfNeeded();
   if(message)airPush({role:"assistant",kind:"text",content:message});
@@ -826,7 +888,7 @@ async function aiReportStartGenerate(options){
   try{ await aiReportRunGenerate(); }
   catch(e){ airPush({role:"assistant",kind:"text",content:"可研生成未能启动："+e.message+"。按钮已恢复，可检查参数或稍后重试。"}); }
   finally{
-    if(window.ProjectWorkflow?.releaseReportGeneration&&aiReportGenerationLockId)ProjectWorkflow.releaseReportGeneration(projectWorkflow,aiReportGenerationLockId,aiReportStopFlag?"paused":"completed");
+    if(window.ProjectWorkflow?.releaseReportGeneration&&aiReportGenerationLockId){const status=aiReportStopFlag?"paused":(airReportGenerationStatus().complete?"completed":"incomplete");ProjectWorkflow.releaseReportGeneration(projectWorkflow,aiReportGenerationLockId,status);}
     aiReportGenerationLockId=null;saveDraft();airSaveState();airSetBusy(false);
   }
 }
@@ -874,7 +936,10 @@ async function aiReportRunGenerate(){
   active.forEach(c=>c.sections.forEach((s,si)=>{if(!s.content&&!s.editedHtml)tasks.push({c,s,si});}));
   aiReportPendingTasks = tasks;
   aiReportStopFlag = false;
-  aiReportProgressMsg = { role:"assistant", kind:"genProgress", total:tasks.length, done:0, failed:0, active:true };
+  aiReportChat=aiReportChat.filter(message=>message.kind!=="genProgress");
+  const coverage=airReportGenerationStatus();
+  const targetReportVersion=window.ProjectWorkflow?.nextReportVersionNumber?ProjectWorkflow.nextReportVersionNumber(projectWorkflow):(projectWorkflow.reportVersions||[]).length+1;
+  aiReportProgressMsg = { role:"assistant", kind:"genProgress", total:coverage.total, done:coverage.generated, failed:0, active:true,targetReportVersion,generationId:"generation-"+Date.now().toString(36) };
   airPush(aiReportProgressMsg);
 
   await airRunGenTasks();
@@ -884,25 +949,42 @@ async function airRunGenTasks(){
   const tasks = aiReportPendingTasks || [];
   const p = aiReportProgressMsg;
   await runWorkerPool(tasks, async (t)=>{
-    await airGenOneSection(t);
-    p.done++;
+    const generated=await airGenOneSection(t);
+    if(generated){p.done++;saveDraft();airSaveLocalState();}
     renderAiReportMsgs();
   }, reportGenerationConcurrency(tasks.length), ()=>!aiReportStopFlag);
   saveDraft();
 
   if(aiReportStopFlag && tasks.length){
-    p.active = false; p.stopped = true;
+    const coverage=airReportGenerationStatus();
+    p.done=coverage.generated;p.total=coverage.total;p.active=false;p.stopped=true;
+    aiReportPendingTasks=tasks.filter(t=>!String(t.s&&t.s.editedHtml||t.s&&t.s.content||"").trim());
     renderAiReportMsgs();
+    if(typeof flushCloudSave==="function")await flushCloudSave();
+    await airSaveState();
     return;
   }
-  aiReportPendingTasks = [];
-  p.active = false; p.stopped = false;
+  const coverage=airReportGenerationStatus();
+  p.done=coverage.generated;p.total=coverage.total;
+  aiReportPendingTasks=tasks.filter(t=>!String(t.s&&t.s.editedHtml||t.s&&t.s.content||"").trim());
+  p.active=false;p.stopped=!coverage.complete;
+  if(!coverage.complete){
+    renderAiReportMsgs();
+    aiReportChat=aiReportChat.filter(message=>!airIsIncompleteGenerationMessage(message));
+    airPush({role:"assistant",kind:"generationIncomplete",content:"本轮实际完成 "+coverage.generated+"/"+coverage.total+" 个子标题，仍有 "+coverage.remaining+" 个没有正文，因此不会标记为完成、不会生成完成版，也不会覆盖上一完整版本。"});
+    airRepairFlowCards();renderAiReportMsgs();
+    saveDraft();if(typeof flushCloudSave==="function")await flushCloudSave();await airSaveState();return;
+  }
+  aiReportPendingTasks=[];
+  aiReportChat=aiReportChat.filter(message=>!airIsIncompleteGenerationMessage(message));
+  p.failed=0;
+  if(window.ProjectWorkflow){const version=window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("AI可研初稿生成完成"));p.reportVersionId=version&&version.id||null;p.reportVersion=Number(version&&version.version)||p.targetReportVersion||null;}
   renderAiReportMsgs();
   airPush({role:"assistant", kind:"text", content:"🎉 可研报告已经生成啦！已完成 "+(p.total-p.failed)+"/"+p.total+" 个子标题的初稿起草"+(p.failed? "（"+p.failed+" 个失败，可在右侧预览里逐节点「重试」）。":"。")+"\n\n接下来你可以继续和我对话修改测算或报告，也可以点击下方「复核与人工审查」，或者直接给我发送“复核”，我会带你进入复核与签发。"});
   airPush({role:"assistant", kind:"deliver"});
-  if(window.ProjectWorkflow)window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("AI可研初稿生成完成"));
   saveDraft();
-  airSaveState();
+  if(typeof flushCloudSave==="function")await flushCloudSave();
+  await airSaveState();
 }
 
 /* 首次生成(airGenOneSection)和失败重试(airRetrySection)驱动的是同一套"跑generateSection+刷新该节DOM"
@@ -929,10 +1011,12 @@ async function airDriveSectionGen(chapter, section, si, opts){
       if(body)body.textContent=streamText;
     },50);
   };
+  let generated=false;
   try{
     const text = await generateSection(chapter, section, (partial)=>{
       streamWrite(partial);
     });
+    if(!String(text||"").trim())throw new Error("模型未返回正文，本节没有计入完成");
     if(streamTimer){clearTimeout(streamTimer);streamTimer=null;}
     section.content = text;
     if(secEl){
@@ -941,6 +1025,7 @@ async function airDriveSectionGen(chapter, section, si, opts){
       airRenderCompletedSection(chapter,section,si);
     }
     if(opts.onDone) opts.onDone();
+    generated=true;
   }catch(e){
     if(streamTimer){clearTimeout(streamTimer);streamTimer=null;}
     if(secEl){
@@ -952,10 +1037,11 @@ async function airDriveSectionGen(chapter, section, si, opts){
     if(opts.onFail) opts.onFail();
   }
   airUpdateChapterChipStatus(cn);
+  return generated;
 }
 
 async function airGenOneSection(t){
-  await airDriveSectionGen(t.c, t.s, t.si, {
+  return airDriveSectionGen(t.c, t.s, t.si, {
     onFail: ()=>{ aiReportProgressMsg.failed++; },
   });
 }
@@ -1141,13 +1227,60 @@ function airBuildDocPane(){
     +'</div>').join("");
   pane.innerHTML = '<div class="air-doc-head"><div class="air-doc-heading"><div class="air-doc-title">'+escapeHtml(project.name||"未命名项目")+'</div>'
     +'<div class="air-doc-meta">'+escapeHtml(project.industry||"")+' · 共 '+active.length+' 章 / '+totalSec+' 个子标题</div></div>'
-    +'<div class="air-doc-actions"><button type="button" class="air-doc-tool air-doc-chat-toggle">收起对话</button><button type="button" class="air-doc-tool air-doc-outline-toggle">收起章节</button><span class="air-doc-zoom"><button type="button" class="air-doc-tool air-doc-zoom-out" title="缩小">−</button><button type="button" class="air-doc-tool air-doc-zoom-reset" title="恢复100%"><span class="air-doc-zoom-value">100%</span></button><button type="button" class="air-doc-tool air-doc-zoom-in" title="放大">＋</button></span><button type="button" class="air-doc-tool air-doc-download">下载 Word</button><button type="button" class="air-doc-tool air-doc-fullscreen">全屏阅读</button><button type="button" class="air-doc-close" title="关闭报告预览">✕</button></div></div>'
+    +'<div class="air-doc-actions">'+airReportVersionSelectHtml("current")+'<button type="button" class="air-doc-tool air-doc-chat-toggle">收起对话</button><button type="button" class="air-doc-tool air-doc-outline-toggle">收起章节</button><span class="air-doc-zoom"><button type="button" class="air-doc-tool air-doc-zoom-out" title="缩小">−</button><button type="button" class="air-doc-tool air-doc-zoom-reset" title="恢复100%"><span class="air-doc-zoom-value">100%</span></button><button type="button" class="air-doc-tool air-doc-zoom-in" title="放大">＋</button></span><button type="button" class="air-doc-tool air-doc-download">下载 Word</button><button type="button" class="air-doc-tool air-doc-fullscreen">全屏阅读</button><button type="button" class="air-doc-close" title="关闭报告预览">✕</button></div></div>'
     +'<div class="air-doc-outline">'+outline+'</div>'
     +'<input type="file" id="airDocMaterialFile" accept=".txt,.md,.doc,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
     +'<div class="air-doc-scroll" id="airDocScroll">'+body+'</div>';
   aiReportHasDoc = true;
   airSetDocVisible(true);
   airApplyDocViewState();
+}
+function airCompletedVersionForProgress(progress){
+  if(!window.ProjectWorkflow?.latestCompleteReportVersion)return null;
+  return ProjectWorkflow.latestCompleteReportVersion(projectWorkflow,progress&&progress.reportVersionId);
+}
+function airReportVersionSelectHtml(selectedId){
+  const versions=Array.isArray(projectWorkflow&&projectWorkflow.reportVersions)?[...projectWorkflow.reportVersions].reverse():[];
+  return '<label class="air-doc-version-picker">查看版本 <select class="air-doc-version-select"><option value="current" '+(selectedId==="current"?'selected':'')+'>当前工作稿</option>'+versions.map(version=>'<option value="'+escapeHtml(version.id)+'" '+(selectedId===version.id?'selected':'')+'>报告第'+Number(version.version||1)+'版 · '+escapeHtml(version.reason||"已保存版本")+'</option>').join("")+'</select></label>';
+}
+function airSavedVersionRules(chapter,section){
+  const snapshotRules=section&&section.logicSnapshot&&Array.isArray(section.logicSnapshot.rules)?section.logicSnapshot.rules:[];
+  let currentRules=[];
+  if(window.ReportLogicCore){
+    const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",ctx=airMaterialContext();
+    currentRules=ReportLogicCore.match(type,chapter.name,section.t,{projectText:[project.name,project.type,project.location,project.desc].filter(Boolean).join(" "),businessScenario:ctx.businessScenario})||[];
+  }
+  if(!snapshotRules.length)return {rules:currentRules,reconstructed:true};
+  return {rules:snapshotRules.map(saved=>Object.assign({},currentRules.find(rule=>rule.id===saved.id)||{},saved)),reconstructed:false};
+}
+function airSavedVersionLogicHtml(chapter,section){
+  const set=airSavedVersionRules(chapter,section),rules=set.rules;
+  if(!rules.length)return '<div class="rpt-logic-note"><b>本节生成逻辑</b><div>该早期版本未保存逻辑快照，当前规则库也未匹配到对应规则。</div></div>';
+  return '<div class="rpt-logic-note"><b>本节生成逻辑'+(set.reconstructed?'（按当前适用规则补显）':'（该版本快照）')+'</b><div>'+rules.map((rule,index)=>escapeHtml((rule.sourceNo?'第'+rule.sourceNo+'项：':'逻辑'+(index+1)+'：')+(rule.writingLogic||rule.title||"按本节规则生成")+(rule.outputForm?'；输出：'+rule.outputForm:''))).join("<br>")+'</div></div>';
+}
+function airSavedVersionFrameworkHtml(chapter,section){
+  const set=airSavedVersionRules(chapter,section),rules=set.rules;
+  if(!rules.length)return '<div class="air-section-material pending"><b>↳ 本版框架与数据需求（只读）</b><span>该早期版本没有保存对应框架，当前规则库也未匹配到该小节。</span></div>';
+  return '<div class="air-section-material pending"><b>↳ 本版框架与数据需求（只读'+(set.reconstructed?'，按当前规则补显':'')+'）</b><span><strong>所需数据与材料：</strong>'+escapeHtml(rules.map(rule=>rule.requiredSources||"按本节论证需要取得项目事实、测算结果和适用依据").join("；"))+'</span><span><strong>输出框架：</strong>'+escapeHtml(rules.map(rule=>rule.outputForm||"文字").join("；"))+'</span><span><strong>缺失处理：</strong>'+escapeHtml(rules.map(rule=>rule.missingPolicy||"缺失内容标注待补，不得虚构").join("；"))+'</span></div>';
+}
+function airOpenCompletedVersion(progress){
+  const version=airCompletedVersionForProgress(progress);
+  if(!version){alert("没有找到可恢复的完整历史版本；当前工作稿仍保留，可继续生成缺失小节。");return;}
+  airOpenReportVersionById(version.id);
+}
+function airOpenReportVersionById(versionId){
+  const versions=Array.isArray(projectWorkflow&&projectWorkflow.reportVersions)?projectWorkflow.reportVersions:[],version=versions.find(item=>item&&item.id===versionId);
+  if(!version){alert("没有找到这个报告版本，可能已被删除或尚未保存。");airRestoreDocPaneIfNeeded();return;}
+  const pane=document.getElementById("airDocPane");if(!pane)return;
+  const active=(version.chapters||[]).filter(c=>c.checked!==false),total=active.reduce((n,c)=>n+(c.sections||[]).length,0);
+  const outline=active.map(c=>'<span class="chip" data-cn="saved_'+escapeHtml(c.cn)+'"><i class="air-material-dot ok"></i>'+escapeHtml(c.cn)+'·'+escapeHtml(c.name)+'</span>').join("");
+  const body=active.map(c=>'<div class="chapter-block" id="block_saved_'+escapeHtml(c.cn)+'"><h3><span class="cn">'+escapeHtml(c.cn)+'</span>'+escapeHtml(c.name)+'</h3>'+(c.sections||[]).map((s,si)=>{
+    const source=s.editedHtml&&typeof blocksToSource==="function"?blocksToSource(s.editedHtml):(s.content||"");
+    return '<div class="section-block" id="saved_sec_'+escapeHtml(c.cn)+'_'+si+'"><h4>'+escapeHtml(s.t)+'<span class="done-stamp">该版已拟</span></h4>'+airSavedVersionLogicHtml(c,s)+airSavedVersionFrameworkHtml(c,s)+'<div class="body">'+renderContent(source)+'</div></div>';
+  }).join("")+'</div>').join("");
+  pane.classList.remove("empty");
+  pane.innerHTML='<div class="air-doc-head"><div class="air-doc-heading"><div class="air-doc-title">'+escapeHtml(project.name||"未命名项目")+' · 第'+Number(version.version||1)+'版报告</div><div class="air-doc-meta">历史版本只读预览 · 共 '+active.length+' 章 / '+total+' 个子标题；不会覆盖当前工作稿</div></div><div class="air-doc-actions">'+airReportVersionSelectHtml(version.id)+'<button type="button" class="air-doc-tool air-doc-current-draft">返回当前工作稿</button><button type="button" class="air-doc-tool air-doc-chat-toggle">收起对话</button><span class="air-doc-zoom"><button type="button" class="air-doc-tool air-doc-zoom-out">−</button><button type="button" class="air-doc-tool air-doc-zoom-reset"><span class="air-doc-zoom-value">100%</span></button><button type="button" class="air-doc-tool air-doc-zoom-in">＋</button></span><button type="button" class="air-doc-tool air-doc-fullscreen">全屏阅读</button><button type="button" class="air-doc-close">✕</button></div></div><div class="air-doc-outline">'+outline+'</div><div class="air-doc-scroll" id="airDocScroll">'+body+'</div>';
+  airSetDocVisible(true);airApplyDocViewState();
 }
 function airUpdateChapterChipStatus(cn){
   const chip = document.querySelector('.air-doc-outline .chip[data-cn="'+cn+'"]');
@@ -1195,11 +1328,12 @@ function airProgressCardHtml(m){
   const pct = m.total? Math.round(m.done/m.total*100) : 0;
   let actions = "";
   if(m.active) actions = '<button class="btn ghost air-progress-btn air-stop-btn">⏸ 停止生成</button>';
-  else if(m.stopped&&m.total>m.done) actions = '<button class="btn air-progress-btn air-resume-btn">▶ 继续生成剩余 '+(m.total-m.done)+' 节</button>';
+  else if(m.stopped&&m.total>m.done) actions = (m.recoveredFromMismatch&&airCompletedVersionForProgress(m)?'<button class="btn ghost air-progress-btn air-open-completed-version">📄 查看上一完整版本</button>':'')+'<button class="btn air-progress-btn air-resume-btn">▶ 继续'+(m.recoveredFromMismatch?'第二轮':'生成')+'剩余 '+(m.total-m.done)+' 节</button>';
   else actions = '<button class="btn air-progress-btn air-open-preview-btn">📄 查看已有报告</button><button class="btn ghost air-progress-btn air-regenerate-btn">🔒 重新生成全部</button>';
-  const label = m.active? "⏳ 正在起草，可在右侧实时查看…" : (m.stopped&&m.total>m.done? "⏸ 已暂停" : "✅ 本轮生成已完成");
+  const label = m.active? "⏳ 正在起草，可在右侧实时查看…" : (m.recoveredFromMismatch?"⚠ 已识别为后续一轮未完成稿":(m.stopped&&m.total>m.done? "⏸ 已暂停" : "✅ 本轮生成已完成"));
+  const versionNo=Number(m.reportVersion||m.targetReportVersion)||0,versionLabel=versionNo?'报告第'+versionNo+'版 · ':'';
   return '<div class="air-progress-card"><div style="flex:1; min-width:180px;">'
-    +'<div class="air-progress-text">'+label+'　已完成 '+m.done+'/'+m.total+(m.failed?'（失败 '+m.failed+'）':'')+'</div>'
+    +'<div class="air-progress-text">'+versionLabel+label+'　已完成 '+m.done+'/'+m.total+(m.failed?'（失败 '+m.failed+'）':'')+'</div>'
     +'<div class="air-progress-bar"><div class="air-progress-bar-fill" style="width:'+pct+'%;"></div></div>'
     +'</div><div class="air-progress-actions">'+actions+'</div></div>';
 }
@@ -1246,13 +1380,14 @@ function airMaterialCheckHtml(m){
   const batch=window.WebResearch?.batchStatus?.(),batchLabel=batch?(batch.status==="completed"?"🌐 查看批量检索结果（"+batch.done+"/"+batch.total+"）":batch.status==="paused"?"🌐 批量检索已暂停（"+batch.done+"/"+batch.total+"）":"🌐 查看批量检索进度（"+batch.done+"/"+batch.total+"）"):"🌐 自动批量检索全部网上缺口（"+(sum.pendingWeb||0)+"）";
   const stat=(num,label,color)=>'<div style="border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:#fff;"><b style="display:block;font-size:18px;color:'+color+';">'+(num||0)+'</b><span style="font-size:11px;color:var(--ink-soft);">'+label+'</span></div>';
   const rowHtml=item=>{const status=item.ready?'<span style="color:var(--ok-green);">✓ 已确认找到</span>':'<span style="color:var(--red);">● 待补充/待检索</span>';const kinds=(item.sourceKinds||[]).length?item.sourceKinds:["unclassified"];const channels=kinds.map(kind=>'<span style="display:inline-block;border:1px solid '+(item.missing.includes(kind)?'#e6a5a0':'#b7ddc6')+';background:'+(item.missing.includes(kind)?'#fff0ef':'#edf8f1')+';color:'+(item.missing.includes(kind)?'var(--red)':'var(--ok-green)')+';padding:1px 5px;border-radius:8px;margin:1px;font-size:10.5px;">'+escapeHtml(labels[kind]||kind)+'</span>').join(""),req=item.dataRequirement||null,reqHtml=req?'<div style="color:var(--ok-green);margin-top:4px;">'+escapeHtml(airRequirementSummary(req))+'</div>':'',web=item.missing.includes("web_search")&&req?.webAllowed?'<button type="button" class="air-web-search" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'" data-query="'+escapeHtml(req.query)+'" data-requirement-schema="'+encodeURIComponent(JSON.stringify(req))+'" data-required-sources="'+escapeHtml(item.requiredSources)+'">🌐 精确联网</button>':'';return '<tr><td style="white-space:nowrap;">第'+item.sourceNo+'项</td><td><b>'+escapeHtml(item.title)+'</b><div style="color:var(--ink-soft);margin-top:3px;white-space:pre-line;">'+escapeHtml(item.requiredSources)+'</div>'+reqHtml+'</td><td>'+channels+'</td><td><div class="air-material-row-actions">'+status+(item.blocking?'<span style="font-size:10px;color:var(--red);">重要阻断</span>':'')+(req?'<button type="button" class="air-refine-requirement" data-requirement="'+encodeURIComponent(JSON.stringify(req))+'">🎯 调整数据需求</button>':'')+web+'<button type="button" class="air-material-upload" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'">＋ 上传补充</button></div></td></tr>';};
-  return '<div class="air-card"><div class="air-step-done" style="margin-bottom:10px;"><b>材料完整性台账 · 逻辑 v'+inv.version+'</b><span>共'+inv.total+'项、'+inv.chapters.length+'章。以下来源数量允许交叉，例如同一小节可能同时需要知识库和人工材料。</span></div>'
+  const content='<div class="air-card"><div class="air-step-done" style="margin-bottom:10px;"><b>材料完整性台账 · 逻辑 v'+inv.version+'</b><span>共'+inv.total+'项、'+inv.chapters.length+'章。以下来源数量允许交叉，例如同一小节可能同时需要知识库和人工材料。</span></div>'
     +(aiReportCanEnhanceLogic?'<div class="air-enhance-entry-tip"><b>管理员增强模式已开启</b><span>请先生成右侧正文并持续修改；定稿后从对应小节点击“从本节成稿提炼增强规则”，AI会比较版本并交由管理员审定。</span></div>':'')
     +'<div style="display:grid;grid-template-columns:repeat(7,minmax(86px,1fr));gap:7px;margin-bottom:10px;">'+stat(sum.ready,"已确认找到","var(--ok-green)")+stat(sum.system_rule,"系统规则直接生成","var(--bp)")+stat(sum.pendingKnowledge,"需从知识库检索","var(--red)")+stat(sum.pendingWeb,"需网上检索","var(--red)")+stat(sum.pendingProvider,"需调用数据接口","var(--red)")+stat(sum.pendingCalculation,"需从测算引擎取得","var(--red)")+stat(sum.pendingManual,"需人工上传","var(--red)")+'</div>'
     +'<div style="display:flex;gap:7px;margin-bottom:8px;flex-wrap:wrap;"><button type="button" class="btn sm ghost" id="airMaterialExpandAll">展开全部</button><button type="button" class="btn sm ghost" id="airMaterialCollapseAll">收起全部</button><button type="button" class="btn sm ghost air-material-ask" data-prompt="请把全报告'+inv.total+'项材料需求按章节列成完整Markdown表格，列出序号、材料名称、获取渠道、当前状态和是否阻断，不要省略。">让AI列完整材料表</button><button type="button" class="btn sm air-batch-web-search" id="airBatchWebSearch" '+(sum.pendingWeb||batch?'':'disabled')+'>'+batchLabel+'</button><button type="button" class="btn sm air-batch-material-upload" id="airBatchMaterialUpload">＋ 批量上传材料</button></div>'
     +'<div style="max-height:470px;overflow:auto;border:1px solid var(--line);border-radius:8px;">'+inv.chapters.map(g=>'<details class="air-material-chapter" style="border-bottom:1px solid var(--line);"><summary style="cursor:pointer;padding:11px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b style="min-width:210px;">'+escapeHtml(g.chapter)+'</b><span style="color:var(--ok-green);">已找到 '+g.counts.ready+'/'+g.total+'</span><span style="color:var(--red);">需知识库检索 '+g.counts.pendingKnowledge+'</span><span style="color:var(--red);">需网搜 '+g.counts.pendingWeb+'</span><span style="color:var(--red);">需接口 '+g.counts.pendingProvider+'</span><span style="color:var(--red);">需测算 '+g.counts.pendingCalculation+'</span><span style="color:var(--red);">需上传 '+g.counts.pendingManual+'</span></summary><div style="padding:0 10px 11px;"><table class="air-material-table" style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr style="text-align:left;background:#f5f8fb;"><th style="padding:7px;">序号</th><th style="padding:7px;">具体需要的内容/材料</th><th style="padding:7px;">获取渠道</th><th style="padding:7px;min-width:150px;">当前状态/补充</th></tr></thead><tbody>'+g.items.map(rowHtml).join("")+'</tbody></table><button type="button" class="btn sm ghost air-material-ask" style="margin-top:8px;" data-prompt="请把'+escapeHtml(g.chapter)+'全部材料需求列成表格，并告诉我应该先补哪几项。">询问本章补充顺序</button></div></details>').join("")+'</div>'
     +'<input type="file" id="airMaterialFile" accept=".txt,.md,.doc,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;"><button class="btn air-start-gen">先联网检索并集中确认 →</button><button class="btn" id="airBackgroundSearchGenerate">后台检索并立即开始可研生成 →</button><button class="btn ghost air-material-ask" data-prompt="请按重要程度汇总全报告必须由我人工补充的材料清单，并列成表格">仅汇总人工材料</button></div><div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">“先联网检索”会等待你集中采用依据后再生成；“后台检索并立即生成”会让联网任务继续运行，同时先按现有资料起草可研，完成后可回到批量检索采用高价值来源并更新受影响章节。上传材料只关联你选择的逻辑项。</div></div>';
+  return airPersistentCardHtml("materials","数据与材料来源","共"+(inv.total||0)+"项；待知识库"+(sum.pendingKnowledge||0)+"、待网搜"+(sum.pendingWeb||0)+"、待人工"+(sum.pendingManual||0),content,false);
 }
 
 function airRefreshMaterialInventory(){
@@ -1580,9 +1715,15 @@ async function airFullMaterialTableMarkdown(){
 
 /* ================= 阶段⑥ 交付：全部复用现成的导出/审查/存档逻辑 ================= */
 function airDeliverHtml(){
+  const coverage=airReportGenerationStatus(),complete=coverage.complete;
+  const title=complete?'下一步想做什么？':'下一步怎么处理当前工作稿？';
+  const copy=complete?'你可以先复核签发，也可以继续在下方和我对话。我能预演参数变化、判断受影响章节，或者生成某一小节的候选修改稿；正式内容不会未经确认就被覆盖。':'当前工作稿已完成 '+coverage.generated+'/'+coverage.total+' 节。可以继续生成剩余 '+coverage.remaining+' 节，也可先下载当前阶段 Word 或查看上一完整版本；不会强制重新生成已完成内容。';
+  const actions=complete
+    ?'<button class="btn ghost air-act air-act-btn" data-act="exportWord">📄 导出可研报告（Word）</button><button class="btn ghost air-act air-act-btn" data-act="exportExcel">📊 导出测算表（Excel）</button><button class="btn ghost air-act air-act-btn" data-act="exportCalcWord">📋 导出测算说明书（Word）</button><button class="btn air-act air-act-btn air-review-primary" data-act="review">🔍 进入复核与签发 →</button><button class="btn ghost air-act air-act-btn" data-act="saveCase">📁 存入历史项目案例库</button>'
+    :'<button type="button" class="btn air-resume-inline-btn">▶ 继续生成剩余 '+coverage.remaining+' 节</button><button class="btn ghost air-act air-act-btn" data-act="exportWord">📄 下载当前阶段 Word</button>'+(airCompletedVersionForProgress(aiReportProgressMsg)?'<button type="button" class="btn ghost air-open-completed-version">📄 查看上一完整版本</button>':'');
   return '<div class="air-card air-deliver-card">'
-    +'<div class="air-deliver-guide"><div class="air-deliver-title">下一步想做什么？</div>'
-    +'<div class="air-deliver-copy">你可以先复核签发，也可以继续在下方和我对话。我能预演参数变化、判断受影响章节，或者生成某一小节的候选修改稿；正式内容不会未经确认就被覆盖。</div>'
+    +'<div class="air-deliver-guide"><div class="air-deliver-title">'+title+'</div>'
+    +'<div class="air-deliver-copy">'+copy+'</div>'
     +'<div class="air-deliver-prompts"><button type="button" class="air-prompt" data-prompt="把租金调整为42元，看看影响">把租金调整为42元，看看影响</button>'
     +'<button type="button" class="air-prompt" data-prompt="你觉得这个项目整体怎么样？请做一次综合诊断">评价这个项目</button>'
     +'<button type="button" class="air-prompt" data-prompt="这个项目还有哪些地方可以提升？请按优先级给建议">寻找提升点</button>'
@@ -1590,13 +1731,7 @@ function airDeliverHtml(){
     +'<button type="button" class="air-prompt" data-prompt="项目背景这一节应该按什么逻辑写？需要什么输出形式？">查看小节生成逻辑</button>'
     +'<button type="button" class="air-prompt" data-prompt="项目背景这一节目前还缺哪些材料？请区分可自动检索和必须人工上传的内容">检查小节材料缺口</button>'
     +'<button type="button" class="air-prompt" data-prompt="帮我修改项目建设必要性这一节，先给候选稿">修改某一章节文字</button></div></div>'
-    +'<div class="air-deliver-actions">'
-    +'<button class="btn ghost air-act air-act-btn" data-act="exportWord">📄 导出可研报告（Word）</button>'
-    +'<button class="btn ghost air-act air-act-btn" data-act="exportExcel">📊 导出测算表（Excel）</button>'
-    +'<button class="btn ghost air-act air-act-btn" data-act="exportCalcWord">📋 导出测算说明书（Word）</button>'
-    +'<button class="btn air-act air-act-btn air-review-primary" data-act="review">🔍 进入复核与签发 →</button>'
-    +'<button class="btn ghost air-act air-act-btn" data-act="saveCase">📁 存入历史项目案例库</button>'
-    +'</div><div class="air-deliver-tip">也可以直接在对话框发送“复核”，我会自动带你进入。</div></div>';
+    +'<div class="air-deliver-actions">'+actions+'</div><div class="air-deliver-tip">'+(complete?'也可以直接在对话框发送“复核”，我会自动带你进入。':'未完成稿不会被标记为最终版本，也不会覆盖上一完整版本。')+'</div></div>';
 }
 async function airDeliverAction(act){
   if(act==="exportWord") return exportWord();
@@ -1674,17 +1809,18 @@ function renderAiReportMsgs(){
     else if(m.kind==="materialCheck") body = airMaterialCheckHtml(m);
     else if(m.kind==="deliver") body = airDeliverHtml();
     else if(m.kind==="genProgress") body = airProgressCardHtml(m);
+    else if(airIsIncompleteGenerationMessage(m)) body = airGenerationIncompleteHtml(m);
     else if(m.kind==="calcPreview") body = airCalcPreviewHtml(m);
     else if(m.kind==="calcResult") body = airCalcResultHtml(m);
     else if(m.kind==="loading") body = '<div class="air-loading"><span class="air-dots"><span></span><span></span><span></span></span>'
       +'<span class="air-loading-label">'+escapeHtml(m.content)+'</span></div>';
     else body = (window.MD? window.MD.renderHtml(m.content||"") : escapeHtml(m.content||"").replace(/\n/g,"<br>"));
-    const collapsibleText=m.role==="assistant"&&m.kind==="text"&&(String(m.content||"").trim().length>120||/\r?\n/.test(String(m.content||"")));
+    const collapsibleText=m.role==="assistant"&&m.kind==="text"&&!airIsIncompleteGenerationMessage(m)&&(String(m.content||"").trim().length>120||/\r?\n/.test(String(m.content||"")));
     if(collapsibleText){
       const detailId="airMsgDetail_"+m.id,firstLine=String(m.content||"").split(/\r?\n/).map(line=>line.trim()).find(Boolean)||"查看本步骤完整结果";
       body='<div class="air-msg-summary">'+escapeHtml(firstLine.length>105?firstLine.slice(0,105)+'…':firstLine)+'</div><div class="air-msg-detail" id="'+detailId+'" hidden>'+body+'</div>';
     }
-    const copyBtn = (m.role==="assistant" && m.kind==="text") ? '<button class="air-msg-copy" data-copy="'+m.id+'">复制</button>' : "";
+    const copyBtn = (m.role==="assistant" && (m.kind==="text"||m.kind==="generationIncomplete")) ? '<button class="air-msg-copy" data-copy="'+m.id+'">复制</button>' : "";
     const detailBtn = collapsibleText ? '<button class="air-msg-detail-toggle" data-detail-target="airMsgDetail_'+m.id+'">查看详情</button>' : "";
     const retryBtn = m.retry ? '<div style="margin-top:8px;"><button class="btn ghost air-msg-retry" data-retry="'+m.id+'" style="padding:4px 12px; font-size:11.5px;">重试</button></div>' : "";
     return '<div class="air-msg '+(m.role==="user"?"user":"assistant")+'">'
@@ -1700,6 +1836,11 @@ function renderAiReportMsgs(){
   document.querySelectorAll('input[name="airSitePrimary"]').forEach(radio=>radio.onchange=()=>{document.querySelectorAll('.air-site-role').forEach((label,index)=>{const input=label.querySelector('input');label.lastChild.textContent=' '+(input.checked?'主项目':'设为主项目');});});
   if(s("airConfirmLocation")) s("airConfirmLocation").onclick = airConfirmLocation;
   document.querySelectorAll('.air-card-detail-toggle,.air-msg-detail-toggle').forEach(button=>button.onclick=()=>{const detail=document.getElementById(button.dataset.detailTarget);if(!detail)return;const opening=detail.hidden;detail.hidden=!opening;button.textContent=opening?'收起详情':'查看详情';const summary=button.closest('.air-msg')?.querySelector('.air-msg-summary');if(summary)summary.hidden=opening;});
+  document.querySelectorAll('.air-persistent-card').forEach(card=>card.ontoggle=()=>{
+    const kind=card.dataset.airCard;if(!kind)return;
+    aiReportCollapsedCards[kind]=!card.open;
+    airSaveLocalState();
+  });
   document.querySelectorAll('.air-location-site-refresh').forEach(button=>button.onclick=()=>airSearchLocationSite(+button.dataset.siteIndex));
   document.querySelectorAll('.air-location-site-address').forEach(input=>input.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();airSearchLocationSite(+input.dataset.siteIndex);}});
   if(s("airSkipLocation")) s("airSkipLocation").onclick = airSkipLocation;
@@ -1762,15 +1903,9 @@ function renderAiReportMsgs(){
   document.querySelectorAll(".air-stop-btn").forEach(b=>{
     b.onclick = ()=>{ aiReportStopFlag = true; b.disabled = true; b.textContent = "正在停止…"; };
   });
-  document.querySelectorAll(".air-resume-btn").forEach(b=>{
-    b.onclick = ()=>{
-      aiReportStopFlag = false;
-      aiReportProgressMsg.active = true; aiReportProgressMsg.stopped = false;
-      renderAiReportMsgs();
-      airRunGenTasks();
-    };
-  });
+  document.querySelectorAll(".air-resume-btn,.air-resume-inline-btn").forEach(b=>{b.onclick=airResumeGeneration;});
   document.querySelectorAll(".air-open-preview-btn").forEach(b=>b.onclick=()=>airRestoreDocPaneIfNeeded());
+  document.querySelectorAll(".air-open-completed-version").forEach(b=>b.onclick=()=>airOpenCompletedVersion(aiReportProgressMsg));
   document.querySelectorAll(".air-regenerate-btn").forEach(b=>b.onclick=()=>airRequestFullRegeneration());
   airRenderChips();
 }
@@ -1885,21 +2020,25 @@ function airSerializableState(){
     if(m.kind==="locationCard"||m.kind==="locationResult"){chat.push({role:m.role,kind:m.kind,content:"",sites:m.sites||(m.kind==="locationResult"?aiReportSiteLocations:aiReportSiteSearches)||[]});return;}
     chat.push({role:m.role, kind:m.kind, content:m.content||""});
   });
-  return { savedAt:Date.now(),stage:airCurrentStage(),chat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,paramsConfirmed:aiReportParamsConfirmed,
+  return { savedAt:Date.now(),stateRevision:aiReportStateRevision,stage:airCurrentStage(),chat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,paramsConfirmed:aiReportParamsConfirmed,
     materialCheckOpen:aiReportChat.some(m=>m.kind==="materialCheck"),
+    collapsedCards:Object.assign({},aiReportCollapsedCards),
     locationCandidates:aiReportLocationCandidates,locationConfirmed:aiReportLocationConfirmed,siteSearches:aiReportSiteSearches,siteLocations:aiReportSiteLocations,
     calcType:calcType||(calcResult&&calcResult.__ctype)||null,calcParams:calcParams||null,calcSummary:calcResult&&calcResult.summary||null,
     currentCalcSnapshotId:projectWorkflow&&projectWorkflow.currentCalcSnapshotId||null,currentReportVersionId:projectWorkflow&&projectWorkflow.currentReportVersionId||null,
     pendingTaskKeys };
 }
 function airSaveState(){
+  aiReportStateRevision++;
   const state=airSerializableState();
   airSaveLocalState(state); // 同步落本地，刚点击后立即刷新也不会倒退
-  try{
-    fetch("/api/aireport", {method:"POST",
+  aiReportStateSaveInFlight=aiReportStateSaveInFlight.catch(()=>false).then(async()=>{
+    try{const response=await fetch("/api/aireport", {method:"POST",
       headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
-      body: JSON.stringify({action:"saveState",projectId:currentProjectId||undefined,state})});
-  }catch(e){ /* 保存失败不影响当前对话，下次关键节点会重试 */ }
+      body: JSON.stringify({action:"saveState",projectId:currentProjectId||undefined,state})});return response.ok;
+    }catch(e){return false;}
+  });
+  return aiReportStateSaveInFlight;
 }
 function airRestoredConfirmation(state){
   if(!state)return false;
@@ -1928,7 +2067,8 @@ function airFillCurrentProjectGaps(){
   return true;
 }
 async function airRestoreMaterialCheck(state){
-  if(!state?.materialCheckOpen||!window.ReportLogicCore||aiReportChat.some(m=>m.kind==="materialCheck"))return;
+  const chat=Array.isArray(state&&state.chat)?state.chat:[],hasReportFlow=!!(state&&(state.hasDoc||["generating","paused","delivered"].includes(state.stage)||chat.some(m=>m&&["genProgress","deliver","generationIncomplete"].includes(m.kind))));
+  if(!(state?.materialCheckOpen||hasReportFlow)||!window.ReportLogicCore||aiReportChat.some(m=>m.kind==="materialCheck"))return;
   const type=state.calcType||calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent";
   try{
     await ReportLogicCore.load(type);
@@ -1938,6 +2078,9 @@ async function airRestoreMaterialCheck(state){
 }
 async function airLoadState(){
   if(aiReportChatLoaded) return;
+  // 直接刷新到AI可研时，项目正文会在大纲和项目接口完成后才恢复。
+  // 此时若用空的chapters纠正进度，会把真实27/42误写成0/0；等待restoreDraft后的第二次渲染再加载AI会话。
+  if(currentProjectId&&!chapters.length)return;
   aiReportChatLoaded = true;
   if(aiReportChat.length) return; // 本次会话已经有内容了，不覆盖
   try{
@@ -1949,7 +2092,9 @@ async function airLoadState(){
     // 若用户刚完成一步就刷新，网络保存可能还在途中；优先采用时间更新的本地即时状态。
     const state=localState&&Number(localState.savedAt)>Number(serverState&&serverState.savedAt||0)?localState:(serverState||localState);
     if(state && (state.extracted||state.suggested||state.calcParams||state.hasDoc||(Array.isArray(state.chat)&&state.chat.length))){
+      aiReportCollapsedCards=Object.assign({params:null,materials:null},state.collapsedCards||{});
       aiReportChat = (Array.isArray(state.chat)?state.chat:[]).map(m=>Object.assign({id: ++aiReportMsgSeq}, m));
+      aiReportStateRevision=Math.max(aiReportStateRevision,Number(state.stateRevision)||0);
       aiReportExtracted = state.extracted || null;
       airFillCurrentProjectGaps();
       aiReportSuggested = state.suggested || null;
@@ -1961,14 +2106,27 @@ async function airLoadState(){
       aiReportParamsConfirmed=airRestoredConfirmation(state);
       if(state.calcType)calcType=state.calcType;
       if(aiReportParamsConfirmed&&state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;}catch(e){aiReportParamsConfirmed=false;}}
-      const repairedState=airRepairFlowCards();
+      let repairedState=airRepairFlowCards();
       await airRestoreMaterialCheck(state);
-      aiReportProgressMsg=aiReportChat.find(m=>m.kind==="genProgress")||null;
-      if(Array.isArray(state.pendingTaskKeys)&&state.pendingTaskKeys.length&&chapters.length){
-        aiReportPendingTasks=state.pendingTaskKeys.map(k=>{const info=findChapterSection(k.cn,+k.si);return info?{c:info.chapter,s:info.section,si:+k.si}:null;}).filter(t=>t&&!String(t.s.editedHtml||t.s.content||"").trim());
-        if(aiReportProgressMsg){aiReportProgressMsg.active=false;aiReportProgressMsg.stopped=aiReportPendingTasks.length>0;}
+      aiReportProgressMsg=[...aiReportChat].reverse().find(m=>m.kind==="genProgress")||null;
+      if(aiReportProgressMsg&&window.ProjectWorkflow?.recoverCompletedReport){
+        const recovered=ProjectWorkflow.recoverCompletedReport(chapters,projectWorkflow,aiReportProgressMsg);
+        if(recovered.recovered){chapters=recovered.chapters;aiReportProgressMsg.reportVersionId=recovered.version.id;aiReportProgressMsg.reportVersion=Number(recovered.version.version)||null;aiReportProgressMsg.recoveredFromMismatch=false;repairedState=true;saveDraft();}
       }
-      if(aiReportProgressMsg&&!state.pendingTaskKeys?.length){aiReportProgressMsg.active=false;aiReportProgressMsg.stopped=false;}
+      aiReportPendingTasks=[];
+      chapters.filter(c=>c.checked!==false).forEach(c=>(c.sections||[]).forEach((s,si)=>{if(!String(s.editedHtml||s.content||"").trim())aiReportPendingTasks.push({c,s,si});}));
+      if(aiReportProgressMsg&&window.ProjectWorkflow?.reconcileGenerationProgress){
+        const reconciled=ProjectWorkflow.reconcileGenerationProgress(aiReportProgressMsg,chapters);
+        if(reconciled.repaired){
+          Object.assign(aiReportProgressMsg,reconciled.progress);
+          repairedState=true;
+        }
+        if(!aiReportProgressMsg.reportVersion&&!aiReportProgressMsg.targetReportVersion){aiReportProgressMsg.targetReportVersion=ProjectWorkflow.nextReportVersionNumber(projectWorkflow);repairedState=true;}
+        if(reconciled.status.complete&&!airCompletedVersionForProgress(aiReportProgressMsg)&&window.ProjectWorkflow?.createReportVersion){
+          const version=ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("刷新恢复时补建完成版本"));aiReportProgressMsg.reportVersionId=version&&version.id||null;aiReportProgressMsg.reportVersion=Number(version&&version.version)||null;repairedState=true;saveDraft();
+        }
+      }
+      repairedState=airRepairFlowCards()||repairedState;
       if(aiReportHasDoc&&chapters.length)airRestoreDocPaneIfNeeded();
       renderAiReportMsgs();
       if(repairedState)airSaveState();
@@ -1977,9 +2135,14 @@ async function airLoadState(){
   }catch(e){
     const state=airLoadLocalState();
     if(state){
-      aiReportChat=(state.chat||[]).map(m=>Object.assign({id:++aiReportMsgSeq},m));aiReportExtracted=state.extracted||null;airFillCurrentProjectGaps();aiReportSuggested=state.suggested||null;aiReportLocationCandidates=Array.isArray(state.locationCandidates)?state.locationCandidates:[];aiReportLocationConfirmed=state.locationConfirmed||null;aiReportHasDoc=!!state.hasDoc;aiReportParamsConfirmed=airRestoredConfirmation(state);
+      aiReportCollapsedCards=Object.assign({params:null,materials:null},state.collapsedCards||{});aiReportStateRevision=Math.max(aiReportStateRevision,Number(state.stateRevision)||0);aiReportChat=(state.chat||[]).map(m=>Object.assign({id:++aiReportMsgSeq},m));aiReportExtracted=state.extracted||null;airFillCurrentProjectGaps();aiReportSuggested=state.suggested||null;aiReportLocationCandidates=Array.isArray(state.locationCandidates)?state.locationCandidates:[];aiReportLocationConfirmed=state.locationConfirmed||null;aiReportHasDoc=!!state.hasDoc;aiReportParamsConfirmed=airRestoredConfirmation(state);
       if(state.calcType)calcType=state.calcType;if(aiReportParamsConfirmed&&state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;}catch(_){aiReportParamsConfirmed=false;} }
-      const repairedState=airRepairFlowCards();await airRestoreMaterialCheck(state);renderAiReportMsgs();if(repairedState)airSaveState();airMaybeAutoRetryMaterialExtraction();
+      let repairedState=airRepairFlowCards();await airRestoreMaterialCheck(state);aiReportProgressMsg=[...aiReportChat].reverse().find(m=>m.kind==="genProgress")||null;
+      if(aiReportProgressMsg&&window.ProjectWorkflow?.recoverCompletedReport){const recovered=ProjectWorkflow.recoverCompletedReport(chapters,projectWorkflow,aiReportProgressMsg);if(recovered.recovered){chapters=recovered.chapters;aiReportProgressMsg.reportVersionId=recovered.version.id;aiReportProgressMsg.reportVersion=Number(recovered.version.version)||null;aiReportProgressMsg.recoveredFromMismatch=false;repairedState=true;saveDraft();}}
+      aiReportPendingTasks=[];chapters.filter(c=>c.checked!==false).forEach(c=>(c.sections||[]).forEach((s,si)=>{if(!String(s.editedHtml||s.content||"").trim())aiReportPendingTasks.push({c,s,si});}));
+      if(aiReportProgressMsg&&window.ProjectWorkflow?.reconcileGenerationProgress){const reconciled=ProjectWorkflow.reconcileGenerationProgress(aiReportProgressMsg,chapters);if(reconciled.repaired){Object.assign(aiReportProgressMsg,reconciled.progress);repairedState=true;}if(!aiReportProgressMsg.reportVersion&&!aiReportProgressMsg.targetReportVersion){aiReportProgressMsg.targetReportVersion=ProjectWorkflow.nextReportVersionNumber(projectWorkflow);repairedState=true;}}
+      repairedState=airRepairFlowCards()||repairedState;
+      if(aiReportHasDoc&&chapters.length)airRestoreDocPaneIfNeeded();renderAiReportMsgs();if(repairedState)airSaveState();airMaybeAutoRetryMaterialExtraction();
     }else if(window.ProjectWorkflow?.aiReportShouldSeedProject(aiReportEntryContext))airSeedCurrentProject();
   }
 }
@@ -2013,6 +2176,15 @@ function airRepairFlowCards(){
     if(oldIndex>=0)aiReportChat.splice(oldIndex,1,result);else{const infoIndex=aiReportChat.findIndex(m=>m.kind==="infoCard");aiReportChat.splice(infoIndex>=0?infoIndex+1:0,0,result);}
     repaired=true;
   }
+  const progressIndexes=aiReportChat.map((m,index)=>m.kind==="genProgress"?index:-1).filter(index=>index>=0);
+  if(progressIndexes.length>1){const keep=progressIndexes[progressIndexes.length-1];aiReportChat=aiReportChat.filter((m,index)=>m.kind!=="genProgress"||index===keep);repaired=true;}
+  const generationCoverage=airReportGenerationStatus();
+  if(generationCoverage.complete){
+    const before=aiReportChat.length;aiReportChat=aiReportChat.filter(m=>!airIsIncompleteGenerationMessage(m));
+    if(aiReportChat.length!==before)repaired=true;
+  }else{
+    aiReportChat.forEach(m=>{if(airIsIncompleteGenerationMessage(m)&&m.kind!=="generationIncomplete"){m.kind="generationIncomplete";repaired=true;}});
+  }
   const dedupe=kind=>{let seen=false;aiReportChat=aiReportChat.filter(m=>m.kind!==kind||(!seen&&(seen=true)));};
   ["infoCard","locationCard","locationResult","confirmCard","genConfirm","deliver"].forEach(dedupe);
   const has=kind=>aiReportChat.some(m=>m.kind===kind);
@@ -2021,6 +2193,7 @@ function airRepairFlowCards(){
   if(aiReportSuggested&&!has("confirmCard"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"confirmCard"});
   const stage=airCurrentStage();
   if(stage==="calculated"&&!has("genConfirm"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"genConfirm"});
-  if(stage==="delivered"&&!has("deliver"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"deliver"});
+  const settledProgress=[...aiReportChat].reverse().find(m=>m.kind==="genProgress");
+  if((stage==="delivered"||(generationCoverage.generated>0&&aiReportParamsConfirmed&&aiReportSuggested&&(!settledProgress||settledProgress.active===false)))&&!has("deliver"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"deliver"});
   return repaired;
 }

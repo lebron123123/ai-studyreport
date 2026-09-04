@@ -1,0 +1,61 @@
+{
+  "name": "龙悦居商业配套改造升级项目_跨项目留出集候选",
+  "calcType": "commercial-renovation",
+  "projectType": "商业改造（自持改造）",
+  "region": "深圳市龙华区",
+  "tags": ["龙悦居", "商业改造", "存量资产盘活", "留出集"],
+  "datasetRole": "holdout",
+  "sourceProjectId": "longyue-commercial-renovation-20260629",
+  "approvalStatus": "historical_document_holdout_candidate",
+  "sourceDocument": {
+    "fileName": "附件9：龙悦居商业配套改造升级项目可行性研究报告（20260629）.docx",
+    "sha256": "d850413026be64edc4fce103ad457abaf8a263f13cdf8ee9c413eb383ae880ae",
+    "paragraphCount": 3921,
+    "tableCount": 36,
+    "note": "来自另一真实项目，仅作为跨项目留出集候选；须由业务负责人确认版本效力后发布。"
+  },
+  "sections": [
+    {
+      "chapter": "第一章　总论",
+      "title": "项目概况",
+      "text": "项目为深圳龙华北站社区龙悦居配套商业升级改造，总建筑面积21300.46平方米，其中盒子商业13563.5平方米、街区商业7736.96平方米。",
+      "numeric": true,
+      "prov": {"projectFields": [{"label": "龙悦居可研报告20260629", "sourceRef": "sha256:d850413026be64edc4fce103ad457abaf8a263f13cdf8ee9c413eb383ae880ae"}]}
+    },
+    {
+      "chapter": "投资估算与资金筹措",
+      "title": "总投资估算",
+      "text": "项目总投资估算19174万元，其中基础管理费13934万元、改造成本5240万元。",
+      "numeric": true,
+      "prov": {"projectFields": [{"label": "龙悦居可研报告20260629", "sourceRef": "sha256:d850413026be64edc4fce103ad457abaf8a263f13cdf8ee9c413eb383ae880ae"}]}
+    },
+    {
+      "chapter": "财务评价",
+      "title": "财务评价结论",
+      "text": "所得税后财务净现值为35万元，所得税后财务内部收益率为5.13%，高于5.0%的基准收益率。",
+      "numeric": true,
+      "prov": {"projectFields": [{"label": "龙悦居可研报告20260629", "sourceRef": "sha256:d850413026be64edc4fce103ad457abaf8a263f13cdf8ee9c413eb383ae880ae"}]}
+    },
+    {
+      "chapter": "结论与建议",
+      "title": "研究结论",
+      "text": "项目改造资产回报率为20.55%，项目净利润为1718万元，集团可增加收入3002万元，综合判断项目建设必要且经济可行。",
+      "numeric": true,
+      "prov": {"projectFields": [{"label": "龙悦居可研报告20260629", "sourceRef": "sha256:d850413026be64edc4fce103ad457abaf8a263f13cdf8ee9c413eb383ae880ae"}]}
+    }
+  ],
+  "expectedFacts": {
+    "grossAreaSqm": 21300.46,
+    "totalInvestmentWan": 19174,
+    "renovationCostWan": 5240,
+    "irrPercent": 5.13,
+    "npvWan": 35,
+    "assetReturnRatePercent": 20.55,
+    "netProfitWan": 1718,
+    "incrementalIncomeWan": 3002
+  },
+  "reviewBaseline": {
+    "knownGaps": ["尚未确认该文件是否为正式签发版", "章节名称需在首次导入时与系统模板映射"],
+    "publishGate": "业务负责人确认来源版本与关键数据后，才能发布为正式Holdout样本"
+  }
+}

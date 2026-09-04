@@ -2,7 +2,7 @@
 (function reportTableAdminModule(global){
   "use strict";
   const escHtml=value=>typeof esc==="function"?esc(value):String(value||"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
-  const LABELS={rent:"出租类", "gaibao-housing":"非居改保（住房改造）", "gaibao-commercial":"商业改造（自持改造）"};
+  const LABELS={rent:"出租类", "gaibao-housing":"非居改保、居改居等（住房改造）", "gaibao-commercial":"商业改造（自持改造）"};
   const TYPES=Object.keys(LABELS);
   let mountedRoot=null,workingSet=null,editing=false,busy=false,activeType="rent";
   const clone=value=>JSON.parse(JSON.stringify(value));

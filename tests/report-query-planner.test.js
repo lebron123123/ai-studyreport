@@ -1,0 +1,5 @@
+const test=require("node:test"),assert=require("node:assert/strict"),P=require("../report-query-planner.js");
+test("财务指标必须回到白箱测算而不是联网查询",()=>{const p=P.createPlan({purpose:"计算项目IRR",targetMetric:"irr"});assert.equal(p.decision,P.SOURCE.CALCULATION);assert.equal(p.webAllowed,false);assert.equal(p.budget.maxQueries,0);});
+test("项目事实和文件优先于互联网",()=>{assert.equal(P.createPlan({purpose:"项目名称",inProjectFacts:true}).decision,P.SOURCE.PROJECT_FACT);assert.equal(P.createPlan({purpose:"权属证明",inProjectFiles:true}).decision,P.SOURCE.PROJECT_FILE);});
+test("网络查询按风险分配最小预算",()=>{const low=P.createPlan({purpose:"周边配套介绍"}),high=P.createPlan({purpose:"政策效力与投资决策依据"});assert.equal(low.budget.maxQueries,1);assert.equal(high.budget.maxQueries,4);assert.ok(high.budget.minIndependentSources>=2);});
+test("证据已满足、预算耗尽或连续无增益时立即停止",()=>{let p=P.createPlan({purpose:"市场租金",risk:"medium"});p=P.record(p,{accepted:false});assert.equal(P.nextAction(p,p).stop,false);p=P.record(p,{accepted:false});assert.match(P.nextAction(p,p).reason,/连续两次/);const good=P.record(P.createPlan({purpose:"政策依据",risk:"high"}),{accepted:true,independentSources:2,quality:88});assert.match(good.stopReason,/满足证据/);});

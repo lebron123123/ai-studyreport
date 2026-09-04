@@ -9,13 +9,14 @@ const PRICE_IN_PER_M = 2, PRICE_OUT_PER_M = 8;   // 元/百万tokens，按DeepSe
 const EST_IN_PER_SEC = 1200, EST_OUT_PER_SEC = 700; // 每子节预估token
 const project = { name:"", owner:"", industry:"", location:"", type:"", scale:"", desc:"" };
 let projectWorkflow = window.ProjectWorkflow ? window.ProjectWorkflow.ensureState({}) : {calcSnapshots:[],reportVersions:[]};
+let reportDocumentRevision = 0;
 
 
 /* ---------- 草稿自动存档（浏览器本地，防刷新丢失） ---------- */
 const DRAFT_KEY = "fs_draft_v1";
 function buildDraftData(){
   return {
-    ts: Date.now(), appMode, aiReportSession:typeof aiReportExtracted!=="undefined"&&!!aiReportExtracted, domainKey, currentStep, signed, docNo,
+    ts: Date.now(),projectId:typeof currentProjectId!=="undefined"?currentProjectId:null,documentRevision:reportDocumentRevision,appMode, aiReportSession:typeof aiReportExtracted!=="undefined"&&!!aiReportExtracted, domainKey, currentStep, signed, docNo,
     project: project, calcParams: calcParams, kb: kbEntries, workflow: projectWorkflow,
     chapters: chapters.map(c=>({cn:c.cn, name:c.name, checked:c.checked,
       sections:c.sections.map(s=>({t:s.t, numeric:s.numeric, content:s.content, editedHtml:s.editedHtml||null,
@@ -24,6 +25,7 @@ function buildDraftData(){
   };
 }
 function saveDraft(){
+  reportDocumentRevision++;
   try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(buildDraftData())); }catch(e){}
   scheduleCloudSave();
 }
@@ -38,23 +40,13 @@ function restoreDraft(d, options){
   appMode = options.openHome ? null
     : (window.ProjectWorkflow?ProjectWorkflow.resumeAppMode(d.appMode,!!d.aiReportSession):(d.aiReportSession?"aireport":"report"));
   domainKey = d.domainKey; signed = !!d.signed; docNo = d.docNo||null;
+  reportDocumentRevision=Math.max(reportDocumentRevision,Number(d.documentRevision)||0);
   Object.assign(project, d.project||{});
   calcParams = d.calcParams||null;
   projectWorkflow = window.ProjectWorkflow ? window.ProjectWorkflow.ensureState(d.workflow||{}) : (d.workflow||{calcSnapshots:[],reportVersions:[]});
   kbEntries = d.kb||[];
   if(domainKey){ loadDomain(domainKey); Object.assign(project, d.project||{}); }
-  if(d.chapters && chapters.length){
-    d.chapters.forEach((dc,i)=>{
-      if(!chapters[i]) return;
-      chapters[i].checked = dc.checked;
-      dc.sections.forEach((ds,j)=>{
-        if(chapters[i].sections[j]){ Object.assign(chapters[i].sections[j],{
-          content:ds.content||"",editedHtml:ds.editedHtml||null,locked:!!ds.locked,syncStatus:ds.syncStatus||"current",
-          staleReason:ds.staleReason||"",staleKeys:ds.staleKeys||[],pendingRevision:ds.pendingRevision||null,
-          undoStack:ds.undoStack||[],prov:ds.prov||null,logicSnapshot:ds.logicSnapshot||null}); }
-      });
-    });
-  }
+  if(d.chapters&&chapters.length)chapters=window.ProjectWorkflow?.mergeReportDraft?ProjectWorkflow.mergeReportDraft(chapters,d.chapters):chapters;
   if(calcParams){
     try{
       const t=(projectWorkflow.calcSnapshots||[]).find(x=>x.id===projectWorkflow.currentCalcSnapshotId)?.calcType
@@ -415,7 +407,7 @@ function reportSectionLogicSnapshot(c,s,rules){
   if(s?.pendingRevision?.logicRevision)return s.pendingRevision.logicRevision;
   if(!Array.isArray(rules)&&s?.logicSnapshot)return Object.assign({},s.logicSnapshot,{siteStrategy:s.logicSnapshot.siteStrategy||reportSiteWritingPlan()?.strategy||""});
   const matched=Array.isArray(rules)?rules:(window.ReportLogicCore?ReportLogicCore.match(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),businessScenario:rlBusinessScenario()}):[]),set=window.ReportLogicCore&&ReportLogicCore.current(rlProjectType());
-  return {version:set?.version||0,updatedAt:new Date().toISOString(),siteStrategy:reportSiteWritingPlan()?.strategy||"",rules:matched.map(r=>({id:r.id,sourceNo:r.sourceNo,title:r.displayTitle||r.pointTitle||r.section,writingLogic:r.writingLogic||"按本节标题和已核实资料完成论证",outputForm:r.outputForm||"文字",changeReason:""}))};
+  return {version:set?.version||0,updatedAt:new Date().toISOString(),siteStrategy:reportSiteWritingPlan()?.strategy||"",rules:matched.map(r=>({id:r.id,sourceNo:r.sourceNo,title:r.displayTitle||r.pointTitle||r.section,requiredSources:r.requiredSources||"",sourceKinds:Array.isArray(r.sourceKinds)?r.sourceKinds.slice():[],dataRequirement:r.dataRequirement?JSON.parse(JSON.stringify(r.dataRequirement)):null,writingLogic:r.writingLogic||"按本节标题和已核实资料完成论证",outputForm:r.outputForm||"文字",missingPolicy:r.missingPolicy||"资料缺失时标注待补，不得虚构",changeReason:""}))};
 }
 function reportLogicRevision(c,s,instruction){
   const base=reportSectionLogicSnapshot(c,s),reason=String(instruction||"按本次意见调整").replace(/\s+/g," ").trim().slice(0,500);

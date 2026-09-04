@@ -63,6 +63,7 @@ function showLoginModal(msg){
 let currentProjectId = null;
 let currentProjectUpdatedAt = null;
 let cloudTimer = null;
+let cloudSaveInFlight = Promise.resolve();
 function rememberActiveProjectId(id){try{id?localStorage.setItem("fs_active_project_id",id):localStorage.removeItem("fs_active_project_id");}catch(e){}}
 function recalledActiveProjectId(){try{return localStorage.getItem("fs_active_project_id")||null;}catch(e){return null;}}
 function genProjectId(){
@@ -73,23 +74,34 @@ function genProjectId(){
 function scheduleCloudSave(){
   if(!getToken()) return;
   clearTimeout(cloudTimer);
-  cloudTimer = setTimeout(cloudSaveNow, 1200);
+  cloudTimer = setTimeout(()=>{cloudTimer=null;cloudSaveNow();}, 1200);
 }
-async function cloudSaveNow(){
+function cloudSaveNow(){
+  if(!getToken())return Promise.resolve(false);
+  clearTimeout(cloudTimer);cloudTimer=null;
+  if(!currentProjectId){currentProjectId=genProjectId();rememberActiveProjectId(currentProjectId);}
+  const request={id:currentProjectId,name:project.name||"未命名项目",snapshot:buildDraftData(),expectedUpdatedAt:currentProjectUpdatedAt};
+  cloudSaveInFlight=cloudSaveInFlight.catch(()=>false).then(()=>cloudSaveSnapshot(request));
+  return cloudSaveInFlight;
+}
+async function cloudSaveSnapshot(saveRequest){
   if(!getToken()) return;
-  if(!currentProjectId){ currentProjectId = genProjectId(); rememberActiveProjectId(currentProjectId); }
   setSaveState("saving");
   try{
+    const expected=saveRequest.id===currentProjectId?currentProjectUpdatedAt:saveRequest.expectedUpdatedAt;
     const resp = await fetch("/api/projects", {method:"POST",
       headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
-      body: JSON.stringify({id:currentProjectId, name:project.name||"未命名项目", data:buildDraftData(),expectedUpdatedAt:currentProjectUpdatedAt})});
+      body: JSON.stringify({id:saveRequest.id,name:saveRequest.name,data:saveRequest.snapshot,expectedUpdatedAt:expected})});
     if(resp.status===401){ setSaveState("err"); clearAuth(); showLoginModal("登录已过期，请重新登录（本地草稿仍在）"); return; }
     const d = await resp.json();
     if(resp.status===409&&d.conflict){setSaveState("conflict");return;}
-    if(d.ok)currentProjectUpdatedAt=Number(d.updatedAt)||currentProjectUpdatedAt;
+    if(d.ok&&saveRequest.id===currentProjectId)currentProjectUpdatedAt=Number(d.updatedAt)||currentProjectUpdatedAt;
     setSaveState(d.ok? "ok":"err");
+    return !!d.ok;
   }catch(e){ setSaveState("err"); }
+  return false;
 }
+function flushCloudSave(){return cloudSaveNow();}
 function setSaveState(st){
   const el = document.getElementById("saveState");
   if(!el) return;
@@ -118,6 +130,7 @@ function mountUserBar(){
 function newProject(){
   if(typeof airSwitchProjectSession==="function")airSwitchProjectSession();
   currentProjectId = null; currentProjectUpdatedAt=null; domainKey = null; chapters = []; signed = false;
+  if(typeof reportDocumentRevision!=="undefined")reportDocumentRevision=0;
   rememberActiveProjectId(null);
   calcParams = null; calcResult = null; docNo = null;
   projectWorkflow = window.ProjectWorkflow ? window.ProjectWorkflow.ensureState({}) : {calcSnapshots:[],reportVersions:[]};
@@ -169,10 +182,12 @@ async function openProject(id){
     if(id!==currentProjectId&&typeof airSwitchProjectSession==="function")airSwitchProjectSession();
     currentProjectId = id;
     currentProjectUpdatedAt=Number(d.project.updated_at)||null;
+    if(typeof reportDocumentRevision!=="undefined")reportDocumentRevision=0;
     rememberActiveProjectId(id);
     const panel = document.getElementById("projPanel"); if(panel) panel.remove();
     const bar = document.getElementById("draftBar"); if(bar) bar.remove();
-    restoreDraft(d.project.data);
+    const local=loadDraft(),selected=window.ProjectWorkflow?.selectProjectDraft?ProjectWorkflow.selectProjectDraft(d.project.data,local,id):d.project.data;
+    restoreDraft(selected);
     if(!String(project.name||"").trim()&&d.project.name)project.name=d.project.name;
     return d.project;
   }catch(e){ alert("打开失败，请重试"); return false; }
@@ -195,7 +210,7 @@ async function startApp(){
   if(currentProjectId){
     try{
       const pr=await fetch("/api/projects?id="+encodeURIComponent(currentProjectId),{headers:authHeaders()});
-      const pd=await pr.json();if(pd.ok&&pd.project&&pd.project.data){currentProjectUpdatedAt=Number(pd.project.updated_at)||null;const resumeMode=appMode,resumeOffice=typeof officeView!=="undefined"?officeView:"chat";restoreDraft(pd.project.data,{openHome:true});if(window.UiRouteState){appMode=resumeMode;if(typeof officeView!=="undefined")officeView=resumeOffice;renderTOC();renderSheet();}}
+      const pd=await pr.json();if(pd.ok&&pd.project&&pd.project.data){currentProjectUpdatedAt=Number(pd.project.updated_at)||null;const resumeMode=appMode,resumeOffice=typeof officeView!=="undefined"?officeView:"chat",local=loadDraft(),selected=window.ProjectWorkflow?.selectProjectDraft?ProjectWorkflow.selectProjectDraft(pd.project.data,local,currentProjectId):pd.project.data;restoreDraft(selected,{openHome:true});if(window.UiRouteState){appMode=resumeMode;if(typeof officeView!=="undefined")officeView=resumeOffice;renderTOC();renderSheet();}}
       else{currentProjectId=null;currentProjectUpdatedAt=null;rememberActiveProjectId(null);}
     }catch(e){ /* 网络失败时仍保留本地草稿兜底，不主动遗忘项目 */ }
   }

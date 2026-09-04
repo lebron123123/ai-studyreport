@@ -191,6 +191,7 @@
     margin-top:6px; background:#FAFBFC; border:1px solid var(--line,#DCE6F0);
     border-radius:8px; padding:14px 16px;
   }
+  .air-persistent-card{margin-top:8px;border:1px solid var(--line,#DCE6F0);border-radius:9px;background:#fff;overflow:hidden}.air-persistent-card>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 15px;cursor:pointer;list-style:none;background:#f4f8fb;color:var(--bp-navy)}.air-persistent-card>summary::-webkit-details-marker{display:none}.air-persistent-card>summary b,.air-persistent-card>summary small{display:block}.air-persistent-card>summary b{font-size:13px}.air-persistent-card>summary small{margin-top:3px;color:var(--ink-soft);font-size:10.5px}.air-persistent-card-toggle{flex:0 0 auto;border:1px solid var(--line-strong);border-radius:14px;background:#fff;padding:4px 10px;font-size:10.5px}.air-persistent-card-toggle i{font-style:normal}.air-persistent-card .when-open{display:none}.air-persistent-card[open] .when-open{display:inline}.air-persistent-card[open] .when-closed{display:none}.air-persistent-card-content>.air-card{margin:0;border:0;border-top:1px solid var(--line,#DCE6F0);border-radius:0}.air-persistent-card:not([open]){box-shadow:0 2px 7px rgba(30,75,114,.04)}
   .air-conf{
     display:inline-block; padding:1px 9px; border-radius:10px; font-size:11px; font-weight:600;
   }
@@ -213,17 +214,17 @@
   }
   .air-doc-reopen:hover{ background:var(--line-soft,#EAF1F8); border-color:var(--bp-navy); }
   .air-doc-pane{
-    min-width:0; position:sticky; top:20px;
-    max-height:calc(100vh - 40px); display:flex; flex-direction:column;
+    min-width:0; position:relative; top:auto;
+    max-height:none; display:flex; flex-direction:column;
     border:1px solid var(--line); border-radius:10px; background:var(--paper-card,#fff);
     box-shadow:0 1px 2px rgba(30,75,114,.05); overflow:hidden;
   }
   .air-doc-pane.empty{ align-items:center; justify-content:center; padding:40px 30px; text-align:center; }
-  .air-doc-pane.fullscreen{position:fixed;inset:10px;z-index:1190;width:auto;max-height:none;border-radius:8px;box-shadow:0 24px 80px rgba(18,42,65,.28)}
+  .air-doc-pane.fullscreen{position:fixed;inset:10px;z-index:1190;width:auto;height:calc(100vh - 20px);max-height:none;border-radius:8px;box-shadow:0 24px 80px rgba(18,42,65,.28)}
   .air-doc-empty-tip{ font-size:12.5px; color:var(--ink-soft); line-height:1.8; max-width:34ch; }
   .air-doc-empty-tip .ic{ font-size:26px; display:block; margin-bottom:10px; opacity:.6; }
   .air-doc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line);flex-shrink:0;position:relative}
-  .air-doc-heading{min-width:180px;flex:1}.air-doc-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;flex-wrap:wrap}.air-doc-tool{border:1px solid var(--line-strong);border-radius:6px;background:#fff;color:var(--bp-navy);padding:4px 7px;font-size:10.5px;cursor:pointer}.air-doc-tool:hover{background:#edf6fc;border-color:var(--bp-navy)}.air-doc-zoom{display:inline-flex}.air-doc-zoom .air-doc-tool{border-radius:0;margin-left:-1px}.air-doc-zoom .air-doc-tool:first-child{border-radius:6px 0 0 6px;margin-left:0}.air-doc-zoom .air-doc-tool:last-child{border-radius:0 6px 6px 0}.air-doc-zoom-value{display:inline-block;min-width:33px}
+  .air-doc-heading{min-width:180px;flex:1}.air-doc-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;flex-wrap:wrap}.air-doc-version-picker{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:var(--ink-soft)}.air-doc-version-select{max-width:210px;border:1px solid var(--line-strong);border-radius:6px;background:#fff;color:var(--bp-navy);padding:4px 6px;font-size:10.5px}.air-doc-tool{border:1px solid var(--line-strong);border-radius:6px;background:#fff;color:var(--bp-navy);padding:4px 7px;font-size:10.5px;cursor:pointer}.air-doc-tool:hover{background:#edf6fc;border-color:var(--bp-navy)}.air-doc-zoom{display:inline-flex}.air-doc-zoom .air-doc-tool{border-radius:0;margin-left:-1px}.air-doc-zoom .air-doc-tool:first-child{border-radius:6px 0 0 6px;margin-left:0}.air-doc-zoom .air-doc-tool:last-child{border-radius:0 6px 6px 0}.air-doc-zoom-value{display:inline-block;min-width:33px}
   .air-doc-close{
     position:static; border:none; background:transparent; cursor:pointer;
     font-size:15px; color:var(--ink-faint,#8A97A8); line-height:1; padding:4px 7px; border-radius:5px;
@@ -246,7 +247,8 @@
   .air-doc-outline .chip.state-done{ border-color:#BFE0C9; color:#2E7D46; background:#EDF7EF; }
   .air-doc-outline .chip.state-failed{ border-color:var(--seal-red-dim,#C24A4255); color:var(--seal-red,#C24A42); background:#FBEAEA; }
   .air-material-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px}.air-material-dot.ok{background:#31915A}.air-material-dot.pending{background:#D89B32;box-shadow:0 0 0 2px #FFF0CF}.air-material-dot.missing{background:#D84E45;box-shadow:0 0 0 2px #FBE3E1}
-  .air-doc-scroll{ flex:1; overflow-y:auto; padding:16px 20px 26px; zoom:var(--air-doc-zoom,1); }
+  .air-doc-scroll{ flex:0 0 auto; overflow-y:visible; padding:16px 20px 26px; zoom:var(--air-doc-zoom,1); }
+  .air-doc-pane.fullscreen .air-doc-scroll{flex:1;min-height:0;overflow-y:auto}
   .air-doc-scroll .chapter-block{ margin-bottom:26px; }
   .air-doc-scroll .chapter-block:last-child{ margin-bottom:4px; }
   .air-section-material{margin:8px 0 11px;padding:9px 11px;border-radius:7px;display:flex;flex-direction:column;gap:4px;font-size:11px;line-height:1.6}
@@ -390,7 +392,7 @@
 
   @media (max-width:1080px){
     .air-shell{ display:flex; flex-direction:column; }
-    .air-doc-pane{ position:static; max-height:520px; width:100%; order:2; }
+    .air-doc-pane{ position:static; max-height:none; width:100%; order:2; }
     .air-doc-pane.fullscreen{position:fixed;inset:8px;width:auto;max-height:none}
     .air-kf-row{ grid-template-columns:1fr 110px; }
     .air-kf-src{ grid-column:1/-1; }
@@ -1017,6 +1019,7 @@
 <script src="calcschema.js"></script>
 <script src="saleestimate.js"></script>
 <script src="salecalc.js"></script>
+<script src="project-context-contract.js?v=1.0"></script>
 <script src="agent-core.js?v=1.2"></script>
 <script src="web-research-tools.js?v=2.0"></script>
 <script src="ppt-evidence.js"></script>
@@ -1048,6 +1051,10 @@
 <script src="report-dependency.js?v=1.0"></script>
 <script src="report-evidence-graph.js?v=1.0"></script>
 <script src="report-golden.js?v=1.0"></script>
+<script src="report-task-graph.js?v=1.0"></script>
+<script src="report-query-planner.js?v=1.0"></script>
+<script src="report-feedback-learning.js?v=1.0"></script>
+<script src="report-orchestration-client.js?v=1.0"></script>
 <script src="project-brain.js?v=1.0"></script>
 <script src="investment-ops.js?v=1.0"></script>
 <script src="project-workflow.js?v=3.7"></script>

@@ -1,0 +1,66 @@
+{
+  "name": "市税务局第一批合作房源改造为保障性租赁住房项目_V2阶段稿训练候选",
+  "calcType": "rent",
+  "projectType": "非居改保（住房改造）",
+  "region": "深圳市罗湖区、福田区",
+  "tags": ["税务局", "保障性租赁住房", "存量住宅改造", "阶段稿"],
+  "datasetRole": "training",
+  "sourceProjectId": "tax-batch1-housing-renovation",
+  "approvalStatus": "phase_draft_not_manager_approved",
+  "sourceDocument": {
+    "fileName": "市税务局第一批合作房源改造为保障性租赁住房项目_阶段稿V2 (1).docx",
+    "sha256": "b0da055e5e1c5b570231a661a8d1fcaf2c16f39bf85738e38e6e2d7ce9fa73b6",
+    "paragraphCount": 686,
+    "tableCount": 32,
+    "note": "仅作为真实阶段稿训练候选；收到并核对经理终稿后，才能升级为正式 Golden。"
+  },
+  "sections": [
+    {
+      "chapter": "第一章　项目总论",
+      "title": "项目概况",
+      "text": "项目涉及罗湖、福田两区6个居住小区的51套存量住宅，总改造建筑面积约5621.15平方米，改造后按市场租金九折对外出租。",
+      "numeric": true,
+      "prov": {"projectFields": [{"label": "税务局V2阶段稿", "sourceRef": "sha256:b0da055e5e1c5b570231a661a8d1fcaf2c16f39bf85738e38e6e2d7ce9fa73b6"}]}
+    },
+    {
+      "chapter": "第九章　投资估算与资金筹措",
+      "title": "总投资估算结果",
+      "text": "项目总投资估算为13892万元，其中建设期融资费用127.2万元计入总投资。",
+      "numeric": true,
+      "prov": {"projectFields": [{"label": "税务局V2阶段稿", "sourceRef": "sha256:b0da055e5e1c5b570231a661a8d1fcaf2c16f39bf85738e38e6e2d7ce9fa73b6"}]}
+    },
+    {
+      "chapter": "第十章　财务评价",
+      "title": "财务评价结果",
+      "text": "测算周期为2027—2039年；累计净现金流于2033年回正，全投资内部收益率为25.79%，累计净现值（折现率6%）为880.47万元。",
+      "numeric": true,
+      "prov": {"projectFields": [{"label": "税务局V2阶段稿", "sourceRef": "sha256:b0da055e5e1c5b570231a661a8d1fcaf2c16f39bf85738e38e6e2d7ce9fa73b6"}]}
+    },
+    {
+      "chapter": "第十三章　项目研究结论及建议",
+      "title": "研究结论",
+      "text": "房源位于深圳核心城区成熟小区，通过翻新盘活闲置存量住房并补充保障性租赁住房供给。",
+      "numeric": false,
+      "prov": {"projectFields": [{"label": "税务局V2阶段稿", "sourceRef": "sha256:b0da055e5e1c5b570231a661a8d1fcaf2c16f39bf85738e38e6e2d7ce9fa73b6"}]}
+    }
+  ],
+  "expectedFacts": {
+    "unitCount": 51,
+    "communityCount": 6,
+    "grossAreaSqm": 5621.15,
+    "totalInvestmentWan": 13892,
+    "averageRentYuanSqmMonth": 42.44,
+    "stableOccupancyRatePercent": 85,
+    "irrPercent": 25.79,
+    "npvWan": 880.47,
+    "operationYears": 12
+  },
+  "reviewBaseline": {
+    "knownGaps": [
+      "经理最终结构与表格意见尚未提供",
+      "竞品租金及出租率仍标记为待人工调研",
+      "部分章节仍存在财务指标待补标记"
+    ],
+    "publishGate": "必须用经理确认后的终稿复核所有事实、章节和表格后再发布"
+  }
+}

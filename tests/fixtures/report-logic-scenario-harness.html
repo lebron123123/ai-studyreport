@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>改造逻辑场景隔离验证</title></head>
+<body><div id="listBox"></div><main id="editBox"></main>
+<script>
+window.authHeaders=()=>({});window.arSubnavHtml=()=>"";window.switchAiRuleAdminTab=()=>{};
+window.ReportTableAdmin={mount(){}};
+const scenarioHarnessFetch=window.fetch.bind(window);
+window.fetch=async(url,options)=>{
+  if(String(url).startsWith("/api/reportlogic?")){
+    const data=await scenarioHarnessFetch("/data/report-logic-gaibao-v1.json").then(response=>response.json());
+    return new Response(JSON.stringify({ok:true,set:{id:"scenario-harness",projectType:"gaibao",name:data.name,version:3,status:"published",data}}),{status:200,headers:{"content-type":"application/json"}});
+  }
+  return scenarioHarnessFetch(url,options);
+};
+</script>
+<script src="/report-logic-admin.js"></script>
+<script>window.renderReportLogicAdminTab("gaibao");</script>
+</body></html>

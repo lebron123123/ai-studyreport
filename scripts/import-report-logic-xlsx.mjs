@@ -113,23 +113,87 @@ const scenarioPattern = {
   housing_conversion: /非居改保|住房改造|改建纳保|保障性租赁住房|保租房/,
   commercial_renovation: /商业改造|自持改造|如为自持|存量改造|商业市场|商业项目/
 };
+function scenarioText(value,scenario){
+  const selected=scenario==="commercial_renovation"?"commercial_renovation":"housing_conversion";
+  const rawText=String(value||"").replace(/\r\n?/g,"\n");
+  // Some source cells append scenario-only method paragraphs after common
+  // content without a heading. Project those paragraphs before processing the
+  // explicit headings, otherwise commercial reports inherit housing policy,
+  // LOFT and保障房 rules merely because they share one Excel row.
+  const paragraphs=rawText.split(/\n{2,}/).filter(paragraph=>{
+    const housing=/非居改保项目|保障性租赁住房|保租房|住房租赁|住房改造|LOFT/.test(paragraph);
+    const commercial=/商业改造|自持改造|商业市场|社区商业|商铺|购物中心|大型综合体/.test(paragraph);
+    if(housing&&!commercial)return selected==="housing_conversion";
+    if(commercial&&!housing)return selected==="commercial_renovation";
+    return true;
+  });
+  const lines=paragraphs.join("\n\n").split("\n");
+  let mode="common",modeSource="common";
+  const output=[];
+  const normalize=line=>{
+    let next=String(line||"")
+      .replace(/非居改保（住房改造）/g,"非居改保、居改居等（住房改造）")
+      .replace(/分非居改保和商业改造两类/g,"按当前改造场景")
+      .replace(/【通用建议（非居改保、商业改造均适用）】/g,"【通用建议（两类改造场景均适用）】");
+    if(selected==="commercial_renovation")next=next
+      .replace(/（同非居改保）/g,"（按本项目实际）")
+      .replace(/同非居改保/g,"按本项目实际")
+      .replace(/、非居改保政策文件[\s\S]*$/,"");
+    next=next.replace(/中资产运营\(非居改保、改造等\)/g,"中资产运营");
+    if(selected==="housing_conversion")next=next.replace(/[、→]商户清退费XX万元(?:\(仅内部自持项目存在\))?/g,"");
+    next=next.replace(/([^/，。；\n]+)\(自持\)\/([^，。；\n]+)\(非居改保\)/g,(_,commercial,housing)=>selected==="commercial_renovation"?commercial:housing);
+    return next;
+  };
+  for(let line of lines){
+    const marker=line.match(/^\s*【([^】]+)】\s*$/)?.[1]||"";
+    const hasHousing=/非居改保|住房改造|保障性租赁住房|保租房/.test(marker),hasCommercial=/商业改造|自持改造/.test(marker);
+    if(marker&&(hasHousing||hasCommercial)){
+      mode=hasHousing&&hasCommercial?"common":hasHousing?"housing_conversion":"commercial_renovation";modeSource="marker";
+      if(mode==="common"||mode===selected){
+        output.push(normalize(line));
+      }
+      continue;
+    }
+    const branch=line.match(/^(\s*(?:[abAB][.．、]\s*)?[•\-]?\s*)(非居改保[^：:]*|商业改造[^：:]*|自持)([：:].*)$/);
+    if(branch){
+      mode=/商业改造|自持/.test(branch[2])?"commercial_renovation":"housing_conversion";modeSource="branch";
+      if(mode===selected)output.push(normalize(line));
+      continue;
+    }
+    const inline=line.match(/^(.*?)(?:若是非居改保\((.*?)\)\s*)若是自持\((.*)\)\s*$/);
+    if(inline){
+      output.push((inline[1]+(selected==="housing_conversion"?inline[2]:inline[3])).trimEnd());
+      mode="common";modeSource="common";
+      continue;
+    }
+    if(modeSource==="branch"&&/^\s*[三四五六七八九十]+[、.]/.test(line)){mode="common";modeSource="common";}
+    if(/^[\u4e00-\u9fff]{1,8}法[：:]/.test(line.trim())){
+      const housing=/非居改保|住房租赁|租户|户型|LOFT|保租房|保障性租赁住房|公寓|房源|58同城|贝壳|安居客|职住/.test(line);
+      const commercial=/商业改造|商户|商业市场|业态|客流|商铺|购物中心/.test(line);
+      mode=housing&&!commercial?"housing_conversion":commercial&&!housing?"commercial_renovation":"common";
+      modeSource="method";
+    }
+    if(mode==="common"||mode===selected)output.push(normalize(line));
+  }
+  return output.join("\n").replace(/\n{3,}/g,"\n\n").trim();
+}
 function scenarioMeta(values){
   // Applicability comes from the worksheet's structural title cells. Long
   // source/logic cells often contain one scenario as an example inside an
   // otherwise common rule; using those mentions to classify the whole row made
   // common chapters (notably Chapter 7 cooperation) disappear from one tab.
   const scopeText=[values[2],values[3],values[4]].map(value=>String(value||"")).join("\n");
-  const housing=scenarioPattern.housing_conversion.test(scopeText),commercial=scenarioPattern.commercial_renovation.test(scopeText);
-  const scenarios=housing&&!commercial?["housing_conversion"]:commercial&&!housing?["commercial_renovation"]:SCENARIOS.slice();
+  const writingText=String(values[6]||"").trim();
+  const dedicatedHousing=/^如中资产涉及住房改造（非居改保）/.test(writingText),dedicatedCommercial=/^如中资产涉及商业改造（自持改造）/.test(writingText);
+  const housing=dedicatedHousing||scenarioPattern.housing_conversion.test(scopeText),commercial=dedicatedCommercial||scenarioPattern.commercial_renovation.test(scopeText);
+  const scenarios=dedicatedHousing&&!dedicatedCommercial?["housing_conversion"]:dedicatedCommercial&&!dedicatedHousing?["commercial_renovation"]:housing&&!commercial?["housing_conversion"]:commercial&&!housing?["commercial_renovation"]:SCENARIOS.slice();
   const variants={};
   for(const scenario of scenarios){
-    // Keep each Excel cell verbatim. Scenario-labelled blocks are selected at
-    // prompt time; destructive text slicing is forbidden because it previously
-    // dropped policy lists and actual data-source requirements.
     const section=String(values[2]||"").trim(),subsection=String(values[3]||"").trim(),pointTitle=String(values[4]||"").trim(),requiredSources=String(values[5]||"").trim(),writingLogic=String(values[6]||"").trim(),note=String(values[9]||"").trim();
-    variants[scenario]={section,subsection,pointTitle,displayTitle:[subsection,pointTitle].filter(Boolean).join("｜"),requiredSources,writingLogic,note};
+    const projectedWriting=scenarioText(writingLogic,scenario);
+    if(projectedWriting)variants[scenario]={section,subsection,pointTitle,displayTitle:[subsection,pointTitle].filter(Boolean).join("｜"),requiredSources:scenarioText(requiredSources,scenario),writingLogic:projectedWriting,note};
   }
-  return {scenarios,variants};
+  return {scenarios:scenarios.filter(scenario=>variants[scenario]),variants};
 }
 
 let currentChapter = "", currentSection = "";
@@ -192,7 +256,7 @@ const seed = {
     sheetName: workbook.sheetName,
     sheetIndex: 1,
     selectionPolicy: "first_sheet_only",
-    baselineId: projectType === "gaibao" ? "gaibao-first-sheet-74-20260901-v2" : "",
+    baselineId: projectType === "gaibao" ? "gaibao-first-sheet-74-scenario-separated-20260903-v5" : "",
     importedAt: new Date().toISOString(),
     authoritativeRows: rules.length
   },

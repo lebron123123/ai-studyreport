@@ -19,7 +19,7 @@ test("改造项目逐小节逻辑以74条、13章和两个业务场景独立成�
   assert.equal(gaibaoSeed.structure.chapterCount, 13);
   assert.deepEqual(gaibaoSeed.rules.map(rule => rule.sourceNo), Array.from({length:74}, (_, index) => index + 1));
   assert.equal(new Set(gaibaoSeed.rules.map(rule => rule.id)).size, 74);
-  assert.deepEqual(gaibaoSeed.structure.scenarioCounts,{housing_conversion:74,commercial_renovation:74});
+  assert.deepEqual(gaibaoSeed.structure.scenarioCounts,{housing_conversion:65,commercial_renovation:67});
   assert.ok(gaibaoSeed.rules.every(rule=>Array.isArray(rule.scenarios)&&rule.scenarios.length));
   assert.ok(gaibaoSeed.rules.every(rule => rule.projectType === "gaibao"));
   assert.ok(gaibaoSeed.rules.some(rule => rule.sourceKinds.includes("calculation_engine")), "测算规则引擎应被识别为测算来源");
@@ -33,6 +33,23 @@ test("改造项目逐小节逻辑以74条、13章和两个业务场景独立成�
   const basis=gaibaoSeed.rules.find(rule=>rule.subsection==="1.1.3编制依据");
   assert.match(basis.requiredSources,/深圳市保障性租赁住房管理办法/);
   assert.match(basis.requiredSources,/商业改造（自持改造）专项政策/);
+  const splitRule=gaibaoSeed.rules.find(rule=>rule.id==="gaibao-v1-009");
+  assert.match(splitRule.scenarioVariants.housing_conversion.writingLogic,/非居改保、居改居等（住房改造）/);
+  assert.doesNotMatch(splitRule.scenarioVariants.housing_conversion.writingLogic,/商业改造（自持改造）/);
+  assert.match(splitRule.scenarioVariants.commercial_renovation.writingLogic,/商业改造（自持改造）/);
+  assert.doesNotMatch(splitRule.scenarioVariants.commercial_renovation.writingLogic,/非居改保/);
+  const housingOnly=gaibaoSeed.rules.find(rule=>rule.id==="gaibao-v1-017"),commercialOnly=gaibaoSeed.rules.find(rule=>rule.id==="gaibao-v1-018");
+  assert.deepEqual(housingOnly.scenarios,["housing_conversion"]);
+  assert.deepEqual(commercialOnly.scenarios,["commercial_renovation"]);
+  const conclusion=gaibaoSeed.rules.find(rule=>rule.id==="gaibao-v1-011");
+  assert.match(conclusion.scenarioVariants.housing_conversion.writingLogic,/a\.非居改保:/);
+  assert.doesNotMatch(conclusion.scenarioVariants.housing_conversion.writingLogic,/b\.自持:/);
+  assert.match(conclusion.scenarioVariants.commercial_renovation.writingLogic,/b\.自持:/);
+  assert.doesNotMatch(conclusion.scenarioVariants.commercial_renovation.writingLogic,/a\.非居改保:/);
+  for(const rule of gaibaoSeed.rules){
+    assert.doesNotMatch(rule.scenarioVariants?.housing_conversion?.writingLogic||"",/【商业改造（自持改造）/);
+    assert.doesNotMatch(rule.scenarioVariants?.commercial_renovation?.writingLogic||"",/【非居改保|保障性租赁住房|保租房/);
+  }
 });
 
 test("首表权威基线标识变化时触发一次性数据库替换",()=>{
@@ -131,8 +148,10 @@ test("前端运行时可把粗粒度报告小节匹配到多条细分逻辑并�
   assert.equal(wronglyTagged.dataNature,"project_fact");assert.equal(wronglyTagged.webAllowed,false,"即使Excel误写网上搜索，项目内部事实也必须禁止联网");
   const marketRequirement=core.dataRequirement({id:"market",sourceNo:2,chapter:"市场分析",section:"租金",displayTitle:"周边租金市场",requiredSources:"网上搜索周边租金",sourceKinds:["web_search"]},{location:"深圳市龙华区"});
   assert.equal(marketRequirement.dataNature,"market_observation");assert.equal(marketRequirement.webAllowed,true);assert.equal(marketRequirement.timeScope.maxAgeMonths,12);assert.match(marketRequirement.query,/深圳市龙华区/);
+  assert.equal(marketRequirement.decision.level,"important");assert.ok(marketRequirement.decision.priority>=80);assert.match(marketRequirement.decision.reason,/市场假设/);assert.match(marketRequirement.decision.reuseKey,/rent_market/);
   const refined=core.dataRequirement({id:"market",sourceNo:2,chapter:"市场分析",section:"租金",displayTitle:"周边租金市场",requiredSources:"网上搜索周边租金",sourceKinds:["web_search"]},{location:"深圳市龙华区",requirementOverrides:{market:{version:3,feedback:"只用接口和知识库",requirement:{fields:[{key:"rent",label:"近12个月月租金",dataType:"number",required:true}],geoScope:{level:"district",value:"龙华区"},timeScope:{kind:"latest_12_months",maxAgeMonths:12},allowedChannels:["provider","knowledge_base"],quality:{minScore:90,minAuthority:"A"},budget:{maxQueries:1,maxResults:3}}}}});
   assert.equal(refined.refinementVersion,3);assert.equal(refined.webAllowed,false);assert.deepEqual(refined.allowedChannels,["provider","knowledge_base"]);assert.match(refined.query,/近12个月月租金/);
+  assert.notEqual(refined.decision.reuseKey,marketRequirement.decision.reuseKey,"人工精化字段后应重算复用键，使后续批量任务按新版需求演进");
   const actualWebRule=seed.rules.find(rule=>(rule.sourceKinds||[]).includes("web_search")),refinedInventory=core.materialInventory("rent",{requirementOverrides:{[actualWebRule.id]:{version:2,requirement:{allowedChannels:["provider","knowledge_base"]}}}}),refinedRow=refinedInventory.items.find(item=>item.ruleId===actualWebRule.id);
   assert.equal(refinedRow.sourceKinds.includes("web_search"),false);assert.equal(refinedRow.missing.includes("web_search"),false);assert.ok(refinedRow.sourceKinds.includes("provider"));
 
@@ -162,10 +181,10 @@ test("前端运行时可把粗粒度报告小节匹配到多条细分逻辑并�
   await core.load("gaibao");
   const housing={businessScenario:"housing_conversion",hasCalculation:true},commercial={businessScenario:"commercial_renovation",hasCalculation:true};
   const gaibaoOverview=core.overview("gaibao",housing),gaibaoOutline=core.outline("gaibao",housing),gaibaoInventory=core.materialInventory("gaibao",housing),commercialInventory=core.materialInventory("gaibao",commercial);
-  assert.equal(gaibaoOverview.ruleCount,74);
+  assert.equal(gaibaoOverview.ruleCount,65);
   assert.equal(gaibaoOutline.chapters.length,13);
-  assert.equal(gaibaoInventory.total,74);
-  assert.equal(commercialInventory.total,74);
+  assert.equal(gaibaoInventory.total,65);
+  assert.equal(commercialInventory.total,67);
   assert.equal(core.overview("gaibao",commercial).businessScenario,"commercial_renovation");
   assert.ok(gaibaoInventory.summary.calculation_engine>2);
   assert.ok(core.match("gaibao","投资估算与资金筹措","投资估算",{projectText:"非居改保项目",...housing}).length>0);
@@ -175,6 +194,9 @@ test("前端运行时可把粗粒度报告小节匹配到多条细分逻辑并�
   assert.ok(commercialMarket.length>0&&commercialMarket.every(rule=>rule.scenarios.includes("commercial_renovation")));
   assert.match(core.prompt("gaibao","项目总论","项目背景",commercial),/当前业务场景：商业改造（自持改造）/);
   assert.match(core.prompt("gaibao","项目总论","项目背景",commercial),/禁止混用另一场景/);
+  const housingScale=core.match("gaibao","项目总论","项目概况",housing).find(rule=>rule.id==="gaibao-v1-009"),commercialScale=core.match("gaibao","项目总论","项目概况",commercial).find(rule=>rule.id==="gaibao-v1-009");
+  assert.doesNotMatch(housingScale.writingLogic,/商业改造（自持改造）/);
+  assert.doesNotMatch(commercialScale.writingLogic,/非居改保/);
 });
 
 test("管理员增强只追加子规则并保留137条原逻辑",()=>{

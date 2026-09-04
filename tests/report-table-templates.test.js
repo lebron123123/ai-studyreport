@@ -68,6 +68,19 @@ test("Word构建器可输出含合并单元格和续表的真实docx",async()=>{
   assert.equal(buffer.subarray(0,2).toString(),"PK");
 });
 
+test("Word正文待补标记统一红色且正文段前段后为0磅",async()=>{
+  const docx=require("../docx.umd.js"),build=require("../docxgen.js"),JSZip=require("../local-server/node_modules/jszip");
+  const doc=build(docx,{project:{name:"[系统测试]Word格式"},signed:false,docNo:"",chapters:[{cn:"一",name:"总论",num:1,sections:[{title:"项目概况",blocks:[{type:"p",text:"竞品情况  【待补：竞品租金及出租率实地调研数据】  。"},{type:"p",text:"   "}]}]}],appendix:null,tableAppendix:[],provenance:null});
+  const buffer=await docx.Packer.toBuffer(doc),zip=await JSZip.loadAsync(buffer),xml=await zip.file("word/document.xml").async("string");
+  const markerAt=xml.indexOf("【待补：竞品租金及出租率实地调研数据】"),start=xml.lastIndexOf("<w:p",markerAt),end=xml.indexOf("</w:p>",markerAt),paragraph=xml.slice(start,end+6);
+  assert.ok(markerAt>0,"待补标记应写入Word正文");
+  assert.match(paragraph,/w:color w:val="C62828"/);
+  assert.match(paragraph,/w:b\/>/);
+  assert.match(paragraph,/w:before="0"/);
+  assert.match(paragraph,/w:after="0"/);
+  assert.doesNotMatch(paragraph,/竞品情况\s{2,}/);
+});
+
 test("七套出租类财务附表可一次性打包，70年续表不会使Word构建失败",async()=>{
   const docx=require("../docx.umd.js");
   const build=require("../docxgen.js");

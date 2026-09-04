@@ -71,8 +71,44 @@ test("完整报告被项目级生成锁拦截，部分报告只允许单个活�
 });
 
 test("37/37完成态刷新后保持完成，不再伪装成暂停和继续0节",()=>{
-  assert.deepEqual(WF.persistedGenerationProgress({total:37,done:37,failed:0,active:true},0),{role:"assistant",kind:"genProgress",total:37,done:37,failed:0,active:false,stopped:false});
+  assert.deepEqual(WF.persistedGenerationProgress({total:37,done:37,failed:0,active:true},0),{role:"assistant",kind:"genProgress",total:37,done:37,failed:0,active:false,stopped:false,reportVersionId:null,reportVersion:null,targetReportVersion:null,generationId:null,recoveredFromMismatch:false});
   assert.equal(WF.persistedGenerationProgress({total:37,done:20},17).stopped,true);
+  assert.equal(WF.persistedGenerationProgress({total:42,done:27},0).stopped,true);
+});
+
+test("上一轮37/37与第二轮未完成工作稿不再串线",()=>{
+  const current=chapters();current[0].sections[0].content="";current[1].sections[0].content="";
+  const result=WF.reconcileGenerationProgress({kind:"genProgress",total:5,done:5,active:false,stopped:false,reportVersionId:"first"},current);
+  assert.equal(result.repaired,true);assert.equal(result.progress.done,3);assert.equal(result.progress.total,5);assert.equal(result.progress.stopped,true);assert.equal(result.progress.recoveredFromMismatch,true);assert.equal(result.progress.reportVersionId,"first");
+});
+
+test("完成版预览优先绑定进度记录对应版本，旧数据则回退最近完整版本",()=>{
+  const complete=chapters(),partial=chapters();partial[0].sections[0].content="";
+  const state={reportVersions:[{id:"v1",version:1,chapters:complete},{id:"v2",version:2,chapters:partial}]};
+  assert.equal(WF.latestCompleteReportVersion(state,"v1").id,"v1");
+  assert.equal(WF.latestCompleteReportVersion(state,"missing").id,"v1");
+  assert.equal(WF.latestCompleteReportVersion({reportVersions:[{id:"v2",chapters:partial}]},null),null);
+});
+
+test("章节大纲插入和换序时按章节名与小节标题恢复，不再用下标错配正文",()=>{
+  const saved=[{cn:"一",name:"总论",checked:true,sections:[{t:"项目背景",content:"背景正文"},{t:"建设必要性",content:"必要性正文"}]}];
+  const template=[{cn:"一",name:"总论",checked:true,sections:[{t:"新增概览",content:""},{t:"建设必要性",content:""},{t:"项目背景",content:""}]}];
+  const merged=WF.mergeReportDraft(template,saved);
+  assert.equal(merged[0].sections[0].content,"");assert.equal(merged[0].sections[1].content,"必要性正文");assert.equal(merged[0].sections[2].content,"背景正文");
+});
+
+test("42节完成版可修复误退到27节的工作稿并恢复明确版本号",()=>{
+  const complete=chapters(),partial=chapters();partial[0].sections[0].content="";
+  const state={reportVersions:[{id:"report-v3",version:3,chapters:complete}]};
+  const recovered=WF.recoverCompletedReport(partial,state,{total:5,done:3,recoveredFromMismatch:true,reportVersionId:"report-v3"});
+  assert.equal(recovered.recovered,true);assert.equal(recovered.status.complete,true);assert.equal(recovered.version.version,3);assert.equal(recovered.chapters[0].sections[0].content,"旧市场稿");
+});
+
+test("刷新优先恢复同项目更新的本地完成稿，绝不串用其他项目草稿",()=>{
+  const cloud={ts:100,project:{name:"A"},domainKey:"rent",documentRevision:8,chapters:[]},local={ts:200,projectId:"project-a",project:{name:"A"},domainKey:"rent",documentRevision:9,chapters:[{name:"完整稿"}]};
+  assert.equal(WF.selectProjectDraft(cloud,local,"project-a"),local);
+  assert.equal(WF.selectProjectDraft(cloud,{...local,projectId:"project-b"},"project-a"),cloud);
+  assert.equal(WF.nextReportVersionNumber({reportVersions:[{version:1},{version:4}]}),5);
 });
 
 test("批量人工确认只勾选未确认项并返回准确数量，不触发后续测算",()=>{

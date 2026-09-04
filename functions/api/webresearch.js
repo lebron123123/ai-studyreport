@@ -1,6 +1,9 @@
 import { verifyAuth, json } from "./_auth.js";
 import { adaptEnv } from "./_adapters.js";
 import { buildHousingSearchPlan, wrProviderCatalog, wrSearch, wrDeduplicate, wrCrossVerify, wrFetchDocument, wrAuthority, wrText, wrCanonicalUrl } from "./_web-research-core.js";
+import "../../report-query-planner.js";
+
+const ReportQueryPlanner=globalThis.ReportQueryPlanner;
 
 let wrSchemaReady=false;
 async function wrEnsureSchema(env){
@@ -57,20 +60,20 @@ function wrEvidenceQuality(row,requirement,now=Date.now()){
   return {...row,qualityScore:score,qualityGrade:score>=90?"A":score>=80?"B":score>=65?"C":"D",qualityReasons:[`权威度${authority}`,`需求词命中${matched.length}项`,ageMonths==null?"发布日期待核":"时效约"+Math.round(ageMonths)+"个月",/cross|multi/.test(row.verificationStatus||"")?"已交叉核验":"单一来源"],meetsRequirement:score>=minScore&&meetsAuthority};
 }
 async function wrRunSearch(env,user,body){
-  const requirement=body.requirementSchema&&typeof body.requirementSchema==="object"?body.requirementSchema:null,budget=body.budget&&typeof body.budget==="object"?body.budget:requirement?.budget||{};
-  if(requirement&&requirement.webAllowed===false)return {skipped:true,stopReason:"精确数据需求禁止联网，应改用项目材料、数据接口或测算引擎",plan:{queries:[]},results:[],errors:[],budgetUsed:{queries:0,results:0,outputTokens:0}};
-  const maxQueries=wrClamp(budget.maxQueries||body.maxQueries,1,2,1),maxResults=wrClamp(budget.maxResults||body.maxResults,1,8,5),limit=wrClamp(body.limit||maxResults,1,5,5),maxOutputTokens=wrClamp(budget.maxOutputTokens,500,1000,900);
-  const exactQuery=wrText(body.query||requirement?.query,180),broadPlan=body.plan?.queries?body.plan:buildHousingSearchPlan({...body,maxQueries:1}),plan=exactQuery?{schemaVersion:requirement?.schemaVersion||1,queries:[{dimension:requirement?.dataNature||"precise",query:exactQuery}]}:broadPlan,queries=(exactQuery?plan.queries:broadPlan.queries).slice(0,maxQueries),runId=wrId("run"),now=Date.now();
-  await env.DB.prepare("INSERT INTO web_search_runs(id,user_id,project_id,section_key,plan_json,status,query_count,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(runId,user.userId,body.projectId||"",[body.chapter,body.section].filter(Boolean).join("/"),JSON.stringify(plan),"running",queries.length,now,now).run();
-  const settled=[];for(let i=0;i<queries.length;i+=2){const batch=queries.slice(i,i+2);settled.push(...await Promise.all(batch.map(async q=>({q,out:await wrSearch(env,q.query,{limit,providers:body.providers,maxOutputTokens})}))));}
-  const raw=[];const errors=[];let provider="",latency=0;
-  for(const item of settled){provider=provider||item.out.provider;latency+=item.out.latencyMs||0;item.out.results.forEach(x=>raw.push({...x,query:item.q.query,dimension:item.q.dimension}));errors.push(...(item.out.errors||[]));}
+  const requirement=body.requirementSchema&&typeof body.requirementSchema==="object"?body.requirementSchema:null,providedPlan=body.queryPlan&&typeof body.queryPlan==="object"?body.queryPlan:null,decisionPlan=providedPlan||ReportQueryPlanner.createPlan({...(requirement||{}),purpose:requirement?.queryPurpose||requirement?.evidenceGoal||body.requirement,targetChapter:body.chapter,targetMetric:requirement?.targetMetric,risk:requirement?.risk,webAllowed:requirement?.webAllowed});
+  if(!decisionPlan.webAllowed)return {skipped:true,stopReason:ReportQueryPlanner.nextAction(decisionPlan,decisionPlan).reason,decisionPlan,plan:{queries:[]},results:[],errors:[],budgetUsed:{queries:0,results:0,outputTokens:0}};
+  const budget=body.budget&&typeof body.budget==="object"?body.budget:requirement?.budget||decisionPlan.budget||{},maxQueries=wrClamp(budget.maxQueries||body.maxQueries,1,6,decisionPlan.budget.maxQueries),maxResults=wrClamp(budget.maxResults||body.maxResults||decisionPlan.budget.maxCandidates,1,10,5),limit=wrClamp(body.limit||maxResults,1,5,5),maxOutputTokens=wrClamp(budget.maxOutputTokens,500,1000,900);
+  decisionPlan.budget.maxQueries=maxQueries;decisionPlan.budget.maxCandidates=maxResults;
+  const exactQuery=wrText(body.query||requirement?.query,180),broadPlan=body.plan?.queries?body.plan:buildHousingSearchPlan({...body,maxQueries}),plan=exactQuery?{schemaVersion:requirement?.schemaVersion||1,queries:[{dimension:requirement?.dataNature||"precise",query:exactQuery}]}:broadPlan,queries=(exactQuery?plan.queries:broadPlan.queries).slice(0,maxQueries),runId=wrId("run"),now=Date.now();
+  await env.DB.prepare("INSERT INTO web_search_runs(id,user_id,project_id,section_key,plan_json,status,query_count,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(runId,user.userId,body.projectId||"",[body.chapter,body.section].filter(Boolean).join("/"),JSON.stringify({...plan,decisionPlan}),"running",0,now,now).run();
+  const raw=[];const errors=[];let provider="",latency=0,used=0,currentDecision=decisionPlan;
+  for(const q of queries){const out=await wrSearch(env,q.query,{limit,providers:body.providers,maxOutputTokens});used+=1;provider=provider||out.provider;latency+=out.latencyMs||0;out.results.forEach(x=>raw.push({...x,query:q.query,dimension:q.dimension}));errors.push(...(out.errors||[]));const interim=wrCrossVerify(wrDeduplicate(raw)).map(row=>wrEvidenceQuality(row,requirement,now)),accepted=interim.filter(x=>x.meetsRequirement),best=interim.reduce((n,x)=>Math.max(n,x.qualityScore||0),0);currentDecision=ReportQueryPlanner.record(currentDecision,{accepted:accepted.length>0,independentSources:new Set(accepted.map(x=>{try{return new URL(x.url).hostname;}catch(_){return x.url;}})).size,quality:best});if(ReportQueryPlanner.nextAction(currentDecision,currentDecision).stop)break;}
   const verified=wrCrossVerify(wrDeduplicate(raw)).map(row=>wrEvidenceQuality(row,requirement,now)).sort((a,b)=>b.qualityScore-a.qualityScore||b.authorityScore-a.authorityScore).slice(0,maxResults);const ids=[];
   for(const row of verified)ids.push(await wrSaveEvidence(env,user,{...body,query:row.query},row));
   const ok=verified.length>0;await wrHealth(env,provider||"all",ok,latency,ok?"":errors.map(x=>x.provider+":"+x.error).join("；").slice(0,500));
-  await env.DB.prepare("UPDATE web_search_runs SET status=?,provider=?,result_count=?,error_text=?,updated_at=? WHERE id=?").bind(ok?"completed":"failed",provider,verified.length,errors.map(x=>x.error).join("；").slice(0,800),Date.now(),runId).run();
-  const accepted=verified.filter(x=>x.meetsRequirement).length,stopReason=accepted?`已找到${accepted}条达到质量门槛的证据，停止继续检索`:queries.length>=maxQueries?"已达到查询预算，停止继续检索":"本轮无合格证据，转知识库、数据接口或人工补充";
-  return {runId,plan,results:verified.map((x,i)=>({...x,evidenceId:ids[i]})),errors,provider,stopReason,budgetUsed:{queries:queries.length,results:verified.length,outputTokens:maxOutputTokens*queries.length,maxQueries,maxResults,maxOutputTokens}};
+  await env.DB.prepare("UPDATE web_search_runs SET status=?,provider=?,query_count=?,result_count=?,error_text=?,updated_at=? WHERE id=?").bind(ok?"completed":"failed",provider,used,verified.length,errors.map(x=>x.error).join("；").slice(0,800),Date.now(),runId).run();
+  const finalDecision=ReportQueryPlanner.nextAction(currentDecision,currentDecision),stopReason=finalDecision.stop?finalDecision.reason:"本轮无合格证据，转知识库、数据接口或人工补充";
+  return {runId,plan,decisionPlan:currentDecision,results:verified.map((x,i)=>({...x,evidenceId:ids[i]})),errors,provider,stopReason,budgetUsed:{queries:used,results:verified.length,outputTokens:maxOutputTokens*used,maxQueries,maxResults,maxOutputTokens}};
 }
 
 async function wrHandle(context,body){

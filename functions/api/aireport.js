@@ -228,8 +228,13 @@ async function doSaveState(context, body, user){
     if(projectId){
       if(!/^[A-Za-z0-9-]{8,64}$/.test(projectId)) return json({ok:false,error:"项目ID非法"},400);
       const id="airs-"+user.userId+"-"+projectId;
-      const exist=await env.DB.prepare("SELECT id FROM aireport_project_sessions WHERE user_id=? AND project_id=?").bind(user.userId,projectId).first();
-      if(exist) await env.DB.prepare("UPDATE aireport_project_sessions SET data=?, updated_at=? WHERE user_id=? AND project_id=?").bind(dataStr,now,user.userId,projectId).run();
+      const exist=await env.DB.prepare("SELECT id, data FROM aireport_project_sessions WHERE user_id=? AND project_id=?").bind(user.userId,projectId).first();
+      if(exist){
+        let previous=null;try{previous=JSON.parse(exist.data||"null");}catch(e){}
+        const incoming=body.state||{},older=Number(incoming.stateRevision||0)<Number(previous&&previous.stateRevision||0)||(Number(incoming.stateRevision||0)===Number(previous&&previous.stateRevision||0)&&Number(incoming.savedAt||0)<Number(previous&&previous.savedAt||0));
+        if(older)return json({ok:true,projectId,staleIgnored:true});
+        await env.DB.prepare("UPDATE aireport_project_sessions SET data=?, updated_at=? WHERE user_id=? AND project_id=?").bind(dataStr,now,user.userId,projectId).run();
+      }
       else await env.DB.prepare("INSERT INTO aireport_project_sessions(id,user_id,project_id,data,updated_at) VALUES(?,?,?,?,?)").bind(id,user.userId,projectId,dataStr,now).run();
       return json({ok:true,projectId});
     }

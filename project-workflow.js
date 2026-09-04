@@ -131,6 +131,40 @@
     const sections=(chapters||[]).filter(c=>c&&c.checked!==false).flatMap(c=>Array.isArray(c.sections)?c.sections:[]),generated=sections.filter(s=>String(s&&((s.editedHtml&&typeof s.editedHtml==="string"?s.editedHtml:"")||s.content)||"").trim()).length;
     return {total:sections.length,generated,remaining:Math.max(0,sections.length-generated),complete:sections.length>0&&generated===sections.length};
   }
+  function nextReportVersionNumber(state){
+    return (Array.isArray(state&&state.reportVersions)?state.reportVersions:[]).reduce((max,item)=>Math.max(max,Number(item&&item.version)||0),0)+1;
+  }
+  function mergeReportDraft(templateChapters,savedChapters){
+    const saved=Array.isArray(savedChapters)?savedChapters:[],used=new Set(),sectionFields=["content","editedHtml","locked","syncStatus","staleReason","staleKeys","pendingRevision","undoStack","prov","logicSnapshot"];
+    return (Array.isArray(templateChapters)?templateChapters:[]).map((chapter,chapterIndex)=>{
+      let savedIndex=saved.findIndex((item,index)=>!used.has(index)&&String(item&&item.cn||"")===String(chapter&&chapter.cn||"")&&String(item&&item.name||"")===String(chapter&&chapter.name||""));
+      if(savedIndex<0)savedIndex=saved.findIndex((item,index)=>!used.has(index)&&String(item&&item.name||"")===String(chapter&&chapter.name||""));
+      if(savedIndex<0&&saved[chapterIndex]&&!used.has(chapterIndex)&&!String(saved[chapterIndex].name||saved[chapterIndex].cn||""))savedIndex=chapterIndex;
+      const old=savedIndex>=0?saved[savedIndex]:null;if(savedIndex>=0)used.add(savedIndex);
+      const oldSections=Array.isArray(old&&old.sections)?old.sections:[],oldUsed=new Set();
+      const sections=(chapter.sections||[]).map((section,sectionIndex)=>{
+        let oldIndex=oldSections.findIndex((item,index)=>!oldUsed.has(index)&&String(item&&item.t||"")===String(section&&section.t||""));
+        if(oldIndex<0&&oldSections[sectionIndex]&&!oldUsed.has(sectionIndex)&&!String(oldSections[sectionIndex].t||""))oldIndex=sectionIndex;
+        const prior=oldIndex>=0?oldSections[oldIndex]:null;if(oldIndex>=0)oldUsed.add(oldIndex);
+        if(!prior)return {...section};
+        const restored={...section};sectionFields.forEach(key=>{if(prior[key]!==undefined)restored[key]=clone(prior[key]);});return restored;
+      });
+      return {...chapter,checked:old&&old.checked!==undefined?old.checked:chapter.checked,sections};
+    });
+  }
+  function recoverCompletedReport(chapters,state,progress){
+    if(!progress||((Number(progress.done)<Number(progress.total)||Number(progress.total)<=0)&&!progress.recoveredFromMismatch))return {recovered:false,chapters,status:reportGenerationStatus(chapters)};
+    const version=latestCompleteReportVersion(state,progress.reportVersionId),merged=version?mergeReportDraft(chapters,version.chapters):chapters,status=reportGenerationStatus(merged);
+    return version&&status.complete?{recovered:true,chapters:merged,status,version}:{recovered:false,chapters,status:reportGenerationStatus(chapters)};
+  }
+  function selectProjectDraft(cloudDraft,localDraft,projectId){
+    if(!localDraft)return cloudDraft||null;if(!cloudDraft)return localDraft;
+    const sameId=projectId&&String(localDraft.projectId||"")===String(projectId),legacyMatch=!localDraft.projectId&&String(localDraft.project&&localDraft.project.name||"")&&String(localDraft.project&&localDraft.project.name||"")===String(cloudDraft.project&&cloudDraft.project.name||"")&&String(localDraft.domainKey||"")===String(cloudDraft.domainKey||"");
+    if(!(sameId||legacyMatch))return cloudDraft;
+    const localRevision=Number(localDraft.documentRevision)||0,cloudRevision=Number(cloudDraft.documentRevision)||0;
+    if(localRevision!==cloudRevision)return localRevision>cloudRevision?localDraft:cloudDraft;
+    return Number(localDraft.ts||0)>Number(cloudDraft.ts||0)?localDraft:cloudDraft;
+  }
   function claimReportGeneration(state,chapters,options){
     state=state||{};options=options||{};const status=reportGenerationStatus(chapters),now=Date.now(),old=state.reportGenerationLock;
     if(status.complete&&!options.force)return {ok:false,reason:"already_complete",status};
@@ -144,7 +178,20 @@
   }
   function persistedGenerationProgress(progress,pendingCount){
     progress=progress||{};const total=Math.max(0,Number(progress.total)||0),done=Math.max(0,Math.min(total,Number(progress.done)||0)),pending=Math.max(0,Number(pendingCount)||0);
-    return {role:"assistant",kind:"genProgress",total,done,failed:Math.max(0,Number(progress.failed)||0),active:false,stopped:pending>0&&done<total};
+    return {role:"assistant",kind:"genProgress",total,done,failed:Math.max(0,Number(progress.failed)||0),active:false,stopped:done<total,reportVersionId:progress.reportVersionId||null,reportVersion:Number(progress.reportVersion)||null,targetReportVersion:Number(progress.targetReportVersion)||null,generationId:progress.generationId||null,recoveredFromMismatch:!!progress.recoveredFromMismatch};
+  }
+  function reconcileGenerationProgress(progress,chapters){
+    const status=reportGenerationStatus(chapters);if(!progress)return {progress:null,status,repaired:false};
+    const apparentlyComplete=Number(progress.total)>0&&Number(progress.done)>=Number(progress.total),expected={...progress,total:status.total,done:status.generated,active:false,stopped:!status.complete,recoveredFromMismatch:!!progress.recoveredFromMismatch||(apparentlyComplete&&!status.complete)};
+    const repaired=Number(progress.total)!==status.total||Number(progress.done)!==status.generated||progress.active!==false||!!progress.stopped!==!status.complete||!!progress.recoveredFromMismatch!==!!expected.recoveredFromMismatch;
+    return {progress:expected,status,repaired};
+  }
+  function latestCompleteReportVersion(state,preferredId){
+    const versions=Array.isArray(state&&state.reportVersions)?state.reportVersions:[],complete=version=>version&&reportGenerationStatus(version.chapters).complete;
+    const preferred=preferredId&&versions.find(version=>version&&version.id===preferredId);
+    if(complete(preferred))return preferred;
+    for(let index=versions.length-1;index>=0;index--)if(complete(versions[index]))return versions[index];
+    return null;
   }
   function setCandidate(section,newText,instruction,meta){
     if(!section)return null;
@@ -211,10 +258,15 @@
   function aiReportStage(state){
     state=state||{};
     const chat=Array.isArray(state.chat)?state.chat:[];
-    const progress=chat.find(x=>x&&x.kind==="genProgress");
+    const progress=[...chat].reverse().find(x=>x&&x.kind==="genProgress");
     const delivered=chat.some(x=>x&&x.kind==="deliver");
-    if(delivered || (progress&&progress.active===false&&progress.stopped===false&&Number(progress.done)>=Number(progress.total))) return "delivered";
-    if(state.paramsConfirmed&&(state.hasDoc || progress)&&state.suggested) return progress&&progress.stopped?"paused":"generating";
+    if(progress){
+      if(progress.active===false&&progress.stopped===false&&Number(progress.total)>0&&Number(progress.done)>=Number(progress.total))return "delivered";
+      if(progress.stopped||Number(progress.done)<Number(progress.total))return "paused";
+      return "generating";
+    }
+    if(delivered)return "delivered";
+    if(state.paramsConfirmed&&state.hasDoc&&state.suggested)return "generating";
     if(state.paramsConfirmed&&state.suggested&&(state.calcParams || state.calcSummary)) return "calculated";
     if(state.suggested) return "suggested";
     if(state.extracted) return "info";
@@ -303,7 +355,7 @@
   }
 
   const api={clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,
-    createCalcSnapshot,createReportVersion,reportGenerationStatus,claimReportGeneration,releaseReportGeneration,persistedGenerationProgress,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
+    createCalcSnapshot,createReportVersion,reportGenerationStatus,nextReportVersionNumber,mergeReportDraft,recoverCompletedReport,selectProjectDraft,claimReportGeneration,releaseReportGeneration,persistedGenerationProgress,reconcileGenerationProgress,latestCompleteReportVersion,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
     aiReportStage,aiReportStageRank,previousAiReportStage,locationTokens,rankLocationCandidates,normalizeAnalysisSites,siteWritingPlan,aiReportProjectSeed,aiReportShouldSeedProject,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
     impactedAnalysisSections,markAnalysisImpacted,METRIC_LABELS,ANALYSIS_DOMAIN_WORDS};
   root.ProjectWorkflow=api;

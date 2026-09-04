@@ -13,10 +13,17 @@
   const LINE13 = { line: 312, lineRule: D.LineRuleType.AUTO }; // 1.3倍行距
 
   function run(text, opt){ return new D.TextRun(Object.assign({text:text, font:FONT}, opt||{})); }
+  function cleanWordText(text){
+    return String(text==null?"":text).replace(/\u00a0/g," ").replace(/[\t ]+/g," ").replace(/\s+([，。；：！？、）】])/g,"$1").replace(/([（【])\s+/g,"$1").trim();
+  }
+  function textRuns(text,opt){
+    const value=cleanWordText(text),parts=value.split(/(【待补(?:：|:)?[^】]*】)/g).filter(Boolean);
+    return parts.map(part=>run(part,Object.assign({},opt||{},/^【待补(?:：|:)?[^】]*】$/.test(part)?{color:"C62828",bold:true}:{})));
+  }
   function bodyPara(text){
     return new D.Paragraph({
-      children:[run(text,{size:24})],
-      spacing: Object.assign({after:120}, LINE13),
+      children:textRuns(text,{size:24}),
+      spacing: Object.assign({before:0,after:0}, LINE13),
       indent:{firstLine:480},
     });
   }
@@ -31,7 +38,7 @@
           shading: ri===0? {fill:"EEEEEE"} : undefined,
           margins:{top:60,bottom:60,left:110,right:110},
           children:[ new D.Paragraph({
-            children:[run(String(c),{size:21, bold:ri===0})],
+            children:textRuns(String(c),{size:21, bold:ri===0}),
             spacing:{line:280, lineRule:D.LineRuleType.AUTO},
           })],
         })),
@@ -80,7 +87,7 @@
             margins:{top:42,bottom:42,left:55,right:55},
             children:[new D.Paragraph({
               alignment:D.AlignmentType.CENTER,
-              children:[run(String(c.text||""),{size:template.longPeriod?14:18,bold:ri===0})],
+              children:textRuns(String(c.text||""),{size:template.longPeriod?14:18,bold:ri===0}),
               spacing:{line:template.longPeriod?220:250,lineRule:D.LineRuleType.AUTO},
             })],
           });
@@ -98,12 +105,11 @@
         spacing:{before:index?0:180,after:100},
       }));
       out.push(makeTemplateTable(template,segment));
-      out.push(new D.Paragraph({children:[],spacing:{after:80}}));
     });
     return out;
   }
   function blockToElems(b){
-    if(b.type==="table" && b.rows && b.rows.length) return [makeTable(b.rows), new D.Paragraph({children:[], spacing:{after:60}})];
+    if(b.type==="table" && b.rows && b.rows.length) return [makeTable(b.rows)];
     if(b.type==="templateTable" && b.template) return templateTableElems(b.template);
     if(b.type==="logic" && b.text) return [new D.Paragraph({
       children:[run(b.text,{size:19,color:"24814D"})],
@@ -115,7 +121,7 @@
       children:[run(b.text,{size:24, bold:true})],
       spacing:{before:160, after:80, line:360, lineRule:D.LineRuleType.AUTO},
     })];
-    return [bodyPara(b.text||"")];
+    return cleanWordText(b.text)?[bodyPara(b.text)]:[];
   }
 
   const children = [];
@@ -232,7 +238,7 @@
       width:{ size:100, type:D.WidthType.PERCENTAGE },
       rows: rows.map((r, ri)=> new D.TableRow({
         children: r.map(cell=> new D.TableCell({
-          children:[ new D.Paragraph({ children:[run(String(cell==null?"":cell), { size: ri===0?19:18, bold: ri===0 })] }) ],
+          children:[ new D.Paragraph({ children:textRuns(String(cell==null?"":cell), { size: ri===0?19:18, bold: ri===0 }),spacing:{before:0,after:0} }) ],
           shading: ri===0 ? { fill:"E8EEF5" } : undefined,
         })),
       })),
@@ -265,7 +271,7 @@
   return new D.Document({
     features:{ updateFields:true },
     styles:{
-      default:{ document:{ run:{ font:FONT, size:24 } } },
+      default:{ document:{ run:{ font:FONT, size:24 },paragraph:{spacing:Object.assign({before:0,after:0},LINE13)} } },
       paragraphStyles:[
         { id:"Heading1", name:"Heading 1", basedOn:"Normal", next:"Normal", quickFormat:true,
           run:{ size:44, bold:true, font:FONT },

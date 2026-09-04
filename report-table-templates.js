@@ -8,7 +8,7 @@
   const clone=value=>JSON.parse(JSON.stringify(value));
   const LIBRARIES={
     rent:{path:"data/report-table-templates-rent-v1.json",label:"出租类"},
-    "gaibao-housing":{path:"data/report-table-templates-gaibao-housing-v1.json",label:"非居改保（住房改造）"},
+    "gaibao-housing":{path:"data/report-table-templates-gaibao-housing-v1.json",label:"非居改保、居改居等（住房改造）"},
     "gaibao-commercial":{path:"data/report-table-templates-gaibao-commercial-v1.json",label:"商业改造（自持改造）"}
   };
   function resolveType(projectType,options){

@@ -13,9 +13,10 @@ export function normalizeAgentTool(name,def={}){
 }
 
 export function buildAgentContextLayers(input={}){
+  const pc=input.projectContext||null;
   return {
     instruction:{system:String(input.system||""),latestUser:String(input.latestUser||"")},
-    working:{projectId:String(input.projectId||""),state:input.state||{},recentMessages:(input.recentMessages||[]).slice(-12)},
+    working:{projectId:String(input.projectId||(pc&&pc.identity&&pc.identity.projectId)||""),projectContext:pc?{contextId:String(pc.contextId||""),contextHash:String(pc.contextHash||""),identity:pc.identity||{},scenario:pc.scenario||{},versions:pc.versions||{},focus:pc.focus||{},governance:pc.governance||{}}:null,state:input.state||{},recentMessages:(input.recentMessages||[]).slice(-12)},
     knowledge:{rag:input.rag||[],wiki:input.wiki||[],rules:input.rules||[]},
     memory:{preferences:input.preferences||[],skills:input.skills||[],historySummary:String(input.historySummary||"")}
   };
@@ -24,6 +25,7 @@ export function buildAgentContextLayers(input={}){
 export function contextLayersToPrompt(layers){
   const x=layers||buildAgentContextLayers();
   const parts=[];
+  if(x.working && x.working.projectContext) parts.push("【已锁定项目上下文】\n"+JSON.stringify(x.working.projectContext));
   if(x.working && Object.keys(x.working.state||{}).length) parts.push("【当前任务状态】\n"+JSON.stringify(x.working.state));
   if(x.knowledge && (x.knowledge.rules||[]).length) parts.push("【适用规则】\n"+x.knowledge.rules.join("\n"));
   if(x.memory && (x.memory.skills||[]).length) parts.push("【已审核技能】\n"+x.memory.skills.join("\n"));

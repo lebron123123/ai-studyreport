@@ -40,6 +40,15 @@ test("已经取得联网依据的逻辑项不会再次进入批量任务",()=>{
   assert.equal(tools.buildBatchTargets([{ruleId:"done",chapter:"第一章",section:"背景",missing:[]}]).length,0);
 });
 
+test("同地域同主题数据需求跨小节只检索一次并绑定全部逻辑项",()=>{
+  const tools=loadTools(),decision={level:"important",priority:88,reason:"判断需求规模与区域趋势",reuseKey:"official_statistic:深圳市龙华区:population:latest_3_years"},base={webAllowed:true,dataNature:"official_statistic",fields:[{key:"residentPopulation",label:"常住人口"}],timeScope:{kind:"latest_3_years",maxAgeMonths:36},geoScope:{level:"district",value:"深圳市龙华区"},quality:{minScore:80,minAuthority:"A",requireCrossCheck:true},budget:{maxQueries:1,maxResults:5},decision};
+  const targets=tools.buildBatchTargets([
+    {ruleId:"r1",sourceNo:1,chapter:"第三章",section:"人口分析",title:"人口规模",requiredSources:"常住人口",missing:["web_search"],dataRequirement:{...base,requirementId:"req:r1",evidenceGoal:"取得常住人口",queryTerms:["龙华区","常住人口"],query:"龙华区 常住人口 统计公报 官方"}},
+    {ruleId:"r2",sourceNo:9,chapter:"第八章",section:"需求论证",title:"需求规模",requiredSources:"人口趋势",missing:["web_search"],dataRequirement:{...base,requirementId:"req:r2",evidenceGoal:"取得人口趋势",queryTerms:["龙华区","常住人口"],query:"龙华区 常住人口 统计公报 官方"}}
+  ]);
+  assert.equal(targets.length,1);assert.deepEqual([...targets[0].logicIds],["r1","r2"]);assert.equal(targets[0].bindings.length,2);assert.equal(targets[0].budget.maxQueries,1);assert.equal(targets[0].requirementSchema.decision.priority,88);
+});
+
 test("采用的联网依据生成带溯源和幂等键的知识库审核材料",()=>{
   const tools=loadTools(),item=tools.knowledgeContributionItem({evidenceId:"evi_1",title:"深圳市住房保障政策",url:"https://zjj.sz.gov.cn/policy/1",authorityLevel:"A",publisher:"深圳市住房建设局",publishedAt:"2026-08-01",snippet:"政策摘要"},{chapter:"第一章",section:"项目背景"});
   assert.equal(item.kind,"wiki");

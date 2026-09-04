@@ -13,6 +13,7 @@ function mockDb(){
     else if(sql.startsWith("DELETE FROM report_golden_samples"))state.samples=state.samples.filter(x=>x.id!==q.args[0]);
     return {success:true,meta:{changes:1}};
   },async first(){if(sql.includes("FROM report_golden_samples WHERE id=?"))return state.samples.find(x=>x.id===q.args[0])||null;return null;},async all(){
+    if(sql.includes("JOIN report_golden_samples"))return {results:state.runs.map(run=>{const sample=state.samples.find(x=>x.id===run.sample_id);return {...run,sample_json:sample&&sample.sample_json};}).filter(x=>x.sample_json)};
     if(sql.includes("FROM report_golden_runs"))return {results:state.runs.filter(x=>x.sample_id===q.args[0])};
     if(sql.includes("FROM report_golden_samples")){if(sql.includes("user_id=?"))return {results:state.samples.filter(x=>x.status==="published"||x.user_id===q.args[0])};return {results:[...state.samples]};}
     return {results:[]};
@@ -39,7 +40,9 @@ test("黄金样本从候选、发布、基准评测到删除形成闭环",async(
   const evaluated=await request(env,"POST",{action:"evaluate",sampleId:id});
   assert.equal(evaluated.status,200);assert.equal(evaluated.data.result.metrics.factAccuracy,100);assert.equal(DB.state.runs.length,1);
   const detail=await request(env,"GET",undefined,"http://test/api/reportgolden?id="+id);
-  assert.equal(detail.data.runs.length,1);assert.equal(detail.data.item.name,"[系统测试]出租项目");
+  assert.equal(detail.data.runs.length,1);assert.equal(detail.data.item.name,"[系统测试]出租项目");assert.equal(detail.data.item.datasetRole,"training");
+  const summary=await request(env,"GET",undefined,"http://test/api/reportgolden?summary=1");
+  assert.equal(summary.status,200);assert.equal(summary.data.runCount,1);assert.equal(summary.data.summary.training.count,1);
   const deleted=await request(env,"DELETE",undefined,"http://test/api/reportgolden?id="+id,true);
   assert.equal(deleted.status,200);assert.equal(DB.state.samples.length,0);assert.equal(DB.state.runs.length,0);
 });
