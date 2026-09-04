@@ -1,4 +1,4 @@
-// 由 scripts/import-report-logic-xlsx.mjs 从正式Excel生成，请勿手工改写。
+// 由 scripts/generate-reportlogic-runtime-seed.mjs 从 Canonical JSON 自动生成，请勿手工改写。
 export default {
   "schemaVersion": 1,
   "setId": "report-logic-gaibao-v1",

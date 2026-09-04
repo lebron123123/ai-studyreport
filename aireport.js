@@ -195,7 +195,13 @@ function bindAiReportEvents(){
       const enhance=e.target.closest(".air-section-enhance");
       if(enhance){airOpenSectionLogicEnhancement(enhance.dataset.cn,+enhance.dataset.si);return;}
       const logicEdit=e.target.closest(".air-section-logic-edit");
-      if(logicEdit){airOpenSectionLogicEditor(logicEdit.dataset.cn,+logicEdit.dataset.si);return;}
+      if(logicEdit){
+        e.preventDefault();e.stopPropagation();
+        void airOpenSectionLogicEditor(logicEdit.dataset.cn,+logicEdit.dataset.si).catch(error=>alert("打开本节生成逻辑失败："+error.message));
+        return;
+      }
+      if(e.target.closest(".air-doc-report-logic")){void airOpenWholeReportLogicEditor();return;}
+      if(e.target.closest(".air-doc-update-impacted")){void airGenerateImpactedCandidates();return;}
       const refine=e.target.closest(".air-refine-requirement");
       if(refine){
         let requirement=null;try{requirement=JSON.parse(decodeURIComponent(refine.dataset.requirementSchema||"null"));}catch(error){}
@@ -254,6 +260,7 @@ async function airOpenIndependentModule(module){
 }
 
 async function airOpenLogicModule(){
+  if(chapters.some(c=>c.sections.some(s=>s.content||s.editedHtml)))return airOpenWholeReportLogicEditor();
   const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",scenario=airBusinessScenario();await ReportLogicCore.load(type);
   const set=ReportLogicCore.current(type),rules=(set?.data?.rules||[]).filter(rule=>!scenario||!rule.scenarios?.length||rule.scenarios.includes(scenario)).map(rule=>Object.assign({},rule,scenario&&rule.scenarioVariants?.[scenario]||{}));
   document.getElementById("airLogicModuleModal")?.remove();
@@ -1046,8 +1053,15 @@ async function airGenOneSection(t){
   });
 }
 
+function airFindChapterSection(cn,si){
+  // data-* 属性始终返回字符串；兼容历史大纲中使用数字章节编号的项目。
+  const chapter=(Array.isArray(chapters)?chapters:[]).find(item=>item&&String(item.cn)===String(cn));
+  if(!chapter||!Array.isArray(chapter.sections)||!chapter.sections[si])return null;
+  return {chapter,section:chapter.sections[si]};
+}
+
 async function airRetrySection(cn, si){
-  const info = findChapterSection(cn, si);
+  const info = airFindChapterSection(cn, si);
   if(!info) return;
   await airDriveSectionGen(info.chapter, info.section, si, {
     clearFirst: true,
@@ -1090,7 +1104,7 @@ function airRenderCompletedSection(chapter,section,si){
   el.querySelector('.air-section-candidate')?.remove();
   if(body)body.insertAdjacentHTML('afterend',airCandidateHtml(chapter,section,si));
 }
-function airRefreshSection(cn,si){const info=findChapterSection(cn,si);if(info)airRenderCompletedSection(info.chapter,info.section,si);}
+function airRefreshSection(cn,si){const info=airFindChapterSection(cn,si);if(info)airRenderCompletedSection(info.chapter,info.section,si);}
 function airHideSelectionAction(){document.getElementById('airSelectionAction')?.remove();aiReportSelectionState=null;}
 function airHandleTextSelection(e){
   if(e.target.closest('button,input,textarea,.wf-candidate'))return;
@@ -1110,13 +1124,13 @@ function airHandleTextSelection(e){
   },0);
 }
 async function airRewriteSection(cn,si,btn){
-  const info=findChapterSection(cn,si);if(!info||!window.ProjectWorkflow)return;
+  const info=airFindChapterSection(cn,si);if(!info||!window.ProjectWorkflow)return;
   btn.disabled=true;const old=btn.textContent;btn.textContent='重写中…';
   try{const text=await generateSection(info.chapter,info.section);ProjectWorkflow.setCandidate(info.section,text,'重写本节',{logicRevision:reportLogicRevision(info.chapter,info.section,'根据现有逻辑重新生成本节')});saveDraft();airSaveState();airRefreshSection(cn,si);}
   catch(e){alert('重写失败：'+e.message);}finally{btn.disabled=false;btn.textContent=old;}
 }
 function airOpenRevisionModal(cn,si,selected){
-  const info=findChapterSection(cn,si);if(!info)return;document.getElementById('airRevisionModal')?.remove();
+  const info=airFindChapterSection(cn,si);if(!info)return;document.getElementById('airRevisionModal')?.remove();
   const partial=!!selected,preview=partial?'<div class="air-revision-selection"><b>已选择文字</b><div>'+escapeHtml(selected)+'</div></div>':'';
   document.body.insertAdjacentHTML('beforeend','<div class="air-modal-overlay" id="airRevisionModal"><div class="air-modal-card air-revision-modal">'
     +'<div class="air-modal-head"><div><b>'+(partial?'局部AI修改':'整节AI修改')+' · '+escapeHtml(info.section.t)+'</b><span>'+(partial?'只替换选中文字，完整正文先保持不变。':'按要求生成完整候选稿，接受后才覆盖正文。')+'</span></div><button type="button" class="air-modal-close" id="airRevisionClose">×</button></div>'
@@ -1127,7 +1141,7 @@ function airOpenRevisionModal(cn,si,selected){
   document.getElementById('airRevisionSubmit').onclick=()=>airRunRevision(cn,si,selected);document.getElementById('airRevisionInstruction').focus();
 }
 async function airRunRevision(cn,si,selected){
-  const info=findChapterSection(cn,si),btn=document.getElementById('airRevisionSubmit'),input=document.getElementById('airRevisionInstruction'),out=document.getElementById('airRevisionOutput');
+  const info=airFindChapterSection(cn,si),btn=document.getElementById('airRevisionSubmit'),input=document.getElementById('airRevisionInstruction'),out=document.getElementById('airRevisionOutput');
   if(!info||!btn||!input)return;const instruction=input.value.trim();if(!instruction){input.focus();return;}
   btn.disabled=true;btn.textContent='生成中…';if(out)out.textContent='AI正在形成候选稿…';
   try{
@@ -1142,7 +1156,7 @@ async function airRunRevision(cn,si,selected){
   }catch(e){if(out)out.innerHTML='<span style="color:var(--seal-red)">修改失败：'+escapeHtml(e.message)+'</span>';btn.disabled=false;btn.textContent='生成候选稿';}
 }
 async function airResolveRevision(cn,si,action){
-  const info=findChapterSection(cn,si);if(!info||!window.ProjectWorkflow)return;
+  const info=airFindChapterSection(cn,si);if(!info||!window.ProjectWorkflow)return;
   if(action==='accept'||action==='adopt'){
     const revision=info.section.pendingRevision?.logicRevision;
     ProjectWorkflow.acceptCandidate(info.section);ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta('在AI可研预览接受AI修改'));
@@ -1152,10 +1166,20 @@ async function airResolveRevision(cn,si,action){
   else if(action==='undo'){if(!ProjectWorkflow.undoSection(info.section))return;ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta('在AI可研预览撤销修改'));}
   saveDraft();airSaveState();airRefreshSection(cn,si);
 }
-function airOpenSectionLogicEditor(cn,si){
-  const info=findChapterSection(cn,si);if(!info)return;
+function airFallbackSectionLogic(info){
+  return {id:"project-"+info.chapter.cn+"-"+info.si,sourceNo:"",title:info.section.t,requiredSources:"按本节论证需要取得项目事实、测算结果和适用依据",sourceKinds:[],dataRequirement:null,writingLogic:"按本节标题、项目事实和已核实依据完成论证",outputForm:"文字",missingPolicy:"资料缺失时标注待补，不得虚构",changeReason:""};
+}
+function airEnsureEditableLogicSnapshot(info,snapshot){
+  const copy=Object.assign({},snapshot||{}),rules=Array.isArray(copy.rules)?copy.rules.slice():[];
+  if(!rules.length)rules.push(airFallbackSectionLogic(info));
+  copy.rules=rules;return copy;
+}
+async function airOpenSectionLogicEditor(cn,si){
+  const info=airFindChapterSection(cn,si);if(!info)return;
+  info.si=si;
+  if(window.ReportLogicCore){try{await ReportLogicCore.load(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent");}catch(error){alert("生成逻辑加载失败："+error.message);return;}}
   const backendRules=window.ReportLogicCore?ReportLogicCore.match(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",info.chapter.name,info.section.t,{projectText:[project.name,project.type,project.location,project.desc].filter(Boolean).join(" "),businessScenario:airBusinessScenario()}):[];
-  const snapshot=info.section.logicSnapshot?.localOverride?info.section.logicSnapshot:reportSectionLogicSnapshot(info.chapter,info.section,backendRules);
+  const snapshot=airEnsureEditableLogicSnapshot(info,info.section.logicSnapshot?.localOverride?info.section.logicSnapshot:reportSectionLogicSnapshot(info.chapter,info.section,backendRules));
   document.getElementById("airSectionLogicModal")?.remove();
   const rows=(snapshot.rules||[]).map((rule,index)=>'<div class="air-logic-edit-row" data-index="'+index+'"><b>'+(rule.sourceNo?'第'+escapeHtml(rule.sourceNo)+'项':'逻辑'+(index+1))+' · '+escapeHtml(rule.title||info.section.t)+'</b><label>生成方法<textarea class="air-logic-writing" rows="4">'+escapeHtml(rule.writingLogic||'')+'</textarea></label><label>输出形式<input class="air-logic-output" value="'+escapeHtml(rule.outputForm||'文字')+'"></label></div>').join("");
   document.body.insertAdjacentHTML("beforeend",'<div class="air-modal-overlay" id="airSectionLogicModal"><div class="air-modal-card air-section-logic-modal"><div class="air-modal-head"><div><b>调整本节生成逻辑 · '+escapeHtml(info.section.t)+'</b><span>仅作用于当前项目和本小节。保存后可生成候选稿，但不会直接改后台规则，也不会进入下载的 Word。</span></div><button type="button" class="air-modal-close">×</button></div><div class="air-logic-edit-list">'+(rows||'<p>本节暂未匹配到可编辑规则。</p>')+'</div><div class="air-enhance-guard">安全边界：这里先形成项目级临时逻辑；正文须人工接受。若以后选择“接受并采纳为后台逻辑”，仍需通过自动评测与管理员权限。</div><div class="air-modal-actions"><button type="button" class="btn ghost air-logic-reset">恢复后台逻辑</button><button type="button" class="btn ghost air-modal-close">取消</button><button type="button" class="btn air-logic-save">仅保存逻辑</button><button type="button" class="btn air-logic-generate">保存并生成候选稿</button></div></div></div>');
@@ -1167,7 +1191,7 @@ function airOpenSectionLogicEditor(cn,si){
 }
 async function airSaveSectionLogicEditor(info,cn,si,generateCandidate){
   const modal=document.getElementById("airSectionLogicModal");if(!modal)return;
-  const base=reportSectionLogicSnapshot(info.chapter,info.section),rules=[...modal.querySelectorAll(".air-logic-edit-row")].map((row,index)=>Object.assign({},base.rules?.[index]||{}, {writingLogic:row.querySelector(".air-logic-writing").value.trim(),outputForm:row.querySelector(".air-logic-output").value.trim()||"文字",changeReason:"当前项目人工调整"}));
+  const base=airEnsureEditableLogicSnapshot(Object.assign({si},info),reportSectionLogicSnapshot(info.chapter,info.section)),rules=[...modal.querySelectorAll(".air-logic-edit-row")].map((row,index)=>Object.assign({},base.rules?.[index]||{}, {writingLogic:row.querySelector(".air-logic-writing").value.trim(),outputForm:row.querySelector(".air-logic-output").value.trim()||"文字",changeReason:"当前项目人工调整"}));
   if(!rules.length)return alert("本节暂未匹配到生成逻辑，不能保存。");
   info.section.logicSnapshot=Object.assign({},base,{rules,localOverride:true,updatedAt:new Date().toISOString(),changeReason:"当前项目人工调整"});
   saveDraft();airSaveState();
@@ -1178,6 +1202,62 @@ async function airSaveSectionLogicEditor(info,cn,si,generateCandidate){
     ProjectWorkflow.setCandidate(info.section,text,"按项目级生成逻辑重新起草",{logicRevision:info.section.logicSnapshot});
     saveDraft();airSaveState();modal.remove();airRefreshSection(cn,si);
   }catch(error){button.disabled=false;button.textContent="保存并生成候选稿";alert("候选稿生成失败："+error.message);}
+}
+function airReportLogicImpactSummary(){
+  const rows=chapters.filter(c=>c.checked).flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).filter(x=>x.s.staleKind==="logic"&&(x.s.syncStatus==="stale"||x.s.syncStatus==="locked-stale"));
+  return {total:rows.length,unlocked:rows.filter(x=>!x.s.locked&&x.s.syncStatus==="stale"&&!x.s.pendingRevision&&(x.s.content||x.s.editedHtml)).length,locked:rows.filter(x=>x.s.locked||x.s.syncStatus==="locked-stale").length,pending:rows.filter(x=>x.s.pendingRevision).length};
+}
+function airDocLogicBarHtml(){
+  const state=airReportLogicImpactSummary(),summary=state.total?("已标记 "+state.total+" 个受影响小节"+(state.pending?"，"+state.pending+" 个已有候选稿":"")+(state.locked?"，"+state.locked+" 个已锁定":"")):"录入经理意见后，只标记真正受影响的小节";
+  return '<div class="air-doc-logicbar"><b>报告逻辑与同步</b><span>'+summary+'</span><button type="button" class="air-doc-tool air-doc-report-logic">调整全报告逻辑</button><button type="button" class="air-doc-tool primary air-doc-update-impacted" '+(state.unlocked?'':'disabled')+'>生成受影响候选稿'+(state.unlocked?'（'+state.unlocked+'）':'')+'</button></div>';
+}
+function airJsonObject(text){
+  const raw=String(text||"").replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,""),start=raw.indexOf("{"),end=raw.lastIndexOf("}");
+  if(start<0||end<start)throw new Error("AI没有返回可识别的影响清单");
+  return JSON.parse(raw.slice(start,end+1));
+}
+async function airOpenWholeReportLogicEditor(){
+  const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent";
+  if(window.ReportLogicCore){try{await ReportLogicCore.load(type);}catch(error){alert("生成逻辑加载失败："+error.message);return;}}
+  const items=chapters.filter(c=>c.checked).flatMap(c=>c.sections.map((s,si)=>{const info={chapter:c,section:s,si},base=airEnsureEditableLogicSnapshot(info,reportSectionLogicSnapshot(c,s));return {c,s,si,base,rule:base.rules[0]};}));
+  if(!items.length)return alert("当前报告还没有可调整的小节。");
+  document.getElementById("airReportLogicModal")?.remove();
+  const rows=items.map(x=>'<div class="air-report-logic-row" data-cn="'+x.c.cn+'" data-si="'+x.si+'"><label class="air-report-logic-pick"><input type="checkbox" class="air-report-logic-check"><b>'+escapeHtml(x.c.cn+'·'+x.c.name+'｜'+x.s.t)+'</b><span>'+(x.s.locked?'已锁定，仅标记提醒':(x.s.content||x.s.editedHtml?'有正文，可生成候选稿':'暂无正文，保存逻辑后首次生成生效'))+'</span></label><label>本节生成方法<textarea class="air-report-logic-writing" rows="3">'+escapeHtml(x.rule.writingLogic||"")+'</textarea></label><label>输出形式（可写“文字”“表格：列名…”或二者组合）<input class="air-report-logic-output" value="'+escapeHtml(x.rule.outputForm||"文字")+'"></label><div class="air-report-logic-reason"></div></div>').join("");
+  document.body.insertAdjacentHTML("beforeend",'<div class="air-modal-overlay" id="airReportLogicModal"><div class="air-modal-card air-report-logic-modal"><div class="air-modal-head"><div><b>调整全报告逻辑与影响范围</b><span>把经理对结构、论证框架或表格填法的意见一次写清。AI只判断受影响小节；保存后仍不覆盖正文。</span></div><button type="button" class="air-modal-close">×</button></div><div class="air-report-logic-intro"><label>经理本轮整体意见<textarea id="airReportLogicInstruction" rows="5" placeholder="例如：市场分析改为‘需求—供给—价格—竞品—结论’；财务评价增加敏感性表，列为变动因素、变动幅度、IRR、NPV和判断；其他章节不要改。"></textarea></label><div id="airReportLogicStatus">先点“智能判断影响范围”，再检查勾选项和每节逻辑。</div></div><div class="air-report-logic-list">'+rows+'</div><div class="air-enhance-guard">安全边界：智能判断只勾选候选范围；你可增减勾选并修改逻辑。锁定小节不自动生成，所有新正文均先进入“候选稿”，人工接受后才替换。</div><div class="air-modal-actions"><button type="button" class="btn ghost air-modal-close">取消</button><button type="button" class="btn ghost" id="airReportLogicAnalyze">智能判断影响范围</button><button type="button" class="btn" id="airReportLogicSave">保存逻辑并标记影响</button><button type="button" class="btn" id="airReportLogicGenerate">保存并生成候选稿</button></div></div></div>');
+  const modal=document.getElementById("airReportLogicModal"),close=()=>modal?.remove();
+  modal.querySelectorAll(".air-modal-close").forEach(button=>button.onclick=close);
+  modal.querySelectorAll(".air-report-logic-check").forEach(box=>box.onchange=()=>box.closest(".air-report-logic-row").classList.toggle("selected",box.checked));
+  modal.querySelector("#airReportLogicAnalyze").onclick=airAnalyzeWholeReportLogicImpact;
+  modal.querySelector("#airReportLogicSave").onclick=()=>airSaveWholeReportLogic(false);
+  modal.querySelector("#airReportLogicGenerate").onclick=()=>airSaveWholeReportLogic(true);
+  modal.querySelector("#airReportLogicInstruction").focus();
+}
+async function airAnalyzeWholeReportLogicImpact(){
+  const modal=document.getElementById("airReportLogicModal"),input=modal?.querySelector("#airReportLogicInstruction"),status=modal?.querySelector("#airReportLogicStatus"),button=modal?.querySelector("#airReportLogicAnalyze");if(!modal||!input)return;
+  const instruction=input.value.trim();if(!instruction){input.focus();status.textContent="请先填写经理的整体意见。";return;}
+  const catalog=chapters.filter(c=>c.checked).flatMap(c=>c.sections.map((s,si)=>({cn:String(c.cn),si,chapter:c.name,title:s.t,currentLogic:reportLogicText(c,s,false),hasContent:!!(s.content||s.editedHtml),locked:!!s.locked})));
+  button.disabled=true;button.textContent="正在判断…";status.textContent="AI正在做一次性影响分析，不联网、不改正文。";
+  try{
+    const answer=await callGen("你是可研报告变更影响分析器。只输出JSON对象：{affected:[{cn,si,reason,writingLogic,outputForm}]}。只选择确实受意见影响的小节，禁止为了省事全选；保留事实和数字口径，不补造数据。结构增删意见映射到最接近的现有小节。writingLogic写该节调整后的完整生成方法，outputForm写明确输出形式和表格列名。", "经理意见：\n"+instruction+"\n\n当前报告小节目录与逻辑：\n"+JSON.stringify(catalog));
+    const result=airJsonObject(answer),affected=Array.isArray(result.affected)?result.affected:[];let count=0;
+    modal.querySelectorAll(".air-report-logic-row").forEach(row=>{const hit=affected.find(x=>String(x.cn)===String(row.dataset.cn)&&Number(x.si)===Number(row.dataset.si)),box=row.querySelector(".air-report-logic-check");box.checked=!!hit;row.classList.toggle("selected",!!hit);row.dataset.reason=hit?.reason||"";row.querySelector(".air-report-logic-reason").textContent=hit?.reason?("影响原因："+hit.reason):"";if(hit?.writingLogic)row.querySelector(".air-report-logic-writing").value=hit.writingLogic;if(hit?.outputForm)row.querySelector(".air-report-logic-output").value=hit.outputForm;if(hit)count++;});
+    status.textContent="已判断出 "+count+" 个受影响小节。请检查勾选和逻辑，必要时手工增减后再保存。";
+  }catch(error){status.textContent="影响判断失败："+error.message+"。你仍可手工勾选并填写。";}finally{button.disabled=false;button.textContent="重新判断影响范围";}
+}
+async function airSaveWholeReportLogic(generateCandidates){
+  const modal=document.getElementById("airReportLogicModal"),instruction=modal?.querySelector("#airReportLogicInstruction")?.value.trim()||"报告整体生成逻辑调整",selected=[...(modal?.querySelectorAll(".air-report-logic-row")||[])].filter(row=>row.querySelector(".air-report-logic-check")?.checked);if(!selected.length)return alert("请至少勾选一个受影响小节。");
+  const changes=selected.map(row=>{const info=airFindChapterSection(row.dataset.cn,+row.dataset.si);if(!info)return null;const base=airEnsureEditableLogicSnapshot({chapter:info.chapter,section:info.section,si:+row.dataset.si},reportSectionLogicSnapshot(info.chapter,info.section)),rules=base.rules.map((rule,index)=>index?rule:Object.assign({},rule,{writingLogic:row.querySelector(".air-report-logic-writing").value.trim()||rule.writingLogic,outputForm:row.querySelector(".air-report-logic-output").value.trim()||"文字",changeReason:instruction}));return {cn:row.dataset.cn,si:+row.dataset.si,reason:row.dataset.reason||instruction,force:true,logicSnapshot:Object.assign({},base,{rules,localOverride:true,updatedAt:new Date().toISOString(),changeReason:instruction})};}).filter(Boolean);
+  const hits=ProjectWorkflow.markLogicImpacted(chapters,changes,instruction);projectWorkflow.reportLogicPlan={instruction,createdAt:new Date().toISOString(),impacts:hits.map(x=>({cn:x.cn,si:x.si,title:x.title,locked:x.locked,reason:x.reason}))};saveDraft();airSaveState();modal.remove();airBuildDocPane();
+  if(generateCandidates)return airGenerateImpactedCandidates();
+  alert("已保存并标记 "+hits.length+" 个受影响小节。正文未改变，可在右侧点击“生成受影响候选稿”。");
+}
+async function airGenerateImpactedCandidates(){
+  const tasks=chapters.filter(c=>c.checked).flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).filter(x=>x.s.staleKind==="logic"&&x.s.syncStatus==="stale"&&!x.s.locked&&!x.s.pendingRevision&&(x.s.content||x.s.editedHtml));
+  const locked=airReportLogicImpactSummary().locked;if(!tasks.length)return alert(locked?"没有可自动生成的小节；受影响小节均已锁定，需要人工解除锁定。":"没有带现有正文且待同步的小节。");
+  if(!confirm("将为 "+tasks.length+" 个受影响小节生成候选稿，不会覆盖现有正文。是否继续？"))return;
+  const button=document.querySelector(".air-doc-update-impacted");if(button){button.disabled=true;button.textContent="候选稿生成中…";}let failed=0;
+  await runWorkerPool(tasks.slice(),async t=>{try{const instruction="报告生成逻辑已调整："+(t.s.staleReason||"按最新项目级逻辑更新")+"。只修改本小节受影响的结构、论证或表格表达，未受影响的事实、数字和内容尽量保持不变；缺失数据明确标待补，不得编造。",text=await reviseSection(t.c,t.s,instruction);ProjectWorkflow.setCandidate(t.s,text,"同步最新报告逻辑",{logicRevision:t.s.logicSnapshot||reportLogicRevision(t.c,t.s,instruction)});}catch(error){failed++;}},3);
+  saveDraft();airSaveState();airBuildDocPane();alert("已生成 "+(tasks.length-failed)+" 个候选稿"+(failed?"，"+failed+" 个失败可单独重试":"")+"。请逐节接受或拒绝，现有正文尚未被覆盖。");
 }
 function airSectionMaterialState(chapter,section){
   if(!window.ReportLogicCore)return {rules:[],missing:[],ready:false};
@@ -1228,7 +1308,7 @@ function airBuildDocPane(){
   pane.innerHTML = '<div class="air-doc-head"><div class="air-doc-heading"><div class="air-doc-title">'+escapeHtml(project.name||"未命名项目")+'</div>'
     +'<div class="air-doc-meta">'+escapeHtml(project.industry||"")+' · 共 '+active.length+' 章 / '+totalSec+' 个子标题</div></div>'
     +'<div class="air-doc-actions">'+airReportVersionSelectHtml("current")+'<button type="button" class="air-doc-tool air-doc-chat-toggle">收起对话</button><button type="button" class="air-doc-tool air-doc-outline-toggle">收起章节</button><span class="air-doc-zoom"><button type="button" class="air-doc-tool air-doc-zoom-out" title="缩小">−</button><button type="button" class="air-doc-tool air-doc-zoom-reset" title="恢复100%"><span class="air-doc-zoom-value">100%</span></button><button type="button" class="air-doc-tool air-doc-zoom-in" title="放大">＋</button></span><button type="button" class="air-doc-tool air-doc-download">下载 Word</button><button type="button" class="air-doc-tool air-doc-fullscreen">全屏阅读</button><button type="button" class="air-doc-close" title="关闭报告预览">✕</button></div></div>'
-    +'<div class="air-doc-outline">'+outline+'</div>'
+    +airDocLogicBarHtml()+'<div class="air-doc-outline">'+outline+'</div>'
     +'<input type="file" id="airDocMaterialFile" accept=".txt,.md,.doc,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
     +'<div class="air-doc-scroll" id="airDocScroll">'+body+'</div>';
   aiReportHasDoc = true;
@@ -1579,7 +1659,7 @@ async function airHandleMaterialFiles(files){
     airResolve(loading,{kind:"text",content:"✓ 已上传并关联 "+files.length+" 份材料到“"+(target.section||target.chapter||"所选逻辑项")+"”。对应缺口已重新核验；绿色表示已找到，其他红色来源仍需补充。"});
     renderAiReportMsgs();airApplyDocMaterialStatuses();airSaveState();
     if(target.cn&&target.si!==null){
-      const info=findChapterSection(target.cn,target.si);
+      const info=airFindChapterSection(target.cn,target.si);
       if(info&&info.section.content){
         const rerun=airPushLoading("新材料已到位，正在只补写受影响小节“"+info.section.t+"”…");
         await airDriveSectionGen(info.chapter,info.section,target.si,{clearFirst:true,failLabel:"材料补写失败",onDone:()=>{saveDraft();airResolve(rerun,{kind:"text",content:"✓ “"+info.section.t+"”已根据新上传材料实时补写完成。"});},onFail:()=>airResolve(rerun,{kind:"text",content:"材料已保存，但“"+info.section.t+"”自动补写失败；可在右侧点击重试，材料不会丢失。"})});
@@ -1658,7 +1738,7 @@ function airSectionRevisionContext(info){
   return {chapter:info.chapter.name,section:info.section.t,versions:unique,first:unique[0]?.content||current,current:current||unique[unique.length-1]?.content||""};
 }
 function airOpenSectionLogicEnhancement(cn,si){
-  const info=findChapterSection(cn,si);if(!info)return alert("未找到该小节，请刷新后重试");
+  const info=airFindChapterSection(cn,si);if(!info)return alert("未找到该小节，请刷新后重试");
   const st=airSectionMaterialState(info.chapter,info.section),base=st.rules[0];if(!base)return alert("本节尚未匹配已发布的生成规则");
   aiReportLogicEnhanceState={type:calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",base,candidate:airEnhancementCandidate(base),history:[],busy:false,sectionContext:airSectionRevisionContext({chapter:info.chapter,section:info.section,si})};airRenderLogicEnhancementModal();
 }

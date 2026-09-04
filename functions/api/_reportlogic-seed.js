@@ -1,4 +1,4 @@
-// 由 scripts/import-report-logic-xlsx.mjs 从正式Excel生成，请勿手工改写。
+// 由 scripts/generate-reportlogic-runtime-seed.mjs 从 Canonical JSON 自动生成，请勿手工改写。
 export default {
   "schemaVersion": 1,
   "setId": "report-logic-rent-v1",
@@ -9,7 +9,7 @@ export default {
   "source": {
     "fileName": "可研报告全逻辑梳理表_XX项目【出租-参考创景苑】(5).xlsx",
     "sheetName": "出租类可研全逻辑梳理表",
-    "importedAt": "2026-08-24T06:03:36.196Z",
+    "importedAt": "2026-08-24T06:03:36.012Z",
     "authoritativeRows": 137
   },
   "structure": {

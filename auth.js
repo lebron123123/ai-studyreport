@@ -92,21 +92,32 @@ async function cloudSaveSnapshot(saveRequest){
     const resp = await fetch("/api/projects", {method:"POST",
       headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
       body: JSON.stringify({id:saveRequest.id,name:saveRequest.name,data:saveRequest.snapshot,expectedUpdatedAt:expected})});
-    if(resp.status===401){ setSaveState("err"); clearAuth(); showLoginModal("登录已过期，请重新登录（本地草稿仍在）"); return; }
+    if(resp.status===401){ setSaveState("auth"); clearAuth(); showLoginModal("登录已过期，请重新登录（本地草稿仍在）"); return; }
     const d = await resp.json();
     if(resp.status===409&&d.conflict){setSaveState("conflict");return;}
     if(d.ok&&saveRequest.id===currentProjectId)currentProjectUpdatedAt=Number(d.updatedAt)||currentProjectUpdatedAt;
-    setSaveState(d.ok? "ok":"err");
+    setSaveState(d.ok? "ok":"offline");
     return !!d.ok;
-  }catch(e){ setSaveState("err"); }
+  }catch(e){ setSaveState("offline"); }
   return false;
 }
 function flushCloudSave(){return cloudSaveNow();}
 function setSaveState(st){
   const el = document.getElementById("saveState");
   if(!el) return;
-  el.textContent = st==="saving"? "云端保存中…" : st==="ok"? "已保存到云端" : st==="conflict"?"发现其他页面的新版本，请从项目管理重新载入":"云端保存失败（本地已存）";
-  el.style.color = st==="err"||st==="conflict"? "var(--seal-red)" : "";
+  const states={
+    local:{text:"已保存到本机",title:"当前修改已经安全保存在此浏览器。"},
+    saving:{text:"本机已保存 · 正在同步云端…",title:"本地草稿已保存，正在同步到项目库。"},
+    ok:{text:"本机与云端均已保存",title:"当前修改已同时保存到本机和云端项目库。"},
+    offline:{text:"已保存到本机 · 云端暂未同步",title:"当前内容不会丢失；网络或云端恢复后，下次编辑会自动再次同步。"},
+    auth:{text:"已保存到本机 · 登录后可同步",title:"登录状态已过期，本地草稿仍然安全；重新登录后可继续同步。"},
+    conflict:{text:"云端有更新 · 请重新载入",title:"其他页面保存了更新。为避免覆盖，请从“我的项目”重新载入。"}
+  };
+  const state=states[st]||states.offline;
+  el.textContent=state.text;
+  el.title=state.title;
+  el.dataset.state=st;
+  el.style.color=st==="conflict"?"var(--seal-red)":st==="offline"||st==="auth"?"#9A6A16":"";
 }
 
 function mountUserBar(){

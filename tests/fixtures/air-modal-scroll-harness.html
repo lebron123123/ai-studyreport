@@ -1,0 +1,20 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>AI可研弹窗滚动验收页</title><style>
+body{margin:0;min-height:2400px;font-family:Arial;color:#173b58;background:linear-gradient(#eef5fa,#fff)}
+.page-copy{padding:24px}.scroll-metrics{position:fixed;top:8px;right:8px;z-index:10000;padding:7px 10px;background:#173b58;color:#fff}
+.air-modal-overlay{box-sizing:border-box;position:fixed;z-index:3000;inset:0;background:rgba(13,34,51,.38);display:flex;align-items:center;justify-content:center;padding:24px;overflow-y:auto;overscroll-behavior:contain}
+.air-modal-card{box-sizing:border-box;width:min(960px,96vw);max-height:calc(100dvh - 48px);overflow-y:auto;overscroll-behavior:contain;background:#fff;border:1px solid #c7d9e6;border-radius:12px;box-shadow:0 24px 70px rgba(18,42,65,.24);display:flex;flex-direction:column}
+.air-modal-head{position:sticky;top:0;z-index:2;flex-shrink:0;display:flex;justify-content:space-between;gap:20px;padding:18px 22px;border-bottom:1px solid #c7d9e6;background:#fff}
+.air-modal-actions{position:sticky;bottom:0;z-index:2;flex-shrink:0;display:flex;justify-content:flex-end;gap:8px;padding:14px 22px;border-top:1px solid #c7d9e6;background:#f7fafc}
+.air-enhance-modal{width:min(900px,96vw)}.air-enhance-modal>*{flex-shrink:0}.section{min-height:170px;margin:14px 22px;padding:12px;border:1px solid #c7d9e6;background:#f7fafd}.btn{padding:8px 14px}
+</style></head><body>
+<div class="page-copy"><h1>报告正文背景</h1><p>弹窗打开时，这一层不应跟随弹窗滚动。</p></div>
+<div class="scroll-metrics" aria-live="polite">页面滚动 <b id="pageScroll">0</b>｜弹窗滚动 <b id="modalScroll">0</b></div>
+<div class="air-modal-overlay"><div class="air-modal-card air-enhance-modal" id="modalCard">
+  <div class="air-modal-head"><b>管理员审定本节增强 · 滚动验收</b><button>×</button></div>
+  <div class="section">查看现行基础逻辑</div><div class="section">新增/细化的数据与材料来源</div><div class="section">新增/细化的生成逻辑</div><div class="section">缺失材料时的处理</div><div class="section">本次增强原因</div>
+  <div class="air-modal-actions"><button class="btn">取消</button><button class="btn" id="publish">管理员审定并合并发布</button></div>
+</div></div>
+<script>
+const pageMetric=document.getElementById("pageScroll"),modalMetric=document.getElementById("modalScroll"),card=document.getElementById("modalCard");
+addEventListener("scroll",()=>pageMetric.textContent=String(Math.round(scrollY)));card.addEventListener("scroll",()=>modalMetric.textContent=String(Math.round(card.scrollTop)));
+</script></body></html>

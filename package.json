@@ -8,8 +8,10 @@
     "test": "node --test",
     "check:syntax": "node scripts/check-javascript-syntax.mjs",
     "check:release": "node scripts/check-release-consistency.mjs",
+    "check:migrations": "node local-server/check-migrations.js",
     "test:golden": "node --test tests/reportgolden-api.test.js tests/report-dependency-evidence-golden.test.js",
     "generate:reportlogic-seed": "node scripts/generate-reportlogic-runtime-seed.mjs",
+    "generate:release-manifest": "node scripts/generate-release-manifest.mjs",
     "sensitivity": "node scripts/sensitivity.js"
   }
 }
