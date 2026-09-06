@@ -2,6 +2,7 @@
 import "../../project-intelligence.js";
 import "../../project-brain.js";
 import { verifyAuth, json } from "./_auth.js";
+import { changeProjectMember } from "./_project-members.js";
 import { adaptEnv } from "./_adapters.js";
 
 const PI=globalThis.ProjectIntelligence,Brain=globalThis.ProjectBrain;
@@ -72,7 +73,7 @@ export async function onRequestPost(c){
     if(!manage)return json({ok:false,error:"仅项目负责人可修改项目数据边界"},403);const p=PI.normalizeProfile({...b.profile,projectId,ownerUserId:x.row.user_id});await env.DB.prepare("UPDATE project_profiles SET organization_id=?,department_id=?,visibility=?,confidentiality_level=?,lifecycle_stage=?,current_gate_id=?,updated_at=? WHERE project_id=?").bind(p.organizationId,p.departmentId,p.visibility,p.confidentialityLevel,p.lifecycleStage,p.currentGateId,now,projectId).run();await piEvent(env,user,projectId,"project.profile.updated",p);return json({ok:true,readModel:(await piOwnedModel(env,user,projectId)).model});
   }
   if(action==="addMember"){
-    if(!manage)return json({ok:false,error:"仅项目负责人可管理成员"},403);const m=PI.normalizeMembership({...b.member,projectId});if(!m.userId)return json({ok:false,error:"成员用户ID不能为空"},400);await env.DB.prepare("INSERT INTO project_memberships(project_id,user_id,role,status,created_at,updated_at) VALUES(?,?,?,'active',?,?) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role,status='active',updated_at=excluded.updated_at").bind(projectId,m.userId,m.role,now,now).run();await piEvent(env,user,projectId,"project.member.updated",m);return json({ok:true});
+    const result=await changeProjectMember(env,user.userId,projectId,Number(b.member?.userId),String(b.member?.role||'VIEWER').toUpperCase());return json(result,result.status||200);
   }
   if(!edit)return json({ok:false,error:"当前角色没有编辑项目进度的权限"},403);
   if(action==="saveGate"){

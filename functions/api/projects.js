@@ -5,6 +5,7 @@
 import { verifyAuth, json } from "./_auth.js";
 
 import { adaptEnv } from "./_adapters.js";
+import { ensureProjectMemberships,resolveProjectAccess,projectRolePermissions } from "./_project-access.js";
 import "../../project-brain.js";
 
 function parseData(raw){
@@ -51,15 +52,16 @@ export async function onRequestGet(context){
   const url = new URL(request.url);
   const id = url.searchParams.get("id");
   if(id){
-    const row = await env.DB.prepare("SELECT id, name, data, updated_at FROM projects WHERE id=? AND user_id=?")
-      .bind(id, user.userId).first();
-    if(!row) return json({ok:false, error:"项目不存在"}, 404);
-    return json({ok:true, project:{id:row.id, name:row.name, updated_at:row.updated_at, data:JSON.parse(row.data)}});
+    const access=await resolveProjectAccess(env,user.userId,id);
+    if(!access) return json({ok:false, error:"项目不存在或已无访问权限"}, 404);
+    const row=access.row;
+    return json({ok:true, project:{id:row.id, name:row.name, updated_at:row.updated_at, data:JSON.parse(row.data),role:access.role,permissions:{...access.permissions,delete:access.ownerUserId===Number(user.userId),duplicate:access.ownerUserId===Number(user.userId)}}});
   }
+  await ensureProjectMemberships(env);
   const rows = await env.DB.prepare(
-    "SELECT id, name, data, updated_at FROM projects WHERE user_id=? ORDER BY updated_at DESC LIMIT 100")
-    .bind(user.userId).all();
-  return json({ok:true, list:(rows.results||[]).map(summarizeProjectRow)});
+    "SELECT p.id,p.user_id,p.name,p.data,p.updated_at,CASE WHEN p.user_id=? THEN 'OWNER' ELSE m.role END AS role FROM projects p LEFT JOIN project_memberships m ON m.project_id=p.id AND m.user_id=? AND m.status='active' WHERE p.user_id=? OR m.role IN ('OWNER','EDITOR','VIEWER') ORDER BY p.updated_at DESC LIMIT 100")
+    .bind(user.userId,user.userId,user.userId).all();
+  return json({ok:true, list:(rows.results||[]).map(row=>({...summarizeProjectRow(row),role:row.role,permissions:{...projectRolePermissions(row.role),delete:Number(row.user_id)===Number(user.userId),duplicate:Number(row.user_id)===Number(user.userId)}}))});
 }
 
 export async function onRequestPost(context){
@@ -85,32 +87,40 @@ export async function onRequestPost(context){
     return json({ok:true,id,updatedAt:now});
   }
   if(action==="setArchived"||action==="updateMeta"){
-    const row=await env.DB.prepare("SELECT name,data FROM projects WHERE id=? AND user_id=?").bind(id,user.userId).first();
-    if(!row)return json({ok:false,error:"项目不存在"},404);
+    const access=await resolveProjectAccess(env,user.userId,id);
+    if(!access)return json({ok:false,error:"项目不存在"},404);
+    if(!(action==='setArchived'?access.permissions.manage:access.permissions.edit))return json({ok:false,error:'当前角色无权执行此操作'},403);
+    const row=access.row;
     const data=parseData(row.data),mg=appendActivity(data,action,action==="setArchived"?(body.archived?"项目已归档":"项目已恢复"):"项目状态已更新",user.username||user.userId);
     if(action==="setArchived"){mg.archived=!!body.archived;mg.archivedAt=body.archived?Date.now():0;}
     else{
       if(body.status!=null)mg.status=String(body.status).slice(0,30);
       if(Array.isArray(body.tags))mg.tags=body.tags.map(x=>String(x).trim()).filter(Boolean).slice(0,8);
     }
-    const dataStr=JSON.stringify(data),now=Date.now();
-    await env.DB.prepare("UPDATE projects SET data=?,updated_at=? WHERE id=? AND user_id=?").bind(dataStr,now,id,user.userId).run();
+    const dataStr=JSON.stringify(data),now=Math.max(Date.now(),Number(row.updated_at)+1);
+    const changed=await env.DB.prepare("UPDATE projects SET data=?,updated_at=? WHERE id=? AND updated_at=?").bind(dataStr,now,id,row.updated_at).run();
+    if(changed.meta?.changes!==1)return json({ok:false,error:'项目已更新，请重新载入后重试',conflict:true},409);
     return json({ok:true,id,updatedAt:now});
   }
   const dataStr = JSON.stringify(body.data||{});
-  if(dataStr.length > 900000) return json({ok:false, error:"项目数据过大，无法保存"}, 413);
+  // PostgreSQL 部署不受 D1 单行限制；历史版本保留完整，不为适配小行限额而丢弃。
+  const oversized=env.DEPLOY_MODE==="local"?new TextEncoder().encode(dataStr).byteLength>32*1024*1024:dataStr.length>900000;
+  if(oversized) return json({ok:false, error:env.DEPLOY_MODE==="local"?"项目超过32MiB保存上限，请保留本机草稿并联系管理员归档历史版本":"项目超过当前云数据库单条保存上限，请保留本机草稿并联系管理员配置大文件存储"}, 413);
 
   const exist = await env.DB.prepare("SELECT user_id FROM projects WHERE id=?").bind(id).first();
-  if(exist && exist.user_id !== user.userId) return json({ok:false, error:"无权限"}, 403);
+  const access=exist?await resolveProjectAccess(env,user.userId,id):null;
+  if(exist && !access?.permissions.edit) return json({ok:false, error:"当前账号没有项目编辑权限"}, 403);
 
   if(exist){
-    if(body.expectedUpdatedAt!=null){
-      const latest=await env.DB.prepare("SELECT updated_at FROM projects WHERE id=? AND user_id=?").bind(id,user.userId).first();
-      if(latest&&Number(latest.updated_at)!==Number(body.expectedUpdatedAt))return json({ok:false,error:"项目已在其他页面更新，请重新载入后再保存",conflict:true,updatedAt:Number(latest.updated_at)},409);
-    }
-    const now=Date.now();
-    await env.DB.prepare("UPDATE projects SET name=?, data=?, updated_at=? WHERE id=? AND user_id=?")
-      .bind(name, dataStr, now, id, user.userId).run();
+    await ensureProjectMemberships(env);
+    const expected=body.expectedUpdatedAt==null?Number(access.row.updated_at):Number(body.expectedUpdatedAt);
+    if(!Number.isSafeInteger(expected)||Number(access.row.updated_at)!==expected)return json({ok:false,error:"项目已在其他页面更新，请重新载入后再保存",conflict:true,updatedAt:Number(access.row.updated_at)},409);
+    if(access.role!=='OWNER'&&body.expectedUpdatedAt==null)return json({ok:false,error:"协作保存必须携带读取时的版本，请重新打开项目",conflict:true},409);
+    const now=Math.max(Date.now(),expected+1);
+    // Check version and live membership in the write itself, not only before it.
+    const saved=await env.DB.prepare("UPDATE projects SET name=?, data=?, updated_at=? WHERE id=? AND updated_at=? AND (user_id=? OR EXISTS (SELECT 1 FROM project_memberships m WHERE m.project_id=projects.id AND m.user_id=? AND m.status='active' AND m.role IN ('OWNER','EDITOR')))")
+      .bind(name,dataStr,now,id,expected,user.userId,user.userId).run();
+    if(saved.meta?.changes!==1)return json({ok:false,error:"项目已更新或编辑权限已撤销；未覆盖任何正文，请重新载入",conflict:true},409);
     return json({ok:true, id, updatedAt:now});
   }else{
     const now=Date.now();
@@ -127,6 +137,10 @@ export async function onRequestDelete(context){
   if(!user) return json({ok:false, error:"未登录或登录已过期"}, 401);
   const url = new URL(request.url);
   const id = url.searchParams.get("id")||"";
+  const access=await resolveProjectAccess(env,user.userId,id);
+  if(!access)return json({ok:false,error:'项目不存在或无权访问'},404);
+  // Permanent deletion remains reserved for the original creator.
+  if(Number(access.ownerUserId)!==Number(user.userId))return json({ok:false,error:'仅项目创建者可彻底删除项目'},403);
   await env.DB.prepare("DELETE FROM projects WHERE id=? AND user_id=?").bind(id, user.userId).run();
   return json({ok:true});
 }

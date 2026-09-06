@@ -44,8 +44,9 @@ export async function createAgentRun(env, userId, data={}){
   const now=Date.now(), id=agentId("run");
   // 空幂等键不能直接落库，否则 UNIQUE(user_id,idempotency_key) 会让同一用户只能创建一次运行。
   const idem=requestedIdem||("auto:"+id);
-  await env.DB.prepare("INSERT INTO agent_runs(id,user_id,agent_type,project_id,status,query_text,idempotency_key,input_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
+  const inserted=await env.DB.prepare("INSERT INTO agent_runs(id,user_id,agent_type,project_id,status,query_text,idempotency_key,input_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,idempotency_key) DO NOTHING")
     .bind(id,userId,String(data.agentType||"general").slice(0,50),String(data.projectId||"").slice(0,100),"running",String(data.query||"").slice(0,1000),idem,agentJson(data.input||{}),now,now).run();
+  if(inserted.meta?.changes===0)return {run:await env.DB.prepare("SELECT * FROM agent_runs WHERE user_id=? AND idempotency_key=?").bind(userId,idem).first(),reused:true};
   return {run:await findOwnedRun(env,userId,id),reused:false};
 }
 

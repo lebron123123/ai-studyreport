@@ -2,6 +2,8 @@
 import "../../project-enterprise.js";
 import { verifyAuth, json } from "./_auth.js";
 import { adaptEnv } from "./_adapters.js";
+import { resolveProjectAccess } from "./_project-access.js";
+import { changeProjectMember } from "./_project-members.js";
 
 const Enterprise=globalThis.ProjectEnterprise;
 const clean=(v,n=240)=>String(v==null?"":v).trim().slice(0,n);
@@ -28,7 +30,8 @@ async function access(env,user,projectId){
   let profile=await one(env,"SELECT * FROM project_profiles WHERE project_id=?",projectId),member=await one(env,"SELECT * FROM project_memberships WHERE project_id=? AND user_id=? AND status='active'",projectId,user.userId),now=Date.now();
   if(!profile&&Number(row.user_id)===Number(user.userId)){await env.DB.prepare("INSERT INTO project_profiles(project_id,owner_user_id,lifecycle_stage,created_at,updated_at) VALUES(?,?,?,?,?)").bind(projectId,row.user_id,"discovery",now,now).run();profile={project_id:projectId,owner_user_id:row.user_id,organization_id:"",department_id:"",visibility:"private",confidentiality_level:"internal",lifecycle_stage:"discovery"};}
   if(!member&&Number(row.user_id)===Number(user.userId)){await env.DB.prepare("INSERT INTO project_memberships(project_id,user_id,role,status,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role,status='active',updated_at=excluded.updated_at").bind(projectId,user.userId,"OWNER","active",now,now).run();member={project_id:projectId,user_id:user.userId,role:"OWNER",status:"active"};}
-  if(!member)return null;const role=clean(member.role,20).toUpperCase();return {row,profile:profile||{},member,role,ownerUserId:Number((profile&&profile.owner_user_id)||row.user_id),permissions:{view:true,edit:role==="OWNER"||role==="EDITOR",manage:role==="OWNER"}};
+  const resolved=await resolveProjectAccess(env,user.userId,projectId);if(!resolved)return null;
+  return {...resolved,profile:profile||{},member};
 }
 async function registerFileRecord(env,a,user,projectId,file,now){
   const f=Enterprise.normalizeFile({...file,projectId}),name=clean(f.name,220);if(!name)throw new Error("文件名不能为空");
@@ -112,10 +115,10 @@ export async function onRequestPost(contextArg){
     if(!a.permissions.edit)return json({ok:false,error:"当前角色无权处理数据问题"},403);const issueId=clean(b.id,100);await env.DB.prepare("UPDATE project_data_issues SET status='resolved',resolution=?,updated_at=? WHERE id=? AND project_id=?").bind(clean(b.resolution,800),now,issueId,projectId).run();await event(env,user,projectId,"project.data.issue.resolved",{issueId});return json({ok:true,status:"resolved"});
   }
   if(action==="updateMember"){
-    if(!a.permissions.manage)return json({ok:false,error:"仅项目OWNER可管理成员"},403);const target=Number(b.userId),role=clean(b.role,20).toUpperCase();if(!Number.isInteger(target)||target<=0||!["OWNER","EDITOR","VIEWER"].includes(role))return json({ok:false,error:"成员或角色无效"},400);await env.DB.prepare("INSERT INTO project_memberships(project_id,user_id,role,status,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role,status='active',updated_at=excluded.updated_at").bind(projectId,target,role,"active",now,now).run();await event(env,user,projectId,"project.member.updated",{userId:target,role});return json({ok:true,userId:target,role});
+    const result=await changeProjectMember(env,user.userId,projectId,Number(b.userId),clean(b.role,20).toUpperCase());return json(result,result.status||200);
   }
   if(action==="removeMember"){
-    if(!a.permissions.manage)return json({ok:false,error:"仅项目OWNER可管理成员"},403);const target=Number(b.userId);if(target===a.ownerUserId)return json({ok:false,error:"不能移除项目OWNER"},400);await env.DB.prepare("UPDATE project_memberships SET status='inactive',updated_at=? WHERE project_id=? AND user_id=?").bind(now,projectId,target).run();await event(env,user,projectId,"project.member.removed",{userId:target});return json({ok:true,userId:target});
+    const result=await changeProjectMember(env,user.userId,projectId,Number(b.userId),'',true);return json(result,result.status||200);
   }
   if(action==="updateProfile"){
     if(!a.permissions.manage)return json({ok:false,error:"仅项目OWNER可修改项目边界"},403);const p=b.profile||{},visibility=["private","department","organization"].includes(p.visibility)?p.visibility:"private",level=["public","internal","confidential","restricted"].includes(p.confidentialityLevel)?p.confidentialityLevel:"internal";await env.DB.prepare("UPDATE project_profiles SET organization_id=?,department_id=?,visibility=?,confidentiality_level=?,updated_at=? WHERE project_id=?").bind(clean(p.organizationId,100),clean(p.departmentId,100),visibility,level,now,projectId).run();await event(env,user,projectId,"project.profile.updated",{visibility,confidentialityLevel:level});return json({ok:true});

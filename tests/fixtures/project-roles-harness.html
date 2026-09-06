@@ -1,0 +1,38 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>项目三角色隔离验收</title>
+<style>body{font:17px system-ui;margin:32px;max-width:1000px}button,select{padding:10px;margin:6px}#sheet{border:1px solid #abc;padding:24px}#saveState{color:#345}</style>
+<h1>[系统测试] 项目只读与版本恢复</h1><p>调用正式 auth.js 渲染函数；不访问正式项目、账号或存储。</p>
+<button id="viewer">查看者</button><button id="empty">空报告</button><button id="loading">核验中</button><button id="offline">核验失败</button><button id="owner">所有者</button><button id="editor">编辑者</button><button id="save">尝试保存</button><button onclick="location.reload()">刷新</button>
+<p id="saveState"></p><p id="result"></p><div id="sheet"></div>
+<script src="/auth.js"></script><script>
+const sample={role:'VIEWER',data:{project:{name:'[系统测试] 角色报告'},chapters:[{name:'1 项目总论',sections:[{t:'1.1 当前正文',content:'已保存的最新正文'},{t:'1.2 安全显示',editedHtml:'<b>加粗文字</b><img src=x onerror="window.injected=true">'}]}],workflow:{reportVersions:[{version:1,reason:'首次保存',chapters:[{name:'历史总论',sections:[{t:'历史小节',content:'第一版正文'}]}]}]}}};
+getToken=()=>null;getUser=()=>'[系统测试]';window.fetch=()=>{throw new Error('隔离页禁止网络请求');};
+currentProjectId='system-test-read-only';
+window.renderSheet=()=>renderProjectReadOnly(document.getElementById('sheet'));
+window.openProject=async()=>{applyProjectAccess(sample);renderSheet();return sample;};
+function show(record){applyProjectAccess(record);renderSheet();document.getElementById('result').textContent='可编辑：'+projectCanEdit();}
+viewer.onclick=()=>show(sample);empty.onclick=()=>show({role:'VIEWER',data:{}});
+loading.onclick=()=>{currentProjectRole='PENDING';renderSheet();};offline.onclick=()=>{currentProjectRole='UNAVAILABLE';renderSheet();};
+function editable(role){applyProjectAccess({role,data:{}});document.getElementById('sheet').textContent=role+'：继续使用现有报告编辑器，本页仅验证权限判定。';document.getElementById('result').textContent='可编辑：'+projectCanEdit();}
+owner.onclick=()=>editable('OWNER');editor.onclick=()=>editable('EDITOR');
+save.onclick=async()=>{document.getElementById('result').textContent='保存返回：'+await cloudSaveSnapshot({id:currentProjectId,snapshot:{}});};
+show(sample);
+if(new URLSearchParams(location.search).has('verify'))(async()=>{
+  const results=[],check=(name,value)=>{if(!value)throw Error(name);results.push('通过：'+name);};
+  try{
+    check('查看者展示已保存正文',sheet.textContent.includes('已保存的最新正文'));
+    const version=document.getElementById('projectReadOnlyVersion');version.value='0';version.dispatchEvent(new Event('change'));
+    check('切换历史版本',sheet.textContent.includes('第一版正文')&&!sheet.textContent.includes('已保存的最新正文'));
+    document.getElementById('projectReadOnlyReload').click();await Promise.resolve();
+    check('重复读取最新版本',sheet.textContent.includes('已保存的最新正文'));
+    check('查看者保存拒绝1',await cloudSaveSnapshot({id:currentProjectId,snapshot:{}})===false);
+    check('查看者保存拒绝2',await cloudSaveSnapshot({id:currentProjectId,snapshot:{}})===false);
+    empty.click();check('空报告无异常',!!document.getElementById('projectReadOnlyBody'));
+    loading.click();check('加载中禁止编辑',!projectCanEdit()&&sheet.textContent.includes('正在核验'));
+    offline.click();check('失败态禁止编辑且保留草稿提示',!projectCanEdit()&&sheet.textContent.includes('草稿未删除'));
+    document.getElementById('projectAccessRetry').click();await Promise.resolve();check('失败后恢复',sheet.textContent.includes('已保存的最新正文'));
+    owner.click();check('所有者可编辑',projectCanEdit());editor.click();check('编辑者可编辑',projectCanEdit());
+    viewer.click();check('返回查看者只读',!projectCanEdit());check('正文不能执行脚本',!window.injected);
+    result.textContent=results.join('；');
+  }catch(e){result.textContent='验收失败：'+e.message;}
+})();
+</script></html>

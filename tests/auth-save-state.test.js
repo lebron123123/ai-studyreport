@@ -12,7 +12,7 @@ function loadSaveState(options={}){
     document:{getElementById:id=>id==="saveState"?saveState:null},
     window:{},localStorage:{getItem:key=>key==="fs_token"?(options.token||null):null,setItem(){},removeItem(){}},
     fetch:options.fetch||(()=>Promise.reject(new Error("offline"))),
-    setTimeout,clearTimeout,Promise,crypto:{randomUUID:()=>"test-id"}
+    setTimeout,clearTimeout,Promise,AbortSignal,crypto:{randomUUID:()=>"test-id"}
   });
   vm.runInContext(source,context,{filename:"auth.js"});
   return {saveState,setSaveState:context.setSaveState,cloudSaveSnapshot:context.cloudSaveSnapshot};

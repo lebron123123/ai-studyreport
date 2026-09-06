@@ -3,14 +3,41 @@ import { verifyAuth, json } from "./_auth.js";
 import { adaptEnv } from "./_adapters.js";
 import rentSeed from "./_reportlogic-seed.js";
 import gaibaoSeed from "./_reportlogic-gaibao-seed.js";
+import writingPolicy from "../../report-writing-policy.js";
 
 const REPORT_LOGIC_SEEDS = { rent: rentSeed, gaibao: gaibaoSeed };
 const GAIBAO_SCENARIOS = ["housing_conversion", "commercial_renovation"];
+const DEFAULT_LOGIC_VERSIONS = { rent: "1.0", housing_conversion: "2.0", commercial_renovation: "1.0" };
 
 const clean = (value, max = 200) => String(value == null ? "" : value).trim().slice(0, max);
 const parse = (value, fallback = null) => { try { return JSON.parse(value || ""); } catch (_) { return fallback; } };
 const isAdmin = (env, user) => (env.ADMIN_USERS || "").split(",").map(x => x.trim()).filter(Boolean).some(x => x === user.username || x === String(user.userId));
 const passOk = (env, request) => !env.ADMIN_PASS || request.headers.get("x-admin-pass") === env.ADMIN_PASS;
+
+function normalizedLogicVersions(data, projectType) {
+  const keys = projectType === "gaibao" ? GAIBAO_SCENARIOS : ["rent"], current = data?.logicVersions && typeof data.logicVersions === "object" ? data.logicVersions : {};
+  return Object.fromEntries(keys.map(key => [key, /^\d+\.\d+$/.test(clean(current[key], 20)) ? clean(current[key], 20) : DEFAULT_LOGIC_VERSIONS[key]]));
+}
+
+function scenarioStructureSignature(data, projectType, scenario) {
+  const rules = Array.isArray(data?.rules) ? data.rules : [];
+  return JSON.stringify(rules.filter(rule => projectType !== "gaibao" || !Array.isArray(rule.scenarios) || rule.scenarios.includes(scenario)).map(rule => {
+    const view = projectType === "gaibao" ? { ...rule, ...(rule.scenarioVariants?.[scenario] || {}) } : rule;
+    return [rule.id, view.chapter || "", view.section || "", view.subsection || "", view.pointTitle || ""];
+  }).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))));
+}
+
+function bumpLogicVersion(data, previousData, projectType, scenario) {
+  data.logicVersions = normalizedLogicVersions(previousData || data, projectType);
+  const keys = projectType === "gaibao" ? (GAIBAO_SCENARIOS.includes(scenario) ? [scenario] : GAIBAO_SCENARIOS) : ["rent"];
+  for (const key of keys) {
+    const changed = JSON.stringify(data) !== JSON.stringify(previousData || {}), structural = scenarioStructureSignature(data, projectType, key) !== scenarioStructureSignature(previousData, projectType, key);
+    if (!changed) continue;
+    const [major, minor] = String(data.logicVersions[key] || DEFAULT_LOGIC_VERSIONS[key]).split(".").map(Number);
+    data.logicVersions[key] = structural ? `${major + 1}.0` : `${major}.${minor + 1}`;
+  }
+  return data.logicVersions;
+}
 
 async function ensureSchema(env) {
   const ts = env.DEPLOY_MODE === "local" ? "BIGINT" : "INTEGER";
@@ -19,12 +46,14 @@ async function ensureSchema(env) {
 }
 
 function validateSet(input, expectedType = "") {
-  const data = input && typeof input === "object" ? structuredClone(input) : null;
+  const data = input && typeof input === "object" ? writingPolicy.normalize(input) : null;
   if (!data || !Array.isArray(data.rules) || !data.rules.length) throw new Error("生成逻辑不能为空");
   const projectType = clean(expectedType || data.projectType, 30);
   if (!projectType) throw new Error("缺少项目类型");
+  for(const value of Object.values(data.globalRequirements||{}))if(typeof value!=="string"||value.length>12000)throw new Error("全篇要求必须是文字，且不超过12000字");
   const ids = new Set();
   data.projectType = projectType;
+  data.logicVersions = normalizedLogicVersions(data, projectType);
   data.rules = data.rules.map((rule, index) => {
     const next = { ...rule, projectType, sourceNo: index + 1 };
     next.id = clean(next.id, 100) || `${projectType}-logic-${String(index + 1).padStart(3, "0")}`;
@@ -49,6 +78,7 @@ function validateSet(input, expectedType = "") {
     next.scenarioVariants = projectType === "gaibao" ? Object.fromEntries(next.scenarios.map(scenario => {
       const variant = variants[scenario] && typeof variants[scenario] === "object" ? variants[scenario] : {};
       return [scenario, {
+        chapter: clean(variant.chapter || next.chapter, 160),
         section: clean(variant.section || next.section, 200),
         subsection: clean(variant.subsection || next.subsection, 240),
         pointTitle: clean(variant.pointTitle || next.pointTitle, 240),
@@ -56,6 +86,8 @@ function validateSet(input, expectedType = "") {
         requiredSources: clean(variant.requiredSources || next.requiredSources, 5000),
         writingLogic: clean(variant.writingLogic || next.writingLogic, 5000),
         outputForm: clean(variant.outputForm || next.outputForm, 200),
+        importance: clean(variant.importance || next.importance, 80),
+        generationMode: clean(variant.generationMode || next.generationMode, 80) || "ai_writing",
         missingPolicy: clean(variant.missingPolicy || next.missingPolicy, 2000),
         sourceKinds: Array.isArray(variant.sourceKinds) && variant.sourceKinds.length ? [...new Set(variant.sourceKinds.map(x=>clean(x,40)).filter(Boolean))] : next.sourceKinds,
         changeReason: clean(variant.changeReason || next.changeReason, 1000),
@@ -67,11 +99,22 @@ function validateSet(input, expectedType = "") {
     next.projectSpecific = !!next.projectSpecific;
     return next;
   });
+  const previousStructure = data.structure && typeof data.structure === "object" ? data.structure : {};
+  const scenarioStructures = projectType === "gaibao" ? Object.fromEntries(GAIBAO_SCENARIOS.map(scenario => {
+    const chapterNames = [...new Set(data.rules.filter(rule => rule.scenarios.includes(scenario)).map(rule => rule.scenarioVariants?.[scenario]?.chapter || rule.chapter))];
+    const previous = previousStructure.scenarioStructures?.[scenario] || {};
+    return [scenario, {
+      chapterCount: chapterNames.length,
+      chapterNames,
+      frameworkVersion: clean(previous.frameworkVersion, 100)
+    }];
+  })) : {};
   data.structure = {
     chapterCount: new Set(data.rules.map(rule => rule.chapter)).size,
     chapterNames: [...new Set(data.rules.map(rule => rule.chapter))],
     ruleCount: data.rules.length,
-    scenarioCounts: projectType === "gaibao" ? Object.fromEntries(GAIBAO_SCENARIOS.map(scenario => [scenario, data.rules.filter(rule => rule.scenarios.includes(scenario)).length])) : {}
+    scenarioCounts: projectType === "gaibao" ? Object.fromEntries(GAIBAO_SCENARIOS.map(scenario => [scenario, data.rules.filter(rule => rule.scenarios.includes(scenario)).length])) : {},
+    scenarioStructures
   };
   return data;
 }
@@ -123,7 +166,7 @@ function mergeRuleRevisionData(baseData,input,actor="",now=Date.now()){
 }
 
 function ruleForScenario(rule,scenario){
-  const variant=scenario&&rule?.scenarioVariants?.[scenario];return variant?{...rule,...variant,id:rule.id,sourceNo:rule.sourceNo,chapter:rule.chapter}:rule;
+  const variant=scenario&&rule?.scenarioVariants?.[scenario];return variant?{...rule,...variant,id:rule.id,sourceNo:rule.sourceNo}:rule;
 }
 function ruleQuality(rule){
   const writing=clean(rule?.writingLogic,5000),sources=clean(rule?.requiredSources,5000),output=clean(rule?.outputForm,500),missing=clean(rule?.missingPolicy,2000),kinds=Array.isArray(rule?.sourceKinds)?rule.sourceKinds:[];
@@ -178,14 +221,19 @@ async function ensureSeeds(env) {
 function needsAuthoritativeBaseline(existingData, targetData) {
   const target = clean(targetData?.source?.baselineId, 160);
   if (!target) return false;
-  const current = clean(parse(existingData, {})?.source?.baselineId, 160);
-  return current !== target;
+  const existing = parse(existingData, {}), current = clean(existing?.source?.baselineId, 160);
+  if (current !== target) return true;
+  const targetStructures=targetData?.structure?.scenarioStructures||{},existingStructures=existing?.structure?.scenarioStructures||{};
+  return Object.keys(targetStructures).some(scenario=>{
+    const wanted=targetStructures[scenario]||{},actual=existingStructures[scenario]||{};
+    return Number(actual.chapterCount)!==Number(wanted.chapterCount)||clean(actual.frameworkVersion,100)!==clean(wanted.frameworkVersion,100);
+  });
 }
 
 function rowOut(row, includeData = true) {
   if (!row) return null;
   const out = { id: row.id, projectType: row.project_type, name: row.name, version: Number(row.version), status: row.status, sourceName: row.source_name || "", createdAt: Number(row.created_at || 0), createdBy: row.created_by || "", publishedAt: Number(row.published_at || 0) };
-  if (includeData) out.data = parse(row.data, {});
+  if (includeData) out.data = writingPolicy.normalize(parse(row.data, {}));
   else {
     const data = parse(row.data, {});
     out.ruleCount = Number(data?.structure?.ruleCount || data?.rules?.length || 0);
@@ -225,7 +273,10 @@ export async function onRequestPost(context) {
       const projectType = clean(action === "restoreRentSeed" ? "rent" : (body.projectType || body.data?.projectType || "rent"), 30);
       const seed = REPORT_LOGIC_SEEDS[projectType];
       if (action === "restoreSeed" && !seed) throw new Error("当前项目类型没有内置基线");
+      const current = await env.DB.prepare("SELECT * FROM report_logic_sets WHERE project_type=? AND status='published' ORDER BY version DESC LIMIT 1").bind(projectType).first();
+      if(action === "publish" && body.expectedVersion !== undefined && Number(body.expectedVersion) !== Number(current?.version || 0))return json({ok:false,error:"逻辑已被其他操作更新，请关闭编辑窗口后重新加载，避免覆盖新版本。"},409);
       const data = validateSet(action === "restoreRentSeed" ? rentSeed : action === "restoreSeed" ? seed : body.data, projectType);
+      if (action === "publish") bumpLogicVersion(data, parse(current?.data, {}), projectType, clean(body.businessScenario, 40));
       const latest = await env.DB.prepare("SELECT version FROM report_logic_sets WHERE project_type=? ORDER BY version DESC LIMIT 1").bind(projectType).first();
       const version = Number(latest?.version || 0) + 1, now = Date.now(), id = `report-logic-${projectType}-v${version}-${now.toString(36)}`;
       await env.DB.prepare("UPDATE report_logic_sets SET status='archived' WHERE project_type=? AND status='published'").bind(projectType).run();
@@ -241,6 +292,7 @@ export async function onRequestPost(context) {
       const projectType=clean(body.projectType||"rent",30),current=await env.DB.prepare("SELECT * FROM report_logic_sets WHERE project_type=? AND status='published' ORDER BY version DESC LIMIT 1").bind(projectType).first();
       if(!current)return json({ok:false,error:"当前项目类型尚无已发布逻辑"},404);
       const data=appendEnhancementData(parse(current.data,{}),{projectType,baseRuleId:body.baseRuleId,enhancement:body.enhancement},user.username||String(user.userId));
+      bumpLogicVersion(data,parse(current.data,{}),projectType,clean(body.businessScenario,40));
       const latest=await env.DB.prepare("SELECT version FROM report_logic_sets WHERE project_type=? ORDER BY version DESC LIMIT 1").bind(projectType).first(),version=Number(latest?.version||0)+1,now=Date.now(),id=`report-logic-${projectType}-v${version}-${now.toString(36)}`;
       await env.DB.prepare("UPDATE report_logic_sets SET status='archived' WHERE project_type=? AND status='published'").bind(projectType).run();
       data.version=version;data.status="published";data.setId=id;
@@ -255,6 +307,7 @@ export async function onRequestPost(context) {
       if(!current)return json({ok:false,error:"当前项目类型尚无已发布逻辑"},404);
       const evaluation=evaluateRuleRevisionData(parse(current.data,{}),{projectType,baseRuleId:body.baseRuleId,businessScenario:body.businessScenario,revision:body.revision});if(!evaluation.recommended)return json({ok:false,error:"候选逻辑未通过自动评测",evaluation},422);
       const data=mergeRuleRevisionData(parse(current.data,{}),{projectType,baseRuleId:body.baseRuleId,businessScenario:body.businessScenario,revision:body.revision},user.username||String(user.userId));
+      bumpLogicVersion(data,parse(current.data,{}),projectType,clean(body.businessScenario,40));
       const latest=await env.DB.prepare("SELECT version FROM report_logic_sets WHERE project_type=? ORDER BY version DESC LIMIT 1").bind(projectType).first(),version=Number(latest?.version||0)+1,now=Date.now(),id=`report-logic-${projectType}-v${version}-${now.toString(36)}`;
       await env.DB.prepare("UPDATE report_logic_sets SET status='archived' WHERE project_type=? AND status='published'").bind(projectType).run();data.version=version;data.status="published";data.setId=id;
       await env.DB.prepare("INSERT INTO report_logic_sets(id,project_type,name,version,status,data,source_name,created_at,created_by,published_at) VALUES(?,?,?,?,?,?,?,?,?,?)").bind(id,projectType,clean(data.name,160)||`${projectType}可研逐小节生成逻辑`,version,"published",JSON.stringify(data),clean(data.source?.fileName,240),now,user.username||String(user.userId),now).run();
@@ -264,4 +317,4 @@ export async function onRequestPost(context) {
   return json({ ok: false, error: "未知操作" }, 400);
 }
 
-export { validateSet, appendEnhancementData, mergeRuleRevisionData, evaluateRuleRevisionData, ruleQuality, needsAuthoritativeBaseline, ensureSeeds };
+export { validateSet, appendEnhancementData, mergeRuleRevisionData, evaluateRuleRevisionData, ruleQuality, needsAuthoritativeBaseline, ensureSeeds, bumpLogicVersion };

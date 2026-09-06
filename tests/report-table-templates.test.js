@@ -68,12 +68,20 @@ test("Word构建器可输出含合并单元格和续表的真实docx",async()=>{
   assert.equal(buffer.subarray(0,2).toString(),"PK");
 });
 
-test("Word正文待补标记统一红色且正文段前段后为0磅",async()=>{
+test("Word各类报告内容的待补标记统一红色且正文段前段后为0磅",async()=>{
   const docx=require("../docx.umd.js"),build=require("../docxgen.js"),JSZip=require("../local-server/node_modules/jszip");
+  const markers=["【待补：章节依据】","【待补：标题依据】","【待补：竞品租金及出租率实地调研数据】","【待补：小标题依据】","【待补：表格依据】","【待补：附表依据】"];
   const doc=build(docx,{project:{name:"[系统测试]Word格式"},signed:false,docNo:"",chapters:[{cn:"一",name:"总论",num:1,sections:[{title:"项目概况",blocks:[{type:"p",text:"竞品情况  【待补：竞品租金及出租率实地调研数据】  。"},{type:"p",text:"   "}]}]}],appendix:null,tableAppendix:[],provenance:null});
-  const buffer=await docx.Packer.toBuffer(doc),zip=await JSZip.loadAsync(buffer),xml=await zip.file("word/document.xml").async("string");
+  const coverageDoc=build(docx,{project:{name:"[系统测试]Word格式"},signed:false,docNo:"",chapters:[{cn:"一",name:"总论【待补：章节依据】",num:1,sections:[{title:"项目概况【待补：标题依据】",blocks:[{type:"p",text:"竞品情况  【待补：竞品租金及出租率实地调研数据】  。"},{type:"h",text:"调查说明【待补：小标题依据】"},{type:"table",rows:[["事项","依据"],["竞品","【待补：表格依据】"]]},{type:"p",text:"   "}]}]}],appendix:{summaryLine:"测算说明【待补：附表依据】",mainRows:null,sensRows:null},tableAppendix:[],provenance:null});
+  const buffer=await docx.Packer.toBuffer(coverageDoc),zip=await JSZip.loadAsync(buffer),xml=await zip.file("word/document.xml").async("string");
   const markerAt=xml.indexOf("【待补：竞品租金及出租率实地调研数据】"),start=xml.lastIndexOf("<w:p",markerAt),end=xml.indexOf("</w:p>",markerAt),paragraph=xml.slice(start,end+6);
   assert.ok(markerAt>0,"待补标记应写入Word正文");
+  markers.forEach(marker=>{
+    const at=xml.indexOf(marker),runStart=xml.lastIndexOf("<w:r>",at),runEnd=xml.indexOf("</w:r>",at),markerRun=xml.slice(runStart,runEnd+6);
+    assert.ok(at>0,marker+" 应写入Word");
+    assert.match(markerRun,/w:color w:val="C62828"/,marker+" 应为红色");
+    assert.match(markerRun,/w:b\/>/,marker+" 应加粗");
+  });
   assert.match(paragraph,/w:color w:val="C62828"/);
   assert.match(paragraph,/w:b\/>/);
   assert.match(paragraph,/w:before="0"/);
@@ -120,7 +128,7 @@ test("非居改保和商业改造分别加载14张与22张Word表格，场景之
   assert.deepEqual(ReportTableTemplates.stats("gaibao-commercial"),{templates:22,physicalTables:22,appendix:0,longPeriod:0});
   assert.equal(ReportTableTemplates.resolveType("gaibao",{businessScenario:"housing_conversion"}),"gaibao-housing");
   assert.equal(ReportTableTemplates.resolveType("gaibao",{businessScenario:"commercial_renovation"}),"gaibao-commercial");
-  assert.ok(ReportTableTemplates.forSection("gaibao-housing","项目总论","项目概况").some(t=>t.title==="改建条件可行性研判表"));
+  assert.ok(ReportTableTemplates.forSection("gaibao-housing","项目总论","项目本体情况、改造情况与政策符合性").some(t=>t.title==="法定改建条件符合性研判表"));
   assert.ok(ReportTableTemplates.forSection("gaibao-commercial","项目建设必要性","遏制经营下滑态势").some(t=>t.title==="经营现状及趋势分析表"));
   assert.equal(ReportTableTemplates.forSection("gaibao-housing","项目建设必要性","遏制经营下滑态势").length,0);
 });
@@ -139,7 +147,7 @@ test("两类改造表格均能被74项逻辑的实际章节自动调出",async()
   const logic=JSON.parse(fs.readFileSync(path.join(root,"data","report-logic-gaibao-v1.json"),"utf8"));
   for(const [type,scenario,set] of [["gaibao-housing","housing_conversion",housingSet],["gaibao-commercial","commercial_renovation",commercialSet]]){
     await ReportTableTemplates.load(type);const matched=new Set();
-    logic.rules.filter(rule=>!rule.scenarios?.length||rule.scenarios.includes(scenario)).forEach(rule=>ReportTableTemplates.forSection(type,rule.chapter,rule.section).forEach(template=>matched.add(template.id)));
+    logic.rules.filter(rule=>!rule.scenarios?.length||rule.scenarios.includes(scenario)).map(rule=>Object.assign({},rule,rule.scenarioVariants?.[scenario]||{})).forEach(rule=>ReportTableTemplates.forSection(type,rule.chapter,rule.section).forEach(template=>matched.add(template.id)));
     const missing=set.templates.filter(template=>!matched.has(template.id)).map(template=>template.title);
     assert.deepEqual(missing,[],type+"存在无法自动调出的表格");
   }

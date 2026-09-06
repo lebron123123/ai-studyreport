@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><title>持久化报告客户端验收</title><h1>报告任务恢复验收（隔离模拟，不改正式项目）</h1><pre id="result">运行中</pre><script src="../../report-orchestration-client.js"></script><script>
+(async()=>{const original=window.fetch,lines=[];try{
+async function check(name,values,expected){let posts=0;window.fetch=async(url,opts)=>{if(opts.method==='POST')posts++;const v=values.shift();return {ok:true,json:async()=>({ok:true,task:v})};};const task=await ReportOrchestrationClient.generateSection({projectId:'[系统测试]',user:'test'});if(task.text!==expected||posts!==1)throw Error(name);lines.push('通过：'+name);}
+await check('正常生成及加载中',[{id:'test'},{status:'running'},{status:'completed',text:'新正文'}],'新正文');
+await check('刷新后恢复已有成果',[{id:'test',reused:true},{status:'completed',text:'已有正文'}],'已有正文');
+await check('重复操作返回相同成果',[{id:'test',reused:true},{status:'completed',text:'已有正文'}],'已有正文');
+window.fetch=async()=>({ok:false,json:async()=>({ok:false,error:'规则已回滚'})});try{await ReportOrchestrationClient.generateSection({});throw Error('未拒绝失败');}catch(e){if(e.message!=='规则已回滚')throw e;lines.push('通过：失败态明确报错');}
+document.getElementById('result').textContent=lines.join('\n')+'\n全部通过';
+}catch(e){document.getElementById('result').textContent='失败：'+e.message;}finally{window.fetch=original;}})();</script>

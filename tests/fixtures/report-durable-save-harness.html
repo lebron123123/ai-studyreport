@@ -1,0 +1,34 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>批量接受刷新保存验收</title>
+<style>body{font:18px system-ui;padding:30px;max-width:1000px}button{padding:12px;margin:10px}pre{white-space:pre-wrap;background:#eef5fc;padding:20px}</style>
+<h1>[系统测试] 批量接受与大草稿恢复</h1><p>使用正式报告、账号保存、AI候选处理代码；隔离测试存储。强制小草稿配额不足和服务器离线，验证 IndexedDB 真实落盘。</p>
+<button id="prepare">准备35份候选稿</button><button id="accept">批量接受</button><button id="reload">刷新验收</button><button id="fail">模拟所有保存失败</button><button id="retry">恢复存储并重试</button><button id="clean">清理测试草稿</button>
+<p id="saveState"></p><pre id="status"></pre><pre id="message"></pre>
+<script>var appMode='aireport',currentStep=0,calcParams=null,STEPS=[0];window.addEventListener('error',e=>document.getElementById('message').textContent+='错误：'+e.message);</script>
+<script src="/project-workflow.js"></script><script src="/report.js"></script><script src="/auth.js"></script><script src="/aireport.js"></script>
+<script>
+getToken=()=> 'isolated-fixture';getUser=()=> '[系统测试]刷新验收';currentProjectId='system-test-refresh-only';
+reportDraftStoreKey=()=> '[系统测试]刷新验收/isolated';
+const actualStore=reportDraftStore;let storageFailure=false;
+reportDraftStore=(...args)=>storageFailure?Promise.reject(new Error('模拟存储失败')):actualStore(...args);
+const nativeSet=Storage.prototype.setItem,nativeGet=Storage.prototype.getItem;
+Storage.prototype.setItem=function(k,v){if(k===DRAFT_KEY)throw new DOMException('模拟配额不足','QuotaExceededError');return nativeSet.call(this,k,v);};
+Storage.prototype.getItem=function(k){if(k===DRAFT_KEY)return null;return nativeGet.call(this,k);};
+window.fetch=async()=>{throw new Error('模拟服务器离线');};scheduleCloudSave=()=>{};
+renderTOC=renderSheet=airSaveState=()=>{};currentReportVersionMeta=reason=>({reason});
+window.confirm=()=>true;window.alert=msg=>document.getElementById('message').textContent=msg;
+function show(){document.getElementById('status').textContent=JSON.stringify({sections:chapters.flatMap(c=>c.sections).length,pending:chapters.flatMap(c=>c.sections).filter(s=>s.pendingRevision).length,accepted:chapters.flatMap(c=>c.sections).filter(s=>s.content?.startsWith('新版')).length,versions:projectWorkflow.reportVersions.length,first:chapters[0]?.sections[6]?.content?.slice(0,12),unsaved:reportHasUnsavedChanges()},null,2);}
+airBuildDocPane=show;
+document.getElementById('prepare').onclick=async()=>{
+  storageFailure=false;reportDocumentRevision=0;reportLocalPersistedRevision=-1;reportCloudPersistedRevision=-1;project.name='[系统测试]刷新验收';projectWorkflow=ProjectWorkflow.ensureState({});
+  chapters=[{name:'总论',checked:true,sections:Array.from({length:41},(_,i)=>({t:'小节'+i,content:'原版'+i,syncStatus:'current'}))}];
+  ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:'旧稿'});
+  chapters[0].sections.slice(6).forEach((s,i)=>{s.staleKind='logic';s.syncStatus='stale';ProjectWorkflow.setCandidate(s,'新版'+i+'正文'.repeat(4000),'更新',{logicRevision:{rules:[{id:String(i)}]}});});
+  await saveDraft();show();document.getElementById('message').textContent='测试候选已存储，可开始批量接受';
+};
+document.getElementById('accept').onclick=()=>airAcceptAllCandidates();
+document.getElementById('reload').onclick=()=>location.reload();
+document.getElementById('fail').onclick=()=>{storageFailure=true;document.getElementById('message').textContent='已启用全部保存失败；请点击批量接受';};
+document.getElementById('retry').onclick=async()=>{storageFailure=false;const saved=await persistReportDraft();show();alert(JSON.stringify(saved));};
+document.getElementById('clean').onclick=async()=>{storageFailure=false;await actualStore('delete',reportDraftStoreKey());reportDocumentRevision=0;chapters=[];projectWorkflow=ProjectWorkflow.ensureState({});show();alert('隔离测试草稿已清理');};
+(async()=>{const saved=await loadDurableDraft();if(saved){restoreDraft(saved);const recovered=ProjectWorkflow.recoverCompletedReport(chapters,projectWorkflow,{done:41,total:41,reportVersionId:projectWorkflow.reportVersions[0]?.id});if(recovered.recovered)chapters=recovered.chapters;}show();})();
+</script></html>
