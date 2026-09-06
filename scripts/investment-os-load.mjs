@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Investment OS 50人核心路径压测。
+ * Investment OS 单账号只读请求压测（不是多员工混合负载或故障恢复演练）。
  *
  * 必填环境变量：
  *   INVESTMENT_OS_PROJECT_ID   已存在的项目ID
@@ -9,7 +9,7 @@
  *   INVESTMENT_OS_BASE_URL     默认 http://localhost:8080
  *   INVESTMENT_OS_COOKIE       已授权的测试账号 Cookie（不得提交到Git）
  *   INVESTMENT_OS_BEARER       已授权的测试令牌（不得提交到Git）
- *   INVESTMENT_OS_CONCURRENCY  默认 50
+ *   INVESTMENT_OS_CONCURRENCY  默认 5，最多50个并发请求执行单元
  *   INVESTMENT_OS_ITERATIONS   每个虚拟用户请求轮数，默认 4
  *   INVESTMENT_OS_RECORD       设为 1 时把结果写入当前项目生产验收台账
  *
@@ -19,12 +19,12 @@
 
 const baseUrl = String(process.env.INVESTMENT_OS_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
 const projectId = String(process.env.INVESTMENT_OS_PROJECT_ID || "").trim();
-const concurrency = Math.max(1, Number(process.env.INVESTMENT_OS_CONCURRENCY || 50));
-const iterations = Math.max(1, Number(process.env.INVESTMENT_OS_ITERATIONS || 4));
+const concurrency = Math.min(50,Math.max(1, Math.floor(Number(process.env.INVESTMENT_OS_CONCURRENCY || 5))));
+const iterations = Math.min(100,Math.max(1, Math.floor(Number(process.env.INVESTMENT_OS_ITERATIONS || 4))));
 const cookie = String(process.env.INVESTMENT_OS_COOKIE || "").trim();
 const bearer = String(process.env.INVESTMENT_OS_BEARER || "").trim();
 
-if (!projectId) {
+if (!projectId || !Number.isFinite(concurrency) || !Number.isFinite(iterations)) {
   console.error("缺少 INVESTMENT_OS_PROJECT_ID，未执行压测。请指定一个测试项目ID。");
   process.exit(2);
 }
@@ -74,6 +74,9 @@ const failures = results.filter((item) => !item.ok);
 const latencies = successes.map((item) => item.latencyMs);
 const summary = {
   kind: "slo",
+  scenario: "single_account_read_only",
+  distinctAccounts: 1,
+  mixedWorkloadTested: false,
   startedAt,
   finishedAt: new Date().toISOString(),
   baseUrl,
@@ -87,7 +90,8 @@ const summary = {
   failureCount: failures.length,
   p50Ms: percentile(latencies, 0.5),
   p95Ms: percentile(latencies, 0.95),
-  recoveryRate: failures.length ? 0 : 1,
+  recoveryTested: false,
+  recoveryRate: null,
   sampleErrors: failures.slice(0, 5),
 };
 
@@ -107,4 +111,5 @@ if (process.env.INVESTMENT_OS_RECORD === "1") {
   console.error("压测结果已写入当前项目的生产验收台账。");
 }
 
-process.exit(failures.length ? 1 : 0);
+// Allow HTTP handles and stdout to close normally (forced exit can abort libuv on Windows).
+process.exitCode = failures.length ? 1 : 0;

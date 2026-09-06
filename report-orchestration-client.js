@@ -9,6 +9,25 @@
     return data;
   }
   const api={
+    async generateSection(input,onTask){
+      async function execute(method,payload,id){
+        const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+        try{
+          const response=await fetch('/api/reportexecution'+(id?'?id='+encodeURIComponent(id):''),{method,signal:controller.signal,headers:Object.assign({'Content-Type':'application/json'},root.authHeaders?root.authHeaders():{}),body:payload?JSON.stringify(payload):undefined});
+          const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||'后台报告任务不可用');return data.task;
+        }catch(e){if(e.name==='AbortError'||e instanceof TypeError)throw new Error('连接后台任务失败，已有任务不会丢失；恢复连接后重试同一小节');throw e;}
+        finally{clearTimeout(timer);}
+      }
+      const task=await execute('POST',input);if(onTask)onTask(task);
+      const deadline=Date.now()+180000;
+      while(Date.now()<deadline){
+        const state=await execute('GET',null,task.id);if(onTask)onTask(state);
+        if(state.status==='completed'){if(!state.text)throw new Error('后台任务未保留正文，请检查调用台账');return state;}
+        if(['dead','cancelled','invalidated','missing'].includes(state.status))throw new Error(state.error||'任务已停止；记录已保留，请检查后台任务状态');
+        await new Promise(resolve=>setTimeout(resolve,1500));
+      }
+      throw new Error('后台仍在处理，任务已保存；稍后继续同一小节将恢复已有任务，不会重复提交');
+    },
     createContext:context=>request("POST",{action:"contextCreate",context}),
     createWorkflow:(contextId,options)=>request("POST",Object.assign({action:"workflowCreate",contextId},options||{})),
     getWorkflow:id=>request("GET",undefined,{type:"workflow",id}),

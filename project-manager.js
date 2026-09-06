@@ -116,6 +116,17 @@
     }
     function render(){const rows=visible();if(!rows.some(p=>p.id===selected)){selected=rows[0]?.id||null;if(selected)setRoute(selected,view,true);}listEl.innerHTML='<div class="pm-list-summary"><b>'+rows.length+' 个项目</b><span>'+(tab==="archived"?'可恢复或彻底删除':'选择项目进入工作区')+'</span></div><div class="pm-list-columns"><span>项目 / 区域</span><span>类型</span><span>阶段</span><span>进度</span><span>更新时间</span></div>'+(rows.length?rows.map(p=>projectCard(p,p.id===selected,intelligenceCache[p.id])).join(''):'<div class="pm-detail-empty"><b>这里还没有项目</b><span>'+(tab==="archived"?'归档项目会安全地保存在这里。':'新建项目后，系统会自动保存并记录进度。')+'</span></div>');const key=selected+":"+view,workspace=workspaceCache[key]||workspaceErrors[key]&&{error:workspaceErrors[key]};detailEl.innerHTML=detail(projects.find(p=>p.id===selected),options.currentId&&options.currentId(),brainCache[selected],brainErrors[selected],opsCache[selected],opsErrors[selected],intelligenceCache[selected],intelligenceErrors[selected],view,workspace);overlay.querySelectorAll('[data-pm-head-view]').forEach(b=>b.classList.toggle('active',b.dataset.pmHeadView===view));bind();if(view==="overview"){if(selected&&!brainCache[selected]&&!brainErrors[selected])loadBrain(selected);if(selected&&!opsCache[selected]&&!opsErrors[selected])loadOps(selected);if(selected&&!intelligenceCache[selected]&&!intelligenceErrors[selected])loadIntelligence(selected);}else if(selected&&!workspaceCache[key]&&!workspaceErrors[key])loadWorkspace(selected,view);}
     function bind(){
+      const selectedProject=projects.find(p=>p.id===selected),perms=selectedProject?.permissions||{};
+      const hide=selector=>detailEl.querySelectorAll(selector).forEach(el=>el.remove());
+      if(!perms.manage)hide('[data-pm-archive]');
+      if(!perms.delete)hide('[data-pm-purge]');
+      if(!perms.duplicate)hide('[data-pm-copy]');
+      if(!perms.edit){
+        hide('[data-pm-meta]');
+        detailEl.querySelectorAll('.pm-meta-edit input,.pm-meta-edit select').forEach(el=>el.disabled=true);
+      }
+      const heading=detailEl.querySelector('.pm-eyebrow');
+      if(heading)heading.textContent='项目工作区 · '+(PM_ROLE[selectedProject?.role]||'权限待确认');
       listEl.querySelectorAll('[data-pm-select]').forEach(b=>b.onclick=()=>{selected=b.dataset.pmSelect;setRoute(selected,view);render();});
       detailEl.querySelectorAll('[data-pw-view]').forEach(b=>b.onclick=()=>{view=b.dataset.pwView;setRoute(selected,view);render();});
       detailEl.querySelectorAll('[data-pw-retry]').forEach(b=>b.onclick=()=>{const key=selected+":"+view;delete workspaceErrors[key];delete workspaceCache[key];loadWorkspace(selected,view);render();});

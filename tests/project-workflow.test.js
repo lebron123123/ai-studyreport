@@ -111,6 +111,34 @@ test("章节大纲插入和换序时按章节名与小节标题恢复，不再�
   assert.equal(merged[0].sections[0].content,"");assert.equal(merged[0].sections[1].content,"必要性正文");assert.equal(merged[0].sections[2].content,"背景正文");
 });
 
+test("批量接受候选稿只更新未锁定小节并保留一次撤销能力",()=>{
+  const open={content:"原稿A",syncStatus:"stale",staleKind:"logic"},locked={content:"原稿B",locked:true};
+  WF.setCandidate(open,"候选A","同步正式逻辑",{logicRevision:{rules:[{id:"r1"}]},allowLogicAdoption:false});
+  WF.setCandidate(locked,"候选B","人工修改");
+  assert.equal(open.pendingRevision.allowLogicAdoption,false);
+  const result=WF.acceptAllCandidates([{checked:true,sections:[open,locked]}]);
+  assert.deepEqual({total:result.total,accepted:result.accepted,locked:result.locked},{total:2,accepted:1,locked:1});
+  assert.equal(open.content,"候选A");assert.equal(open.pendingRevision,null);assert.equal(open.syncStatus,"current");assert.equal(locked.content,"原稿B");assert.ok(locked.pendingRevision);assert.equal(WF.undoSection(open),true);
+});
+
+test("住房改造大框架迁移保留旧正文，并把改名和新增小节标为待生成",()=>{
+  const saved=[{cn:"六",name:"改造升级策略及效果",checked:true,sections:[{t:"总体改造升级方案（集中商业、街区商业）",content:"旧改造正文",logicSnapshot:{version:1,rules:[{id:"r1",writingLogic:"旧逻辑"}]}}]}];
+  const template=[{cn:"六",name:"改造运营方案",checked:true,sections:[{t:"改造实施计划及效果",content:""},{t:"运营方案",content:""}]}];
+  const merged=WF.mergeReportDraft(template,saved,{chapterAliases:{"改造运营方案":["改造升级策略及效果"]},sectionAliases:{"改造运营方案|改造实施计划及效果":[{chapter:"改造升级策略及效果",title:"总体改造升级方案（集中商业、街区商业）"}]},markNewSectionsStale:true,migrationReason:"正式框架更新"});
+  assert.equal(merged[0].sections[0].content,"旧改造正文");assert.equal(merged[0].sections[0].syncStatus,"stale");assert.equal(merged[0].sections[0].migrationSource,"改造升级策略及效果 / 总体改造升级方案（集中商业、街区商业）");
+  assert.equal(merged[0].sections[1].content,"");assert.equal(merged[0].sections[1].syncStatus,"stale");assert.equal(merged[0].sections[1].migrationSource,"新增小节");
+});
+
+test("受影响候选任务同时包含旧正文和新增空白小节，并排除锁定或已有候选的小节",()=>{
+  const cs=[{cn:"一",name:"项目总论",checked:true,sections:[
+    {t:"旧正文",content:"原稿",staleKind:"logic",syncStatus:"stale"},
+    {t:"新增小节",content:"",staleKind:"logic",syncStatus:"stale"},
+    {t:"锁定小节",content:"原稿",staleKind:"logic",syncStatus:"locked-stale",locked:true},
+    {t:"已有候选",content:"原稿",staleKind:"logic",syncStatus:"stale",pendingRevision:{content:"候选"}},
+  ]}];
+  assert.deepEqual(WF.logicImpactedTasks(cs).map(x=>x.s.t),["旧正文","新增小节"]);
+});
+
 test("42节完成版可修复误退到27节的工作稿并恢复明确版本号",()=>{
   const complete=chapters(),partial=chapters();partial[0].sections[0].content="";
   const state={reportVersions:[{id:"report-v3",version:3,chapters:complete}]};
@@ -179,7 +207,17 @@ test("批量分析点位最多保留6个且始终只有一个主项目",()=>{
 test("批量点位写作计划明确主项目精写、次项目合并压缩",()=>{
   const plan=WF.siteWritingPlan([{name:"核心项目",address:"A区",role:"primary"},{name:"次项目甲",address:"B区"},{name:"次项目乙",address:"C区"}]);
   assert.equal(plan.isBatch,true);assert.equal(plan.primary.name,"核心项目");assert.equal(plan.secondary.length,2);
-  assert.match(plan.strategy,/完整展开/);assert.match(plan.strategy,/合并为一段/);assert.match(plan.strategy,/2—3句/);
+  assert.match(plan.strategy,/重要程度/);assert.match(plan.strategy,/整体优先合并/);assert.match(plan.strategy,/2—3句/);assert.match(plan.strategy,/不得使用“主项目”“次项目”标签/);
+});
+
+test("调整报告逻辑时历史整篇生成进度保持绑定完成版本，不误报第二轮续写",()=>{
+  const complete=chapters(),current=chapters();
+  current[0].sections[0].syncStatus="stale";current[0].sections[0].staleKind="logic";current[0].sections[0].pendingRevision={before:"旧稿",after:"候选稿"};
+  const state={reportVersions:[{id:"report-v2",version:2,chapters:complete}]};
+  const fixed=WF.historicalProgressDuringLogicRevision(state,current,{total:41,done:6,failed:0,active:false,stopped:true,reportVersionId:"report-v2",reportVersion:2,recoveredFromMismatch:true});
+  assert.equal(fixed.status.complete,true);assert.equal(fixed.progress.total,5);assert.equal(fixed.progress.done,5);
+  assert.equal(fixed.progress.stopped,false);assert.equal(fixed.progress.recoveredFromMismatch,false);assert.equal(fixed.progress.reportVersionId,"report-v2");assert.equal(fixed.repaired,true);
+  assert.equal(WF.historicalProgressDuringLogicRevision(state,complete,fixed.progress),null);
 });
 
 test("单点位保持旧流程兼容，不错误启用批量压缩",()=>{

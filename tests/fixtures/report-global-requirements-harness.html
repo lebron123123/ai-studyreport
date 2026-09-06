@@ -1,0 +1,31 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>全篇要求隔离验收</title>
+<style>body{font:16px system-ui;max-width:1100px;margin:24px auto;color:#234}button{padding:9px;margin:5px}textarea{font:inherit}#front .rpt-logic-note,[data-rla-global]{background:#eaf7ef;padding:18px;border:1px solid #abd;margin:12px 0}.rla-rule{padding:12px;border:1px solid #ddd}.rla-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:15px}.rla-summary{display:flex;gap:30px}#front h3{margin-top:25px}</style>
+<h1>[系统测试] 全篇要求 / 小节逻辑</h1><p>使用正式模块；发布只写本验收页内存，不接触真实项目或正式逻辑。</p>
+<button id="normal">正常态</button><button id="empty">空规则</button><button id="failure">模拟读取失败</button><button id="refresh">刷新验收</button>
+<pre id="status"></pre><div id="front"></div><hr><div id="listBox"></div><div id="editBox"></div>
+<script>var calcType='gaibao',calcResult=null,appMode='aireport';window.addEventListener('error',e=>{document.getElementById('status').textContent='ERROR '+e.message;});function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}function authHeaders(){return {};}function unlockStdEdit(fn){fn();}function msg(s){document.getElementById('status').textContent=s;}</script>
+<script src="/report-writing-policy.js"></script><script src="/project-workflow.js"></script><script src="/report-logic-core.js"></script><script src="/report.js"></script><script src="/report-logic-admin.js"></script>
+<script>
+const nativeFetch=window.fetch.bind(window);let data,initial,version=19,mode='normal';
+window.confirm=()=>true;window.alert=text=>document.getElementById('status').textContent=text;
+nativeFetch('/index.html').then(r=>r.text()).then(text=>{const doc=new DOMParser().parseFromString(text,'text/html');doc.querySelectorAll('style').forEach(s=>document.head.appendChild(s.cloneNode(true)));});
+window.fetch=async(url,options)=>{
+  if(!String(url).startsWith('/api/reportlogic'))return nativeFetch(url,options);
+  if(mode==='failure')return {ok:false,json:async()=>({error:'[系统测试]逻辑读取失败，请重试'})};
+  if(options?.method==='POST'){const body=JSON.parse(options.body);if(body.action==='adminCapability')return {ok:true,json:async()=>({ok:true,isAdmin:true})};if(body.action!=='publish')throw Error('Unexpected action');data=ReportWritingPolicy.normalize(body.data);data.logicVersions[body.businessScenario]='2.1';version++;}
+  return {ok:true,json:async()=>({ok:true,set:{version,name:'[系统测试]住房逻辑',data:mode==='empty'?{projectType:'gaibao',rules:[],globalRequirements:{housing_conversion:''}}:structuredClone(data)}})};
+};
+async function show(){
+  const status=document.getElementById('status');status.textContent='加载中…';
+  try{await ReportLogicCore.load('gaibao',true);const rules=ReportLogicCore.match('gaibao','项目总论','编制依据与编制说明',{businessScenario:'housing_conversion'}),c={cn:'一',name:'项目总论',sections:[]},s={t:'编制依据与编制说明',content:'已接受的报告正文'};c.sections=[s];
+    document.getElementById('front').innerHTML=reportGlobalRequirementsHtml()+'<h3>1 项目总论</h3>'+renderSectionLogicHtml(c,s,true)+'<p>'+s.content+'</p>';
+    status.textContent='PASS：全篇要求位于首章前；业务规则 '+rules.length+' 项；正文未改写。';
+  }catch(e){status.textContent=e.message;document.getElementById('front').innerHTML='';}
+  await renderReportLogicAdminTab('gaibao');
+}
+document.getElementById('normal').onclick=()=>{mode='normal';show();};
+document.getElementById('empty').onclick=()=>{mode='empty';show();};
+document.getElementById('failure').onclick=()=>{mode='failure';show();};
+document.getElementById('refresh').onclick=()=>location.reload();
+(async()=>{initial=await nativeFetch('/data/report-logic-gaibao-v1.json').then(r=>r.json());data=structuredClone(initial);project.name='[系统测试]住房项目';project.businessScenario='housing_conversion';await show();})();
+</script></html>

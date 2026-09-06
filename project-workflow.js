@@ -93,7 +93,9 @@
   }
   function markAnalysisImpacted(chapters,domains,reason){const hits=impactedAnalysisSections(chapters,domains);hits.forEach(h=>{const c=(chapters||[]).find(x=>String(x.cn)===String(h.cn)),s=c&&c.sections[h.si];if(!s)return;s.syncStatus=s.locked?"locked-stale":"stale";s.staleReason=reason||("分析数据变化："+h.domains.join("、"));s.staleKeys=h.domains.slice();});return hits;}
   function logicSnapshotCore(snapshot){
-    return {rules:(snapshot&&Array.isArray(snapshot.rules)?snapshot.rules:[]).map(rule=>({id:rule.id||"",title:rule.title||"",requiredSources:rule.requiredSources||"",dataRequirement:rule.dataRequirement||null,writingLogic:rule.writingLogic||"",outputForm:rule.outputForm||"",missingPolicy:rule.missingPolicy||""}))};
+    const policy=root.ReportWritingPolicy||(typeof require==="function"?require("./report-writing-policy.js"):null);
+    if(policy)snapshot=policy.snapshot(snapshot);
+    return {globalRequirements:snapshot?.globalRequirements||"",rules:(snapshot&&Array.isArray(snapshot.rules)?snapshot.rules:[]).map(rule=>({id:rule.id||"",title:rule.title||"",requiredSources:rule.requiredSources||"",dataRequirement:rule.dataRequirement||null,writingLogic:rule.writingLogic||"",outputForm:rule.outputForm||"",missingPolicy:rule.missingPolicy||""}))};
   }
   function logicSnapshotDiff(before,after){
     const a=logicSnapshotCore(before),b=logicSnapshotCore(after),fields=[];
@@ -101,6 +103,7 @@
       if(JSON.stringify(a.rules.map(rule=>rule[field]))!==JSON.stringify(b.rules.map(rule=>rule[field])))fields.push(field);
     });
     if(a.rules.length!==b.rules.length)fields.unshift("rules");
+    if(a.globalRequirements!==b.globalRequirements)fields.push("globalRequirements");
     return {changed:fields.length>0,fields,beforeHash:hash(a),afterHash:hash(b)};
   }
   function markLogicImpacted(chapters,changes,reason){
@@ -152,28 +155,71 @@
   function nextReportVersionNumber(state){
     return (Array.isArray(state&&state.reportVersions)?state.reportVersions:[]).reduce((max,item)=>Math.max(max,Number(item&&item.version)||0),0)+1;
   }
-  function mergeReportDraft(templateChapters,savedChapters){
-    const saved=Array.isArray(savedChapters)?savedChapters:[],used=new Set(),sectionFields=["content","editedHtml","locked","syncStatus","staleReason","staleKeys","staleKind","pendingRevision","undoStack","prov","logicSnapshot"];
+  function mergeReportDraft(templateChapters,savedChapters,options){
+    options=options||{};
+    const saved=Array.isArray(savedChapters)?savedChapters:[],used=new Set(),usedSections=new Set(),sectionFields=["content","editedHtml","locked","syncStatus","staleReason","staleKeys","staleKind","pendingRevision","undoStack","prov","logicSnapshot","structureMigrated","migrationSource"];
     return (Array.isArray(templateChapters)?templateChapters:[]).map((chapter,chapterIndex)=>{
       let savedIndex=saved.findIndex((item,index)=>!used.has(index)&&String(item&&item.cn||"")===String(chapter&&chapter.cn||"")&&String(item&&item.name||"")===String(chapter&&chapter.name||""));
       if(savedIndex<0)savedIndex=saved.findIndex((item,index)=>!used.has(index)&&String(item&&item.name||"")===String(chapter&&chapter.name||""));
       if(savedIndex<0&&saved[chapterIndex]&&!used.has(chapterIndex)&&!String(saved[chapterIndex].name||saved[chapterIndex].cn||""))savedIndex=chapterIndex;
       const old=savedIndex>=0?saved[savedIndex]:null;if(savedIndex>=0)used.add(savedIndex);
+      const aliases=Array.isArray(options.chapterAliases?.[chapter.name])?options.chapterAliases[chapter.name]:[];
+      const sourceIndexes=[savedIndex,...aliases.map(name=>saved.findIndex(item=>String(item&&item.name||"")===String(name)))].filter((value,index,list)=>value>=0&&list.indexOf(value)===index);
       const oldSections=Array.isArray(old&&old.sections)?old.sections:[],oldUsed=new Set();
       const sections=(chapter.sections||[]).map((section,sectionIndex)=>{
-        let oldIndex=oldSections.findIndex((item,index)=>!oldUsed.has(index)&&String(item&&item.t||"")===String(section&&section.t||""));
-        if(oldIndex<0&&oldSections[sectionIndex]&&!oldUsed.has(sectionIndex)&&!String(oldSections[sectionIndex].t||""))oldIndex=sectionIndex;
-        const prior=oldIndex>=0?oldSections[oldIndex]:null;if(oldIndex>=0)oldUsed.add(oldIndex);
-        if(!prior)return {...section};
-        const restored={...section};sectionFields.forEach(key=>{if(prior[key]!==undefined)restored[key]=clone(prior[key]);});return restored;
+        let oldIndex=oldSections.findIndex((item,index)=>!oldUsed.has(index)&&!usedSections.has(savedIndex+":"+index)&&String(item&&item.t||"")===String(section&&section.t||""));
+        if(oldIndex<0&&oldSections[sectionIndex]&&!oldUsed.has(sectionIndex)&&!usedSections.has(savedIndex+":"+sectionIndex)&&!String(oldSections[sectionIndex].t||""))oldIndex=sectionIndex;
+        let prior=oldIndex>=0?oldSections[oldIndex]:null,priorChapterIndex=savedIndex;
+        if(oldIndex>=0)oldUsed.add(oldIndex);
+        const key=chapter.name+"|"+section.t,sectionAliases=Array.isArray(options.sectionAliases?.[key])?options.sectionAliases[key]:[];
+        if(!prior&&sectionAliases.length){
+          for(const source of sectionAliases){
+            const names=typeof source==="string"?source:(source&&source.title),chapterName=typeof source==="object"&&source&&source.chapter;
+            const candidates=chapterName?saved.map((item,index)=>String(item&&item.name||"")===String(chapterName)?index:-1).filter(index=>index>=0):sourceIndexes;
+            for(const candidate of candidates){const list=Array.isArray(saved[candidate]?.sections)?saved[candidate].sections:[],hit=list.findIndex((item,index)=>!usedSections.has(candidate+":"+index)&&String(item&&item.t||"")===String(names||""));if(hit>=0){prior=list[hit];priorChapterIndex=candidate;oldIndex=hit;break;}}
+            if(prior)break;
+          }
+        }
+        const migrated=!!prior&&(String(saved[priorChapterIndex]?.name||"")!==String(chapter.name)||String(prior.t||"")!==String(section.t));
+        if(prior)usedSections.add(priorChapterIndex+":"+oldIndex);
+        const restored={...section};
+        if(prior)sectionFields.forEach(field=>{if(prior[field]!==undefined)restored[field]=clone(prior[field]);});
+        if(migrated||(!prior&&options.markNewSectionsStale)){
+          restored.structureMigrated=true;restored.migrationSource=prior?String(saved[priorChapterIndex]?.name||"")+" / "+String(prior.t||""):"新增小节";
+          restored.syncStatus=restored.locked?"locked-stale":"stale";restored.staleKind="logic";restored.staleKeys=["report_logic","report_structure"];
+          restored.staleReason=options.migrationReason||"报告正式结构已更新，需要按最新逻辑生成候选稿";
+        }
+        return restored;
       });
       return {...chapter,checked:old&&old.checked!==undefined?old.checked:chapter.checked,sections};
     });
   }
+  function logicImpactedTasks(chapters){
+    return (chapters||[]).filter(c=>c&&c.checked!==false).flatMap(c=>(c.sections||[]).map((s,si)=>({c,s,si}))).filter(x=>x.s&&x.s.staleKind==="logic"&&x.s.syncStatus==="stale"&&!x.s.locked&&!x.s.pendingRevision);
+  }
+  function logicRevisionInProgress(chapters){
+    return (chapters||[]).some(c=>(c&&c.sections||[]).some(s=>s&&(s.staleKind==="logic"||s.structureMigrated)&&(s.syncStatus==="stale"||s.syncStatus==="locked-stale"||s.pendingRevision)));
+  }
+  function historicalProgressDuringLogicRevision(state,chapters,progress){
+    if(!progress||!logicRevisionInProgress(chapters))return null;
+    const version=latestCompleteReportVersion(state,progress.reportVersionId);if(!version)return null;
+    const status=reportGenerationStatus(version.chapters);if(!status.complete)return null;
+    const normalized={...progress,total:status.total,done:status.generated,failed:0,active:false,stopped:false,reportVersionId:version.id,reportVersion:Number(version.version)||Number(progress.reportVersion)||null,targetReportVersion:null,recoveredFromMismatch:false};
+    const repaired=["total","done","failed","active","stopped","reportVersionId","reportVersion","targetReportVersion","recoveredFromMismatch"].some(key=>progress[key]!==normalized[key]);
+    return {progress:normalized,version,status,repaired};
+  }
   function recoverCompletedReport(chapters,state,progress){
     if(!progress||((Number(progress.done)<Number(progress.total)||Number(progress.total)<=0)&&!progress.recoveredFromMismatch))return {recovered:false,chapters,status:reportGenerationStatus(chapters)};
-    const version=latestCompleteReportVersion(state,progress.reportVersionId),merged=version?mergeReportDraft(chapters,version.chapters):chapters,status=reportGenerationStatus(merged);
-    return version&&status.complete?{recovered:true,chapters:merged,status,version}:{recovered:false,chapters,status:reportGenerationStatus(chapters)};
+    if(reportGenerationStatus(chapters).complete)return {recovered:false,chapters,status:reportGenerationStatus(chapters)};
+    const version=latestCompleteReportVersion(state,progress.reportVersionId);
+    let filled=false;
+    const merged=(chapters||[]).map(c=>({...c,sections:(c.sections||[]).map(s=>{
+      if(s.content||s.editedHtml||s.pendingRevision||s.locked||s.staleKind||s.structureMigrated||s.undoStack?.length)return s;
+      const prior=(version?.chapters||[]).find(old=>old.name===c.name)?.sections?.find(old=>old.t===s.t);
+      if(!prior||!(prior.content||prior.editedHtml))return s;
+      filled=true;return {...s,...clone(prior)};
+    })})),status=reportGenerationStatus(merged);
+    return version&&filled&&status.complete?{recovered:true,chapters:merged,status,version}:{recovered:false,chapters,status:reportGenerationStatus(chapters)};
   }
   function selectProjectDraft(cloudDraft,localDraft,projectId){
     if(!localDraft)return cloudDraft||null;if(!cloudDraft)return localDraft;
@@ -215,18 +261,35 @@
     if(!section)return null;
     meta=meta||{};
     const candidate={id:uid("patch"),createdAt:new Date().toISOString(),instruction:String(instruction||""),before:currentText(section),after:String(newText||""),logicRevision:clone(meta.logicRevision||null)};
+    if(meta.allowLogicAdoption!==undefined)candidate.allowLogicAdoption=!!meta.allowLogicAdoption;
     section.pendingRevision=candidate; return candidate;
   }
   function acceptCandidate(section){
     if(!section||!section.pendingRevision)return null;
     section.undoStack=Array.isArray(section.undoStack)?section.undoStack:[];
-    section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null,logicSnapshot:clone(section.logicSnapshot||null)});
+    section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null,logicSnapshot:clone(section.logicSnapshot||null),syncState:{syncStatus:section.syncStatus||"current",staleReason:section.staleReason||"",staleKeys:clone(section.staleKeys||[]),staleKind:section.staleKind||""}});
     const c=section.pendingRevision; section.content=c.after; section.editedHtml=null;if(c.logicRevision)section.logicSnapshot=clone(c.logicRevision); section.pendingRevision=null; clearSectionStale(section); return c;
   }
+  function keepOriginalLogic(section){
+    if(!section||section.locked||section.pendingRevision||!(section.content||section.editedHtml)||section.staleKind!=="logic"||section.syncStatus!=="stale")return false;
+    if((section.staleKeys||[]).some(key=>key!=="report_logic"))return false;
+    section.undoStack=Array.isArray(section.undoStack)?section.undoStack:[];
+    section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null,logicSnapshot:clone(section.logicSnapshot||null),syncState:{syncStatus:section.syncStatus,staleReason:section.staleReason||"",staleKeys:clone(section.staleKeys||[]),staleKind:section.staleKind}});
+    section.logicSnapshot=Object.assign({},section.logicSnapshot,{reviewDecision:{action:"keep-original",at:new Date().toISOString(),reason:"人工确认现有正文无需按本轮逻辑重写"}});
+    section.structureMigrated=false;
+    clearSectionStale(section);return true;
+  }
   function rejectCandidate(section){ if(!section)return; section.pendingRevision=null; }
+  function acceptAllCandidates(chapters){
+    const rows=(chapters||[]).filter(c=>c&&c.checked!==false).flatMap(c=>(c.sections||[]).map((section,si)=>({chapter:c,section,si}))),pending=rows.filter(x=>x.section&&x.section.pendingRevision),accepted=[];
+    pending.forEach(item=>{if(!item.section.locked&&acceptCandidate(item.section))accepted.push(item);});
+    return {total:pending.length,accepted:accepted.length,locked:pending.length-accepted.length,items:accepted};
+  }
   function undoSection(section){
     if(!section||!Array.isArray(section.undoStack)||!section.undoStack.length)return false;
-    const prev=section.undoStack.pop(); section.content=prev.content; section.editedHtml=prev.editedHtml;section.logicSnapshot=clone(prev.logicSnapshot||null); return true;
+    const prev=section.undoStack.pop(); section.content=prev.content; section.editedHtml=prev.editedHtml;section.logicSnapshot=clone(prev.logicSnapshot||null);
+    if(prev.syncState)Object.assign(section,clone(prev.syncState));
+    return true;
   }
   function escapeHtml(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
   function simpleDiffHtml(before,after){
@@ -324,7 +387,7 @@
   function siteWritingPlan(sites){
     const normalized=normalizeAnalysisSites(sites),primary=normalized.find(x=>x.role==="primary")||normalized[0],secondary=normalized.filter(x=>x!==primary);
     const strategy=secondary.length
-      ? "主项目“"+(primary.name||primary.address||"未命名主项目")+"”完整展开论证；其余"+secondary.length+"个次项目只写影响结论的差异，优先合并为一段，确需分列时每个最多2—3句，不重复主项目的通用分析。"
+      ? "按重要程度先分析“"+(primary.name||primary.address||"重点点位")+"”，再对其余"+secondary.length+"个点位只写影响结论的实质差异；整体优先合并表达，确需分列时每个最多2—3句，不重复通用分析，正文不得使用“主项目”“次项目”标签。"
       : "仅有一个分析点位，按本节逻辑正常展开论证。";
     return {sites:normalized,primary,secondary,isBatch:secondary.length>0,strategy};
   }
@@ -372,8 +435,8 @@
       guardrails:["财务数字来自白箱测算结果","异常结论来自硬规则检查","知识资料仅按检索匹配度作为依据","未提供的数据必须明确写暂无，不能推测","本工具只诊断，不修改参数或正文"]};
   }
 
-  const api={clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,logicSnapshotCore,logicSnapshotDiff,markLogicImpacted,
-    createCalcSnapshot,createReportVersion,reportGenerationStatus,nextReportVersionNumber,mergeReportDraft,recoverCompletedReport,selectProjectDraft,claimReportGeneration,releaseReportGeneration,persistedGenerationProgress,reconcileGenerationProgress,latestCompleteReportVersion,setCandidate,acceptCandidate,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
+  const api={keepOriginalLogic,clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,logicSnapshotCore,logicSnapshotDiff,markLogicImpacted,
+    createCalcSnapshot,createReportVersion,reportGenerationStatus,logicImpactedTasks,logicRevisionInProgress,historicalProgressDuringLogicRevision,nextReportVersionNumber,mergeReportDraft,recoverCompletedReport,selectProjectDraft,claimReportGeneration,releaseReportGeneration,persistedGenerationProgress,reconcileGenerationProgress,latestCompleteReportVersion,setCandidate,acceptCandidate,acceptAllCandidates,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
     aiReportStage,aiReportStageRank,previousAiReportStage,locationTokens,rankLocationCandidates,normalizeAnalysisSites,siteWritingPlan,aiReportProjectSeed,aiReportShouldSeedProject,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
     impactedAnalysisSections,markAnalysisImpacted,METRIC_LABELS,ANALYSIS_DOMAIN_WORDS};
   root.ProjectWorkflow=api;

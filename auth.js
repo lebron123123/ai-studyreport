@@ -62,6 +62,35 @@ function showLoginModal(msg){
 /* ================= 云端项目库 ================= */
 let currentProjectId = null;
 let currentProjectUpdatedAt = null;
+let currentProjectRole = 'OWNER';
+let currentProjectReadOnlyData = null;
+function projectCanEdit(){return currentProjectRole==='OWNER'||currentProjectRole==='EDITOR';}
+function applyProjectAccess(record){
+  currentProjectRole=['OWNER','EDITOR','VIEWER'].includes(record?.role)?record.role:'VIEWER';
+  currentProjectReadOnlyData=currentProjectRole==='VIEWER'?JSON.parse(JSON.stringify(record.data||{})):null;
+}
+function renderProjectReadOnly(sheet){
+  const data=currentProjectReadOnlyData||{},escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  if(currentProjectRole!=='VIEWER'){
+    sheet.innerHTML='<section><h2>项目访问核验</h2><p>'+({PENDING:'正在核验当前项目权限…',DENIED:'当前账号已无权访问此项目。原有本机草稿未删除。',UNAVAILABLE:'暂时无法核验项目权限，请连接本地服务后重试。原有本机草稿未删除。'}[currentProjectRole]||'项目权限尚未确认。')+'</p><button id="projectAccessRetry" class="btn">重新读取项目</button></section>';
+    document.getElementById('projectAccessRetry').onclick=async()=>{if(await openProject(currentProjectId))renderSheet();};
+    setSaveState('denied');return;
+  }
+  const versions=Array.isArray(data.workflow?.reportVersions)?data.workflow.reportVersions:[];
+  sheet.innerHTML='<section><h2>'+escape(data.project?.name||'项目报告')+'</h2><p>查看者 · 只读。仅展示项目库已保存的内容，正式多人审批尚未启用。</p><button id="projectReadOnlyReload" class="btn">读取最新版本</button><select id="projectReadOnlyVersion"><option value="">当前工作稿</option>'+versions.map((v,i)=>'<option value="'+i+'">报告第'+escape(v.version||i+1)+'版 · '+escape(v.reason||'历史版本')+'</option>').join('')+'</select><div id="projectReadOnlyBody"></div></section>';
+  const draw=items=>{
+    const body=document.getElementById('projectReadOnlyBody');body.replaceChildren();
+    for(const c of Array.isArray(items)?items:[]){
+      const h=document.createElement('h2');h.textContent=c.name||c.title||'';body.append(h);
+      for(const s of c.sections||[]){const title=document.createElement('h3'),text=document.createElement('div');title.textContent=s.t||s.title||'';text.style.whiteSpace='pre-wrap';
+        text.textContent=s.editedHtml?new DOMParser().parseFromString(s.editedHtml,'text/html').body.textContent:s.content||'本节尚无已保存正文';body.append(title,text);}
+    }
+  };
+  draw(data.chapters);
+  document.getElementById('projectReadOnlyVersion').onchange=e=>{const v=versions[Number(e.target.value)];draw(e.target.value===''?data.chapters:v?.chapters||v?.snapshot?.chapters||[]);};
+  document.getElementById('projectReadOnlyReload').onclick=async()=>{if(await openProject(currentProjectId))renderSheet();};
+  setSaveState('readonly');
+}
 let cloudTimer = null;
 let cloudSaveInFlight = Promise.resolve();
 function rememberActiveProjectId(id){try{id?localStorage.setItem("fs_active_project_id",id):localStorage.removeItem("fs_active_project_id");}catch(e){}}
@@ -72,31 +101,37 @@ function genProjectId(){
   }
 }
 function scheduleCloudSave(){
-  if(!getToken()) return;
+  if(!getToken()||!projectCanEdit()) return;
   clearTimeout(cloudTimer);
   cloudTimer = setTimeout(()=>{cloudTimer=null;cloudSaveNow();}, 1200);
 }
 function cloudSaveNow(){
+  if(!projectCanEdit()){setSaveState('readonly');return Promise.resolve(false);}
   if(!getToken())return Promise.resolve(false);
   clearTimeout(cloudTimer);cloudTimer=null;
   if(!currentProjectId){currentProjectId=genProjectId();rememberActiveProjectId(currentProjectId);}
-  const request={id:currentProjectId,name:project.name||"未命名项目",snapshot:buildDraftData(),expectedUpdatedAt:currentProjectUpdatedAt};
+  const request={id:currentProjectId,name:project.name||"未命名项目",snapshot:JSON.parse(JSON.stringify(buildDraftData())),expectedUpdatedAt:currentProjectUpdatedAt};
   cloudSaveInFlight=cloudSaveInFlight.catch(()=>false).then(()=>cloudSaveSnapshot(request));
   return cloudSaveInFlight;
 }
 async function cloudSaveSnapshot(saveRequest){
+  if(saveRequest.id===currentProjectId&&!projectCanEdit()){setSaveState('readonly');return false;}
   if(!getToken()) return;
   setSaveState("saving");
   try{
     const expected=saveRequest.id===currentProjectId?currentProjectUpdatedAt:saveRequest.expectedUpdatedAt;
     const resp = await fetch("/api/projects", {method:"POST",
-      headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
+      headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),signal:AbortSignal.timeout(30000),
       body: JSON.stringify({id:saveRequest.id,name:saveRequest.name,data:saveRequest.snapshot,expectedUpdatedAt:expected})});
-    if(resp.status===401){ setSaveState("auth"); clearAuth(); showLoginModal("登录已过期，请重新登录（本地草稿仍在）"); return; }
+    if(resp.status===401){ setSaveState("auth"); clearAuth(); showLoginModal("登录已过期，请重新登录。尚未保存时请勿刷新或关闭页面。"); return false; }
     const d = await resp.json();
+    if(resp.status===403){setSaveState('denied');return false;}
     if(resp.status===409&&d.conflict){setSaveState("conflict");return;}
-    if(d.ok&&saveRequest.id===currentProjectId)currentProjectUpdatedAt=Number(d.updatedAt)||currentProjectUpdatedAt;
+    if(d.ok&&saveRequest.id===currentProjectId){currentProjectUpdatedAt=Number(d.updatedAt)||currentProjectUpdatedAt;
+      if(typeof reportCloudPersistedRevision!=="undefined")reportCloudPersistedRevision=Math.max(reportCloudPersistedRevision,Number(saveRequest.snapshot.documentRevision)||0);
+    }
     setSaveState(d.ok? "ok":"offline");
+    if(!d.ok&&d.error){const el=document.getElementById("saveState");if(el)el.title+=" 原因："+d.error;}
     return !!d.ok;
   }catch(e){ setSaveState("offline"); }
   return false;
@@ -106,6 +141,8 @@ function setSaveState(st){
   const el = document.getElementById("saveState");
   if(!el) return;
   const states={
+    readonly:{text:'查看者 · 只读',title:'本页只展示项目库中的报告，不会保存或生成修改。'},
+    denied:{text:'权限已变化 · 未同步修改',title:'项目编辑权限已被撤销。未覆盖项目库中的报告，请联系项目所有者。'},
     local:{text:"已保存到本机",title:"当前修改已经安全保存在此浏览器。"},
     saving:{text:"本机已保存 · 正在同步云端…",title:"本地草稿已保存，正在同步到项目库。"},
     ok:{text:"本机与云端均已保存",title:"当前修改已同时保存到本机和云端项目库。"},
@@ -113,11 +150,19 @@ function setSaveState(st){
     auth:{text:"已保存到本机 · 登录后可同步",title:"登录状态已过期，本地草稿仍然安全；重新登录后可继续同步。"},
     conflict:{text:"云端有更新 · 请重新载入",title:"其他页面保存了更新。为避免覆盖，请从“我的项目”重新载入。"}
   };
-  const state=states[st]||states.offline;
+  const local=typeof reportLocalPersistedRevision==="undefined"||reportLocalPersistedRevision>=reportDocumentRevision;
+  const remote=typeof reportCloudPersistedRevision!=="undefined"&&reportCloudPersistedRevision>=reportDocumentRevision;
+  let state=states[st]||states.offline;
+  if(!local&&st!=='readonly'&&st!=='denied'){
+    if(remote)state={text:"已保存到项目库 · 本机空间不足",title:"当前报告已保存到项目数据库；刷新将从项目库恢复。"};
+    else if(st==="saving")state={text:"正在保存，请勿刷新…",title:"正在写入本机大草稿或项目库，尚未确认保存完成。"};
+    else state={text:"尚未保存成功 · 请勿刷新",title:"当前修改仍在页面中。请重试保存；不要重新载入旧项目或关闭页面。"};
+  }
   el.textContent=state.text;
   el.title=state.title;
   el.dataset.state=st;
-  el.style.color=st==="conflict"?"var(--seal-red)":st==="offline"||st==="auth"?"#9A6A16":"";
+  el.style.color=(!local&&!remote&&st!=="saving")||st==="conflict"?"var(--seal-red)":st==="offline"||st==="auth"?"#9A6A16":"";
+  el.onclick=()=>typeof persistReportDraft==="function"?persistReportDraft():flushCloudSave();
 }
 
 function mountUserBar(){
@@ -139,9 +184,11 @@ function mountUserBar(){
   document.getElementById("ubProjects").onclick = openProjectsPanel;
 }
 function newProject(){
+  currentProjectRole='OWNER';currentProjectReadOnlyData=null;
   if(typeof airSwitchProjectSession==="function")airSwitchProjectSession();
   currentProjectId = null; currentProjectUpdatedAt=null; domainKey = null; chapters = []; signed = false;
   if(typeof reportDocumentRevision!=="undefined")reportDocumentRevision=0;
+  if(typeof reportLocalPersistedRevision!=="undefined"){reportLocalPersistedRevision=-1;reportCloudPersistedRevision=-1;}
   rememberActiveProjectId(null);
   calcParams = null; calcResult = null; docNo = null;
   projectWorkflow = window.ProjectWorkflow ? window.ProjectWorkflow.ensureState({}) : {calcSnapshots:[],reportVersions:[]};
@@ -192,12 +239,13 @@ async function openProject(id){
     if(!d.ok){ alert(d.error||"打开失败"); return false; }
     if(id!==currentProjectId&&typeof airSwitchProjectSession==="function")airSwitchProjectSession();
     currentProjectId = id;
+    applyProjectAccess(d.project);
     currentProjectUpdatedAt=Number(d.project.updated_at)||null;
     if(typeof reportDocumentRevision!=="undefined")reportDocumentRevision=0;
     rememberActiveProjectId(id);
     const panel = document.getElementById("projPanel"); if(panel) panel.remove();
     const bar = document.getElementById("draftBar"); if(bar) bar.remove();
-    const local=loadDraft(),selected=window.ProjectWorkflow?.selectProjectDraft?ProjectWorkflow.selectProjectDraft(d.project.data,local,id):d.project.data;
+    const local=projectCanEdit()?await loadDurableDraft():null,selected=projectCanEdit()&&window.ProjectWorkflow?.selectProjectDraft?ProjectWorkflow.selectProjectDraft(d.project.data,local,id):d.project.data;
     restoreDraft(selected);
     if(!String(project.name||"").trim()&&d.project.name)project.name=d.project.name;
     return d.project;
@@ -215,18 +263,19 @@ async function openAiReportProject(id,entryOptions){
 
 async function startApp(){
   if(!currentProjectId) currentProjectId=recalledActiveProjectId();
+  if(currentProjectId){currentProjectRole='PENDING';currentProjectReadOnlyData=null;}
   mountUserBar();
   renderTOC(); renderSheet();
   await Promise.all([fetchOutlines(), fetchCalcConfig()]);
   if(currentProjectId){
     try{
       const pr=await fetch("/api/projects?id="+encodeURIComponent(currentProjectId),{headers:authHeaders()});
-      const pd=await pr.json();if(pd.ok&&pd.project&&pd.project.data){currentProjectUpdatedAt=Number(pd.project.updated_at)||null;const resumeMode=appMode,resumeOffice=typeof officeView!=="undefined"?officeView:"chat",local=loadDraft(),selected=window.ProjectWorkflow?.selectProjectDraft?ProjectWorkflow.selectProjectDraft(pd.project.data,local,currentProjectId):pd.project.data;restoreDraft(selected,{openHome:true});if(window.UiRouteState){appMode=resumeMode;if(typeof officeView!=="undefined")officeView=resumeOffice;renderTOC();renderSheet();}}
-      else{currentProjectId=null;currentProjectUpdatedAt=null;rememberActiveProjectId(null);}
-    }catch(e){ /* 网络失败时仍保留本地草稿兜底，不主动遗忘项目 */ }
+      const pd=await pr.json();if(pd.ok&&pd.project&&pd.project.data){applyProjectAccess(pd.project);currentProjectUpdatedAt=Number(pd.project.updated_at)||null;const resumeMode=appMode,resumeOffice=typeof officeView!=="undefined"?officeView:"chat",local=projectCanEdit()?await loadDurableDraft():null,selected=projectCanEdit()&&window.ProjectWorkflow?.selectProjectDraft?ProjectWorkflow.selectProjectDraft(pd.project.data,local,currentProjectId):pd.project.data;restoreDraft(selected,{openHome:true});if(window.UiRouteState){appMode=resumeMode;if(typeof officeView!=="undefined")officeView=resumeOffice;renderTOC();renderSheet();}}
+      else{currentProjectRole='DENIED';currentProjectReadOnlyData=null;currentProjectUpdatedAt=null;}
+    }catch(e){ currentProjectRole='UNAVAILABLE';currentProjectReadOnlyData=null; }
   }
   renderTOC(); renderSheet();
-  const d = loadDraft();
+  const d = await loadDurableDraft();
   if(d && d.ts && !currentProjectId && (d.project&&d.project.name || (d.chapters||[]).some(c=>c.sections.some(s=>s.content)))){
     document.querySelector(".sheet-wrap").insertAdjacentHTML("beforeend", "");
     const bar = document.getElementById("draftBar");

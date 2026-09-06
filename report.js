@@ -10,6 +10,45 @@ const EST_IN_PER_SEC = 1200, EST_OUT_PER_SEC = 700; // 每子节预估token
 const project = { name:"", owner:"", industry:"", location:"", type:"", scale:"", desc:"" };
 let projectWorkflow = window.ProjectWorkflow ? window.ProjectWorkflow.ensureState({}) : {calcSnapshots:[],reportVersions:[]};
 let reportDocumentRevision = 0;
+let reportLocalPersistedRevision = -1;
+let reportCloudPersistedRevision = -1;
+let reportLocalSavePending = Promise.resolve(false);
+let reportLocalSaveQueue = Promise.resolve();
+// 大报告/多版本超过 localStorage 配额时，完整保存在 IndexedDB，不裁剪用户版本。
+function reportDraftStoreKey(){return (typeof getUser==="function"?getUser()||"guest":"guest")+"/"+(typeof currentProjectId!=="undefined"&&currentProjectId||"draft");}
+function reportDraftStore(mode,key,value){
+  return new Promise((resolve,reject)=>{
+    if(typeof indexedDB==="undefined")return reject(new Error("浏览器不支持大草稿存储"));
+    const request=indexedDB.open("ai-studyreport-drafts",1);
+    let expired=false;const timer=setTimeout(()=>{expired=true;reject(new Error("本机存储超时"));},8000);
+    request.onupgradeneeded=()=>request.result.createObjectStore("drafts");
+    request.onerror=()=>{clearTimeout(timer);reject(request.error);};
+    request.onsuccess=()=>{
+      const db=request.result;if(expired){db.close();return;}
+      const tx=db.transaction("drafts",mode==="get"?"readonly":"readwrite"),store=tx.objectStore("drafts");
+      const op=mode==="get"?store.get(key):mode==="delete"?store.delete(key):store.put(value,key);
+      tx.oncomplete=()=>{clearTimeout(timer);db.close();resolve(mode==="get"?op.result:true);};
+      tx.onabort=tx.onerror=()=>{clearTimeout(timer);db.close();reject(tx.error||new Error("本机存储失败"));};
+    };
+  });
+}
+async function loadDurableDraft(){
+  const local=loadDraft();let large=null;
+  try{large=await reportDraftStore("get",reportDraftStoreKey());}catch(_){}
+  if(!large)return local;
+  return window.ProjectWorkflow?.selectProjectDraft?ProjectWorkflow.selectProjectDraft(large,local,large.projectId):large;
+}
+function reportHasUnsavedChanges(){return reportDocumentRevision>0&&reportDocumentRevision>Math.max(reportLocalPersistedRevision,reportCloudPersistedRevision);}
+if(window.addEventListener)window.addEventListener("beforeunload",event=>{
+  if(reportDocumentRevision>0&&reportHasUnsavedChanges()){event.preventDefault();event.returnValue="";}
+});
+async function persistReportDraft(){
+  if(typeof projectCanEdit==='function'&&!projectCanEdit()){setSaveState('readonly');return {ok:false,local:false,remote:false,readonly:true};}
+  saveDraft();
+  const local=await reportLocalSavePending;
+  const remote=typeof flushCloudSave==="function"?await flushCloudSave():false;
+  return {ok:!!(local||remote),local:!!local,remote:!!remote};
+}
 
 
 /* ---------- 草稿自动存档（浏览器本地，防刷新丢失） ---------- */
@@ -21,20 +60,28 @@ function buildDraftData(){
     chapters: chapters.map(c=>({cn:c.cn, name:c.name, checked:c.checked,
       sections:c.sections.map(s=>({t:s.t, numeric:s.numeric, content:s.content, editedHtml:s.editedHtml||null,
         locked:!!s.locked,syncStatus:s.syncStatus||"current",staleReason:s.staleReason||"",staleKeys:s.staleKeys||[],staleKind:s.staleKind||"",
-        pendingRevision:s.pendingRevision||null,undoStack:s.undoStack||[],prov:s.prov||null,logicSnapshot:s.logicSnapshot||null}))}))
+        pendingRevision:s.pendingRevision||null,undoStack:s.undoStack||[],prov:s.prov||null,logicSnapshot:s.logicSnapshot||null,executionTask:s.executionTask||null,
+        structureMigrated:!!s.structureMigrated,migrationSource:s.migrationSource||""}))}))
   };
 }
 function saveDraft(){
+  if(typeof projectCanEdit==='function'&&!projectCanEdit())return;
   reportDocumentRevision++;
+  const snapshot=JSON.parse(JSON.stringify(buildDraftData())),revision=reportDocumentRevision,key=reportDraftStoreKey();
   let savedLocally=false;
-  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(buildDraftData())); savedLocally=true; }catch(e){}
-  if(savedLocally&&typeof setSaveState==="function")setSaveState("local");
+  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(snapshot)); savedLocally=true;reportLocalPersistedRevision=revision; }catch(e){}
+  reportLocalSavePending=savedLocally?Promise.resolve(true):(reportLocalSaveQueue=reportLocalSaveQueue.catch(()=>false).then(()=>reportDraftStore("put",key,snapshot)).then(()=>{
+    if(key===reportDraftStoreKey())reportLocalPersistedRevision=Math.max(reportLocalPersistedRevision,revision);
+    if(revision===reportDocumentRevision&&typeof setSaveState==="function")setSaveState("local");return true;
+  }).catch(()=>{if(revision===reportDocumentRevision&&typeof setSaveState==="function")setSaveState("offline");return false;}));
+  if(typeof setSaveState==="function")setSaveState(savedLocally?"local":"saving");
   scheduleCloudSave();
+  return reportLocalSavePending;
 }
 function loadDraft(){
   try{ const raw = localStorage.getItem(DRAFT_KEY); return raw? JSON.parse(raw): null; }catch(e){ return null; }
 }
-function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
+function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} reportDraftStore("delete",reportDraftStoreKey()).catch(()=>{}); }
 function restoreDraft(d, options){
   options=options||{};
   // 浏览器刷新时只恢复项目数据，不替用户决定要进入哪个功能模块。
@@ -43,12 +90,19 @@ function restoreDraft(d, options){
     : (window.ProjectWorkflow?ProjectWorkflow.resumeAppMode(d.appMode,!!d.aiReportSession):(d.aiReportSession?"aireport":"report"));
   domainKey = d.domainKey; signed = !!d.signed; docNo = d.docNo||null;
   reportDocumentRevision=Math.max(reportDocumentRevision,Number(d.documentRevision)||0);
+  reportLocalPersistedRevision=reportDocumentRevision;reportCloudPersistedRevision=-1;
   Object.assign(project, d.project||{});
   calcParams = d.calcParams||null;
   projectWorkflow = window.ProjectWorkflow ? window.ProjectWorkflow.ensureState(d.workflow||{}) : (d.workflow||{calcSnapshots:[],reportVersions:[]});
   kbEntries = d.kb||[];
   if(domainKey){ loadDomain(domainKey); Object.assign(project, d.project||{}); }
-  if(d.chapters&&chapters.length)chapters=window.ProjectWorkflow?.mergeReportDraft?ProjectWorkflow.mergeReportDraft(chapters,d.chapters):chapters;
+  // 恢复必须先保留保存时的结构；旧的 /api/outlines 不能筛掉新框架正文。
+  // 正式框架迁移由 airSyncOfficialHousingLogic 在规则加载后执行一次。
+  if(Array.isArray(d.chapters)&&d.chapters.length){
+    const named=d.chapters.every(c=>c&&c.name&&Array.isArray(c.sections)&&c.sections.every(s=>s&&s.t));
+    if(named)chapters=JSON.parse(JSON.stringify(d.chapters));
+    else if(chapters.length&&window.ProjectWorkflow?.mergeReportDraft)chapters=ProjectWorkflow.mergeReportDraft(chapters,d.chapters,reportDraftMergeOptions(domainKey,d.project));
+  }
   if(calcParams){
     try{
       const t=(projectWorkflow.calcSnapshots||[]).find(x=>x.id===projectWorkflow.currentCalcSnapshotId)?.calcType
@@ -103,6 +157,36 @@ function reportLoadDomainSource(key,src){
   }));
 }
 function loadDomain(key){ reportLoadDomainSource(key,getOutlines()[key]); }
+
+function reportDraftMergeOptions(key,projectData){
+  const scenario=projectData?.businessScenario||project.businessScenario||"housing_conversion";
+  if(key!=="baozhang_gaibao"||scenario==="commercial_renovation")return {};
+  const aliases={
+    "项目总论":["项目总论"],"项目建设必要性":["项目建设必要性"],"项目市场分析":["项目市场分析"],"项目条件和SWOT分析":["项目条件和SWOT分析"],"项目策划定位":["项目策划定位"],
+    "改造运营方案":["改造升级策略及效果","项目管理和实施进度计划"],"项目合作模式":["合作协议","环境影响分析"],"投资估算与资金筹措":["投资估算与资金筹措"],"财务评价":["财务评价"],"社会效益评价":["社会效益评价"],"项目风险分析及对策":["项目风险分析及对策"],"项目研究结论及建议":["项目研究结论及建议"]
+  };
+  const sections={
+    "项目总论|项目本体情况、改造情况与政策符合性":["项目概况（区位、现状、定位、改造规模与内容）","项目概况"],
+    "项目总论|合作模式及合作期限":["主要假设条件"],"项目总论|改造目标、投资估算与经济效益":["项目资金估算和资金筹措"],
+    "项目总论|可行性与必要性概述":["结论和建议"],"项目总论|问题、建议与结论":["结论和建议"],
+    "项目建设必要性|政策与国有资产管理要求":["遏制经营下滑态势，筑牢国有资产保值增值基础"],
+    "项目建设必要性|项目改造与经济效益必要性":["物业条件制约出租去化，需系统性改造实现破局"],
+    "项目建设必要性|社会效益与国企责任":["呼应民意诉求与民生需求，践行国企社会责任"],
+    "项目市场分析|人口、就业与租赁市场基础":["宏观经济环境及区域规划分析"],
+    "项目市场分析|职住关系与租赁需求分析":["区域商业市场供需与格局分析"],
+    "项目市场分析|目标客群画像":["市场分析小结"],"项目市场分析|住房租赁供给分析":["区域商业市场供需与格局分析"],
+    "项目市场分析|竞品与租金水平分析":["项目周边商业竞争格局与租金水平研究"],"项目市场分析|供需态势与市场结论":["市场分析小结"],
+    "项目条件和SWOT分析|项目条件":["项目选址与基本情况","项目现状条件（商业现状、配套设施、基础设施）"],
+    "项目条件和SWOT分析|SWOT综合分析":["SWOT分析（优势/劣势/机会/威胁）"],
+    "项目策划定位|客群定位":["消费者研究"],"项目策划定位|产品及竞争定位":["商业业态定位","整体定位与研究框架"],"项目策划定位|价格定位":["商业价格定位（价值排序、分租定价、管理费建议）"],
+    "改造运营方案|改造实施计划及效果":[{chapter:"改造升级策略及效果",title:"总体改造升级方案（集中商业、街区商业）"},{chapter:"改造升级策略及效果",title:"改造升级效果说明"}],
+    "改造运营方案|项目管理与实施进度计划":[{chapter:"项目管理和实施进度计划",title:"项目实施进度计划"},{chapter:"项目管理和实施进度计划",title:"项目招投标"}],
+    "改造运营方案|运营方案":[{chapter:"项目管理和实施进度计划",title:"项目开发运营方案"}],
+    "项目合作模式|合作模式":[{chapter:"合作协议",title:"项目合作模式"},{chapter:"环境影响分析",title:"宗地环境现状"}],
+    "项目合作模式|合作核心条款":[{chapter:"合作协议",title:"项目合作核心条款"},{chapter:"环境影响分析",title:"环境影响分析与保护措施"}]
+  };
+  return {chapterAliases:aliases,sectionAliases:sections,markNewSectionsStale:true,migrationReason:"经理审定的非居改保框架已发布：旧稿保留，需按住房改造v2逻辑生成候选稿"};
+}
 
 
 function stepDomain(){
@@ -266,7 +350,7 @@ function stepGenerate(){
   return '<div class="doc-eyebrow">STEP 04 · 逐章生成</div>'
     +'<h1 class="doc-title">起草中：'+(project.name||"（未命名项目）")+'</h1>'
     +'<div class="progress-line" id="progressLine">共 '+active.length+' 章 / '+totalSec+' 个子标题待生成'+(kbEntries.length?'｜已挂载参考资料 '+kbEntries.length+' 篇（自动匹配注入）':'')+' ｜ 预计消耗约 '+((totalSec*(EST_IN_PER_SEC+EST_OUT_PER_SEC))/10000).toFixed(1)+' 万 tokens（约 ¥'+((totalSec*EST_IN_PER_SEC*PRICE_IN_PER_M + totalSec*EST_OUT_PER_SEC*PRICE_OUT_PER_M)/1000000).toFixed(2)+'，按标准价估算）</div>'
-    +'<div id="chapterContainer">'+inner+'</div>'
+    +reportGlobalRequirementsHtml()+'<div id="chapterContainer">'+inner+'</div>'
     +'<div class="actions"><button class="btn ghost" id="backStep3g">← 上一步</button>'
     +'<button class="btn" id="startGen">开始逐章生成</button><button class="btn ghost" id="exportWordDraftBtn">下载当前阶段 Word</button>'
     +'<button class="btn" id="toStep5r" style="display:none;">下一步：人工复核 →</button></div>';
@@ -405,33 +489,72 @@ function reportSiteWritingPlan(){
   const plan=ProjectWorkflow.siteWritingPlan(project.analysisSites||[]);
   return plan.isBatch?plan:null;
 }
+function reportGlobalRequirementsHtml(){
+  const type=rlProjectType(),scenario=rlBusinessScenario(),set=window.ReportLogicCore?.current(type);
+  const text=window.ReportLogicCore?.globalRequirements?.(type,{businessScenario:scenario})||"",plan=reportSiteWritingPlan();
+  const version=set?.data?.logicVersions?.[type==="gaibao"?scenario:type];
+  return '<section class="rpt-logic-note rpt-global-requirements"><div class="rpt-logic-head"><b>全篇要求'+(version?' · 逻辑版本 '+escapeHtml(version):'')+'</b><button type="button" onclick="reportEditGlobalRequirements()">编辑全篇要求</button></div><p>以下要求统一适用于全篇；各小节只展示自身业务逻辑。后台发布后用于后续生成，已有正文仍通过候选稿确认更新。</p><div>'+escapeHtml(text||(set?'暂未设置场景专属全篇要求。':'全篇要求尚未加载，请稍后重试。')).replace(/\n/g,'<br>')+'</div>'+(plan?'<p><b>当前项目多点位写作策略：</b>'+escapeHtml(plan.strategy)+'</p>':'')+'</section>';
+}
+async function reportEditGlobalRequirements(){
+  if(document.getElementById("reportGlobalEditor"))return;
+  const type=rlProjectType(),scenario=rlBusinessScenario(),scope=type==="gaibao"?scenario:type;
+  try{
+    const capability=await fetch('/api/reportlogic',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},authHeaders()),body:JSON.stringify({action:'adminCapability'})}).then(r=>r.json());
+    if(!capability.ok||!capability.isAdmin)return alert("全篇要求是同类项目共用的后台规则，仅管理员可直接发布。普通用户请联系管理员审核调整。");
+    await ReportLogicCore.load(type,true);
+    const base=JSON.parse(JSON.stringify(ReportLogicCore.current(type)));
+    if(!base?.data)throw new Error("未能加载现行逻辑，请重试");
+    document.body.insertAdjacentHTML('beforeend','<div class="air-modal-overlay" id="reportGlobalEditor"><div class="air-modal-card air-report-logic-modal"><div class="air-modal-head"><b>编辑全篇要求 · 发布记录 v'+base.version+'</b><button data-global-close>×</button></div><p>保存将发布当前场景的新逻辑版本，前后台使用同一份要求。不自动重写正文；可选择生成候选稿或批量保持原文。</p><textarea rows="12" maxlength="12000" style="width:100%;box-sizing:border-box;overflow:auto" id="reportGlobalText">'+escapeHtml(base.data.globalRequirements?.[scope]||'')+'</textarea><div role="status" id="reportGlobalStatus"></div><div class="air-modal-actions"><button class="btn ghost" data-global-close>取消</button><button class="btn" id="reportGlobalPublish">发布全篇要求</button></div></div></div>');
+    const modal=document.getElementById('reportGlobalEditor'),button=modal.querySelector('#reportGlobalPublish'),status=modal.querySelector('#reportGlobalStatus');let busy=false;
+    modal.querySelectorAll('[data-global-close]').forEach(b=>b.onclick=()=>{if(!busy)modal.remove();});
+    button.onclick=async()=>{
+      if(busy)return;
+      const value=modal.querySelector('#reportGlobalText').value.trim();
+      if(value===(base.data.globalRequirements?.[scope]||'')){status.textContent='内容未改变，无需发布。';return;}
+      if(!confirm('确认发布当前场景的全篇要求？已有正文不会自动覆盖。'))return;
+      busy=true;button.disabled=true;
+      try{
+        const data=JSON.parse(JSON.stringify(base.data));data.globalRequirements=Object.assign({},data.globalRequirements,{[scope]:value});
+        const send=pass=>fetch('/api/reportlogic',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},authHeaders(),pass?{'x-admin-pass':pass}:{}),body:JSON.stringify({action:'publish',projectType:type,businessScenario:scenario,expectedVersion:base.version,data})});
+        let response=await send(''),result=await response.json();
+        if(response.status===403){const pass=prompt('请输入管理员发布密码（仅本次使用）：');if(pass===null)throw new Error('已取消发布');response=await send(pass);result=await response.json();}
+        if(!response.ok||!result.ok)throw new Error(result.error||'发布失败');
+        await ReportLogicCore.load(type,true);
+        if(typeof airSyncOfficialHousingLogic==='function')await airSyncOfficialHousingLogic();
+        document.querySelectorAll('.rpt-global-requirements').forEach(el=>el.outerHTML=reportGlobalRequirementsHtml());
+        if(typeof airBuildDocPane==='function'&&document.getElementById('airDocPane'))airBuildDocPane();
+        modal.remove();alert('全篇要求已发布，后台与前台共用新版本。已有正文未改写。');
+      }catch(error){status.textContent=error.message;}finally{busy=false;button.disabled=false;}
+    };
+  }catch(error){alert('全篇要求加载失败：'+error.message);}
+}
 function reportSectionLogicSnapshot(c,s,rules){
   if(s?.pendingRevision?.logicRevision)return s.pendingRevision.logicRevision;
   if(!Array.isArray(rules)&&s?.logicSnapshot)return Object.assign({},s.logicSnapshot,{siteStrategy:s.logicSnapshot.siteStrategy||reportSiteWritingPlan()?.strategy||""});
   const matched=Array.isArray(rules)?rules:(window.ReportLogicCore?ReportLogicCore.match(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),businessScenario:rlBusinessScenario()}):[]),set=window.ReportLogicCore&&ReportLogicCore.current(rlProjectType());
-  return {version:set?.version||0,updatedAt:new Date().toISOString(),siteStrategy:reportSiteWritingPlan()?.strategy||"",rules:matched.map(r=>({id:r.id,sourceNo:r.sourceNo,title:r.displayTitle||r.pointTitle||r.section,requiredSources:r.requiredSources||"",sourceKinds:Array.isArray(r.sourceKinds)?r.sourceKinds.slice():[],dataRequirement:r.dataRequirement?JSON.parse(JSON.stringify(r.dataRequirement)):null,writingLogic:r.writingLogic||"按本节标题和已核实资料完成论证",outputForm:r.outputForm||"文字",missingPolicy:r.missingPolicy||"资料缺失时标注待补，不得虚构",changeReason:""}))};
+  return {version:set?.version||0,globalRequirements:window.ReportLogicCore?.globalRequirements?.(rlProjectType(),{businessScenario:rlBusinessScenario()})||"",updatedAt:new Date().toISOString(),siteStrategy:reportSiteWritingPlan()?.strategy||"",rules:matched.map(r=>({id:r.id,sourceNo:r.sourceNo,title:r.displayTitle||r.pointTitle||r.section,requiredSources:r.requiredSources||"",sourceKinds:Array.isArray(r.sourceKinds)?r.sourceKinds.slice():[],dataRequirement:r.dataRequirement?JSON.parse(JSON.stringify(r.dataRequirement)):null,writingLogic:r.writingLogic||"按本节标题和已核实资料完成论证",outputForm:r.outputForm||"文字",missingPolicy:r.missingPolicy||"资料缺失时标注待补，不得虚构",changeReason:""}))};
 }
 function reportLogicRevision(c,s,instruction){
   const base=reportSectionLogicSnapshot(c,s),reason=String(instruction||"按本次意见调整").replace(/\s+/g," ").trim().slice(0,500);
-  return {version:base.version||0,updatedAt:new Date().toISOString(),changeReason:reason,siteStrategy:base.siteStrategy||reportSiteWritingPlan()?.strategy||"",rules:(base.rules||[]).map(r=>Object.assign({},r,{writingLogic:String(r.writingLogic||"").replace(/\n?本次定稿调整：[\s\S]*$/,"")+(reason?"\n本次定稿调整："+reason:""),changeReason:reason}))};
+  return {version:base.version||0,globalRequirements:window.ReportLogicCore?.globalRequirements?.(rlProjectType(),{businessScenario:rlBusinessScenario()})||"",updatedAt:new Date().toISOString(),changeReason:reason,siteStrategy:base.siteStrategy||reportSiteWritingPlan()?.strategy||"",rules:(base.rules||[]).map(r=>Object.assign({},r,{writingLogic:(window.ReportWritingPolicy?ReportWritingPolicy.split(r.writingLogic).text:String(r.writingLogic||"")).replace(/\n?本次定稿调整：[\s\S]*$/,"")+(reason?"\n本次定稿调整："+reason:""),changeReason:reason}))};
 }
 function reportLogicText(c,s,pending){
   const snap=pending&&s?.pendingRevision?.logicRevision?s.pendingRevision.logicRevision:reportSectionLogicSnapshot(c,s);
-  const lines=(snap?.rules||[]).map((r,i)=>((r.sourceNo?"第"+r.sourceNo+"项：":"逻辑"+(i+1)+"：")+(r.writingLogic||"")+(r.outputForm?"；输出："+r.outputForm:""))).filter(Boolean);
-  if(snap?.siteStrategy)lines.unshift("批量点位主次策略："+snap.siteStrategy);
+  const lines=(snap?.rules||[]).map((r,i)=>((r.sourceNo?"第"+r.sourceNo+"项：":"逻辑"+(i+1)+"：")+(window.ReportWritingPolicy?ReportWritingPolicy.split(r.writingLogic).text:(r.writingLogic||""))+(r.outputForm?"；输出："+r.outputForm:""))).filter(Boolean);
   return lines.join("\n");
 }
 function renderSectionLogicHtml(c,s,interactive){
   const pending=!!s?.pendingRevision?.logicRevision,text=reportLogicText(c,s,pending);
   if(!text)return "";
   const si=Array.isArray(c?.sections)?c.sections.indexOf(s):-1,edit=interactive&&!pending&&si>=0?'<button type="button" class="rpt-logic-edit air-section-logic-edit" data-cn="'+c.cn+'" data-si="'+si+'">调整本节生成逻辑</button>':'';
-  return '<div class="rpt-logic-note '+(pending?'pending':'')+'"><div class="rpt-logic-head"><b>'+(pending?'本次候选稿对应生成逻辑（接受后生效）':'本节生成逻辑')+'</b>'+edit+'</div><div>'+escapeHtml(text).replace(/\n/g,"<br>")+'</div></div>';
+  const task=s.executionTask,taskInfo=task?'<details><summary>后台生成任务与规则快照</summary><div>任务编号：'+escapeHtml(task.runId||task.id)+'；记录状态：'+escapeHtml(task.status||'queued')+'</div>'+((task.graph||[]).map(n=>'<div>'+escapeHtml(n.key)+'：'+escapeHtml(n.status)+(n.hash?' · '+escapeHtml(n.hash):'')+'</div>').join(''))+'</details>':'';
+  return '<div class="rpt-logic-note '+(pending?'pending':'')+'"><div class="rpt-logic-head"><b>'+(pending?'本次候选稿对应生成逻辑（接受后生效）':'本节生成逻辑')+'</b>'+edit+'</div><div>'+escapeHtml(text).replace(/\n/g,"<br>")+'</div>'+taskInfo+'</div>';
 }
 
 // 项目级临时逻辑只约束当前项目的当前小节，不直接改写后台规则。
 // 只有候选正文被接受并通过既有自动评测/管理员流程后，才允许沉淀到正式规则库。
 function reportLocalLogicPrompt(s){
-  const snap=s?.logicSnapshot;
+  const snap=window.ReportWritingPolicy?ReportWritingPolicy.snapshot(s?.logicSnapshot):s?.logicSnapshot;
   if(!snap?.localOverride||!Array.isArray(snap.rules)||!snap.rules.length)return "";
   return '\n\n【本项目本节临时生成逻辑｜仅作为内部约束，严禁写入报告正文】\n'+snap.rules.map((r,i)=>(r.sourceNo?'第'+r.sourceNo+'项':'逻辑'+(i+1))+'：'+(r.writingLogic||'按本节标题和已核实资料完成论证')+(r.outputForm?'；输出形式：'+r.outputForm:'')).join('\n');
 }
@@ -837,7 +960,7 @@ async function reviseSection(c, s, instruction, onChunk){
     + rlRetrieve(c.name,s.t)
     + reportLocalLogicPrompt(s)
     + kbRetrieve(c.name, s.t);
-  return callGen(sys, user, onChunk);
+  return reportDurableSectionCall(c,s,sys,user,onChunk);
 }
 
 // 仅改写用户在预览正文中拖选的片段；返回“替换片段”，完整小节的安全拼接由 ProjectWorkflow 完成。
@@ -854,7 +977,7 @@ async function reviseSectionExcerpt(c,s,selected,instruction,onChunk){
     +'\n\n【需要替换的原片段】\n'+String(selected||'')
     +'\n\n【修改意见】\n'+String(instruction||'请使表述更准确、正式、简洁')
     +'\n\n请只输出替换片段。'+rlRetrieve(c.name,s.t)+reportLocalLogicPrompt(s)+kbRetrieve(c.name,s.t);
-  return callGen(sys,user,onChunk);
+  return reportDurableSectionCall(c,s,sys,user,onChunk);
 }
 
 async function generateSection(c, s, onChunk){
@@ -862,7 +985,7 @@ async function generateSection(c, s, onChunk){
   if(window.ReportLogicCore){try{await ReportLogicCore.load(rlProjectType());}catch(e){}}
   await ensureReportTableTemplates();
   const formalTemplates=sectionFormalTemplates(c,s);
-  const sitePlan=reportSiteWritingPlan(),siteInstruction=sitePlan?'\n6. 本报告含多个分析点位。'+sitePlan.strategy+'凡本节涉及区位、市场、建设条件、实施影响或风险时，先围绕主项目形成完整判断，再用一个压缩段落概括次项目差异；与本节无关时不要机械罗列点位。不得给每个次项目复制一套完整模板。':'';
+  const sitePlan=reportSiteWritingPlan(),siteInstruction=sitePlan?'\n6. 本报告含多个分析点位。'+sitePlan.strategy+'凡本节涉及区位、市场、建设条件、实施影响或风险时，按重要程度先后形成整体判断，再用一个压缩段落概括其余点位的实质差异；正文不得出现“主项目”“次项目”标签，与本节无关时不要机械罗列点位，也不得逐点复制同一套模板。':'';
   const digest = s.numeric ? buildCalcDigest() : null;
   if(digest) collector.hasCalcData = true;
   let tableHint = "";
@@ -873,7 +996,7 @@ async function generateSection(c, s, onChunk){
   } else if(s.numeric){
     tableHint = '\n本子标题涉及具体数字或测算，请：①用文字说明测算口径、方法与逻辑；②生成一个结构完整的数据表格，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔，每行一个换行）：\n[[TABLE]]\n列1|列2|列3\n项目A|待填|待填\n[[/TABLE]]\n表格中的具体数值一律填"待填"，绝不编造精确数字；但表格的行项目、列结构要专业完整、贴合真实可研报告。';
   }
-  const sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与商业配套改造类项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 材料不足时仍须先完成专业的分析框架、论证方法、逻辑链和表格结构，禁止整节只返回待补提示或空内容；只有项目专属事实、关键数字、批复、证照、合同等依据在对应位置简短标注“【待补：具体依据】”。\n3. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n4. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n5. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+siteInstruction+tableHint;
+  const housingGuard=rlProjectType()==="gaibao"&&rlBusinessScenario()==="housing_conversion"?'\n6. 当前为非居改保、居改居等住房改造场景，默认改造为保障性租赁住房；不得写入商业市场、招商、商业业态或配套商业等另一场景内容。':'',sys = '你是一名资深工程咨询工程师，专门撰写政府投资项目和国企项目的可行性研究报告，尤其擅长保障性住房与改造项目。请以正式、严谨的官方文书语言撰写，逻辑缜密、层次分明，术语准确，避免口语化和空洞套话。\n要求：\n1. 只依据用户提供的项目信息展开，不得编造项目未提及的具体事实（如虚构的地名、单位名、政策文号）。\n2. 材料不足时仍须先完成专业的分析框架、论证方法、逻辑链和表格结构，禁止整节只返回待补提示或空内容；只有项目专属事实、关键数字、批复、证照、合同等依据在对应位置简短标注“【待补：具体依据】”。\n3. 涉及具体金额、比率、财务指标（回报率/IRR/NPV/坪效等）时：若用户消息中提供了【真实财务测算结果】，则严格引用其中的数字，不得改动或另行编造；若未提供，则绝不给出看似权威的精确数字，一律以"待填"标注。\n4. 参照真实可研报告的深度：有分点论述、有逻辑递进、有专业分析，不要泛泛而谈。篇幅约500-800字。\n5. 直接输出该子标题下的正文内容，不要重复子标题，不要客套语，不要"以下是"之类的开场白。'+housingGuard+siteInstruction+tableHint;
   // 记录本节用到了哪些项目信息字段（L2溯源的一部分）
   [["项目名称",project.name],["建设/委托单位",project.owner],["建设地点",project.location],
    ["投资规模",project.scale],["项目概况",project.desc]].forEach(([k,v])=>{
@@ -882,9 +1005,9 @@ async function generateSection(c, s, onChunk){
   const excelContext=s.numeric?(excelSourceRetrieve(collector)+await mappedExcelSourceRetrieve(collector)):"";
   const logicRules=window.ReportLogicCore?ReportLogicCore.match(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),businessScenario:rlBusinessScenario()}):[];
   if(!s.logicSnapshot?.localOverride)s.logicSnapshot=reportSectionLogicSnapshot(c,s,logicRules);
-  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +(sitePlan?'\n【本节必须执行的主次写作逻辑】\n'+sitePlan.strategy+'\n':'')+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + reportLocalLogicPrompt(s) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t, collector) + kbRetrieve(c.name, s.t, collector) + webEvidenceRetrieve(c.name,s.t,collector) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t, collector);
+  const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +(sitePlan?'\n【本节必须执行的多点位写作逻辑】\n'+sitePlan.strategy+'\n':'')+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + reportLocalLogicPrompt(s) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t, collector) + kbRetrieve(c.name, s.t, collector) + webEvidenceRetrieve(c.name,s.t,collector) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t, collector);
 
-  let text = await callGen(sys, user, onChunk);
+  let text = await reportDurableSectionCall(c,s,sys,user,onChunk);
   if(!text || text === "（未返回内容）" || reportBodyContainsInternalLogic(text)){
     text = window.ReportLogicCore?.fallbackDraft
       ? ReportLogicCore.fallbackDraft(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),numeric:!!s.numeric,context:typeof airMaterialContext==="function"?airMaterialContext():{hasCalculation:!!(calcParams&&calcResult)}})
@@ -911,6 +1034,20 @@ async function generateSection(c, s, onChunk){
 
 // 报告逐节生成与逐节AI评审属于"批量"负载（一篇报告约40次调用），
 // 走独立的 batch 额度，不占用日常AI问答的额度
+async function reportDurableSectionCall(c,s,sys,user,onChunk){
+  const projectId=typeof currentProjectId==='string'?currentProjectId:'';
+  if(!projectId)throw new Error('请先保存项目，再启动可恢复的小节生成');
+  if(!window.ReportOrchestrationClient?.generateSection)throw new Error('报告任务模块未加载，请刷新后重试');
+  const result=await ReportOrchestrationClient.generateSection({projectId,sectionKey:c.name+' / '+s.t,projectType:rlProjectType(),logicVersion:window.ReportLogicCore?.current(rlProjectType())?.version,system:sys,user},task=>{
+    if(currentProjectId!==projectId)return;
+    const changed=s.executionTask?.id!==task.id||s.executionTask?.status!==(task.status||'queued');
+    s.executionTask={id:task.id,runId:task.runId,status:task.status||'queued',graph:task.graph};
+    if(changed)saveDraft();
+  });
+  if(currentProjectId!==projectId)throw new Error('已切换项目，后台结果已保留，未写入其他项目');
+  if(onChunk)onChunk(result.text);
+  return result.text;
+}
 async function callGen(sys, user, onChunk){
   const resp = await fetch("/api/generate", {
     method:"POST",

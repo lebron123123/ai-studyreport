@@ -126,6 +126,9 @@ function renderSheet(){
   sheet.classList.toggle("personal-sheet",appMode==="personalKnowledge");
   sheet.classList.toggle("ppt-sheet",appMode==="office" && typeof officeView!=="undefined" && officeView==="ppt");
   if(window.HousingParticles) window.HousingParticles.destroy();
+  if(typeof projectCanEdit==='function'&&!projectCanEdit()&&(appMode==='aireport'||appMode==='review'||appMode==='calc'||appMode===null&&currentStep>0)){
+    renderProjectReadOnly(sheet);return;
+  }
   if(appMode===null){ sheet.innerHTML = stepHome(); bindEvents(); bindCalcEvents(); mountAnchorNav(); if(window.HousingParticles) window.HousingParticles.mount("housingHero"); return; }
   if(appMode==="calc"){ sheet.innerHTML = renderCalcModule(); bindEvents(); bindCalcEvents(); mountAnchorNav(); return; }
   if(appMode==="review"){ sheet.innerHTML = renderReviewModule(); bindEvents(); bindReviewEvents(); mountAnchorNav(); return; }

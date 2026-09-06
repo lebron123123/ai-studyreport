@@ -1,0 +1,21 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>保持原文隔离验收</title>
+<script>const fixtureStyles=fetch('/index.html').then(r=>r.text()).then(text=>{const doc=new DOMParser().parseFromString(text,'text/html');doc.querySelectorAll('style').forEach(s=>document.head.appendChild(s.cloneNode(true)));});</script>
+<h1>[系统测试] 保持原文与刷新</h1><p>仅使用隔离测试草稿；不访问真实项目。</p>
+<button id="prepare">准备41节</button><button onclick="airOpenKeepOriginal()">批量保持原文</button><button onclick="location.reload()">刷新</button><button id="fail">保存失败</button><button id="recover">恢复保存</button>
+<pre id="status"></pre><pre id="message"></pre>
+<script>var appMode='aireport',currentStep=0,calcParams=null,STEPS=[0];function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}</script><script src="/outlines.js"></script>
+<script src="/report-writing-policy.js"></script><script src="/project-workflow.js"></script><script src="/report.js"></script><script src="/auth.js"></script><script src="/aireport.js"></script>
+<script>
+getToken=()=> 'isolated-fixture';getUser=()=> '[系统测试]保持原文';currentProjectId='system-test-keep-original';reportDraftStoreKey=()=> '[系统测试]保持原文/isolated';
+const actualStore=reportDraftStore;let failure=false;
+reportDraftStore=(...args)=>failure?Promise.reject(Error('模拟存储失败')):actualStore(...args);
+const nativeSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k===DRAFT_KEY)throw new DOMException('隔离配额不足','QuotaExceededError');return nativeSet.call(this,k,v);};
+const nativeGet=Storage.prototype.getItem;Storage.prototype.getItem=function(k){if(k===DRAFT_KEY)return null;return nativeGet.call(this,k);};
+window.fetch=async()=>{throw Error('隔离服务器离线');};scheduleCloudSave=renderTOC=renderSheet=airSaveState=()=>{};
+currentReportVersionMeta=reason=>({reason});window.confirm=()=>true;window.alert=s=>document.getElementById('message').textContent=s;
+function show(){const all=chapters.flatMap(c=>c.sections);document.getElementById('status').textContent=JSON.stringify({sections:all.length,stale:all.filter(s=>s.syncStatus==='stale').length,kept:all.filter(s=>s.logicSnapshot?.reviewDecision).length,unchanged:all.every(s=>s.content==='保留正文'),versions:projectWorkflow.reportVersions.length});}
+airBuildDocPane=show;
+document.getElementById('prepare').onclick=async()=>{project.name='[系统测试]保持原文';projectWorkflow=ProjectWorkflow.ensureState({});chapters=[{cn:'一',name:'总论',checked:true,sections:Array.from({length:41},(_,i)=>({t:'小节'+i,content:'保留正文',syncStatus:'stale',staleKind:'logic',staleKeys:['report_logic'],logicSnapshot:{version:5,globalRequirements:'简洁',rules:[]}}))}];await persistReportDraft();show();};
+document.getElementById('fail').onclick=()=>failure=true;document.getElementById('recover').onclick=()=>failure=false;
+(async()=>{const draft=await loadDurableDraft();if(draft)restoreDraft(draft);show();})();
+</script></html>

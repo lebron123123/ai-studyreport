@@ -17,8 +17,8 @@
     return String(text==null?"":text).replace(/\u00a0/g," ").replace(/[\t ]+/g," ").replace(/\s+([，。；：！？、）】])/g,"$1").replace(/([（【])\s+/g,"$1").trim();
   }
   function textRuns(text,opt){
-    const value=cleanWordText(text),parts=value.split(/(【待补(?:：|:)?[^】]*】)/g).filter(Boolean);
-    return parts.map(part=>run(part,Object.assign({},opt||{},/^【待补(?:：|:)?[^】]*】$/.test(part)?{color:"C62828",bold:true}:{})));
+    const value=cleanWordText(text),parts=value.split(/(【待补\s*(?:：|:)?[^】]*】)/g).filter(Boolean);
+    return parts.map(part=>run(part,Object.assign({},opt||{},/^【待补\s*(?:：|:)?[^】]*】$/.test(part)?{color:"C62828",bold:true}:{})));
   }
   function bodyPara(text){
     return new D.Paragraph({
@@ -99,7 +99,7 @@
     const out=[];
     (template.segments||[]).forEach((segment,index)=>{
       out.push(new D.Paragraph({
-        children:[run(index?template.title+"（续表"+index+"）":template.title,{size:22,bold:true})],
+        children:textRuns(index?template.title+"（续表"+index+"）":template.title,{size:22,bold:true}),
         alignment:D.AlignmentType.CENTER,
         pageBreakBefore:!!(template.longPeriod&&index>0),
         spacing:{before:index?0:180,after:100},
@@ -112,13 +112,13 @@
     if(b.type==="table" && b.rows && b.rows.length) return [makeTable(b.rows)];
     if(b.type==="templateTable" && b.template) return templateTableElems(b.template);
     if(b.type==="logic" && b.text) return [new D.Paragraph({
-      children:[run(b.text,{size:19,color:"24814D"})],
+      children:textRuns(b.text,{size:19,color:"24814D"}),
       shading:{fill:"EAF7EE"},border:{left:{color:"55A46D",size:12,space:6,style:D.BorderStyle.SINGLE}},
       spacing:{before:40,after:120,line:310,lineRule:D.LineRuleType.AUTO}
     })];
     // 小标题：正文里的 ## 三级标题，加粗略大，与正文拉开层次
     if(b.type==="h" && b.text) return [new D.Paragraph({
-      children:[run(b.text,{size:24, bold:true})],
+      children:textRuns(b.text,{size:24, bold:true}),
       spacing:{before:160, after:80, line:360, lineRule:D.LineRuleType.AUTO},
     })];
     return cleanWordText(b.text)?[bodyPara(b.text)]:[];
@@ -160,13 +160,13 @@
   payload.chapters.forEach((c,ci)=>{
     children.push(new D.Paragraph({
       tabStops:tocTab, spacing:{before:100, after:40, line:300, lineRule:D.LineRuleType.AUTO},
-      children:[ run("第"+c.cn+"章　"+c.name,{size:24,bold:true}), run("\t"),
+      children:[ ...textRuns("第"+c.cn+"章　"+c.name,{size:24,bold:true}), run("\t"),
         new D.SimpleField("PAGEREF _tc"+ci+" \\h") ],
     }));
     c.sections.forEach((s,si)=>{
       children.push(new D.Paragraph({
         tabStops:tocTab, indent:{left:420}, spacing:{after:40, line:300, lineRule:D.LineRuleType.AUTO},
-        children:[ run((c.num||ci+1)+"."+(si+1)+"　"+(s.title||""),{size:24}), run("\t"),
+        children:[ ...textRuns((c.num||ci+1)+"."+(si+1)+"　"+(s.title||""),{size:24}), run("\t"),
           new D.SimpleField("PAGEREF _tc"+ci+"_"+si+" \\h") ],
       }));
     });
@@ -179,14 +179,14 @@
   payload.chapters.forEach((c,ci)=>{
     children.push(new D.Paragraph({
       heading: D.HeadingLevel.HEADING_1,
-      children:[ new D.Bookmark({id:"_tc"+ci, children:[run("第"+c.cn+"章　"+c.name,{size:44,bold:true})]}) ],
+      children:[ new D.Bookmark({id:"_tc"+ci, children:textRuns("第"+c.cn+"章　"+c.name,{size:44,bold:true})}) ],
       alignment:D.AlignmentType.CENTER, pageBreakBefore:true,
       spacing: Object.assign({after:360}, LINE13),
     }));
     c.sections.forEach((s,si)=>{
       children.push(new D.Paragraph({
         heading: D.HeadingLevel.HEADING_2,
-        children:[ new D.Bookmark({id:"_tc"+ci+"_"+si, children:[run((c.num||ci+1)+"."+(si+1)+"　"+s.title,{size:28,bold:true})]}) ],
+        children:[ new D.Bookmark({id:"_tc"+ci+"_"+si, children:textRuns((c.num||ci+1)+"."+(si+1)+"　"+s.title,{size:28,bold:true})}) ],
         spacing: Object.assign({before:280, after:160}, LINE13),
       }));
       (s.blocks||[]).forEach(b=> blockToElems(b).forEach(e=>children.push(e)));
@@ -201,7 +201,7 @@
       alignment:D.AlignmentType.CENTER, pageBreakBefore:true, spacing:{after:300},
     }));
     if(payload.appendix.summaryLine)
-      children.push(new D.Paragraph({children:[run(payload.appendix.summaryLine,{size:24})], alignment:D.AlignmentType.CENTER, spacing:Object.assign({after:200},LINE13)}));
+      children.push(new D.Paragraph({children:textRuns(payload.appendix.summaryLine,{size:24}), alignment:D.AlignmentType.CENTER, spacing:Object.assign({after:200},LINE13)}));
     if(payload.appendix.mainRows) children.push(makeTable(payload.appendix.mainRows));
     if(payload.appendix.sensRows){
       children.push(new D.Paragraph({children:[run("附表二　单因素敏感性分析",{size:24,bold:true})], spacing:{before:300, after:120}}));

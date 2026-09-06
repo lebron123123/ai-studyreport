@@ -41,11 +41,11 @@ export function toPgPlaceholders(sql) {
 const isInsert = (sql) => /^\s*insert\s/i.test(sql);
 const hasReturning = (sql) => /\sreturning\s/i.test(sql);
 
-export function createD1Shim(connectionString) {
+export function createD1Shim(connectionString, transactionClient = null) {
   // 连接数上限：原来固定10，本地部署人数上到50人左右时偏紧——这个应用是这个Postgres实例唯一的使用方，
   // 默认max_connections(通常100)留得住20个连接的余量。做成环境变量而不是直接改死数字，
   // 是因为"多少合适"跟部署机器的CPU核数/内存/实际并发行为有关，应该能不改代码就调，不用为了调个数字重新发布。
-  const pool = new pg.Pool({
+  const pool = transactionClient || new pg.Pool({
     connectionString,
     max: parseInt(process.env.DB_POOL_MAX) || 20,
     idleTimeoutMillis: 30000,
@@ -105,7 +105,21 @@ export function createD1Shim(connectionString) {
       const r = await pool.query("SELECT 1 AS ok");
       return r.rows[0].ok === 1;
     },
-    async _close() { await pool.end(); },
+    async _close() { if (!transactionClient) await pool.end(); },
+    // Local worker writes use one connection and hold the job lock until commit.
+    async _transaction(work) {
+      if (transactionClient) return work(db);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const result = await work(createD1Shim(null, client));
+        await client.query('COMMIT');
+        return result;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally { client.release(); }
+    },
   };
 
   return db;

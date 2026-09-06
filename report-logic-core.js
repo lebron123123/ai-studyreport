@@ -40,11 +40,17 @@
         const result = await response.json();
         if (!response.ok || !result.ok) throw new Error(result.error || "生成逻辑读取失败");
         const set = result.set || null;
+        if(set&&global.ReportWritingPolicy)set.data=global.ReportWritingPolicy.normalize(set.data);
         cache.set(type, set); pending.delete(type); return set;
       }).catch(error => { pending.delete(type); throw error; });
     pending.set(type, task); return task;
   }
   function current(projectType){ return cache.get(typeOf(projectType)) || null; }
+  function globalRequirements(projectType,options){
+    const scope=scenarioOf(projectType,options)||typeOf(projectType);
+    const data=current(projectType)?.data;
+    return global.ReportWritingPolicy?global.ReportWritingPolicy.requirements(data,scope):(data?.globalRequirements?.[scope]||"");
+  }
   function match(projectType, chapterName, sectionTitle, options){
     const set = current(projectType), opts = options || {};
     if (!set?.data?.rules) return [];
@@ -196,12 +202,14 @@
   }
   function prompt(projectType, chapterName, sectionTitle, options){
     const rules = match(projectType, chapterName, sectionTitle, options), opts=options||{};
-    if (!rules.length) return "";
+    const whole=globalRequirements(projectType,opts);
+    if (!rules.length&&!whole) return "";
     const scenario=scenarioOf(projectType,opts),scenarioGuard=scenario
       ? `当前业务场景：${scenario==="commercial_renovation"?"商业改造（自持改造）":"非居改保、居改居等（住房改造）"}。Excel原始逻辑中的【通用】内容应保留；遇到【住房改造】或【商业改造】标签时，只采用当前业务场景对应内容，禁止混用另一场景。\n`
       : "";
     return "\n\n【内部生成约束｜严禁写入报告正文】（以下仅供模型规划写作，不是报告内容；不得复述其中的字段名、规则原文、编号或‘写作逻辑’字样。）\n"
       + scenarioGuard
+      + (whole?"【全篇要求｜每个小节均须遵守，不得复述到正文】\n"+whole+"\n\n":"")
       + "材料不足不等于停止写作：禁止整节只输出待补提示或返回空内容；应把规则转化为可直接下载使用的正式报告正文，先写能够成立的背景、分析和论证内容。只有项目专属数字、批复、证照、合同等关键依据，在对应句子或表格单元格处用简短【待补：具体依据】标记。不得输出‘本节重点按照以下逻辑展开’‘材料状态’‘所需材料摘要’‘写作逻辑’‘输出形式’等内部提示语。\n\n" + rules.map(rule => {
       const scope = rule.projectSpecific ? "【仅项目特征命中时适用】" : "";
       const readiness=generationReadiness(rule,opts.context||{});
@@ -254,9 +262,11 @@
   function outline(projectType,options){
     const set=current(projectType),rules=rulesFor(projectType,options);
     if(!rules.length)return null;
+    const sectionOrder=value=>{const hit=String(value||"").match(/^(\d+(?:\.\d+)*)/);return hit?hit[1].split(".").reduce((score,n)=>score*100+Number(n),0):Number.MAX_SAFE_INTEGER;};
     const groups=new Map(),cnMap={一:"一",二:"二",三:"三",四:"四",五:"五",六:"六",七:"七",八:"八",九:"九",十:"十",十一:"十一",十二:"十二",十三:"十三",十四:"十四"};
-    rules.forEach(rule=>{if(!groups.has(rule.chapter))groups.set(rule.chapter,[]);const rows=groups.get(rule.chapter);if(!rows.some(x=>normalize(x.t)===normalize(rule.section))){const related=rules.filter(x=>x.chapter===rule.chapter&&x.section===rule.section),numeric=related.some(x=>/数据|表格|计算|测算|投资|财务|价格|租金|供需/.test([x.outputForm,x.requiredSources,x.section].join(" ")));rows.push({t:String(rule.section).replace(/^\d+(?:\.\d+)*\s*/,""),numeric});}});
-    return {label:set.name,businessScenario:scenarioOf(projectType,options),chapters:[...groups.entries()].map(([chapter,sections])=>{const hit=chapter.match(/^第([一二三四五六七八九十]+)章\s*(.*)$/);return{cn:cnMap[hit&&hit[1]]||(hit&&hit[1])||String(groups.size),name:(hit&&hit[2])||chapter,sections};})};
+    rules.forEach(rule=>{if(!groups.has(rule.chapter))groups.set(rule.chapter,[]);const rows=groups.get(rule.chapter);if(!rows.some(x=>normalize(x.t)===normalize(rule.section))){const related=rules.filter(x=>x.chapter===rule.chapter&&x.section===rule.section),numeric=related.some(x=>/数据|表格|计算|测算|投资|财务|价格|租金|供需/.test([x.outputForm,x.requiredSources,x.section].join(" ")));rows.push({t:String(rule.section).replace(/^\d+(?:\.\d+)*\s*/,""),numeric,order:sectionOrder(rule.section)});}});
+    const preferred=set?.data?.structure?.scenarioStructures?.[scenarioOf(projectType,options)]?.chapterNames||[],chapterOrder=value=>{const found=preferred.indexOf(value);if(found>=0)return found;const hit=String(value||"").match(/^第([一二三四五六七八九十]+)章/);return Object.keys(cnMap).indexOf(hit?.[1]);};
+    return {label:set.name,businessScenario:scenarioOf(projectType,options),chapters:[...groups.entries()].sort((a,b)=>chapterOrder(a[0])-chapterOrder(b[0])).map(([chapter,sections])=>{const hit=chapter.match(/^第([一二三四五六七八九十]+)章\s*(.*)$/);return{cn:cnMap[hit&&hit[1]]||(hit&&hit[1])||String(groups.size),name:(hit&&hit[2])||chapter,sections:sections.sort((a,b)=>a.order-b.order).map(({t,numeric})=>({t,numeric}))};})};
   }
-  global.ReportLogicCore = { load, current, match, prompt, requirementStatus, generationReadiness, dataRequirement, dataRequirementSchema, fallbackDraft, ensureMissingMarkers, suggestMaterialRuleLinks, materialInventory, sourcePlan, overview, outline, normalize };
+  global.ReportLogicCore = { load, current, match, prompt, globalRequirements, requirementStatus, generationReadiness, dataRequirement, dataRequirementSchema, fallbackDraft, ensureMissingMarkers, suggestMaterialRuleLinks, materialInventory, sourcePlan, overview, outline, normalize };
 })(window);

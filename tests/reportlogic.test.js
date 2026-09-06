@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import seed from "../functions/api/_reportlogic-seed.js";
 import gaibaoSeed from "../functions/api/_reportlogic-gaibao-seed.js";
-import { validateSet, appendEnhancementData, mergeRuleRevisionData, evaluateRuleRevisionData, needsAuthoritativeBaseline, ensureSeeds } from "../functions/api/reportlogic.js";
+import { validateSet, appendEnhancementData, mergeRuleRevisionData, evaluateRuleRevisionData, needsAuthoritativeBaseline, ensureSeeds, bumpLogicVersion } from "../functions/api/reportlogic.js";
 
 test("出租类逐小节逻辑以137条和14章为正式基线并连续重编号", () => {
   assert.equal(seed.rules.length, 137);
@@ -19,7 +19,7 @@ test("改造项目逐小节逻辑以74条、13章和两个业务场景独立成�
   assert.equal(gaibaoSeed.structure.chapterCount, 13);
   assert.deepEqual(gaibaoSeed.rules.map(rule => rule.sourceNo), Array.from({length:74}, (_, index) => index + 1));
   assert.equal(new Set(gaibaoSeed.rules.map(rule => rule.id)).size, 74);
-  assert.deepEqual(gaibaoSeed.structure.scenarioCounts,{housing_conversion:65,commercial_renovation:67});
+  assert.deepEqual(gaibaoSeed.structure.scenarioCounts,{housing_conversion:64,commercial_renovation:67});
   assert.ok(gaibaoSeed.rules.every(rule=>Array.isArray(rule.scenarios)&&rule.scenarios.length));
   assert.ok(gaibaoSeed.rules.every(rule => rule.projectType === "gaibao"));
   assert.ok(gaibaoSeed.rules.some(rule => rule.sourceKinds.includes("calculation_engine")), "测算规则引擎应被识别为测算来源");
@@ -34,7 +34,7 @@ test("改造项目逐小节逻辑以74条、13章和两个业务场景独立成�
   assert.match(basis.requiredSources,/深圳市保障性租赁住房管理办法/);
   assert.match(basis.requiredSources,/商业改造（自持改造）专项政策/);
   const splitRule=gaibaoSeed.rules.find(rule=>rule.id==="gaibao-v1-009");
-  assert.match(splitRule.scenarioVariants.housing_conversion.writingLogic,/非居改保、居改居等（住房改造）/);
+  assert.match(splitRule.scenarioVariants.housing_conversion.writingLogic,/法定改建条件/);
   assert.doesNotMatch(splitRule.scenarioVariants.housing_conversion.writingLogic,/商业改造（自持改造）/);
   assert.match(splitRule.scenarioVariants.commercial_renovation.writingLogic,/商业改造（自持改造）/);
   assert.doesNotMatch(splitRule.scenarioVariants.commercial_renovation.writingLogic,/非居改保/);
@@ -42,8 +42,8 @@ test("改造项目逐小节逻辑以74条、13章和两个业务场景独立成�
   assert.deepEqual(housingOnly.scenarios,["housing_conversion"]);
   assert.deepEqual(commercialOnly.scenarios,["commercial_renovation"]);
   const conclusion=gaibaoSeed.rules.find(rule=>rule.id==="gaibao-v1-011");
-  assert.match(conclusion.scenarioVariants.housing_conversion.writingLogic,/a\.非居改保:/);
-  assert.doesNotMatch(conclusion.scenarioVariants.housing_conversion.writingLogic,/b\.自持:/);
+  assert.match(conclusion.scenarioVariants.housing_conversion.writingLogic,/必要性/);
+  assert.match(conclusion.scenarioVariants.housing_conversion.writingLogic,/压缩/);
   assert.match(conclusion.scenarioVariants.commercial_renovation.writingLogic,/b\.自持:/);
   assert.doesNotMatch(conclusion.scenarioVariants.commercial_renovation.writingLogic,/a\.非居改保:/);
   for(const rule of gaibaoSeed.rules){
@@ -52,9 +52,39 @@ test("改造项目逐小节逻辑以74条、13章和两个业务场景独立成�
   }
 });
 
+test("后台校验保留非居改保12章场景结构与规则章节映射",()=>{
+  const normalized=validateSet(gaibaoSeed,"gaibao"),housing=normalized.rules.filter(rule=>rule.scenarios.includes("housing_conversion")).map(rule=>({...rule,...rule.scenarioVariants.housing_conversion}));
+  assert.equal(normalized.structure.scenarioStructures.housing_conversion.chapterCount,12);
+  assert.equal(normalized.structure.scenarioStructures.housing_conversion.frameworkVersion,"gaibao-housing-manager-v2-20260904");
+  assert.equal(new Set(housing.map(rule=>rule.chapter)).size,12);
+  assert.ok(housing.some(rule=>rule.chapter==="第七章 项目合作模式"));
+  assert.ok(!housing.some(rule=>rule.chapter==="第七章 合作协议"));
+});
+
+test("后台按当前场景小节编号排序而不是沿用Excel源行号",async()=>{
+  globalThis.window={};
+  await import("../report-logic-admin.js?order-test="+Date.now());
+  const compare=window.ReportLogicAdminTools.compareRules,chapterNames=gaibaoSeed.structure.scenarioStructures.housing_conversion.chapterNames;
+  const housing=gaibaoSeed.rules.filter(rule=>rule.scenarios.includes("housing_conversion")).map(rule=>({...rule,...rule.scenarioVariants.housing_conversion})).sort((a,b)=>compare(a,b,chapterNames));
+  assert.deepEqual(housing.slice(0,4).map(rule=>rule.subsection),["1.1.1编制依据与编制说明","1.2.1项目背景","1.3.1项目名称","1.3.2项目本体基本情况"]);
+  assert.equal(housing.length,64);
+});
+
+test("逻辑版本按内容小改升修订号、结构改动升主版本",()=>{
+  const previous=validateSet(gaibaoSeed,"gaibao"),minor=structuredClone(previous),major=structuredClone(previous);
+  minor.rules[0].scenarioVariants.housing_conversion.writingLogic+="\n补充核验步骤。";
+  bumpLogicVersion(minor,previous,"gaibao","housing_conversion");
+  assert.equal(minor.logicVersions.housing_conversion,"2.1");
+  assert.equal(minor.logicVersions.commercial_renovation,"1.0");
+  major.rules[0].scenarioVariants.housing_conversion.subsection="1.3.9项目名称";
+  bumpLogicVersion(major,previous,"gaibao","housing_conversion");
+  assert.equal(major.logicVersions.housing_conversion,"3.0");
+});
+
 test("首表权威基线标识变化时触发一次性数据库替换",()=>{
   assert.equal(needsAuthoritativeBaseline(JSON.stringify({source:{baselineId:"old"}}),gaibaoSeed),true);
-  assert.equal(needsAuthoritativeBaseline(JSON.stringify({source:{baselineId:gaibaoSeed.source.baselineId}}),gaibaoSeed),false);
+  assert.equal(needsAuthoritativeBaseline(JSON.stringify({source:{baselineId:gaibaoSeed.source.baselineId}}),gaibaoSeed),true,"同一基线但缺失场景结构的历史入库数据也要修复");
+  assert.equal(needsAuthoritativeBaseline(JSON.stringify(validateSet(gaibaoSeed,"gaibao")),gaibaoSeed),false);
   assert.equal(needsAuthoritativeBaseline("{}",{source:{}}),false);
 });
 
@@ -181,22 +211,26 @@ test("前端运行时可把粗粒度报告小节匹配到多条细分逻辑并�
   await core.load("gaibao");
   const housing={businessScenario:"housing_conversion",hasCalculation:true},commercial={businessScenario:"commercial_renovation",hasCalculation:true};
   const gaibaoOverview=core.overview("gaibao",housing),gaibaoOutline=core.outline("gaibao",housing),gaibaoInventory=core.materialInventory("gaibao",housing),commercialInventory=core.materialInventory("gaibao",commercial);
-  assert.equal(gaibaoOverview.ruleCount,65);
-  assert.equal(gaibaoOutline.chapters.length,13);
-  assert.equal(gaibaoInventory.total,65);
+  assert.equal(gaibaoOverview.ruleCount,64);
+  assert.equal(gaibaoOutline.chapters.length,12);
+  assert.equal(gaibaoInventory.total,64);
   assert.equal(commercialInventory.total,67);
   assert.equal(core.overview("gaibao",commercial).businessScenario,"commercial_renovation");
   assert.ok(gaibaoInventory.summary.calculation_engine>2);
   assert.ok(core.match("gaibao","投资估算与资金筹措","投资估算",{projectText:"非居改保项目",...housing}).length>0);
-  const housingMarket=core.match("gaibao","项目市场分析","住房市场分析",housing);
+  const housingMarket=core.match("gaibao","项目市场分析","住房租赁供给分析",housing);
   const commercialMarket=core.match("gaibao","项目市场分析","商业市场分析",commercial);
   assert.ok(housingMarket.length>0&&housingMarket.every(rule=>rule.scenarios.includes("housing_conversion")));
   assert.ok(commercialMarket.length>0&&commercialMarket.every(rule=>rule.scenarios.includes("commercial_renovation")));
   assert.match(core.prompt("gaibao","项目总论","项目背景",commercial),/当前业务场景：商业改造（自持改造）/);
   assert.match(core.prompt("gaibao","项目总论","项目背景",commercial),/禁止混用另一场景/);
-  const housingScale=core.match("gaibao","项目总论","项目概况",housing).find(rule=>rule.id==="gaibao-v1-009"),commercialScale=core.match("gaibao","项目总论","项目概况",commercial).find(rule=>rule.id==="gaibao-v1-009");
+  const housingScale=core.match("gaibao","项目总论","项目本体情况、改造情况与政策符合性",housing).find(rule=>rule.id==="gaibao-v1-009"),commercialScale=core.match("gaibao","项目总论","项目概况",commercial).find(rule=>rule.id==="gaibao-v1-009");
   assert.doesNotMatch(housingScale.writingLogic,/商业改造（自持改造）/);
   assert.doesNotMatch(commercialScale.writingLogic,/非居改保/);
+  assert.deepEqual(gaibaoOutline.chapters.map(ch=>ch.name),["项目总论","项目建设必要性","项目市场分析","项目条件和SWOT分析","项目策划定位","改造运营方案","项目合作模式","投资估算与资金筹措","财务评价","社会效益评价","项目风险分析及对策","项目研究结论及建议"]);
+  assert.deepEqual(gaibaoOutline.chapters[0].sections.map(s=>s.t),["编制依据与编制说明","项目背景","项目本体情况、改造情况与政策符合性","合作模式及合作期限","改造目标、投资估算与经济效益","可行性与必要性概述","问题、建议与结论"]);
+  assert.equal(gaibaoOutline.chapters.some(ch=>ch.sections.some(s=>/委托单位及编制单位/.test(s.t))),false);
+  assert.match(core.prompt("gaibao","项目总论","项目背景",housing),/不得出现商业市场、商业业态、招商或配套商业/);
 });
 
 test("管理员增强只追加子规则并保留137条原逻辑",()=>{
