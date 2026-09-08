@@ -16,6 +16,7 @@
   global.openWebResearchAdmin=async function(){
     const box=document.getElementById("listBox"),edit=document.getElementById("editBox");if(edit)edit.style.display="none";box.style.display="block";
     box.innerHTML='<h1>联网检索治理</h1><div class="sub">统一管理公网搜索、MCP检索桥和专业数据Provider。这里只显示“是否配置”和健康状态，密钥始终只保存在服务器环境变量。</div><div class="msg" style="background:#edf6ff;border-color:#bed8f2;color:#315f8e;">推荐顺序：企业统一搜索 → Brave/Tavily → MCP桥 → 专业数据接口 → DuckDuckGo降级。候选证据必须由用户采用后才进入可研正文。</div><div class="bar"><button class="btn sm" id="wrReload">刷新状态</button></div><div id="wrAdminBody"><div class="empty">加载中…</div></div>';
+    if(global.mountAdminSourceSearch)global.mountAdminSourceSearch(box);
     document.getElementById("wrReload").onclick=()=>global.openWebResearchAdmin();
     try{
       const data=await wrAdminApi({action:"status"}),health=Object.fromEntries((data.health||[]).map(x=>[x.provider,x]));

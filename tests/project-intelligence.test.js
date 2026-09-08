@@ -3,7 +3,7 @@ const assert=require("node:assert/strict");
 const PI=require("../project-intelligence.js");
 
 test("项目成员权限保持OWNER/EDITOR/VIEWER三级边界",()=>{
-  assert.deepEqual(PI.permissionsFor("OWNER"),{role:"OWNER",view:true,edit:true,manage:true,approve:true});
+  assert.deepEqual(PI.permissionsFor("OWNER"),{role:"OWNER",view:true,edit:true,manage:true,approve:false});
   assert.equal(PI.permissionsFor("EDITOR").edit,true);assert.equal(PI.permissionsFor("EDITOR").manage,false);
   assert.equal(PI.permissionsFor("VIEWER").view,true);assert.equal(PI.permissionsFor("VIEWER").edit,false);
 });
@@ -22,4 +22,12 @@ test("Project Context Contract继承项目、页面、当前对象、快照和�
 test("Read Model V1统一Gate、KPI、数据健康、风险、决策和下一步事项",()=>{
   const out=PI.buildReadModel({project:{id:"project-1",name:"真实项目",type:"rent",location:"深圳"},profile:{projectId:"project-1",lifecycleStage:"feasibility",currentGateId:"g1"},membership:{projectId:"project-1",userId:1,role:"OWNER"},gates:[{id:"g1",name:"可研审查",status:"in_progress"}],milestones:[{id:"m1",name:"可研初稿",progress:65}],deliverables:[{id:"d1",name:"测算表",status:"done"}],brain:{lifecycle:{label:"可研与尽调"},summary:{materials:3},facts:[{status:"confirmed"},{status:"candidate"}],artifacts:[],decisions:[{id:"decision-1",status:"candidate"}],changes:[]},ops:{tasks:[{id:"t1",title:"补材料",status:"open",dueDate:"2000-01-01"}],risks:[{id:"r1",status:"open"}]},kpis:{totalInvestment:12000,irr:4.2}});
   assert.equal(out.gate.name,"可研审查");assert.equal(out.progress.value,83);assert.equal(out.kpis.totalInvestment,12000);assert.equal(out.kpis.irr,4.2);assert.equal(out.kpis.overdueTaskCount,1);assert.equal(out.dataHealth.score,50);assert.equal(out.contextContract.currentGate.name,"可研审查");
+});
+
+test('采用方案必须显式selected，空数据不显示100分，选中冲突不猜第一项',()=>{
+  const context=scenarios=>PI.contextContract({ops:{scenarios}});
+  assert.equal(context([{id:'draft',status:'active'}]).activeScenario,null);
+  assert.equal(context([{id:'draft',status:'draft'},{id:'chosen',status:'selected'}]).selectedScenarioId,'chosen');
+  assert.equal(context([{id:'one',status:'selected'},{id:'two',status:'selected'}]).scenarioSelectionStatus,'conflict');
+  assert.equal(PI.dataHealth({}).score,null);assert.equal(PI.normalizeDeliverable({required:0}).required,false);
 });

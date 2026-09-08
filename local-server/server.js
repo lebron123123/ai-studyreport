@@ -32,6 +32,9 @@ import { createLimiter, generatePptImage, imageProviderStatus } from "./ppt-imag
 import { providerStatus as llmProviderStatus, probeProviderNetwork } from "../functions/api/_llm-providers.js";
 import { startAgentWorker } from "./agent-worker.js";
 import { createRagObjectStore } from "./rag-object-store.js";
+import { createRuntimeMetrics } from "./runtime-metrics.js";
+import { publicStaticPath } from './static-policy.js';
+import { createInvestmentCalculator } from './investment-calculator.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 公司内网模型与第三方生图单独放在.env.company，避免改写原.env中的数据库及云端兜底密钥。
@@ -63,6 +66,8 @@ const ENV = {
   VECTORIZE: vectorize,
   AI: ai,
   RAG_OBJECTS: ragObjects,
+  RUNTIME_METRICS: createRuntimeMetrics(),
+  INVESTMENT_CALCULATOR: createInvestmentCalculator(),
 };
 
 /* ---------- 2. 启动自检：早点发现问题，别等用户点了才报错 ---------- */
@@ -131,6 +136,7 @@ async function selfCheck() {
 
 /* ---------- 3. 路由 ---------- */
 const app = new Hono();
+app.use('/api/*',async(c,next)=>{const finish=ENV.RUNTIME_METRICS.begin();try{await next();finish(c.res.status);}catch(e){finish(500);throw e;}});
 const runImageGeneration = createLimiter(process.env.PPT_IMAGE_MAX_CONCURRENCY || 1);
 
 // PPT图片服务统一网关：浏览器不直接接触云端密钥或ComfyUI地址。
@@ -291,12 +297,17 @@ app.all("/api/:name", async (c) => {
 });
 
 // 静态文件：网页本体
+app.use('/*',async(c,next)=>publicStaticPath(c.req.path)?next():c.text('Not found',404));
 app.use("/*", serveStatic({ root: path.relative(process.cwd(), ROOT) || "." }));
 app.get("/", serveStatic({ path: path.join(path.relative(process.cwd(), ROOT) || ".", "index.html") }));
 
 /* ---------- 4. 启动 ---------- */
 const PORT = parseInt(process.env.PORT) || 8080;
 await selfCheck();
+// Initialize additive delivery tables before concurrent HTTP requests arrive.
+await (await import('../functions/api/_account-security.js')).ensureAccountSecurity(ENV);
+await (await import('../functions/api/projectartifacts.js')).ensureProjectArtifacts(ENV);
+await (await import('../functions/api/_delivery.js')).ensureDelivery(ENV);
 console.log("接口已加载：" + apiNames.join("、"));
 const httpServer = serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" }, (info) => {
   console.log("\n🚀 本地站已启动：http://localhost:" + info.port);
@@ -304,6 +315,8 @@ const httpServer = serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" }, 
 });
 const agentWorker=startAgentWorker(ENV,{pollMs:process.env.AGENT_WORKER_POLL_MS,leaseMs:process.env.AGENT_WORKER_LEASE_MS});
 console.log("Agent后台Worker已启动："+agentWorker.workerId);
+const operationsMonitor=await (await import('./operations-monitor.js')).startOperationsMonitor(ENV);
+console.log('自动运行监控：'+(operationsMonitor.enabled?'已启动':'已停用'));
 // 端口占用等启动失败原来是"未捕获异常"，Node会直接打一串英文堆栈然后退出——
 // 双击桌面快捷方式时窗口一闪而过，根本来不及看是什么问题。这里接住，打印人话原因再退出。
 httpServer.on("error", (err) => {

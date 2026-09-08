@@ -1,33 +1,34 @@
-const test=require("node:test");
-const assert=require("node:assert/strict");
-const Ops=require("../investment-ops.js");
-
-test("会议纪要会分离议题、决定、任务和风险，且保持来源行",()=>{
-  const x=Ops.parseMeeting("会议讨论项目边界\n决定采用方案A\n由投资部牵头，2026-09前完成测算复核\n存在融资利率上行风险，需预警");
-  assert.deepEqual(x.summary,{agenda:1,decisions:1,tasks:1,risks:1,requiresConfirmation:3});
-  assert.equal(x.tasks[0].owner,"投资部牵头");
-  assert.equal(x.risks[0].sourceLine,4);
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const Ops=require('../investment-ops.js');
+function trusted(overrides={}){
+  const metrics={irr:5,capitalIrr:7,npv:100,payback:10,totalInvestment:1000},metricMeta={};
+  for(const [key,,unit] of Ops.METRICS)metricMeta[key]={unit,currency:'CNY',period:'2026-2046;annual',cashFlow:key==='capitalIrr'?'capital':'project',engineVersion:'test-engine',discountRate:3.5};
+  return {kind:'baseline',calcType:'rent',calcSnapshotId:'calc-v1',engine:'whitebox',metrics,metricMeta,verification:{status:'server_recomputed'},...overrides};
+}
+test('会议一句可以同时构成决定、任务与风险并保留稳定来源ID',()=>{
+  const a=Ops.parseMeeting('讨论范围\n会议决定由投资部牵头完成融资风险复核'),b=Ops.parseMeeting('讨论范围\n会议决定由投资部牵头完成融资风险复核');
+  assert.deepEqual(a,b);assert.deepEqual(a.summary,{agenda:1,decisions:1,tasks:1,risks:1,requiresConfirmation:3});assert.equal(a.tasks[0].sourceId,a.risks[0].sourceId);assert.notEqual(a.tasks[0].id,a.risks[0].id);
 });
-
-test("情景比较覆盖六类决策指标并保留白箱快照",()=>{
-  const c=Ops.compareScenarios([
-    {kind:"baseline",calcSnapshotId:"calc-v1",engine:"whitebox",metrics:{irr:5,npv:100,totalInvestment:1000}},
-    {kind:"prudent",calcSnapshotId:"calc-v2",engine:"whitebox",metrics:{irr:3,npv:-20,totalInvestment:1100}}
-  ]);
-  assert.equal(c.hasBaseline,true);assert.equal(c.comparable,true);assert.equal(c.columns.length,6);assert.equal(c.scenarios[0].calcSnapshotId,"calc-v1");
+test('缺失/非有限指标不会变成0，资本金IRR不代替全投资IRR',()=>{
+  assert.deepEqual(Ops.normalizeScenario({metrics:{capitalIrr:8}}).metrics,{capitalIrr:8});
+  for(const value of [null,'',false,NaN,Infinity]){const s=Ops.normalizeScenario({metrics:{irr:value}});assert.equal(s.metrics.irr,undefined);assert.deepEqual(s.invalidMetrics,['irr']);}
+  assert.equal(Ops.normalizeScenario({metrics:{irr:0}}).metrics.irr,0);
 });
-
-test("投资决策包缺少快照、证据或存在阻断问题时不能误标通过",()=>{
-  const bad=Ops.buildDecisionPackage({projectId:"p1",scenario:{kind:"baseline",engine:"ai",metrics:{irr:5}},evidenceIds:[],consistencyIssues:[{severity:"blocker"}]});
-  assert.equal(bad.status,"blocked");assert.ok(bad.audit.blockers.length>=4);
-  const good=Ops.buildDecisionPackage({projectId:"p1",scenario:{kind:"baseline",calcSnapshotId:"calc-v1",engine:"whitebox",metrics:{irr:5,npv:20,payback:12,totalInvestment:1000}},evidenceIds:["e1"],context:{artifacts:[{artifactType:"report"},{artifactType:"calculation"}]}});
-  assert.equal(good.status,"ready");assert.equal(good.audit.passed,true);
+test('只有同版本同口径的服务端情景可以直接比较',()=>{
+  const a=trusted(),b=trusted({kind:'prudent',metrics:{...a.metrics,irr:3}});assert.equal(Ops.compareScenarios([a,b]).comparable,true);assert.equal(Ops.compareScenarios([a,b]).columns.length,8);
+  for(const key of ['unit','currency','period','cashFlow','engineVersion']){const changed=structuredClone(b);changed.metricMeta.irr[key]='different';assert.equal(Ops.compareScenarios([a,changed]).comparable,false);}
+  assert.equal(Ops.compareScenarios([a,{...b,verification:{}}]).comparable,false);
 });
-
-test("SLO与生产门槛使用真实样本判断，空样本不会通过",()=>{
-  assert.equal(Ops.evaluateSlo({}).passed,false);
-  const samples=Array.from({length:50},(_,i)=>({latencyMs:1000+i,ok:true,recovered:true})),slo=Ops.evaluateSlo({concurrency:50,samples,target:{p95Ms:5000,successRate:.99,recoveryRate:.95,concurrency:50}});
-  assert.equal(slo.passed,true);
-  const gate=Ops.productionGate({goldenProjects:["rent","sale","gaibao","rent","sale"].map((type,i)=>({id:i,type,numericErrors:0})),slo});
-  assert.equal(gate.passed,true);
+test('决策包不能以白箱标签、证据ID或空问题清单替代真实核查',()=>{
+  const input={projectId:'p1',scenario:trusted(),evidenceIds:['e1'],context:{snapshotVerified:true,evidenceVerified:true,consistencyVerified:true,artifacts:[{artifactType:'report'},{artifactType:'calculation'}]}};
+  assert.equal(Ops.buildDecisionPackage(input).status,'ready');
+  for(const key of ['snapshotVerified','evidenceVerified','consistencyVerified'])assert.equal(Ops.buildDecisionPackage({...input,context:{...input.context,[key]:false}}).status,'blocked');
+  assert.equal(Ops.buildDecisionPackage({...input,scenario:trusted({metrics:{irr:3,capitalIrr:5,npv:1}})}).status,'blocked');
+});
+test('生产通过必须有受信运行和明确零数字错误，样本不限20个',()=>{
+  const slo={passed:true,serverVerified:true,runId:'slo-run'},goldenProjects=Array.from({length:25},(_,i)=>({id:'p'+i,type:['rent','sale','gaibao'][i%3],numericErrors:0,serverVerified:true,runId:'run'+i}));
+  assert.equal(Ops.productionGate({goldenProjects,slo}).passed,true);
+  for(const value of [undefined,null,'',NaN])assert.equal(Ops.productionGate({goldenProjects:goldenProjects.map(x=>({...x,numericErrors:value})),slo}).passed,false);
+  assert.equal(Ops.productionGate({goldenProjects,slo:{passed:true}}).passed,false);assert.equal(Ops.productionGate({goldenProjects:goldenProjects.map(x=>({...x,serverVerified:false})),slo}).passed,false);
 });

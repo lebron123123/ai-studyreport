@@ -1,5 +1,6 @@
 import { ensureAgentEnterprise } from "./_agent-enterprise.js";
 import { resolveProjectAccess } from "./_project-access.js";
+import {accountSecurity} from './_account-security.js';
 
 const PERM_RANK={read:1,write:2,approve:3,admin:4};
 export async function resolveAgentPrincipal(env,user){
@@ -10,6 +11,7 @@ export async function resolveAgentPrincipal(env,user){
 }
 
 export async function authorizeAgentAction(env,principal,req={}){
+  if(Number((await accountSecurity(env,principal.userId))?.disabled))return {ok:false,reason:'账号已停用'};
   const projectId=String(req.projectId||""), action=String(req.action||"read"), level=Math.max(1,Number(req.securityLevel)||1);
   if(level>principal.clearance) return {ok:false,reason:"资料密级超过当前用户权限"};
   if(!projectId) return {ok:true,scope:"personal"};

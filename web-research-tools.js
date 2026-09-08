@@ -14,8 +14,9 @@
     return {region:"深圳市",regionLevel:"city",regionPath:["深圳市"]};
   }
   function projectContext(extra){
-    const p=global.project||{},workflow=global.projectWorkflow||{};
-    return Object.assign({projectId:String(workflow.projectId||p.id||p.name||"current-project").slice(0,120),projectName:p.name||"",location:p.location||"",projectType:global.calcType||(global.calcResult&&global.calcResult.__ctype)||global.rptCtype||"rent",businessScenario:p.businessScenario||(global.aiReportExtracted&&global.aiReportExtracted.businessScenario)||""},extra||{});
+    const p=typeof project!=='undefined'?project:(global.project||{}),workflow=typeof projectWorkflow!=='undefined'?projectWorkflow:(global.projectWorkflow||{});
+    const activeId=typeof currentProjectId!=='undefined'?currentProjectId:global.currentProjectId;
+    return Object.assign({projectId:String(activeId||workflow.projectId||p.id||p.name||"current-project").slice(0,120),projectName:p.name||"",location:p.location||"",projectType:global.calcType||(global.calcResult&&global.calcResult.__ctype)||global.rptCtype||"rent",businessScenario:p.businessScenario||(global.aiReportExtracted&&global.aiReportExtracted.businessScenario)||""},extra||{});
   }
   async function api(body){
     const response=await fetch("/api/webresearch",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},typeof global.authHeaders==="function"?global.authHeaders():{}),body:JSON.stringify(body)});
@@ -33,7 +34,7 @@
   function sectionRows(chapter,section){return approved().filter(x=>(!chapter||x.chapter===chapter)&&(!section||x.section===section));}
   function contextForSection(chapter,section,collector){
     const rows=sectionRows(chapter,section).slice(0,8);if(!rows.length)return "";
-    if(collector)collector.webEvidence=rows.map(x=>({id:x.id,title:x.title,url:x.url,publisher:x.publisher,authority:x.authority_level,confidence:x.confidence,verification:x.verification_status,fetchedAt:x.fetched_at||""}));
+    if(collector)collector.webEvidence=rows.map(x=>({id:x.id,title:x.title,url:x.url,publisher:x.publisher,authority:x.authority_level,confidence:x.confidence,verification:x.verification_status,fetchedAt:x.fetched_at||"",version:x.version||x.fetched_at||null,excerpt:String(x.content_text||x.excerpt||'').slice(0,900)}));
     return "\n\n【已人工采用的联网证据】\n仅使用下列证据支持可核验事实；不得把网页摘要扩写成未出现的数字。正文涉及事实时注明来源机构和统计期；不同来源冲突时说明差异。\n"+rows.map((x,i)=>(i+1)+". "+x.title+"｜"+(x.publisher||"来源机构待识别")+"｜权威度"+(x.authority_level||"D")+"｜"+(x.published_at||"未标明发布日期")+"\n网址："+x.url+"\n摘要："+String(x.content_text||x.excerpt||"").slice(0,900)).join("\n\n");
   }
   function injectStyle(){
@@ -75,6 +76,38 @@
   }
   async function depositHighValue(job,levels,options){
     options=options||{};const entries=highValueEntries(job,levels),results=await runLimited(entries,Math.min(4,Number(options.concurrency)||3),async entry=>{try{const data=await submitKnowledgeReview(entry.row,entry.target,{fetchFullText:options.fetchFullText===true}),pipelineStatus=data.status||"pending";entry.occurrences.forEach(x=>{x.row.knowledgeDeposit={status:data.existing?"existing":"submitted",pipelineStatus,targetModule:data.target_module||"",targetRef:data.target_ref||"",id:data.id||"",auto:!!options.auto,at:Date.now()};});return {ok:true,existing:!!data.existing,status:pipelineStatus};}catch(error){entry.occurrences.forEach(x=>{x.row.knowledgeDeposit={status:"failed",error:error.message||String(error),auto:!!options.auto,at:Date.now()};});return {ok:false,error:error.message||String(error)};}});if(options.persist!==false)persistBatchJob(job);return {total:entries.length,submitted:results.filter(x=>x&&x.ok&&!x.existing).length,existing:results.filter(x=>x&&x.ok&&x.existing).length,pending:results.filter(x=>x&&x.ok&&x.status==="pending").length,approved:results.filter(x=>x&&x.ok&&x.status==="approved").length,failed:results.filter(x=>x&&!x.ok).length};
+  }
+  // An archive is detached from the live job: review must never resume search or alter report state.
+  function savedEvidenceArchive(projectId,job,evidence){
+    const outputs=job&&job.projectId===projectId?JSON.parse(JSON.stringify(job.outputs||[])).filter(Boolean):[];
+    (evidence||[]).forEach(row=>{
+      if(row.project_id&&row.project_id!==projectId)return;
+      const bindings=row.bindings?.length?row.bindings:[{chapter:row.chapter||'',section:row.section||''}];
+      bindings.forEach(binding=>outputs.push({target:binding,results:[{...row,authorityLevel:row.authorityLevel||row.authority_level,snippet:row.snippet||row.excerpt}]}));
+    });
+    outputs.forEach(output=>{output.results=(output.results||[]).filter(row=>/^https?:\/\//i.test(String(row.url||'')));});
+    return {projectId,targets:[],outputs};
+  }
+  async function openSavedEvidence(legacy){
+    document.getElementById('wrSavedEvidence')?.remove();
+    const overlay=document.createElement('div');overlay.id='wrSavedEvidence';overlay.className='air-modal-overlay';
+    overlay.innerHTML='<div class="air-modal-card" style="max-height:85vh;overflow:auto;overscroll-behavior:contain"><div class="air-modal-head"><b>已保存检索来源 · 只读</b><button data-close>关闭</button></div><p>此处不会重新检索、采用依据或生成报告。检索候选不等于正文已引用；可单独提交后台知识库审核。</p><div data-status role="status">正在读取已保存来源…</div><div data-sources></div><button class="btn" data-submit disabled>提交 A/B 级来源到后台审核</button></div>';
+    document.body.appendChild(overlay);overlay.querySelector('[data-close]').onclick=()=>overlay.remove();
+    const ctx=projectContext(),sourceProjectId=legacy?'current-project':ctx.projectId,status=overlay.querySelector('[data-status]'),button=overlay.querySelector('[data-submit]');
+    const legacyButton=document.createElement('button');legacyButton.className='btn ghost';legacyButton.textContent=legacy?'返回本项目来源':'查看旧版未归属来源（不可视为本项目已引用）';legacyButton.onclick=()=>openSavedEvidence(!legacy);overlay.querySelector('.air-modal-card').appendChild(legacyButton);
+    let evidence=[],loadError='';
+    try{evidence=(await api({action:'listEvidence',projectId:sourceProjectId})).evidence||[];}catch(error){loadError='后台来源读取失败：'+error.message+'。以下仅显示本机缓存；可关闭后重试。';}
+    const archive=savedEvidenceArchive(sourceProjectId,restoreBatchJob(),evidence),entries=highValueEntries(archive,['A','B','C','D']);
+    status.textContent=loadError||((legacy?'旧版未记录项目归属，以下不可认定为本项目来源。':'')+'共 '+entries.length+' 个已保存来源；提交后仍需管理员审核。');
+    overlay.querySelector('[data-sources]').innerHTML=entries.length?entries.map(({row,target})=>'<details><summary>'+esc(row.title||row.url)+' · '+esc(row.status||'检索候选')+'</summary><p>'+esc(target.bindings.map(x=>[x.chapter,x.section].filter(Boolean).join(' / ')).filter((x,i,a)=>a.indexOf(x)===i).join('；'))+'</p><a target="_blank" rel="noopener noreferrer" href="'+esc(row.url)+'">查看原始来源</a><p>'+esc(row.snippet||row.excerpt||'暂无摘要')+'</p></details>').join(''):'<p>没有可读取的已保存来源。不自动补搜，也不会更改正文。</p>';
+    button.disabled=!highValueEntries(archive,['A','B']).length;
+    button.onclick=async()=>{
+      if(projectContext().projectId!==ctx.projectId){status.textContent='项目已切换，请关闭后重新打开。';return;}
+      button.disabled=true;status.textContent='正在提交审核，不修改报告…';
+      try{const result=await depositHighValue(archive,['A','B'],{persist:false,fetchFullText:false});status.textContent='新增 '+result.submitted+'，已有 '+result.existing+'，待审核 '+result.pending+'，失败 '+result.failed+'。仅保存已有正文/摘要及网址，不代表已抓取附件全文。';}
+      catch(error){status.textContent='提交失败：'+error.message;}
+      finally{button.disabled=false;}
+    };
   }
   function base64Buffer(value){const binary=atob(value||""),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);return bytes.buffer;}
   async function extractFullText(row,button){
@@ -227,7 +260,7 @@
     global.AgentCore.registerTool("search_affordable_housing_web",{risk:"external",toolset:"knowledge",timeoutMs:60000,schema:{type:"function",function:{name:"search_affordable_housing_web",description:"仅在精确数据需求允许联网时执行一次低预算检索；返回真实候选及质量评分，候选未经人工采用不能视为正式依据。",parameters:{type:"object",properties:{chapter:{type:"string"},section:{type:"string"},query:{type:"string"},requirementSchema:{type:"object"}},required:["query"]}}},label:a=>"🌐 精确检索："+String(a.query||"").slice(0,28),run:async a=>JSON.stringify(await searchSection(Object.assign({},a,{review:false,maxQueries:1,maxResults:5})))});
     global.AgentCore.registerTool("list_web_evidence",{toolset:"knowledge",schema:{type:"function",function:{name:"list_web_evidence",description:"列出当前项目已经人工采用的联网证据及其权威度、网址和对应章节。",parameters:{type:"object",properties:{chapter:{type:"string"},section:{type:"string"}}}}},run:async a=>{await loadEvidence();return JSON.stringify(sectionRows(a.chapter,a.section));}});
   }
-  global.WebResearch={api,loadEvidence,materialContext,contextForSection,searchSection,searchFromButton,openRequirementRefinement,batchSearchGaps,buildBatchTargets,batchSearchQuery,batchDecisionLabel,batchStatus,pauseBatchSearch,resumeBatchSearch,setStatus,classifyWebEvidence,knowledgeContributionItem,highValueEntries,depositHighValue,state,registerAgentTools};
+  global.WebResearch={api,loadEvidence,materialContext,contextForSection,searchSection,searchFromButton,openRequirementRefinement,batchSearchGaps,buildBatchTargets,batchSearchQuery,batchDecisionLabel,batchStatus,pauseBatchSearch,resumeBatchSearch,setStatus,classifyWebEvidence,knowledgeContributionItem,highValueEntries,depositHighValue,savedEvidenceArchive,openSavedEvidence,state,registerAgentTools};
   function boot(){registerAgentTools();loadEvidence().catch(()=>{});const job=restoreBatchJob();if(job&&job.status==="running")startBatchJob(job);}
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot);else boot();
 })(window);

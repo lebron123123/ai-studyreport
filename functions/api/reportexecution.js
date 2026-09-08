@@ -18,8 +18,9 @@ export async function effectiveReportRules(env,projectId,projectType=''){
   const declared=data.project?.businessScenario||data.aiReportExtracted?.businessScenario;
   const scenario=['commercial_renovation','housing_conversion'].includes(declared)?declared:((data.calcType||data.rptCtype)==='gaibao'?'housing_conversion':'');
   const organization=String(env.REPORT_ORGANIZATION_ID||'');
-  const rows=(await env.DB.prepare("SELECT id,version,payload_json FROM report_rule_publications WHERE status='published' AND ((scope='project_only' AND scope_key=?) OR (scope='scenario_rule' AND scope_key=?) OR (scope='org_rule' AND scope_key=? AND scope_key!='')) ORDER BY published_at,id").bind(projectId,scenario,organization).all()).results||[];
-  const rules=rows.map(r=>{const p=parseJson(r.payload_json,{});return {id:r.id,version:r.version,target:String(p.target||''),rule:String(p.candidateRule||'')};});
+  const rows=(await env.DB.prepare("SELECT id,version,scope,payload_json FROM report_rule_publications WHERE status='published' AND ((scope='project_only' AND scope_key=?) OR (scope='scenario_rule' AND scope_key=?) OR (scope='org_rule' AND scope_key=? AND scope_key!='')) ORDER BY CASE scope WHEN 'org_rule' THEN 0 WHEN 'scenario_rule' THEN 1 ELSE 2 END,published_at,id").bind(projectId,scenario,organization).all()).results||[];
+  // Apply broad defaults first, then scenario/project refinements. Never silently delete unrelated rules.
+  const rules=rows.map(r=>{const p=parseJson(r.payload_json,{});return {id:r.id,version:r.version,scope:r.scope,target:String(p.target||''),rule:String(p.candidateRule||'')};});
   if(['rent','gaibao','sale'].includes(projectType)){
     const base=await env.DB.prepare("SELECT id,version,data FROM report_logic_sets WHERE project_type=? AND status='published' ORDER BY version DESC LIMIT 1").bind(projectType).first();
     if(base)rules.push({id:base.id,version:Number(base.version),target:'',rule:'',baseLogic:true,hash:await reportEvidenceHash(base.data)});
@@ -38,7 +39,10 @@ export async function startReportSection(env,userId,b){
     const projectType=['rent','gaibao','sale'].includes(b.projectType)?b.projectType:'';
     const rules=await effectiveReportRules(scoped,projectId,projectType),applicable=rules.filter(r=>!r.target||sectionKey.includes(r.target)),rulesHash=await reportEvidenceHash(applicable);
     const base=rules.find(r=>r.baseLogic);if(base&&Number(b.logicVersion)!==base.version)throw new Error('前台逻辑版本落后于后台，请刷新逻辑后重试；未发送模型请求');
-    const snapshot={system:b.system,user:b.user,sectionKey,projectType,rules:applicable},inputHash=await reportEvidenceHash(snapshot),id='rsec_'+await reportEvidenceHash([userId,projectId,inputHash]);
+    const saved=parseJson((await DB.prepare('SELECT data FROM projects WHERE id=?').bind(projectId).first())?.data,{});
+    // Freeze relevant source versions, not volatile report/UI state. Existing tasks remain readable.
+    const dependencies={project:await reportEvidenceHash(saved.project||{}),calculations:await reportEvidenceHash(saved.workflow?.calcSnapshots||saved.calcParams||{}),materials:await reportEvidenceHash(saved.kb||[]),prompt:await reportEvidenceHash([b.system,b.user]),logicVersion:base?.version||null};
+    const snapshot={system:b.system,user:b.user,sectionKey,projectType,rules:applicable,dependencies},inputHash=await reportEvidenceHash(snapshot),id='rsec_'+await reportEvidenceHash([userId,projectId,inputHash]);
     const old=await DB.prepare('SELECT * FROM report_section_tasks WHERE id=?').bind(id).first();if(old)return {id,reused:true,runId:old.run_id};
     const {run}=await createAgentRun(scoped,userId,{agentType:'report_section',projectId,query:sectionKey,idempotencyKey:id});
     await upsertRunGovernance(scoped,userId,run.id,{executionMode:'server',budgetInputTokens:2000000,budgetOutputTokens:4000});
@@ -50,10 +54,10 @@ export async function startReportSection(env,userId,b){
 export async function readReportSection(env,userId,id){
   await ensureReportExecution(env);
   const row=await env.DB.prepare('SELECT * FROM report_section_tasks WHERE id=? AND user_id=?').bind(id,userId).first();if(!row||!(await resolveProjectAccess(env,userId,row.project_id))?.permissions.view)throw new Error('任务不存在或项目权限已失效');
-  const job=await env.DB.prepare('SELECT id,status,error_text FROM agent_jobs WHERE run_id=?').bind(row.run_id).first(),ledger=await env.DB.prepare('SELECT response_json,status,actual_input,actual_output,actual_cost FROM agent_call_ledger WHERE run_id=?').bind(row.run_id).first();
+  const job=await env.DB.prepare('SELECT id,status,error_text FROM agent_jobs WHERE run_id=?').bind(row.run_id).first(),ledger=await env.DB.prepare('SELECT response_json,status,provider,model,actual_input,actual_output,actual_cost FROM agent_call_ledger WHERE run_id=?').bind(row.run_id).first();
   const rules=(await effectiveReportRules(env,row.project_id,parseJson(row.input_json,{}).projectType)).filter(r=>!r.target||row.section_key.includes(r.target));
-  const stale=(await reportEvidenceHash(rules))!==row.rules_hash,status=stale?'invalidated':job?.status||'missing';
-  return {id:row.id,runId:row.run_id,jobId:job?.id,status,error:stale?'规则已发布或回滚，本次候选已失效，请按最新逻辑重新生成':job?.error_text,text:status==='completed'?parseJson(ledger?.response_json,{}).text||'':'',graph:[{key:'context_snapshot',status:'completed',hash:row.input_hash},{key:'effective_rules',dependsOn:['context_snapshot'],status:stale?'invalidated':'completed',hash:row.rules_hash},{key:'content_generate',dependsOn:['effective_rules'],status},{key:'candidate_review',dependsOn:['content_generate'],status:status==='completed'?'ready':'pending'}],usage:ledger?{status:ledger.status,input:ledger.actual_input,output:ledger.actual_output,costMicros:ledger.actual_cost}:null};
+  const stale=(await reportEvidenceHash(rules))!==row.rules_hash,status=job?.status||'missing';
+  return {id:row.id,runId:row.run_id,jobId:job?.id,status,model:ledger?.model||null,provider:ledger?.provider||null,rulesChanged:stale,warning:stale?'后台规则已更新；本任务保留启动时的逻辑与成果，可另行生成新版对比':'',snapshot:parseJson(row.input_json,{}).dependencies||{},error:job?.error_text,text:status==='completed'?parseJson(ledger?.response_json,{}).text||'':'',graph:[{key:'context_snapshot',status:'completed',hash:row.input_hash},{key:'effective_rules',dependsOn:['context_snapshot'],status:'completed',hash:row.rules_hash},{key:'content_generate',dependsOn:['effective_rules'],status},{key:'candidate_review',dependsOn:['content_generate'],status:status==='completed'?'ready':'pending'}],usage:ledger?{status:ledger.status,input:ledger.actual_input,output:ledger.actual_output,costMicros:ledger.actual_cost}:null};
 }
 async function handle(context,post){
   const env=adaptEnv(context.env),user=await verifyAuth(context.request,env);if(!user)return json({ok:false,error:'未登录'},401);

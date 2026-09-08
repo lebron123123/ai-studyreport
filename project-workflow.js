@@ -148,8 +148,19 @@
     if(prev&&prev.hash===ver.hash&&prev.calcSnapshotId===ver.calcSnapshotId&&prev.analysisSnapshotId===ver.analysisSnapshotId&&(!lineage||prev.lineage&&prev.lineage.hash===lineage.hash))return prev;
     state.reportVersions.push(ver);if(state.reportVersions.length>50)state.reportVersions.splice(0,state.reportVersions.length-50);state.currentReportVersionId=ver.id; return ver;
   }
+  function reportBodyText(value){
+    return String(value??'').replace(/<!--[\s\S]*?-->/g,'').replace(/<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,'').replace(/<[^>]*>/g,' ')
+      .replace(/&#(x[0-9a-f]+|\d+);?/gi,(entity,code)=>{const n=code[0].toLowerCase()==='x'?parseInt(code.slice(1),16):Number(code);return n>0&&n<=0x10ffff?String.fromCodePoint(n):entity;})
+      .replace(/&(?:nbsp|ensp|emsp|thinsp|hairsp|ZeroWidthSpace|NoBreak|zwnj|zwj|lrm|rlm|shy|Tab|NewLine);/gi,' ')
+      .replace(/[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]/g,'').replace(/\s+/g,' ').trim();
+  }
+  function hasReportBody(section){
+    // Match the renderer: a nonempty editedHtml overrides content, even when visually blank.
+    // Legacy editedHtml:'' still falls back to content; stale text is retained for explicit review.
+    return !!reportBodyText(section&&((typeof section.editedHtml==='string'&&section.editedHtml)||section.content));
+  }
   function reportGenerationStatus(chapters){
-    const sections=(chapters||[]).filter(c=>c&&c.checked!==false).flatMap(c=>Array.isArray(c.sections)?c.sections:[]),generated=sections.filter(s=>String(s&&((s.editedHtml&&typeof s.editedHtml==="string"?s.editedHtml:"")||s.content)||"").trim()).length;
+    const sections=(chapters||[]).filter(c=>c&&c.checked!==false).flatMap(c=>Array.isArray(c.sections)?c.sections:[]),generated=sections.filter(hasReportBody).length;
     return {total:sections.length,generated,remaining:Math.max(0,sections.length-generated),complete:sections.length>0&&generated===sections.length};
   }
   function nextReportVersionNumber(state){
@@ -436,7 +447,7 @@
   }
 
   const api={keepOriginalLogic,clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,logicSnapshotCore,logicSnapshotDiff,markLogicImpacted,
-    createCalcSnapshot,createReportVersion,reportGenerationStatus,logicImpactedTasks,logicRevisionInProgress,historicalProgressDuringLogicRevision,nextReportVersionNumber,mergeReportDraft,recoverCompletedReport,selectProjectDraft,claimReportGeneration,releaseReportGeneration,persistedGenerationProgress,reconcileGenerationProgress,latestCompleteReportVersion,setCandidate,acceptCandidate,acceptAllCandidates,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
+    createCalcSnapshot,createReportVersion,reportBodyText,hasReportBody,reportGenerationStatus,logicImpactedTasks,logicRevisionInProgress,historicalProgressDuringLogicRevision,nextReportVersionNumber,mergeReportDraft,recoverCompletedReport,selectProjectDraft,claimReportGeneration,releaseReportGeneration,persistedGenerationProgress,reconcileGenerationProgress,latestCompleteReportVersion,setCandidate,acceptCandidate,acceptAllCandidates,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
     aiReportStage,aiReportStageRank,previousAiReportStage,locationTokens,rankLocationCandidates,normalizeAnalysisSites,siteWritingPlan,aiReportProjectSeed,aiReportShouldSeedProject,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
     impactedAnalysisSections,markAnalysisImpacted,METRIC_LABELS,ANALYSIS_DOMAIN_WORDS};
   root.ProjectWorkflow=api;

@@ -11,6 +11,13 @@
   const D = docx;
   const FONT = { ascii:"SimSun", eastAsia:"SimSun", hAnsi:"SimSun", cs:"SimSun" };
   const LINE13 = { line: 312, lineRule: D.LineRuleType.AUTO }; // 1.3倍行距
+  const PAGE_WIDTH=11906, PAGE_HEIGHT=16838, TEXT_WIDTH=PAGE_WIDTH-3400;
+  function tableWidths(weights){
+    const total=weights.reduce((sum,w)=>sum+w,0)||weights.length;
+    const widths=weights.map(w=>Math.floor(w/total*TEXT_WIDTH));
+    if(widths.length)widths[widths.length-1]+=TEXT_WIDTH-widths.reduce((sum,w)=>sum+w,0);
+    return widths;
+  }
 
   function run(text, opt){ return new D.TextRun(Object.assign({text:text, font:FONT}, opt||{})); }
   function cleanWordText(text){
@@ -27,18 +34,21 @@
       indent:{firstLine:480},
     });
   }
-  function makeTable(rows){
+  function makeTable(rows,weights,fontSize){
     const border = {style:D.BorderStyle.SINGLE, size:4, color:"000000"};
+    const count=Math.max(...rows.map(r=>r.length)),widths=tableWidths(weights||Array(count).fill(1));
     return new D.Table({
       alignment: D.AlignmentType.CENTER,
-      width:{size:96, type:D.WidthType.PERCENTAGE},
+      width:{size:TEXT_WIDTH, type:D.WidthType.DXA},columnWidths:widths,layout:D.TableLayoutType.FIXED,
       borders:{top:border,bottom:border,left:border,right:border,insideHorizontal:border,insideVertical:border},
       rows: rows.map((cells,ri)=> new D.TableRow({
-        children: cells.map(c=> new D.TableCell({
-          shading: ri===0? {fill:"EEEEEE"} : undefined,
+        tableHeader:ri===0,
+        children: Array.from({length:count},(_,ci)=> new D.TableCell({
+          width:{size:widths[ci],type:D.WidthType.DXA},
+          shading: ri===0? {fill:"EEEEEE",type:D.ShadingType.CLEAR} : undefined,
           margins:{top:60,bottom:60,left:110,right:110},
           children:[ new D.Paragraph({
-            children:textRuns(String(c),{size:21, bold:ri===0}),
+            children:textRuns(String(cells[ci]??""),{size:fontSize||21, bold:ri===0}),
             spacing:{line:280, lineRule:D.LineRuleType.AUTO},
           })],
         })),
@@ -62,9 +72,8 @@
   function makeTemplateTable(template,segment){
     const border={style:D.BorderStyle.SINGLE,size:4,color:"666666"};
     const sourceWidths=(segment.gridWidths||[]).map(Number);
-    const sourceTotal=sourceWidths.reduce((a,b)=>a+b,0)||1;
-    const tableWidth=9026;
-    const widths=sourceWidths.length?sourceWidths.map(w=>Math.max(260,Math.round(w/sourceTotal*tableWidth))):[];
+    const tableWidth=TEXT_WIDTH;
+    const widths=sourceWidths.length?tableWidths(sourceWidths.map(w=>Number.isFinite(w)&&w>0?w:1)):[];
     const rows=preparedTemplateRows(segment);
     return new D.Table({
       alignment:D.AlignmentType.CENTER,
@@ -118,6 +127,7 @@
     })];
     // 小标题：正文里的 ## 三级标题，加粗略大，与正文拉开层次
     if(b.type==="h" && b.text) return [new D.Paragraph({
+      heading:D.HeadingLevel.HEADING_3,keepNext:true,
       children:textRuns(b.text,{size:24, bold:true}),
       spacing:{before:160, after:80, line:360, lineRule:D.LineRuleType.AUTO},
     })];
@@ -144,6 +154,7 @@
   meta.forEach(m=> children.push(new D.Paragraph({children:[run(m,{size:24})], alignment:D.AlignmentType.CENTER, spacing:{after:120}})));
   children.push(new D.Paragraph({children:[run(new Date().toLocaleDateString("zh-CN"),{size:24})], alignment:D.AlignmentType.CENTER}));
   if(payload.docNo) children.push(new D.Paragraph({children:[run("文档编号："+payload.docNo,{size:21,color:"666666"})], alignment:D.AlignmentType.CENTER, spacing:{before:200}}));
+  if(payload.versionNote)children.push(new D.Paragraph({children:[run(payload.versionNote,{size:20,color:"666666"})],alignment:D.AlignmentType.CENTER,spacing:{before:120}}));
 
   /* ---------- 目录页（可更新域，打开时Word提示更新即出页码） ---------- */
   children.push(new D.Paragraph({
@@ -233,17 +244,7 @@
       spacing:{before:400, after:200}, pageBreakBefore:true }));
     children.push(new D.Paragraph({ children:[run(payload.provenance.note,{size:20,color:"666666"})],
       spacing:{after:200} }));
-    const rows = payload.provenance.rows;
-    const table = new D.Table({
-      width:{ size:100, type:D.WidthType.PERCENTAGE },
-      rows: rows.map((r, ri)=> new D.TableRow({
-        children: r.map(cell=> new D.TableCell({
-          children:[ new D.Paragraph({ children:textRuns(String(cell==null?"":cell), { size: ri===0?19:18, bold: ri===0 }),spacing:{before:0,after:0} }) ],
-          shading: ri===0 ? { fill:"E8EEF5" } : undefined,
-        })),
-      })),
-    });
-    children.push(table);
+    children.push(makeTable(payload.provenance.rows,[15,18,17,50],18));
   }
 
   if(payload.images && payload.images.length){
@@ -282,7 +283,7 @@
       ],
     },
     sections:[{
-      properties:{ page:{ margin:{ top:1440, bottom:1440, left:1700, right:1700 } } },
+      properties:{ page:{size:{width:PAGE_WIDTH,height:PAGE_HEIGHT}, margin:{ top:1440, bottom:1440, left:1700, right:1700 } } },
       headers:{ default: new D.Header({ children:[ new D.Paragraph({
         children:[run(payload.project.name||"可行性研究报告",{size:18,color:"666666"})],
         alignment:D.AlignmentType.CENTER,

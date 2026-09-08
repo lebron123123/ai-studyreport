@@ -7,13 +7,16 @@ import {executeLlmTask,settleAgentJob} from '../functions/api/_agent-enterprise.
 import {signToken} from '../functions/api/_auth.js';
 import * as projects from '../functions/api/projects.js';
 import * as orchestration from '../functions/api/reportorchestration.js';
+import {deliveryAction} from '../functions/api/_delivery.js';
+import {changeProjectMember} from '../functions/api/_project-members.js';
 test('受控检查不把空输出或关键词检查冒充语义准确率',()=>{
   assert.equal(scoreReportCase({required:['依据'],forbidden:['主项目']},'依据已核对').passed,true);
   assert.equal(scoreReportCase({required:['依据'],forbidden:['主项目']},'主项目依据').passed,false);
   assert.equal(scoreReportCase({required:[],forbidden:[]},'').passed,false);
   assert.equal(scoreReportCase({required:['依据'],forbidden:[]},'依据').semanticAccuracyVerified,false);
 });
-const target=process.env.AGENT_TEST_DATABASE_URL;
+import {testDatabaseUrl} from '../scripts/require-test-database.mjs';
+const target=testDatabaseUrl();
 test('真实数据库：报告任务、受控评测、发布消费与回滚',{skip:!target},async t=>{
   const url=new URL(target);assert.match(url.pathname,/^\/studyreport_restore_\d+$/);assert.ok(['localhost','127.0.0.1','[::1]'].includes(url.hostname));
   const DB=createD1Shim(target),env={DB,SESSION_SECRET:crypto.randomUUID(),ADMIN_USERS:'test-admin',DEEPSEEK_API_KEY:'test-only',DEEPSEEK_API_URL:'http://test.invalid/chat/completions'},pid=crypto.randomUUID();
@@ -40,25 +43,37 @@ test('真实数据库：报告任务、受控评测、发布消费与回滚',{sk
       const created=await request(orchestration,{action:'feedbackCreate',feedback:{projectId:pid,scenario:'housing_conversion',before:'旧',after:'新',candidateRule:'必须写出依据已核对',target:'编制依据'}});assert.equal(created.status,200);
       candidate=await DB.prepare('SELECT * FROM report_feedback_candidates WHERE id=?').bind(created.data.candidate.candidateId).first();
       const sampleInput='[系统测试]'+pid+'材料：依据已经核对。';
-      const sample=await registerReportCase(env,user,{projectId:pid,scenario:'housing_conversion',datasetRole:'training',input:sampleInput,required:['依据'],forbidden:['主项目'],approvalNote:'隔离库合成回归，不是正式Golden'});
+      const name='test'+crypto.randomUUID().replaceAll('-','');await DB.prepare('INSERT INTO users(username,pass_hash,salt,created_at) VALUES(?,?,?,?)').bind(name,'not-a-login-hash','test',Date.now()).run();
+      const reviewer=Number((await DB.prepare('SELECT id FROM users WHERE username=?').bind(name).first()).id);
+      await changeProjectMember(env,user,pid,reviewer,'VIEWER');
+      const body={project:{businessScenario:'housing_conversion'},chapters:[{name:'总论',sections:[{t:'依据',content:'依据已经核对'}]}]};
+      await DB.prepare('UPDATE projects SET data=? WHERE id=?').bind(JSON.stringify(body),pid).run();
+      const frozen=await deliveryAction(env,user,{action:'freeze',projectId:pid,reviewerId:reviewer,contract:{required:['依据'],forbidden:['主项目']}});
+      await deliveryAction(env,reviewer,{action:'approve',projectId:pid,id:frozen.id,note:'[系统测试]合成审签，不是正式Golden',factsReviewed:true,wordLayoutReviewed:true});
+      const registration={projectId:pid,deliveryId:frozen.id,scenario:'housing_conversion',datasetRole:'training',input:sampleInput,approvalNote:'隔离库合成回归，不是正式Golden'};
+      await assert.rejects(()=>registerReportCase(env,user,{...registration,deliveryId:''}),/审签/);
+      const sample=await registerReportCase(env,user,{...registration,required:['伪造条件']});
+      const registered=JSON.parse((await DB.prepare('SELECT sample_json FROM report_trusted_cases WHERE id=?').bind(sample.id).first()).sample_json);assert.deepEqual(registered.required,['依据']);
       const evalTask=await startReportEvaluation(env,user,candidate,sample.id);assert.equal((await trustedReportEvaluations(env,candidate))[0].passed,false);
       const again=await Promise.all([startReportEvaluation(env,user,candidate,sample.id),startReportEvaluation(env,user,candidate,sample.id)]);assert.ok(again.every(x=>x.jobId===evalTask.jobId&&x.reused));
       assert.equal((await request(orchestration,{action:'feedbackPublish',candidateId:candidate.id})).status,409);
       const run=(await DB.prepare('SELECT run_id FROM report_trusted_runs WHERE id=?').bind(evalTask.id).first()).run_id;await finish(run,'依据已核对');
       const verified=await trustedReportEvaluations(env,candidate);assert.equal(verified[0].passed,true);assert.equal(verified[0].candidateHash,await reportEvidenceHash(reportCandidateBinding(candidate)));
       const changed={...candidate,version:2};assert.equal((await trustedReportEvaluations(env,changed)).length,0);
-      const holdout=await registerReportCase(env,user,{projectId:pid,scenario:'housing_conversion',datasetRole:'holdout',input:'测试',required:['依据'],approvalNote:'测试非法留出'});await assert.rejects(()=>startReportEvaluation(env,user,candidate,holdout.id),/来源项目/);
-      const duplicate=await registerReportCase(env,user,{projectId:'other-'+pid,scenario:'housing_conversion',datasetRole:'holdout',input:sampleInput,required:['依据'],approvalNote:'测试跨项目重复材料'});await assert.rejects(()=>startReportEvaluation(env,user,candidate,duplicate.id),/材料重复/);
+      await assert.rejects(()=>registerReportCase(env,user,{...registration,datasetRole:'holdout',input:'测试'}),/独立项目/);
+      await assert.rejects(()=>registerReportCase(env,user,{...registration,projectId:'other-'+pid,datasetRole:'holdout'}),/无权/);
     });
-    await t.test('发布后真实任务消费规则，旧候选失效；回滚后不再消费且正文不覆盖',async()=>{
+    await t.test('发布后新任务消费规则，旧候选保留；回滚后旧快照和正文不覆盖',async()=>{
       assert.equal((await request(orchestration,{action:'feedbackPublish',candidateId:candidate.id})).status,200);
-      assert.equal((await readReportSection(env,user,first.id)).status,'invalidated');
+      assert.equal((await readReportSection(env,user,first.id)).status,'completed');
+      assert.equal((await readReportSection(env,user,first.id)).rulesChanged,true);
       const next=await startReportSection(env,user,input);assert.notEqual(next.id,first.id);
       const payload=JSON.parse((await DB.prepare('SELECT payload_json FROM agent_jobs WHERE run_id=?').bind(next.runId).first()).payload_json);assert.match(payload.system,/必须写出依据已核对/);
       assert.equal((await request(orchestration,{action:'feedbackRollback',candidateId:candidate.id,reason:'[系统测试]回滚验证'})).status,200);
-      assert.equal((await readReportSection(env,user,next.id)).status,'invalidated');
+      assert.equal((await readReportSection(env,user,next.id)).status,'queued');
+      assert.equal((await readReportSection(env,user,next.id)).rulesChanged,true);
       assert.equal((await readReportSection(env,user,first.id)).text,'依据已经核对');
-      const saved=JSON.parse((await DB.prepare('SELECT data FROM projects WHERE id=?').bind(pid).first()).data);assert.deepEqual(saved.chapters,[]);
+      const saved=JSON.parse((await DB.prepare('SELECT data FROM projects WHERE id=?').bind(pid).first()).data);assert.equal(saved.chapters[0].sections[0].content,'依据已经核对');
       await DB.prepare("UPDATE agent_jobs SET status='cancelled' WHERE run_id=? AND status='queued'").bind(next.runId).run();
     });
   }finally{await DB._close();}

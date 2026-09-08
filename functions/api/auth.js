@@ -4,6 +4,7 @@
 import { hashPassword, randomHex, signToken, json } from "./_auth.js";
 
 import { adaptEnv } from "./_adapters.js";
+import {accountSecurity} from './_account-security.js';
 export async function onRequestPost(context){
   const { request } = context;
   const env = adaptEnv(context.env);   // 云端原样返回，行为零变化；本地才切到本地实现
@@ -40,6 +41,7 @@ export async function onRequestPost(context){
     if(!u) return json({ok:false, error:"用户名或密码错误"}, 401);
     const hash = await hashPassword(password, u.salt);
     if(hash !== u.pass_hash) return json({ok:false, error:"用户名或密码错误"}, 401);
+    if(Number((await accountSecurity(env,u.id))?.disabled))return json({ok:false,error:'账号已停用，请联系管理员'},403);
     const token = await signToken(env, u.id, username);
     return json({ok:true, token, username});
   }

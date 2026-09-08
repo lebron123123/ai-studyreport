@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -47,5 +47,5 @@ jobs:
         run: npm run check:migrations -- --require-db
       - name: Golden Project 定向回归
         run: npm run test:golden
-      - name: 全仓自动化测试
-        run: npm test
+      - name: 全仓自动化测试（独立数据库，禁止跳过行为验证）
+        run: node scripts/run-postgres-tests.mjs

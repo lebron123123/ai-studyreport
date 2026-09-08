@@ -345,7 +345,7 @@ function stepGenerate(){
   const active = chapters.filter(c=>c.checked);
   const totalSec = active.reduce((n,c)=>n+c.sections.length,0);
   let inner = active.map(c=>'<div class="chapter-block" id="block_'+c.cn+'"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
-    + c.sections.map((s,si)=>{const ready=!!(s.content||s.editedHtml);return '<div class="section-block '+(ready?'':'pending')+'" id="sec_'+c.cn+'_'+si+'"><h4>'+s.t+(s.numeric?' ⚠数据':'')+(ready?'<span class="done-stamp">已拟</span>':'')+'</h4>'+(ready?renderSectionLogicHtml(c,s):'')+'<div class="body">'+(ready?renderSectionContent(c,s,true):'<span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:88%"></span><span class="skel" style="width:56%"></span>')+'</div></div>';}).join("")
+    + c.sections.map((s,si)=>{const ready=reportHasVisibleBody(s);return '<div class="section-block '+(ready?'':'pending')+'" id="sec_'+c.cn+'_'+si+'"><h4>'+s.t+(s.numeric?' ⚠数据':'')+(ready?'<span class="done-stamp">已拟</span>':'')+'</h4>'+(ready?renderSectionLogicHtml(c,s):'')+'<div class="body">'+(ready?renderSectionContent(c,s,true):'<span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:88%"></span><span class="skel" style="width:56%"></span>')+'</div></div>';}).join("")
     +'</div>').join("");
   return '<div class="doc-eyebrow">STEP 04 · 逐章生成</div>'
     +'<h1 class="doc-title">起草中：'+(project.name||"（未命名项目）")+'</h1>'
@@ -372,10 +372,18 @@ function runWorkerPool(queue, workerFn, concurrency, shouldContinue){
 }
 // 一篇报告的生成以远端模型调用为主，4路能比原3路缩短约一成至两成墙钟时间，
 // 同时保留全局覆盖口供本地/服务器按模型限流能力调低或调高（安全范围2~6）。
+function reportHasVisibleBody(section){
+  if(window.ProjectWorkflow?.hasReportBody)return ProjectWorkflow.hasReportBody(section);
+  return !!String(section?.editedHtml||section?.content||'').replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/gi,' ').replace(/[\u200b-\u200f\u2060\ufeff]/g,'').trim();
+}
 function reportGenerationConcurrency(total){
   const configured=Number((typeof window!=="undefined"&&window.REPORT_GENERATION_CONCURRENCY)||4);
   const safe=Number.isFinite(configured)?Math.max(2,Math.min(6,Math.round(configured))):4;
   return Math.max(1,Math.min(Number(total)||1,safe));
+}
+function runReportGenerationPool(tasks,worker,concurrency,shouldContinue){
+  if(!window.ReportArgument?.runInDependencyOrder)throw new Error('论证任务模块未加载，请刷新后重试');
+  return ReportArgument.runInDependencyOrder(tasks,worker,runWorkerPool,concurrency,shouldContinue);
 }
 async function runGeneration(){
   await ensureReportTableTemplates();
@@ -385,7 +393,7 @@ async function runGeneration(){
   const progressEl = document.getElementById("progressLine");
   genUsage = {inTok:0, outTok:0};
   const tasks = [];
-  active.forEach(c=>c.sections.forEach((s,si)=>{if(!s.content&&!s.editedHtml)tasks.push({c,s,si});}));
+  active.forEach(c=>c.sections.forEach((s,si)=>{if(!reportHasVisibleBody(s))tasks.push({c,s,si});}));
   const total = tasks.length;
   let done = 0, failed = 0;
 
@@ -395,6 +403,8 @@ async function runGeneration(){
     secEl.classList.add("gen");
     try{
       const text = await generateSection(c, s);
+      if(!reportHasVisibleBody({content:text}))throw new Error("模型未返回正文，本节没有计入完成");
+      if(s.editedHtml&&!reportHasVisibleBody({editedHtml:s.editedHtml}))s.editedHtml=null;
       s.content = text;
       secEl.classList.remove("pending"); secEl.classList.remove("gen");
       secEl.querySelector(".body").innerHTML = renderSectionContent(c,s,false);
@@ -410,7 +420,7 @@ async function runGeneration(){
     done++;
     progressEl.textContent = reportGenerationConcurrency(total)+'路并行撰写中… 已完成 '+done+'/'+total + (failed? '（失败 '+failed+'）':'');
   }
-  await runWorkerPool(tasks, handleOne, reportGenerationConcurrency(total));
+  await runReportGenerationPool(tasks, handleOne, reportGenerationConcurrency(total));
 
   const cost = (genUsage.inTok*PRICE_IN_PER_M + genUsage.outTok*PRICE_OUT_PER_M)/1000000;
   let tail = '已完成 '+(total-failed)+'/'+total+' 个子标题的初稿起草' + (failed? '（'+failed+' 个失败，可在下方点击重试）':'。');
@@ -425,7 +435,7 @@ async function runGeneration(){
   }
   genBtn.style.display = "none";
   document.getElementById("toStep5r").style.display = "inline-block";
-  if(window.ProjectWorkflow)window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("完成初稿生成"));
+  if(!failed&&active.every(c=>c.sections.every(reportHasVisibleBody))&&window.ProjectWorkflow)window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("完成初稿生成"));
   saveDraft();
   bindEvents();
 }
@@ -493,7 +503,7 @@ function reportGlobalRequirementsHtml(){
   const type=rlProjectType(),scenario=rlBusinessScenario(),set=window.ReportLogicCore?.current(type);
   const text=window.ReportLogicCore?.globalRequirements?.(type,{businessScenario:scenario})||"",plan=reportSiteWritingPlan();
   const version=set?.data?.logicVersions?.[type==="gaibao"?scenario:type];
-  return '<section class="rpt-logic-note rpt-global-requirements"><div class="rpt-logic-head"><b>全篇要求'+(version?' · 逻辑版本 '+escapeHtml(version):'')+'</b><button type="button" onclick="reportEditGlobalRequirements()">编辑全篇要求</button></div><p>以下要求统一适用于全篇；各小节只展示自身业务逻辑。后台发布后用于后续生成，已有正文仍通过候选稿确认更新。</p><div>'+escapeHtml(text||(set?'暂未设置场景专属全篇要求。':'全篇要求尚未加载，请稍后重试。')).replace(/\n/g,'<br>')+'</div>'+(plan?'<p><b>当前项目多点位写作策略：</b>'+escapeHtml(plan.strategy)+'</p>':'')+'</section>';
+  return '<section class="rpt-logic-note rpt-global-requirements"><div class="rpt-logic-head"><b>全篇要求'+(version?' · 逻辑版本 '+escapeHtml(version):'')+'</b><button type="button" class="rpt-logic-edit" onclick="reportEditGlobalRequirements()">编辑全篇要求</button></div><p>以下要求统一适用于全篇；各小节只展示自身业务逻辑。后台发布后用于后续生成，已有正文仍通过候选稿确认更新。</p><div>'+escapeHtml(text||(set?'暂未设置场景专属全篇要求。':'全篇要求尚未加载，请稍后重试。')).replace(/\n/g,'<br>')+'</div>'+(plan?'<p><b>当前项目多点位写作策略：</b>'+escapeHtml(plan.strategy)+'</p>':'')+'</section>';
 }
 async function reportEditGlobalRequirements(){
   if(document.getElementById("reportGlobalEditor"))return;
@@ -642,8 +652,8 @@ let ragAvailable = null;
 
 // 溯源徽章：小节标题后显示置信度，点击展开依据详情
 function provBadgeHtml(cn, si, prov){
-  if(!prov || !prov.confidence) return "";
-  const cf = prov.confidence;
+  if(!prov) return "";
+  const cf = provConfidence(prov);
   return '<span class="prov-badge" data-prov="'+cn+'_'+si+'" title="点击查看本节生成依据" '
     +'style="cursor:pointer; font-family:var(--mono); font-size:9.5px; letter-spacing:.5px; padding:1px 7px; '
     +'border:1px solid '+cf.color+'; color:'+cf.color+'; border-radius:2px; margin-left:6px;">依据 '+cf.label+'</span>'
@@ -652,10 +662,10 @@ function provBadgeHtml(cn, si, prov){
     + provDetailHtml(prov) + '</div>';
 }
 function provDetailHtml(p){
-  const cf = p.confidence || {};
-  let h = '<div style="color:'+(cf.color||"#666")+'; font-weight:600; margin-bottom:6px;">本节生成依据（置信度 '+(cf.label||"")+'，'+Math.round((cf.score||0)*100)+'分）</div>';
+  const cf = provConfidence(p);
+  let h = '<div style="color:'+(cf.color||"#666")+'; font-weight:600; margin-bottom:6px;">本节来源记录 · '+escapeHtml(cf.label)+'（不代表事实准确率）</div>';
   h += '<div style="margin-bottom:6px;">' + (cf.basis||[]).map(b=>"· "+escapeHtml(b)).join("<br>") + '</div>';
-  if(p.hasCalcData) h += '<div>📊 <b>财务数据来源</b>：本项目内置公式实时测算结果（非AI生成，可在财务测算页复算核对）</div>';
+  if(p.hasCalcData) h += '<div>📊 <b>测算上下文</b>：已向生成任务提供测算摘要；仍须核对正文数值、单位及所用版本。</div>';
   if((p.kbDocs||[]).length) h += '<div>📎 <b>引用资料</b>：' + p.kbDocs.map(d=>escapeHtml(d.title)).join("、") + '</div>';
   if((p.rag||[]).length){
     h += '<div>📚 <b>知识库检索命中</b>：<br>' + p.rag.map(r=>{
@@ -664,7 +674,7 @@ function provDetailHtml(p){
     }).join("<br>") + '</div>';
   }
   if((p.examples||[]).length) h += '<div>✍ <b>参照范例</b>：' + p.examples.map(e=>escapeHtml(e.title)).join("、") + '</div>';
-  if((p.projectFields||[]).length) h += '<div>📁 <b>使用的项目信息</b>：' + p.projectFields.join("、") + '</div>';
+  if((p.projectFields||[]).length) h += '<div>📁 <b>使用的项目信息</b>：' + p.projectFields.map(x=>escapeHtml(typeof x==='string'?x:x.label||x.title||'项目字段')).join("、") + '</div>';
   h += '<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--line); font-size:10.5px;">'
     + '🤖 生成模型：' + escapeHtml(p.model||"-") + '　⏱ 生成时间：' + (p.generatedAt ? new Date(p.generatedAt).toLocaleString("zh-CN") : "-") + '</div>';
   return h;
@@ -673,10 +683,11 @@ function provDetailHtml(p){
 function currentReportVersionMeta(reason){
   const provs=[];(chapters||[]).forEach(c=>(c.sections||[]).forEach(s=>{if(s.prov)provs.push(s.prov);}));
   const models=[...new Set(provs.map(p=>p.model).filter(Boolean))];
-  return {reason:reason||"报告保存",projectData:project,parameterSet:calcParams||null,calcEngineVersion:"whitebox-2026-08",
-    knowledgeSnapshot:{localFiles:(kbEntries||[]).map(x=>({title:x.title,length:String(x.content||"").length})),rag:provs.flatMap(p=>p.rag||[]).map(x=>({title:x.title,section:x.section,score:x.score,lifecycle:x.lifecycle}))},
+  const calc=(projectWorkflow?.calcSnapshots||[]).find(x=>x.id===projectWorkflow?.currentCalcSnapshotId);
+  return {reason:reason||"报告保存",projectData:project,parameterSet:calcParams||null,calcEngineVersion:calc?.engineVersion||null,
+    knowledgeSnapshot:{localFiles:(kbEntries||[]).map(x=>({title:x.title,contentHash:window.ReportTrust?.hash(x.content||'')||null})),rag:provs.flatMap(p=>p.rag||[]).map(x=>({title:x.title,section:x.section,version:x.version,score:x.score,lifecycle:x.lifecycle}))},
     evidenceSnapshot:provs.map((p,i)=>({section:i,excel:p.excelSources||[],web:p.webEvidence||p.web||[],projectFields:p.projectFields||[]})),
-    workflowVersion:"ai-studyreport-workflow-2026-08-28",promptVersion:"report-generation-2026-08-28",model:models.join(",")||null,
+    workflowVersion:projectWorkflow?.workflowVersion||null,promptVersion:[...new Set(provs.map(p=>p.promptVersion).filter(Boolean))].join(',')||null,model:models.join(",")||null,
     reviewSnapshot:projectWorkflow&&projectWorkflow.reviewSnapshot||null};
 }
 
@@ -716,25 +727,8 @@ function provStart(){ return { rag:[], examples:[], kbDocs:[], excelSources:[], 
 
 // 置信度：有真实测算数据 > 有高匹配知识库依据 > 仅项目信息 > 纯AI发挥
 function provConfidence(p){
-  if(!p) return { score:0.5, label:"一般", color:"#8A6D1B", basis:["无溯源记录"] };
-  const basis = [];
-  let score = 0.55;   // 基线：仅凭项目信息与模型常识生成
-  if(p.hasCalcData){ score = Math.max(score, 0.95); basis.push("引用了内置公式计算的真实测算数据"); }
-  if((p.excelSources||[]).length){ score = Math.max(score, 0.92); basis.push("引用了"+(p.excelSources||[]).length+"项可定位到单元格的 Excel 数据"); }
-  const hiRag = p.rag.filter(r=>r.score >= 0.85);
-  const midRag = p.rag.filter(r=>r.score >= 0.70 && r.score < 0.85);
-  if(hiRag.length){ score = Math.max(score, 0.85); basis.push("有"+hiRag.length+"条高匹配知识库依据"); }
-  else if(midRag.length){ score = Math.max(score, 0.72); basis.push("有"+midRag.length+"条中匹配知识库依据"); }
-  else if(p.rag.length){ basis.push("仅有低匹配知识库参考"); }
-  if(p.kbDocs.length){ score = Math.max(score, 0.80); basis.push("引用了"+p.kbDocs.length+"份人工上传的项目资料"); }
-  if(p.examples.length) basis.push("参照了"+p.examples.length+"篇黄金范例的结构");
-  // 有过期资料则扣分并提示
-  const expired = p.rag.filter(r=>r.lifecycle && r.lifecycle !== "valid");
-  if(expired.length){ score = Math.max(0.5, score - 0.1); basis.push("⚠含"+expired.length+"条时效异常资料，需人工核实"); }
-  if(!basis.length) basis.push("主要依据项目信息与模型通用知识，无外部资料支撑");
-  const label = score >= 0.9 ? "高" : score >= 0.75 ? "较高" : score >= 0.6 ? "中" : "偏低";
-  const color = score >= 0.9 ? "#3E7A53" : score >= 0.75 ? "#1F7A3D" : score >= 0.6 ? "#8A6D1B" : "#C24A42";
-  return { score: Math.round(score*100)/100, label, color, basis };
+  const profile=window.ReportTrust?.buildSectionProfile({prov:p||{}});
+  return {score:null,label:profile?.grade||'待核验',color:'#8A6D1B',basis:profile?.reasons||['来源核查模块未就绪，不能判断准确率']};
 }
 
 // 相似度分层策略（参考行业实践：不同匹配度的资料，可信程度不同，应区别使用）
@@ -781,10 +775,11 @@ async function ragRetrieve(chapterName, secTitle, collector){
     hits.forEach(m=>{
       if(budget<=200) return;
       const tier = ragTierOf(m.score);
-      if(collector) collector.rag.push({ title:m.title||"历史报告", section:m.section||m.chapter||"",
-        score:m.score, tier:tier.label, lifecycle:m.lifecycle||"valid", lifecycleNote:m.lifecycleNote||"",
-        docNo:m.docNo||"", issuer:m.issuer||"", sourceRef:m.sourceRef||"", exact:!!m.exact, exactReason:m.exactReason||"" });
       const c = String(m.text).slice(0, Math.min(1400, budget));
+      if(collector) collector.rag.push({id:m.id||m.chunkId||null,title:m.title||"历史报告",section:m.section||m.chapter||"",
+        score:m.score,tier:tier.label,lifecycle:m.lifecycle||"unknown",lifecycleNote:m.lifecycleNote||"",excerpt:c,
+        version:m.version||m.updatedAt||(window.ReportTrust?'content:'+ReportTrust.hash(c):null),
+        docNo:m.docNo||"",issuer:m.issuer||"",url:m.url||"",sourceRef:m.sourceRef||m.id||m.chunkId||"",exact:!!m.exact,exactReason:m.exactReason||""});
       budget -= c.length;
       const lifeTag = (m.lifecycle && m.lifecycle !== "valid") ? "⚠该文件"+(m.lifecycleNote||"时效异常")+"，不得作为现行依据引用；" : "";
       const precise = (m.docNo?"文号："+m.docNo+"；":"")+(m.issuer?"发布机关："+m.issuer+"；":"")+(m.sourceRef?"原始定位："+m.sourceRef+"；":"")+(m.exact?"“"+(m.exactReason||"精确命中")+"”；":"");
@@ -915,8 +910,8 @@ function kbRetrieve(chapterName, secTitle, collector){
   let budget = 2600;
   scored.forEach(({e})=>{
     if(budget<=100) return;
-    if(collector) collector.kbDocs.push({ title: e.title||"未命名资料" });
     const c = String(e.content||"").slice(0, Math.min(1500, budget));
+    if(collector) collector.kbDocs.push({title:e.title||"未命名资料",id:e.id||null,sourceRef:e.sourceRef||'project-material:'+String(e.id||e.title||''),version:e.version||(window.ReportTrust?'content:'+ReportTrust.hash(e.content||''):null),excerpt:c});
     budget -= c.length;
     out += "《"+(e.title||"未命名资料")+"》：\n"+c+"\n\n";
   });
@@ -981,13 +976,21 @@ async function reviseSectionExcerpt(c,s,selected,instruction,onChunk){
 }
 
 async function generateSection(c, s, onChunk){
+  if(!window.ReportArgument)throw new Error('论证任务模块未加载，请刷新后重试');
+  const summaryContext=ReportArgument.summaryContext(chapters,c.name,s.t);
   const collector=provStart();   // 每个并发任务独享，避免不同小节的溯源相互串写
   if(window.ReportLogicCore){try{await ReportLogicCore.load(rlProjectType());}catch(e){}}
   await ensureReportTableTemplates();
   const formalTemplates=sectionFormalTemplates(c,s);
   const sitePlan=reportSiteWritingPlan(),siteInstruction=sitePlan?'\n6. 本报告含多个分析点位。'+sitePlan.strategy+'凡本节涉及区位、市场、建设条件、实施影响或风险时，按重要程度先后形成整体判断，再用一个压缩段落概括其余点位的实质差异；正文不得出现“主项目”“次项目”标签，与本节无关时不要机械罗列点位，也不得逐点复制同一套模板。':'';
   const digest = s.numeric ? buildCalcDigest() : null;
-  if(digest) collector.hasCalcData = true;
+  if(digest){
+    collector.hasCalcData = true;
+    const snapshot=(projectWorkflow?.calcSnapshots||[]).find(x=>x.id===projectWorkflow.currentCalcSnapshotId);
+    if(snapshot&&JSON.stringify(snapshot.params)===JSON.stringify(calcParams)&&JSON.stringify(snapshot.summary)===JSON.stringify(calcResult?.summary)){
+      collector.calcSnapshotId=snapshot.id;collector.calcVersion=snapshot.version;collector.calcEngineVersion=snapshot.engineVersion||null;
+    }
+  }
   let tableHint = "";
   if(formalTemplates.length){
     tableHint='\n本节已由系统按公司出租类标准报告自动插入以下固定表格：'+formalTemplates.map(t=>'《'+t.title+'》').join('、')+'。正文只负责解释口径、分析结论和表格前后衔接，不得自行重画表格、重复罗列表头或改变表格结构；项目专属数值由资料与测算引擎后续填充。'+(digest?'\n\n【真实财务测算结果】\n'+digest:'');
@@ -1007,7 +1010,8 @@ async function generateSection(c, s, onChunk){
   if(!s.logicSnapshot?.localOverride)s.logicSnapshot=reportSectionLogicSnapshot(c,s,logicRules);
   const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +(sitePlan?'\n【本节必须执行的多点位写作逻辑】\n'+sitePlan.strategy+'\n':'')+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + reportLocalLogicPrompt(s) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t, collector) + kbRetrieve(c.name, s.t, collector) + webEvidenceRetrieve(c.name,s.t,collector) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t, collector);
 
-  let text = await reportDurableSectionCall(c,s,sys,user,onChunk);
+  const argumentPrompt=ReportArgument.prompt(c.name,s.t,{hasCalculation:!!digest});
+  let text = await reportDurableSectionCall(c,s,sys.replace('篇幅约500-800字。','篇幅服从本节论证任务与材料。')+argumentPrompt,user+summaryContext,onChunk);
   if(!text || text === "（未返回内容）" || reportBodyContainsInternalLogic(text)){
     text = window.ReportLogicCore?.fallbackDraft
       ? ReportLogicCore.fallbackDraft(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),numeric:!!s.numeric,context:typeof airMaterialContext==="function"?airMaterialContext():{hasCalculation:!!(calcParams&&calcResult)}})
@@ -1021,7 +1025,9 @@ async function generateSection(c, s, onChunk){
   // 生成完成：把溯源档案挂到该小节上（含模型与时间，即L3模型溯源）
   const prov = collector;
   if(prov){
-    prov.model = "deepseek-v4-flash";
+    prov.model = s.executionTask?.model||null;
+    prov.provider = s.executionTask?.provider||null;
+    prov.promptVersion = window.ReportArgument?.VERSION||null;
     prov.generatedAt = new Date().toISOString();
     if(projectWorkflow&&projectWorkflow.currentAnalysisSnapshotId){prov.analysisSnapshotId=projectWorkflow.currentAnalysisSnapshotId;prov.analysisSnapshotVersion=projectWorkflow.currentAnalysisSnapshotVersion||null;}
     prov.confidence = provConfidence(prov);
@@ -1045,6 +1051,7 @@ async function reportDurableSectionCall(c,s,sys,user,onChunk){
     if(changed)saveDraft();
   });
   if(currentProjectId!==projectId)throw new Error('已切换项目，后台结果已保留，未写入其他项目');
+  s.executionTask=Object.assign({},s.executionTask,{model:result.model||null,provider:result.provider||null});
   if(onChunk)onChunk(result.text);
   return result.text;
 }

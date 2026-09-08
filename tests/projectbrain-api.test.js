@@ -5,8 +5,8 @@ import {signToken} from "../functions/api/_auth.js";
 
 function mockDb(){
   const state={project:{id:"project-123",name:"测试项目",data:JSON.stringify({project:{name:"测试项目",type:"rent",location:"深圳"},workflow:{management:{}}}),updated_at:1,user_id:1},facts:[],events:[],stages:[]};
-  return {state,prepare(sql){const q={args:[]};return {bind(...a){q.args=a;return this;},async first(){
-    if(sql.startsWith("SELECT id,name,data,updated_at FROM projects"))return q.args[0]===state.project.id?state.project:null;
+  return {state,async _transaction(work){return work(this);},prepare(sql){const q={args:[]};return {bind(...a){q.args=a;return this;},async first(){
+    if(sql.startsWith("SELECT id,name,data,updated_at,user_id FROM projects"))return q.args[0]===state.project.id?state.project:null;
     if(sql.includes("MAX(version)")&&sql.includes("project_facts")){const rows=state.facts.filter(x=>x.fact_key===q.args[2]);return {n:rows.reduce((n,x)=>Math.max(n,x.version),0)};}
     return null;
   },async all(){
@@ -33,6 +33,6 @@ test("Project Brain兼容读取旧项目并写入结构化事实",async()=>{
 });
 
 test("生命周期切换写回旧项目兼容字段并记录历史和事件",async()=>{
-  const DB=mockDb(),changed=await call(DB,"POST",{action:"setStage",projectId:"project-123",stageKey:"decision",reason:"可研已通过"},"http://test/api/projectbrain");
-  assert.equal(changed.status,200);assert.equal(JSON.parse(DB.state.project.data).workflow.management.investmentStage,"decision");assert.equal(DB.state.stages[0].to,"decision");assert.equal(DB.state.events.at(-1).event_type,"stage.changed");
+  const DB=mockDb(),changed=await call(DB,"POST",{action:"setStage",projectId:"project-123",stageKey:"decision",expectedVersion:0,reason:"调整工作阶段"},"http://test/api/projectbrain");
+  assert.equal(changed.status,200);assert.equal(JSON.parse(DB.state.project.data).workflow.management.investmentStage,"decision");assert.equal(DB.state.stages[0].to,"decision");assert.equal(DB.state.events.at(-1).event_type,"project.work_stage.updated");
 });

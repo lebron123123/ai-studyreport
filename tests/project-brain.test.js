@@ -27,3 +27,22 @@ test("变更预演从参数传播到指标和章节",()=>{
   const out=Brain.previewChange({before:{rent:40},after:{rent:42},dependencyGraph:graph});
   assert.deepEqual(out.changedKeys,["rent"]);assert.equal(out.affectedMetrics[0].key,"irr");assert.equal(out.affectedSections[0].title,"财务评价");assert.equal(out.requiresApproval,true);
 });
+
+test('必需事实从清单计算：未录入、冲突、待核、条件和NA都有明确状态',()=>{
+  const empty=Brain.buildContext({projectId:'project-empty',data:{},stageKey:'discovery'});
+  assert.equal(empty.requirements.requiredCount,4);assert.equal(empty.requirements.missingCount,4);assert.equal(empty.requirements.score,0);
+  const result=Brain.requiredFacts({stageKey:'discovery',requirements:[{factKey:'custom',scopeId:'a',requirement:'conditional',conditionMet:null},{factKey:'na',requirement:'required'}],facts:[
+    {factKey:'project.name',value:'A',status:'confirmed',factType:'FACT'},
+    {factKey:'project.type',value:'rent',status:'conflict',conflictValues:['rent','sale']},
+    {factKey:'project.location',value:'深圳',status:'candidate'},
+    {factKey:'na',status:'not_applicable',naReason:'该项目不涉及'}]});
+  assert.equal(result.items.find(x=>x.factKey==='custom').status,'condition_pending');assert.equal(result.items.find(x=>x.factKey==='project.type').status,'conflict');
+  assert.equal(result.items.find(x=>x.factKey==='na').status,'not_applicable');assert.equal(result.items.find(x=>x.factKey==='project.location').status,'unverified');
+});
+
+test('同一事实在不同点位不互相覆盖；假设不能冒充确认事实',()=>{
+  const c=Brain.buildContext({data:{},facts:[{factKey:'asset.area',scopeId:'A',value:100,status:'confirmed'},{factKey:'asset.area',scopeId:'B',value:200,status:'confirmed'}]});
+  assert.equal(c.facts.filter(x=>x.factKey==='asset.area').length,2);
+  const result=Brain.requiredFacts({requirements:[{factKey:'rent'}],facts:[{factKey:'rent',factType:'ASSUMPTION',value:42,status:'confirmed'}]});
+  assert.equal(result.items.find(x=>x.factKey==='rent').status,'assumption');
+});

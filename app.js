@@ -222,6 +222,7 @@ function escapeHtml(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").repla
 
 // 把测算结果整理成给AI的数据摘要 + 现成表格
 function bindEvents(){
+  if(window.ReportEvidenceGraph?.bindDetails)ReportEvidenceGraph.bindDetails(document.getElementById('sheet'));
   const s = id=>document.getElementById(id);
   document.querySelectorAll(".domain-card").forEach(card=>{
     card.onclick = ()=>{ loadDomain(card.dataset.key); renderSheet(); };

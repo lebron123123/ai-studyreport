@@ -4,14 +4,36 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-function loadTools(fetchImpl){
+function loadTools(fetchImpl,prelude){
   const document={readyState:"loading",addEventListener(){},getElementById(){return null;}};
   const window={project:{},projectWorkflow:{},document};
   const context=vm.createContext({window,document,fetch:fetchImpl||(async()=>{throw new Error("测试不应发起网络请求");}),console,Map,Set,Array,String,Number,Object,JSON,Promise,Math,Date,URL,Uint8Array,atob:()=>""});
   const source=fs.readFileSync(path.join(__dirname,"..","web-research-tools.js"),"utf8");
+  if(prelude)vm.runInContext(prelude,context);
   vm.runInContext(source,context,{filename:"web-research-tools.js"});
   return window.WebResearch;
 }
+
+test('只读来源隔离其他项目，合并后台来源且不修改原批次',()=>{
+  const tools=loadTools(),job={projectId:'p1',outputs:[{target:{section:'依据'},results:[{url:'https://example.com/a',authorityLevel:'A',title:'法律'}]}]};
+  const before=JSON.stringify(job);
+  const archive=tools.savedEvidenceArchive('p1',job,[{project_id:'p1',url:'https://example.com/b',authority_level:'B',excerpt:'摘要',bindings:[{section:'背景'}]},{project_id:'p2',url:'https://example.com/secret'},{url:'javascript:alert(1)'}]);
+  const entries=tools.highValueEntries(archive,['A','B']);
+  assert.equal(entries.length,2);
+  assert.equal(entries[1].row.snippet,'摘要');
+  entries[0].row.knowledgeDeposit={status:'submitted'};
+  assert.equal(JSON.stringify(job),before);
+  assert.equal(tools.savedEvidenceArchive('p2',job,[]).outputs.length,0);
+  assert.equal(tools.savedEvidenceArchive('p1',{projectId:'p1',outputs:[null]},[]).outputs.length,0);
+});
+
+test('来源使用页面词法作用域中的实际项目ID',async()=>{
+  const bodies=[];
+  const tools=loadTools(async(url,options)=>{bodies.push(JSON.parse(options.body));return {ok:true,json:async()=>({ok:true,evidence:[],refinements:{}})};},"let currentProjectId='actual-project'; let project={name:'测试项目'}; let projectWorkflow={};");
+  await tools.loadEvidence(true);
+  assert.equal(bodies.length,2);
+  assert.ok(bodies.every(body=>body.projectId==='actual-project'));
+});
 
 test("批量联网检索按章节和小节合并规则，忽略非网搜缺口",()=>{
   const tools=loadTools();

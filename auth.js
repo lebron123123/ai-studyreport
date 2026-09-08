@@ -86,6 +86,10 @@ function renderProjectReadOnly(sheet){
         text.textContent=s.editedHtml?new DOMParser().parseFromString(s.editedHtml,'text/html').body.textContent:s.content||'本节尚无已保存正文';body.append(title,text);}
     }
   };
+  const deliveryButton=document.createElement('button');deliveryButton.className='btn';deliveryButton.textContent='验收与运行保障';
+  deliveryButton.onclick=()=>globalThis.ReportDeliveryUI?.open();
+  document.getElementById('projectReadOnlyBody').before(deliveryButton);
+  const accessDescription=sheet.querySelector('section > p');if(accessDescription)accessDescription.textContent='查看者 · 只读。仅展示后台已保存的内容；被指定的独立复核人可进入验收与运行保障。';
   draw(data.chapters);
   document.getElementById('projectReadOnlyVersion').onchange=e=>{const v=versions[Number(e.target.value)];draw(e.target.value===''?data.chapters:v?.chapters||v?.snapshot?.chapters||[]);};
   document.getElementById('projectReadOnlyReload').onclick=async()=>{if(await openProject(currentProjectId))renderSheet();};
@@ -199,6 +203,15 @@ function newProject(){
 }
 async function openProjectsPanel(){
   if(window.ProjectManager)return window.ProjectManager.open({
+    userId:getUser()||'',
+    preserveDraft:async()=>{
+      if(!currentProjectId||!projectCanEdit())return true;
+      // Viewing stages does not itself create a save. Drain only already pending edits.
+      if(cloudTimer)return (await flushCloudSave())===true;
+      const settled=await cloudSaveInFlight.catch(()=>false);
+      if(typeof reportDocumentRevision!=='undefined'&&reportDocumentRevision>0&&reportDocumentRevision>reportCloudPersistedRevision)return (await flushCloudSave())===true;
+      return settled!==false||!(typeof reportHasUnsavedChanges==='function'&&reportHasUnsavedChanges());
+    },
     headers:authHeaders,currentId:()=>currentProjectId,genId:genProjectId,openProject,openAiReport:openAiReportProject,newProject,
     updateCurrentMeta:(meta,updatedAt)=>{currentProjectUpdatedAt=Number(updatedAt)||currentProjectUpdatedAt;projectWorkflow=window.ProjectWorkflow?ProjectWorkflow.ensureState(projectWorkflow):projectWorkflow;projectWorkflow.management=Object.assign(projectWorkflow.management||{},meta||{});saveDraft();}
   });
@@ -286,9 +299,14 @@ async function startApp(){
     }
   }
   const projectRoute=window.UiRouteState&&window.UiRouteState.projectRoute&&window.UiRouteState.projectRoute();
-  if(projectRoute&&projectRoute.projectId)setTimeout(()=>openProjectsPanel(),60);
+  if(projectRoute)setTimeout(()=>openProjectsPanel(),60);
 }
 function checkLogin(){
   if(getToken()){ startApp(); }
   else{ renderTOC(); renderSheet(); showLoginModal(); }
 }
+
+// Browser Back/Forward can reopen a workspace route after returning to AI/home.
+window.addEventListener?.("popstate",()=>{
+  if(window.UiRouteState?.projectRoute()&&!document.getElementById("projPanel")&&getToken())openProjectsPanel();
+});

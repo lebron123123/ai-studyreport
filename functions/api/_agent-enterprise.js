@@ -3,6 +3,7 @@ import { callConfiguredLlm,providerOrder,getProviderConfig } from "./_llm-provid
 import {reserveAgentCall,settleAgentCall,markAgentCallUnknown} from "./_agent-budget.js";
 import { withAgentJobLease,agentJobFetch } from "./_agent-job-fence.js";
 import { resolveProjectAccess } from "./_project-access.js";
+import {createSchemaInitializer} from './_schema-once.js';
 
 const DDL=[
   "CREATE TABLE IF NOT EXISTS agent_run_governance (run_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,parent_run_id TEXT DEFAULT '',root_run_id TEXT DEFAULT '',department TEXT DEFAULT '',security_level INTEGER NOT NULL DEFAULT 1,execution_mode TEXT NOT NULL DEFAULT 'client',budget_input_tokens INTEGER NOT NULL DEFAULT 0,budget_output_tokens INTEGER NOT NULL DEFAULT 0,budget_cost_micros BIGINT NOT NULL DEFAULT 0,input_tokens INTEGER NOT NULL DEFAULT 0,output_tokens INTEGER NOT NULL DEFAULT 0,cost_micros BIGINT NOT NULL DEFAULT 0,provider TEXT DEFAULT '',model TEXT DEFAULT '',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL)",
@@ -17,8 +18,7 @@ const DDL=[
   "CREATE TABLE IF NOT EXISTS agent_skill_releases (skill_id TEXT PRIMARY KEY,active_version INTEGER NOT NULL,previous_version INTEGER NOT NULL DEFAULT 0,published_by TEXT DEFAULT '',published_at BIGINT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS agent_project_access (user_id INTEGER NOT NULL,project_id TEXT NOT NULL,department TEXT DEFAULT '',permission TEXT NOT NULL DEFAULT 'read',max_security_level INTEGER NOT NULL DEFAULT 1,updated_at BIGINT NOT NULL,PRIMARY KEY(user_id,project_id))"
 ];
-const initialized=new WeakSet();
-export async function ensureAgentEnterprise(env){ if(initialized.has(env.DB))return; for(const sql of DDL)await env.DB.prepare(sql).run(); initialized.add(env.DB); }
+export const ensureAgentEnterprise = createSchemaInitializer(DDL);
 
 export function normalizeUsage(raw={}){
   return {inputTokens:Number(raw.prompt_tokens??raw.input_tokens)||0,outputTokens:Number(raw.completion_tokens??raw.output_tokens)||0};
@@ -125,6 +125,10 @@ export async function reauthorizeAgentJob(env,job){
   const payload=parseAgentJson(job.payload_json,{}), projectId=String(payload.projectId||"");
   const user=await env.DB.prepare("SELECT id,department,clearance FROM users WHERE id=?").bind(job.user_id).first();
   if(!user)return {ok:false,error:"任务所属用户已不存在"};
+  if(payload.evaluationSource){
+    try{const {approvedCaseSource}=await import('./_report-case-provenance.js');await approvedCaseSource(env,job.user_id,payload.evaluationSource.projectId,payload.evaluationSource.deliveryId);}
+    catch{return {ok:false,error:'评测来源的访问权限或独立审签已失效'};}
+  }
   const level=Math.max(1,Number(payload.securityLevel)||1);if(level>(Number(user.clearance)||1))return {ok:false,error:"任务密级已超过用户当前权限"};
   if(!projectId)return {ok:true};
   const access=await resolveProjectAccess(env,job.user_id,projectId);

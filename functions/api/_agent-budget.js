@@ -1,18 +1,17 @@
 // Durable per-call reservations. PostgreSQL row locks serialize a root and all children.
 // An unresolved call is never automatically sent again, even after worker takeover.
-const initialized = new WeakSet();
-export async function ensureAgentBudget(env) {
-  if (initialized.has(env.DB)) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agent_call_ledger (
+import {createSchemaInitializer} from './_schema-once.js';
+export const ensureAgentBudget = createSchemaInitializer([
+  `CREATE TABLE IF NOT EXISTS agent_call_ledger (
     id TEXT PRIMARY KEY,run_id TEXT NOT NULL,root_run_id TEXT NOT NULL,user_id INTEGER NOT NULL,
     status TEXT NOT NULL,provider TEXT NOT NULL,model TEXT NOT NULL,
     reserved_input BIGINT NOT NULL,reserved_output BIGINT NOT NULL,reserved_cost BIGINT NOT NULL,
     actual_input BIGINT,actual_output BIGINT,actual_cost BIGINT,
     rate_json TEXT NOT NULL,response_json TEXT NOT NULL DEFAULT '',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL
-  )`).run();
-  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_call_root ON agent_call_ledger(root_run_id,status)').run();
-  initialized.add(env.DB);
-}
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_agent_call_root ON agent_call_ledger(root_run_id,status)',
+  'CREATE TABLE IF NOT EXISTS agent_call_reconciliations(id TEXT PRIMARY KEY,actor_id INTEGER NOT NULL,evidence TEXT NOT NULL,input_tokens BIGINT NOT NULL,output_tokens BIGINT NOT NULL,cost_micros BIGINT NOT NULL,created_at BIGINT NOT NULL)'
+]);
 function integer(value) { return value !== null && value !== undefined && value !== '' && Number.isSafeInteger(Number(value)) && Number(value) >= 0 ? Number(value) : null; }
 export function agentPrice(env, provider, model) {
   let config; try { config = JSON.parse(env.LLM_COSTS_JSON || '{}'); } catch { return null; }
@@ -93,4 +92,25 @@ export async function settleAgentCall(env, id, result, usage, latencyMs=0) {
 }
 export async function markAgentCallUnknown(env,id) {
   await env.DB.prepare("UPDATE agent_call_ledger SET status='outcome_unknown',updated_at=? WHERE id=? AND status='reserved'").bind(Date.now(),id).run();
+}
+
+// Operator-confirmed billing only; never invents a response or requeues a paid call.
+export async function reconcileAgentCall(env,actorId,id,input){
+  await ensureAgentBudget(env);
+  const usage=agentUsage(input),cost=integer(input.costMicros),evidence=String(input.evidence||'').trim();
+  if(!usage||cost===null||evidence.length<10||evidence.length>2000)throw new Error('请提供供应商账单依据、实耗输入/输出Token及费用微单位');
+  return transaction(env,async scoped=>{
+    const initial=await scoped.DB.prepare('SELECT * FROM agent_call_ledger WHERE id=?').bind(id).first();if(!initial)throw new Error('调用不存在');
+    const {local,root}=await lockRoot(scoped,initial.run_id,initial.user_id);
+    const prior=await scoped.DB.prepare('SELECT * FROM agent_call_reconciliations WHERE id=?').bind(id).first();
+    if(prior){if(Number(prior.input_tokens)!==usage.input||Number(prior.output_tokens)!==usage.output||Number(prior.cost_micros)!==cost||prior.evidence!==evidence)throw new Error('已对账记录不可覆盖');return {id,reused:true};}
+    const row=await scoped.DB.prepare('SELECT * FROM agent_call_ledger WHERE id=?').bind(id).first();
+    if(!['usage_unknown','outcome_unknown','settled'].includes(row.status)||row.status==='settled'&&row.actual_cost!==null)throw new Error('该调用正在执行或已完整结算，不可手工覆盖');
+    const oldUsage=await scoped.DB.prepare('SELECT * FROM agent_run_usage WHERE id=?').bind(id).first(),now=Date.now();
+    await scoped.DB.prepare('INSERT INTO agent_call_reconciliations(id,actor_id,evidence,input_tokens,output_tokens,cost_micros,created_at) VALUES(?,?,?,?,?,?,?)').bind(id,actorId,evidence,usage.input,usage.output,cost,now).run();
+    await scoped.DB.prepare("UPDATE agent_call_ledger SET status='settled',actual_input=?,actual_output=?,actual_cost=?,updated_at=? WHERE id=?").bind(usage.input,usage.output,cost,now,id).run();
+    await scoped.DB.prepare('INSERT INTO agent_run_usage(id,run_id,user_id,provider,model,input_tokens,output_tokens,cost_micros,latency_ms,cached,created_at) VALUES(?,?,?,?,?,?,?,?,0,0,?) ON CONFLICT(id) DO UPDATE SET input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,cost_micros=excluded.cost_micros').bind(id,local.run_id,row.user_id,row.provider,row.model,usage.input,usage.output,cost,now).run();
+    for(const g of root.run_id===local.run_id?[root]:[root,local])await scoped.DB.prepare('UPDATE agent_run_governance SET input_tokens=input_tokens+?,output_tokens=output_tokens+?,cost_micros=cost_micros+?,updated_at=? WHERE run_id=?').bind(usage.input-Number(oldUsage?.input_tokens||0),usage.output-Number(oldUsage?.output_tokens||0),cost-Number(oldUsage?.cost_micros||0),now,g.run_id).run();
+    return {id,reused:false,responseRecovered:!!row.response_json};
+  });
 }

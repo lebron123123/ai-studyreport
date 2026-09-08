@@ -224,6 +224,26 @@ function htmlToBlocks(htmlStr){
   return blocks;
 }
 
+function exportProvenance(active){
+  const rows=[["章节","小节","核验状态","来源与版本"]];
+  const refs=(items)=>Array.isArray(items)?items.map(item=>{
+    if(!item||typeof item!=="object")return String(item||"");
+    const parts=[item.title||item.label||item.id||"未命名来源",item.url||item.sourceUrl||item.sourceRef,
+      item.version!=null?"版本 "+item.version:null,item.locator||item.page||item.chunkId,
+      item.lifecycle&&item.lifecycle!=="valid"?"效力待核："+(item.lifecycleNote||item.lifecycle):null];
+    return parts.filter(Boolean).join(" · ");
+  }).filter(Boolean).join("；"):"";
+  active.forEach(c=>(c.sections||[]).forEach(s=>{
+    if(!String(s.content||s.editedHtml||"").trim())return;
+    const p=s.prov||{},parts=[];
+    const profile=window.ReportTrust?.buildSectionProfile(s);
+    if(p.hasCalcData)parts.push("测算上下文（正文数字仍需勾稽）"+(p.calcSnapshotId?"："+p.calcSnapshotId:"")+(p.calcVersion!=null?" · 版本 "+p.calcVersion:"")+(p.calcEngineVersion?" · 引擎 "+p.calcEngineVersion:""));
+    [["Excel单元格",p.excelSources],["资料库",p.kbDocs],["RAG检索候选",p.rag],["联网来源",p.webEvidence||p.web],["参考范例（非事实证明）",p.examples]].forEach(([label,items])=>{const value=refs(items);if(value)parts.push(label+"："+value);});
+    rows.push(["第"+c.cn+"章 "+c.name,s.title||s.t,profile?.grade||"待核验",parts.join("；")||"尚未绑定可追溯来源，须人工补证核验"]);
+  }));
+  return rows.length>1?{rows,note:"本表记录生成时可追溯的来源、版本和核验状态。检索命中或提供测算上下文不代表正文逐句、逐数已核验；不按素材种类计算准确率。未标注版本、页码或效力的来源仍须人工核对，参考范例不可替代项目事实。"}:null;
+}
+
 function buildExportPayload(){
   const active = chapters.filter(c=>c.checked);
   const secEls = document.querySelectorAll("#sheet .section-block");
@@ -249,32 +269,12 @@ function buildExportPayload(){
     }).filter(Boolean)
   })).filter(c=>c.sections.length);
 
-  // 溯源清单：逐节记录生成依据与置信度，作为附录随报告一并交付（满足可追溯审计要求）
-  const provRows = [["章节", "小节", "置信度", "主要依据"]];
-  let provCount = 0;
-  active.forEach(c=>{
-    c.sections.forEach(s=>{
-      if(!s.prov || !s.prov.confidence) return;
-      provCount++;
-      const cf = s.prov.confidence;
-      const parts = [];
-      if(s.prov.hasCalcData) parts.push("内置公式测算数据");
-      if((s.prov.excelSources||[]).length) parts.push("Excel单元格：" + s.prov.excelSources.map(x=>x.label).join("、"));
-      if((s.prov.kbDocs||[]).length) parts.push("资料库：" + s.prov.kbDocs.map(d=>d.title).join("、"));
-      if((s.prov.rag||[]).length) parts.push("知识库：" + s.prov.rag.map(r=>r.title+"("+r.tier+r.score+")"
-        + (r.lifecycle && r.lifecycle!=="valid" ? "⚠"+(r.lifecycleNote||"") : "")).join("；"));
-      if((s.prov.examples||[]).length) parts.push("范例：" + s.prov.examples.map(e=>e.title).join("、"));
-      if(!parts.length) parts.push("项目信息与模型通用知识");
-      provRows.push(["第"+c.cn+"章 "+c.name, s.title||s.t, cf.label+"("+Math.round(cf.score*100)+"分)", parts.join("；")]);
-    });
-  });
-  const provenance = provCount ? { rows: provRows,
-    note: "本表记录报告各小节的生成依据与置信度评级，供复核与审计追溯。置信度按素材构成计算：引用内置公式测算数据者最高，有高匹配知识库依据者次之，仅凭项目信息生成者最低。标注⚠的资料存在时效问题，须人工核实后方可作为依据。" } : null;
+  const provenance=exportProvenance(active);
 
   let appendix = null;
   if(calcResult){
     const r = calcResult, s = r.summary;
-    const fmt = x=> x===null? "—" : Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
+    const fmt = x=> x==null||x===""||!Number.isFinite(Number(x))? "—" : Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
     const mainRows = [["年份","租金收入","总成本","税金","净利润","净现金流","累计净现金流"]];
     r.allYears.forEach(y=> mainRows.push([y, fmt(r.income[y].rent), fmt(r.cost[y].total), fmt(r.tax[y].total), fmt(r.profit[y].netProfit), fmt(r.cf[y].net), fmt(r.cf[y].cumNet)]));
     let sensRows = null;
@@ -291,7 +291,10 @@ function buildExportPayload(){
   const tableAppendix=type&&window.ReportTableTemplates
     ?window.ReportTableTemplates.appendix(type).map(t=>window.ReportTableTemplates.exportTemplate(t.id,type))
     :[];
-  return { project: project, signed: signed, docNo: getDocNo(), chapters: chs, appendix, tableAppendix, provenance };
+  const workflow=typeof projectWorkflow!=="undefined"?projectWorkflow:null;
+  const current=workflow?.reportVersions?.find(v=>v.id===workflow.currentReportVersionId);
+  const versionNote=[current?"关联报告版本 V"+current.version:null,typeof reportDocumentRevision!=="undefined"?"工作稿修订 "+reportDocumentRevision:null].filter(Boolean).join(" · ");
+  return { project: project, signed: signed, docNo: getDocNo(), chapters: chs, appendix, tableAppendix, provenance, versionNote };
 }
 
 /* ===== 图表转PNG(嵌入Word用) ===== */

@@ -2,10 +2,23 @@
 // 投稿提交后不可原地修改；退回后只能复制形成新提交，避免审核对象被静默替换。
 import { verifyAuth, json } from "./_auth.js";
 import { adaptEnv } from "./_adapters.js";
+import { publishContribution } from './_contribution-publish.js';
 import { mergeRuleRevisionData, evaluateRuleRevisionData } from "./reportlogic.js";
 
 const KINDS = ["material","wiki","rule","example","correction","report_logic"];
 const STATUSES = ["pending","needs_changes","approved","rejected"];
+const REVIEW_CLASSES={policy:["material","policy","政策原文"],interpretation:["material","policy","政策解读"],standard:["material","rule","标准规范"],data:["material","other","统计数据"],material:["material","other","其他资料"],experience:["wiki","case","经验沉淀"]};
+export function suggestContribution(row){
+  const meta=typeof row.meta==='object'?row.meta:safeJson(row.meta,{}),title=String(row.title||''),format=/\.pdf(?:$|[?#])/i.test(row.file_name||row.source_ref||'')?'PDF':'文本/网页';
+  if(!['wiki','material'].includes(row.kind))return {category:'original',format,reason:'规则、范例与逻辑修订保留专用审核，不参与资料批量通过'};
+  let category='material',reason='未识别出明确类型，请核对';
+  if(/解读|问答|答记者问|图解/.test(title)){category='interpretation';reason='标题含解读或问答标记';}
+  else if(/规范|标准|规程|GB\s?\d/i.test(title)){category='standard';reason='标题含规范或标准标记';}
+  else if(/办法|条例|通知|意见|细则|法律|民法典|制度/.test(title)){category='policy';reason='标题含政策制度标记，不代表效力已核实';}
+  else if(/统计|GDP|人口|数据|指标/i.test(title)){category='data';reason='标题含数据指标标记';}
+  else if(row.kind==='wiki'&&!/web|search/i.test(meta.sourceChannel||'')){category='experience';reason='原投稿为经验知识，未标记联网原始资料';}
+  return {category,format,reason,method:'规则辅助分类；非真实性或效力审核'};
+}
 let schemaReady = false;
 
 function isAdmin(env,user){
@@ -91,7 +104,7 @@ export async function onRequestPost(context){
     if(!isAdmin(env,user)||!passOk(env,request))return json({ok:false,error:"仅管理员可查看审核队列"},403);
     const status=STATUSES.includes(body.status)?body.status:"pending";
     const rows=await env.DB.prepare("SELECT * FROM knowledge_contributions WHERE status=? ORDER BY created_at ASC LIMIT 300").bind(status).all();
-    return json({ok:true,items:(rows.results||[]).map(out)});
+    return json({ok:true,items:(rows.results||[]).map(r=>({...out(r),suggestion:suggestContribution(r)}))});
   }
   if(action==="submit"){
     const p=body.item||{},kind=KINDS.includes(p.kind)?p.kind:"correction",title=clean(p.title,120),content=clean(p.content,200000),sourceRef=clean(p.source_ref,500),fileName=clean(p.file_name,180),parentId=clean(p.parent_id,50),itemMeta=p.meta&&typeof p.meta==="object"?p.meta:{},scope=normalizeRegionScope(p.region,itemMeta),idempotencyKey=clean(itemMeta.idempotencyKey,120);
@@ -105,11 +118,44 @@ export async function onRequestPost(context){
       .bind(id,kind,title,content,sourceRef,fileName,scope.region,clean(p.project_type,40),meta,parentId,user.userId,user.username,now).run();
     return json({ok:true,id,status:"pending",message:"已提交管理员审核；审核前不会进入正式知识库"});
   }
+  if(action==='approvePublish'){
+    if(!isAdmin(env,user)||!passOk(env,request))return json({ok:false,error:'仅管理员可审核发布'},403);
+    const id=clean(body.id,50),row=await env.DB.prepare('SELECT * FROM knowledge_contributions WHERE id=?').bind(id).first();
+    if(!row)return json({ok:false,error:'投稿不存在'},404);
+    if(!['wiki','material'].includes(row.kind))return json({ok:false,error:'此类型须走专用审核'},400);
+    if(!['pending','approved'].includes(row.status))return json({ok:false,error:'请先重新提交审核，当前状态不能发布'},400);
+    if(row.status==='pending'){
+      if(!REVIEW_CLASSES[body.classification])return json({ok:false,error:'请先确认分类'},400);
+      const reviewed=await onRequestPost({env,request:new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({...body,action:'review',decision:'approve'})})});
+      if(!reviewed.ok)return reviewed;
+    }
+    try{const publication=await publishContribution(env,id,user);return json({ok:true,publication,message:'已审核发布，索引已建立，可参与检索'});}
+    catch(e){console.error('[contribution publication]',id,e.message);return json({ok:false,status:'approved',error:'尚未发布；已通过的资料保留，可重试发布。'+(e.message.startsWith('[SQL]')?'索引保存失败，请检查服务日志':e.message)},503);}
+  }
   if(action==="review"){
     if(!isAdmin(env,user)||!passOk(env,request))return json({ok:false,error:"仅管理员可审核"},403);
     const id=clean(body.id,50),decision=clean(body.decision,20),note=clean(body.note,1200),row=await env.DB.prepare("SELECT * FROM knowledge_contributions WHERE id=?").bind(id).first();
     if(!row)return json({ok:false,error:"提交不存在"},404);
     if(row.status!=="pending")return json({ok:false,error:"该提交已处理，不能重复审核"},409);
+    if(decision==='approve' && body.classification){
+      const chosen=REVIEW_CLASSES[body.classification];
+      if(!chosen||!['material','wiki'].includes(row.kind))return json({ok:false,error:'此类型不能进入资料批量分流'},400);
+      if(!env.DB._transaction)return json({ok:false,error:'分类审核需要事务数据库，请部署本地/服务器PostgreSQL服务'},503);
+      try{
+        const target=await env.DB._transaction(async DB=>{
+          const current=await DB.prepare('SELECT * FROM knowledge_contributions WHERE id=? FOR UPDATE').bind(id).first();
+          if(!current||current.status!=='pending')throw new Error('该投稿已处理，请刷新审核队列');
+          if(!current.content?.trim()||!current.source_ref?.trim())throw new Error('缺少正文或来源，请退回补充');
+          const original=safeJson(current.meta,{}),meta={...original,documentType:chosen[1],category:chosen[2],wikiKind:'case',reviewClassification:{category:body.classification,originalKind:current.kind,format:suggestContribution(current).format,reviewedBy:user.username,reviewedAt:Date.now(),method:'管理员确认分类'}};
+          meta.note=clean((original.note||'')+'；审核分类：'+chosen[2]+'；来源格式：'+meta.reviewClassification.format+'；尚未发布到RAG',1000);
+          const target=await routeApproved({...env,DB},{...current,kind:chosen[0],meta:JSON.stringify(meta)},user);
+          await DB.prepare('UPDATE knowledge_contributions SET status=?,review_note=?,target_module=?,target_ref=?,reviewed_at=?,reviewed_by=? WHERE id=?').bind('approved',note,target.module,target.ref,Date.now(),user.username,id).run();
+          await DB.prepare('UPDATE knowledge_contributions SET meta=? WHERE id=?').bind(JSON.stringify(meta),id).run();
+          return target;
+        });
+        return json({ok:true,status:'approved',target,message:'审核通过，已按确认分类分流；尚未发布到RAG'});
+      }catch(e){return json({ok:false,error:'分类审核未完成：'+e.message},409);}
+    }
     if(decision==="return"&&!note)return json({ok:false,error:"退回时请填写修改意见"},400);
     let status,target={module:"",ref:""};
     if(decision==="approve"){try{target=await routeApproved(env,row,user);status="approved";}catch(e){return json({ok:false,error:"分流到正式模块失败："+e.message},500);}}

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { onRequestPost } from "../functions/api/contributions.js";
+import { onRequestPost, suggestContribution } from "../functions/api/contributions.js";
 import { signToken } from "../functions/api/_auth.js";
 
 function dbMock(seed={}){
@@ -54,6 +54,33 @@ test("同一联网证据重复提交时复用已有审核记录并返回所处�
 test("普通用户不能读取后台审核队列",async()=>{
   const DB=dbMock(),env={SESSION_SECRET:"s2",ADMIN_USERS:"admin",ADMIN_PASS:"pass",DEPLOY_MODE:"local",DB};
   const r=await call(env,"user",{action:"listReview",status:"pending"});assert.equal(r.status,403);
+});
+test('一键发布保留管理员及密码边界，拒绝缺失分类',async()=>{
+ const DB=dbMock({items:[{id:'p',kind:'material',status:'pending'}]}),env={SESSION_SECRET:'publish-test',ADMIN_USERS:'admin',ADMIN_PASS:'pass',DEPLOY_MODE:'local',DB};
+ assert.equal((await call(env,'user',{action:'approvePublish',id:'p',classification:'policy'})).status,403);
+ assert.equal((await call(env,'admin',{action:'approvePublish',id:'p',classification:'policy'})).status,403);
+ assert.equal((await call(env,'admin',{action:'approvePublish',id:'p'},true)).status,400);
+ assert.equal(DB.state.items[0].status,'pending');
+});
+
+test('辅助分类区分内容与PDF格式，不将联网来源默认沉淀成经验',()=>{
+ assert.equal(suggestContribution({kind:'wiki',title:'办法政策解读',source_ref:'https://a.cn/a.pdf'}).category,'interpretation');
+ assert.equal(suggestContribution({kind:'material',title:'条例',source_ref:'https://a.cn/a.pdf'}).format,'PDF');
+ assert.equal(suggestContribution({kind:'wiki',title:'未知材料',meta:{sourceChannel:'web_research'}}).category,'material');
+ assert.equal(suggestContribution({kind:'report_logic',title:'办法'}).category,'original');
+});
+test('分类审核权限、非法分类和事务前置检查',async()=>{
+ const row={id:'class1',kind:'wiki',title:'政策',content:'正文',source_ref:'官方来源',meta:'{}',status:'pending'};
+ const DB=dbMock({items:[row]}),env={DB,SESSION_SECRET:'class',ADMIN_USERS:'admin',ADMIN_PASS:'pass'};
+ assert.equal((await call(env,'user',{action:'review',id:'class1',decision:'approve',classification:'policy'})).status,403);
+ assert.equal((await call(env,'admin',{action:'review',id:'class1',decision:'approve',classification:'wrong'},true)).status,400);
+ assert.equal((await call(env,'admin',{action:'review',id:'class1',decision:'approve',classification:'policy'},true)).status,503);
+ assert.equal(DB.state.wiki.length,0);
+ DB._transaction=async work=>work(DB);
+ const ok=await call(env,'admin',{action:'review',id:'class1',decision:'approve',classification:'policy'},true);
+ assert.equal(ok.status,200);assert.match(ok.data.target.module,/资料台账/);assert.equal(DB.state.wiki.length,0);
+ assert.ok(DB.state.calls.some(c=>c.sql.startsWith('INSERT INTO source_assets')&&c.args[2]==='policy'&&c.args[3]==='政策原文'));
+ assert.equal((await call(env,'admin',{action:'review',id:'class1',decision:'approve',classification:'policy'},true)).status,409);
 });
 
 test("管理员通过 Wiki 投稿后只生成待发布草稿",async()=>{
