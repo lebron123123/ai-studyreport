@@ -1,0 +1,4216 @@
+{
+  "commit": "4d1c23bdb2476cc2ab099b775bc1133b594ce699",
+  "sourceSha256": "b3bf8e96f624018729241dc4a68b51a73215d05a90feab12dca9bab2c3feb207",
+  "toleranceWan": 0.00010001,
+  "cases": [
+    {
+      "name": "legacy-full",
+      "params": {
+        "buildStart": 2025,
+        "buildYears": 1,
+        "operateYears": 12,
+        "firstMonths": 12,
+        "area": 20000,
+        "rent": 75,
+        "rentSpan": 3,
+        "rentRate": 5,
+        "rampOcc": 0.85,
+        "stableOcc": 0.95,
+        "collect": 25,
+        "deco": 1500,
+        "decoInt": 10,
+        "decoRatio": 0.3,
+        "units": 500,
+        "unitCost": 800,
+        "startup": 50,
+        "loan": 13892,
+        "interestBase": 10600,
+        "rateDiscount": 0.8,
+        "loanRate": 3.5,
+        "repay": 1157.67,
+        "discount": 6,
+        "mode": "lease"
+      },
+      "expected": {
+        "income": {
+          "2025": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2026": {
+            "rent": 1530.0,
+            "rentAfterTax": 1403.6697
+          },
+          "2027": {
+            "rent": 1710.0,
+            "rentAfterTax": 1568.8073
+          },
+          "2028": {
+            "rent": 1710.0,
+            "rentAfterTax": 1568.8073
+          },
+          "2029": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2030": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2031": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2032": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2033": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2034": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2035": {
+            "rent": 1979.5387,
+            "rentAfterTax": 1816.0906
+          },
+          "2036": {
+            "rent": 1979.5387,
+            "rentAfterTax": 1816.0906
+          },
+          "2037": {
+            "rent": 1979.5387,
+            "rentAfterTax": 1816.0906
+          }
+        },
+        "cost": {
+          "2025": {
+            "collect": 0.0,
+            "collectAT": 0.0,
+            "eng": 0.0,
+            "engAT": 0.0,
+            "op": 0.0,
+            "opAT": 0.0,
+            "fin": 148.4,
+            "finAT": 140.0,
+            "total": 148.4,
+            "totalAT": 140.0,
+            "finBuild": 148.4,
+            "finOperate": 0.0
+          },
+          "2026": {
+            "collect": 510.0,
+            "collectAT": 467.8899,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 530.0,
+            "opAT": 500.0,
+            "fin": 296.8,
+            "finAT": 280.0,
+            "total": 1661.8,
+            "totalAT": 1546.055,
+            "finBuild": 0.0,
+            "finOperate": 296.8
+          },
+          "2027": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 296.8,
+            "finAT": 280.0,
+            "total": 1671.8,
+            "totalAT": 1553.9311,
+            "finBuild": 0.0,
+            "finOperate": 296.8
+          },
+          "2028": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 272.0666,
+            "finAT": 256.6666,
+            "total": 1647.0666,
+            "totalAT": 1530.5977,
+            "finBuild": 0.0,
+            "finOperate": 272.0666
+          },
+          "2029": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 247.3332,
+            "finAT": 233.3332,
+            "total": 1622.3332,
+            "totalAT": 1507.2643,
+            "finBuild": 0.0,
+            "finOperate": 247.3332
+          },
+          "2030": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 222.5998,
+            "finAT": 209.9998,
+            "total": 1597.5998,
+            "totalAT": 1483.9309,
+            "finBuild": 0.0,
+            "finOperate": 222.5998
+          },
+          "2031": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 197.8664,
+            "finAT": 186.6664,
+            "total": 1572.8664,
+            "totalAT": 1460.5975,
+            "finBuild": 0.0,
+            "finOperate": 197.8664
+          },
+          "2032": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 173.133,
+            "finAT": 163.333,
+            "total": 1548.133,
+            "totalAT": 1437.2641,
+            "finBuild": 0.0,
+            "finOperate": 173.133
+          },
+          "2033": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 148.3996,
+            "finAT": 139.9996,
+            "total": 1523.3996,
+            "totalAT": 1413.9307,
+            "finBuild": 0.0,
+            "finOperate": 148.3996
+          },
+          "2034": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 123.6662,
+            "finAT": 116.6662,
+            "total": 1498.6662,
+            "totalAT": 1390.5973,
+            "finBuild": 0.0,
+            "finOperate": 123.6662
+          },
+          "2035": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 98.9328,
+            "finAT": 93.3328,
+            "total": 1473.9328,
+            "totalAT": 1367.2639,
+            "finBuild": 0.0,
+            "finOperate": 98.9328
+          },
+          "2036": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 74.1994,
+            "finAT": 69.9994,
+            "total": 1449.1994,
+            "totalAT": 1343.9305,
+            "finBuild": 0.0,
+            "finOperate": 74.1994
+          },
+          "2037": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 49.466,
+            "finAT": 46.666,
+            "total": 1424.466,
+            "totalAT": 1320.5971,
+            "finBuild": 0.0,
+            "finOperate": 49.466
+          }
+        },
+        "tax": {
+          "2025": {
+            "output": 0.0,
+            "input": 0.0,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2026": {
+            "output": 126.3303,
+            "input": 73.6349,
+            "vat": 52.6954,
+            "surcharge": 6.3234,
+            "stamp": 0.9,
+            "total": 59.9189
+          },
+          "2027": {
+            "output": 141.1927,
+            "input": 70.8047,
+            "vat": 70.388,
+            "surcharge": 8.4466,
+            "stamp": 0.0,
+            "total": 78.8345
+          },
+          "2028": {
+            "output": 141.1927,
+            "input": 69.4047,
+            "vat": 71.788,
+            "surcharge": 8.6146,
+            "stamp": 0.0,
+            "total": 80.4025
+          },
+          "2029": {
+            "output": 148.2523,
+            "input": 68.0047,
+            "vat": 80.2476,
+            "surcharge": 9.6297,
+            "stamp": 0.0,
+            "total": 89.8773
+          },
+          "2030": {
+            "output": 148.2523,
+            "input": 66.6047,
+            "vat": 81.6476,
+            "surcharge": 9.7977,
+            "stamp": 0.0,
+            "total": 91.4453
+          },
+          "2031": {
+            "output": 148.2523,
+            "input": 65.2047,
+            "vat": 83.0476,
+            "surcharge": 9.9657,
+            "stamp": 0.0,
+            "total": 93.0134
+          },
+          "2032": {
+            "output": 155.6649,
+            "input": 63.8047,
+            "vat": 91.8603,
+            "surcharge": 11.0232,
+            "stamp": 0.0,
+            "total": 102.8835
+          },
+          "2033": {
+            "output": 155.6649,
+            "input": 62.4047,
+            "vat": 93.2603,
+            "surcharge": 11.1912,
+            "stamp": 0.0,
+            "total": 104.4515
+          },
+          "2034": {
+            "output": 155.6649,
+            "input": 61.0046,
+            "vat": 94.6603,
+            "surcharge": 11.3592,
+            "stamp": 0.0,
+            "total": 106.0195
+          },
+          "2035": {
+            "output": 163.4481,
+            "input": 59.6046,
+            "vat": 103.8435,
+            "surcharge": 12.4612,
+            "stamp": 0.0,
+            "total": 116.3047
+          },
+          "2036": {
+            "output": 163.4481,
+            "input": 58.2046,
+            "vat": 105.2435,
+            "surcharge": 12.6292,
+            "stamp": 0.0,
+            "total": 117.8727
+          },
+          "2037": {
+            "output": 163.4481,
+            "input": 56.8046,
+            "vat": 106.6435,
+            "surcharge": 12.7972,
+            "stamp": 0.0,
+            "total": 119.4407
+          }
+        },
+        "profit": {
+          "2025": {
+            "incomeAT": 0.0,
+            "costAT": 140.0,
+            "pretax": -140.0,
+            "tax": 0.0,
+            "totalProfit": -140.0,
+            "makeup": 0.0,
+            "taxable": -140.0,
+            "incomeTax": 0.0,
+            "netProfit": -140.0
+          },
+          "2026": {
+            "incomeAT": 1403.6697,
+            "costAT": 1546.055,
+            "pretax": -142.3853,
+            "tax": 59.9189,
+            "totalProfit": -202.3042,
+            "makeup": 0.0,
+            "taxable": -202.3042,
+            "incomeTax": 0.0,
+            "netProfit": -202.3042
+          },
+          "2027": {
+            "incomeAT": 1568.8073,
+            "costAT": 1553.9311,
+            "pretax": 14.8762,
+            "tax": 78.8345,
+            "totalProfit": -63.9583,
+            "makeup": 0.0,
+            "taxable": -63.9583,
+            "incomeTax": 0.0,
+            "netProfit": -63.9583
+          },
+          "2028": {
+            "incomeAT": 1568.8073,
+            "costAT": 1530.5977,
+            "pretax": 38.2096,
+            "tax": 80.4025,
+            "totalProfit": -42.1929,
+            "makeup": 0.0,
+            "taxable": -42.1929,
+            "incomeTax": 0.0,
+            "netProfit": -42.1929
+          },
+          "2029": {
+            "incomeAT": 1647.2477,
+            "costAT": 1507.2643,
+            "pretax": 139.9834,
+            "tax": 89.8773,
+            "totalProfit": 50.1061,
+            "makeup": -448.4554,
+            "taxable": -398.3493,
+            "incomeTax": 0.0,
+            "netProfit": 50.1061
+          },
+          "2030": {
+            "incomeAT": 1647.2477,
+            "costAT": 1483.9309,
+            "pretax": 163.3168,
+            "tax": 91.4453,
+            "totalProfit": 71.8715,
+            "makeup": -398.3493,
+            "taxable": -326.4778,
+            "incomeTax": 0.0,
+            "netProfit": 71.8715
+          },
+          "2031": {
+            "incomeAT": 1647.2477,
+            "costAT": 1460.5975,
+            "pretax": 186.6502,
+            "tax": 93.0134,
+            "totalProfit": 93.6368,
+            "makeup": -326.4778,
+            "taxable": -232.841,
+            "incomeTax": 0.0,
+            "netProfit": 93.6368
+          },
+          "2032": {
+            "incomeAT": 1729.6101,
+            "costAT": 1437.2641,
+            "pretax": 292.346,
+            "tax": 102.8835,
+            "totalProfit": 189.4625,
+            "makeup": -232.841,
+            "taxable": -43.3785,
+            "incomeTax": 0.0,
+            "netProfit": 189.4625
+          },
+          "2033": {
+            "incomeAT": 1729.6101,
+            "costAT": 1413.9307,
+            "pretax": 315.6794,
+            "tax": 104.4515,
+            "totalProfit": 211.2279,
+            "makeup": -43.3785,
+            "taxable": 167.8494,
+            "incomeTax": 41.9624,
+            "netProfit": 169.2655
+          },
+          "2034": {
+            "incomeAT": 1729.6101,
+            "costAT": 1390.5973,
+            "pretax": 339.0128,
+            "tax": 106.0195,
+            "totalProfit": 232.9933,
+            "makeup": 0.0,
+            "taxable": 232.9933,
+            "incomeTax": 58.2483,
+            "netProfit": 174.745
+          },
+          "2035": {
+            "incomeAT": 1816.0906,
+            "costAT": 1367.2639,
+            "pretax": 448.8267,
+            "tax": 116.3047,
+            "totalProfit": 332.522,
+            "makeup": 0.0,
+            "taxable": 332.522,
+            "incomeTax": 83.1305,
+            "netProfit": 249.3915
+          },
+          "2036": {
+            "incomeAT": 1816.0906,
+            "costAT": 1343.9305,
+            "pretax": 472.1601,
+            "tax": 117.8727,
+            "totalProfit": 354.2874,
+            "makeup": 0.0,
+            "taxable": 354.2874,
+            "incomeTax": 88.5718,
+            "netProfit": 265.7156
+          },
+          "2037": {
+            "incomeAT": 1816.0906,
+            "costAT": 1320.5971,
+            "pretax": 495.4935,
+            "tax": 119.4407,
+            "totalProfit": 376.0528,
+            "makeup": 0.0,
+            "taxable": 376.0528,
+            "incomeTax": 94.0132,
+            "netProfit": 282.0396
+          }
+        },
+        "cf": {
+          "2025": {
+            "inflow": 0.0,
+            "outflow": 148.4,
+            "net": -148.4,
+            "cumNet": -148.4,
+            "npv": -144.1388,
+            "cumNpv": -144.1388
+          },
+          "2026": {
+            "inflow": 1530.0,
+            "outflow": 1721.7189,
+            "net": -191.7189,
+            "cumNet": -340.1189,
+            "npv": -175.6735,
+            "cumNpv": -319.8123
+          },
+          "2027": {
+            "inflow": 1710.0,
+            "outflow": 1750.6345,
+            "net": -40.6345,
+            "cumNet": -380.7534,
+            "npv": -35.1261,
+            "cumNpv": -354.9384
+          },
+          "2028": {
+            "inflow": 1710.0,
+            "outflow": 1727.4691,
+            "net": -17.4691,
+            "cumNet": -398.2225,
+            "npv": -14.2462,
+            "cumNpv": -369.1846
+          },
+          "2029": {
+            "inflow": 1795.5,
+            "outflow": 1712.2105,
+            "net": 83.2895,
+            "cumNet": -314.933,
+            "npv": 64.0787,
+            "cumNpv": -305.1059
+          },
+          "2030": {
+            "inflow": 1795.5,
+            "outflow": 1689.0451,
+            "net": 106.4549,
+            "cumNet": -208.4781,
+            "npv": 77.2651,
+            "cumNpv": -227.8408
+          },
+          "2031": {
+            "inflow": 1795.5,
+            "outflow": 1665.8798,
+            "net": 129.6202,
+            "cumNet": -78.8579,
+            "npv": 88.7533,
+            "cumNpv": -139.0875
+          },
+          "2032": {
+            "inflow": 1885.275,
+            "outflow": 1651.0165,
+            "net": 234.2585,
+            "cumNet": 155.4006,
+            "npv": 151.3218,
+            "cumNpv": 12.2343
+          },
+          "2033": {
+            "inflow": 1885.275,
+            "outflow": 1669.8135,
+            "net": 215.4615,
+            "cumNet": 370.8621,
+            "npv": 131.3015,
+            "cumNpv": 143.5358
+          },
+          "2034": {
+            "inflow": 1885.275,
+            "outflow": 1662.934,
+            "net": 222.341,
+            "cumNet": 593.2031,
+            "npv": 127.8244,
+            "cumNpv": 271.3602
+          },
+          "2035": {
+            "inflow": 1979.5387,
+            "outflow": 1673.368,
+            "net": 306.1707,
+            "cumNet": 899.3738,
+            "npv": 166.055,
+            "cumNpv": 437.4152
+          },
+          "2036": {
+            "inflow": 1979.5387,
+            "outflow": 1655.6439,
+            "net": 323.8948,
+            "cumNet": 1223.2686,
+            "npv": 165.7244,
+            "cumNpv": 603.1396
+          },
+          "2037": {
+            "inflow": 1979.5387,
+            "outflow": 1637.9199,
+            "net": 341.6188,
+            "cumNet": 1564.8874,
+            "npv": 164.8992,
+            "cumNpv": 768.0388
+          }
+        },
+        "loan": {
+          "2025": {
+            "begin": 0.0,
+            "borrow": 13892.0,
+            "interest": 148.4,
+            "repay": 0.0,
+            "payTotal": 148.4,
+            "end": 13892.0
+          },
+          "2026": {
+            "begin": 13892.0,
+            "borrow": 0.0,
+            "interest": 296.8,
+            "repay": 0.0,
+            "payTotal": 296.8,
+            "end": 13892.0
+          },
+          "2027": {
+            "begin": 13892.0,
+            "borrow": 0.0,
+            "interest": 296.8,
+            "repay": 1157.67,
+            "payTotal": 1454.47,
+            "end": 12734.33
+          },
+          "2028": {
+            "begin": 12734.33,
+            "borrow": 0.0,
+            "interest": 272.0666,
+            "repay": 1157.67,
+            "payTotal": 1429.7366,
+            "end": 11576.66
+          },
+          "2029": {
+            "begin": 11576.66,
+            "borrow": 0.0,
+            "interest": 247.3332,
+            "repay": 1157.67,
+            "payTotal": 1405.0032,
+            "end": 10418.99
+          },
+          "2030": {
+            "begin": 10418.99,
+            "borrow": 0.0,
+            "interest": 222.5998,
+            "repay": 1157.67,
+            "payTotal": 1380.2698,
+            "end": 9261.32
+          },
+          "2031": {
+            "begin": 9261.32,
+            "borrow": 0.0,
+            "interest": 197.8664,
+            "repay": 1157.67,
+            "payTotal": 1355.5364,
+            "end": 8103.65
+          },
+          "2032": {
+            "begin": 8103.65,
+            "borrow": 0.0,
+            "interest": 173.133,
+            "repay": 1157.67,
+            "payTotal": 1330.803,
+            "end": 6945.98
+          },
+          "2033": {
+            "begin": 6945.98,
+            "borrow": 0.0,
+            "interest": 148.3996,
+            "repay": 1157.67,
+            "payTotal": 1306.0696,
+            "end": 5788.31
+          },
+          "2034": {
+            "begin": 5788.31,
+            "borrow": 0.0,
+            "interest": 123.6662,
+            "repay": 1157.67,
+            "payTotal": 1281.3362,
+            "end": 4630.64
+          },
+          "2035": {
+            "begin": 4630.64,
+            "borrow": 0.0,
+            "interest": 98.9328,
+            "repay": 1157.67,
+            "payTotal": 1256.6028,
+            "end": 3472.97
+          },
+          "2036": {
+            "begin": 3472.97,
+            "borrow": 0.0,
+            "interest": 74.1994,
+            "repay": 1157.67,
+            "payTotal": 1231.8694,
+            "end": 2315.3
+          },
+          "2037": {
+            "begin": 2315.3,
+            "borrow": 0.0,
+            "interest": 49.466,
+            "repay": 1157.67,
+            "payTotal": 1207.136,
+            "end": 1157.63
+          }
+        }
+      },
+      "checks": 533,
+      "differences": []
+    },
+    {
+      "name": "partial-132-months",
+      "params": {
+        "buildStart": 2025,
+        "buildYears": 1,
+        "operateYears": 12,
+        "firstMonths": 12,
+        "area": 20000,
+        "rent": 75,
+        "rentSpan": 3,
+        "rentRate": 5,
+        "rampOcc": 0.85,
+        "stableOcc": 0.95,
+        "collect": 25,
+        "deco": 1500,
+        "decoInt": 10,
+        "decoRatio": 0.3,
+        "units": 500,
+        "unitCost": 800,
+        "startup": 50,
+        "loan": 13892,
+        "interestBase": 10600,
+        "rateDiscount": 0.8,
+        "loanRate": 3.5,
+        "repay": 1157.67,
+        "discount": 6,
+        "mode": "lease",
+        "buildStartMonth": "2025-04",
+        "buildEndMonth": "2026-03",
+        "operateStartMonth": "2026-04",
+        "operateEndMonth": "2037-03"
+      },
+      "expected": {
+        "income": {
+          "2025": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2026": {
+            "rent": 1147.5,
+            "rentAfterTax": 1052.7523
+          },
+          "2027": {
+            "rent": 1710.0,
+            "rentAfterTax": 1568.8073
+          },
+          "2028": {
+            "rent": 1710.0,
+            "rentAfterTax": 1568.8073
+          },
+          "2029": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2030": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2031": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2032": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2033": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2034": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2035": {
+            "rent": 1979.5387,
+            "rentAfterTax": 1816.0906
+          },
+          "2036": {
+            "rent": 1979.5387,
+            "rentAfterTax": 1816.0906
+          },
+          "2037": {
+            "rent": 494.8847,
+            "rentAfterTax": 454.0226
+          }
+        },
+        "cost": {
+          "2025": {
+            "collect": 0.0,
+            "collectAT": 0.0,
+            "eng": 0.0,
+            "engAT": 0.0,
+            "op": 0.0,
+            "opAT": 0.0,
+            "fin": 148.4,
+            "finAT": 140.0,
+            "total": 148.4,
+            "totalAT": 140.0,
+            "finBuild": 148.4,
+            "finOperate": 0.0
+          },
+          "2026": {
+            "collect": 382.5,
+            "collectAT": 350.9174,
+            "eng": 265.9091,
+            "engAT": 243.9533,
+            "op": 410.0,
+            "opAT": 386.7925,
+            "fin": 296.8,
+            "finAT": 280.0,
+            "total": 1355.2091,
+            "totalAT": 1261.6632,
+            "finBuild": 296.8,
+            "finOperate": 296.8
+          },
+          "2027": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 354.5455,
+            "engAT": 325.2711,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 296.8,
+            "finAT": 280.0,
+            "total": 1701.3455,
+            "totalAT": 1581.0371,
+            "finBuild": 0.0,
+            "finOperate": 296.8
+          },
+          "2028": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 354.5455,
+            "engAT": 325.2711,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 272.0666,
+            "finAT": 256.6666,
+            "total": 1676.6121,
+            "totalAT": 1557.7037,
+            "finBuild": 0.0,
+            "finOperate": 272.0666
+          },
+          "2029": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 354.5455,
+            "engAT": 325.2711,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 247.3332,
+            "finAT": 233.3332,
+            "total": 1651.8787,
+            "totalAT": 1534.3703,
+            "finBuild": 0.0,
+            "finOperate": 247.3332
+          },
+          "2030": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 354.5455,
+            "engAT": 325.2711,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 222.5998,
+            "finAT": 209.9998,
+            "total": 1627.1453,
+            "totalAT": 1511.0369,
+            "finBuild": 0.0,
+            "finOperate": 222.5998
+          },
+          "2031": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 354.5455,
+            "engAT": 325.2711,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 197.8664,
+            "finAT": 186.6664,
+            "total": 1602.4119,
+            "totalAT": 1487.7035,
+            "finBuild": 0.0,
+            "finOperate": 197.8664
+          },
+          "2032": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 354.5455,
+            "engAT": 325.2711,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 173.133,
+            "finAT": 163.333,
+            "total": 1577.6785,
+            "totalAT": 1464.3701,
+            "finBuild": 0.0,
+            "finOperate": 173.133
+          },
+          "2033": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 354.5455,
+            "engAT": 325.2711,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 148.3996,
+            "finAT": 139.9996,
+            "total": 1552.9451,
+            "totalAT": 1441.0367,
+            "finBuild": 0.0,
+            "finOperate": 148.3996
+          },
+          "2034": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 354.5455,
+            "engAT": 325.2711,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 123.6662,
+            "finAT": 116.6662,
+            "total": 1528.2117,
+            "totalAT": 1417.7033,
+            "finBuild": 0.0,
+            "finOperate": 123.6662
+          },
+          "2035": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 354.5455,
+            "engAT": 325.2711,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 98.9328,
+            "finAT": 93.3328,
+            "total": 1503.4783,
+            "totalAT": 1394.3699,
+            "finBuild": 0.0,
+            "finOperate": 98.9328
+          },
+          "2036": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 354.5455,
+            "engAT": 325.2711,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 74.1994,
+            "finAT": 69.9994,
+            "total": 1478.7449,
+            "totalAT": 1371.0365,
+            "finBuild": 0.0,
+            "finOperate": 74.1994
+          },
+          "2037": {
+            "collect": 142.5,
+            "collectAT": 130.7339,
+            "eng": 88.6364,
+            "engAT": 81.3178,
+            "op": 120.0,
+            "opAT": 113.2075,
+            "fin": 49.466,
+            "finAT": 46.666,
+            "total": 400.6024,
+            "totalAT": 371.9252,
+            "finBuild": 0.0,
+            "finOperate": 49.466
+          }
+        },
+        "tax": {
+          "2025": {
+            "output": 0.0,
+            "input": 0.0,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2026": {
+            "output": 94.7477,
+            "input": 61.9633,
+            "vat": 32.7844,
+            "surcharge": 3.9341,
+            "stamp": 0.9,
+            "total": 37.6185
+          },
+          "2027": {
+            "output": 141.1927,
+            "input": 73.2442,
+            "vat": 67.9485,
+            "surcharge": 8.1538,
+            "stamp": 0.0,
+            "total": 76.1023
+          },
+          "2028": {
+            "output": 141.1927,
+            "input": 71.8442,
+            "vat": 69.3485,
+            "surcharge": 8.3218,
+            "stamp": 0.0,
+            "total": 77.6703
+          },
+          "2029": {
+            "output": 148.2523,
+            "input": 70.4442,
+            "vat": 77.8081,
+            "surcharge": 9.337,
+            "stamp": 0.0,
+            "total": 87.1451
+          },
+          "2030": {
+            "output": 148.2523,
+            "input": 69.0442,
+            "vat": 79.2081,
+            "surcharge": 9.505,
+            "stamp": 0.0,
+            "total": 88.7131
+          },
+          "2031": {
+            "output": 148.2523,
+            "input": 67.6442,
+            "vat": 80.6081,
+            "surcharge": 9.673,
+            "stamp": 0.0,
+            "total": 90.2811
+          },
+          "2032": {
+            "output": 155.6649,
+            "input": 66.2442,
+            "vat": 89.4207,
+            "surcharge": 10.7305,
+            "stamp": 0.0,
+            "total": 100.1512
+          },
+          "2033": {
+            "output": 155.6649,
+            "input": 64.8442,
+            "vat": 90.8207,
+            "surcharge": 10.8985,
+            "stamp": 0.0,
+            "total": 101.7192
+          },
+          "2034": {
+            "output": 155.6649,
+            "input": 63.4442,
+            "vat": 92.2207,
+            "surcharge": 11.0665,
+            "stamp": 0.0,
+            "total": 103.2872
+          },
+          "2035": {
+            "output": 163.4481,
+            "input": 62.0442,
+            "vat": 101.404,
+            "surcharge": 12.1685,
+            "stamp": 0.0,
+            "total": 113.5724
+          },
+          "2036": {
+            "output": 163.4481,
+            "input": 60.6442,
+            "vat": 102.804,
+            "surcharge": 12.3365,
+            "stamp": 0.0,
+            "total": 115.1404
+          },
+          "2037": {
+            "output": 40.862,
+            "input": 16.911,
+            "vat": 23.951,
+            "surcharge": 2.8741,
+            "stamp": 0.0,
+            "total": 26.8251
+          }
+        },
+        "profit": {
+          "2025": {
+            "incomeAT": 0.0,
+            "costAT": 140.0,
+            "pretax": -140.0,
+            "tax": 0.0,
+            "totalProfit": -140.0,
+            "makeup": 0.0,
+            "taxable": -140.0,
+            "incomeTax": 0.0,
+            "netProfit": -140.0
+          },
+          "2026": {
+            "incomeAT": 1052.7523,
+            "costAT": 1261.6632,
+            "pretax": -208.9109,
+            "tax": 37.6185,
+            "totalProfit": -246.5294,
+            "makeup": 0.0,
+            "taxable": -246.5294,
+            "incomeTax": 0.0,
+            "netProfit": -246.5294
+          },
+          "2027": {
+            "incomeAT": 1568.8073,
+            "costAT": 1581.0371,
+            "pretax": -12.2298,
+            "tax": 76.1023,
+            "totalProfit": -88.3321,
+            "makeup": 0.0,
+            "taxable": -88.3321,
+            "incomeTax": 0.0,
+            "netProfit": -88.3321
+          },
+          "2028": {
+            "incomeAT": 1568.8073,
+            "costAT": 1557.7037,
+            "pretax": 11.1036,
+            "tax": 77.6703,
+            "totalProfit": -66.5667,
+            "makeup": 0.0,
+            "taxable": -66.5667,
+            "incomeTax": 0.0,
+            "netProfit": -66.5667
+          },
+          "2029": {
+            "incomeAT": 1647.2477,
+            "costAT": 1534.3703,
+            "pretax": 112.8774,
+            "tax": 87.1451,
+            "totalProfit": 25.7323,
+            "makeup": -541.4282,
+            "taxable": -515.6959,
+            "incomeTax": 0.0,
+            "netProfit": 25.7323
+          },
+          "2030": {
+            "incomeAT": 1647.2477,
+            "costAT": 1511.0369,
+            "pretax": 136.2108,
+            "tax": 88.7131,
+            "totalProfit": 47.4977,
+            "makeup": -515.6959,
+            "taxable": -468.1982,
+            "incomeTax": 0.0,
+            "netProfit": 47.4977
+          },
+          "2031": {
+            "incomeAT": 1647.2477,
+            "costAT": 1487.7035,
+            "pretax": 159.5442,
+            "tax": 90.2811,
+            "totalProfit": 69.2631,
+            "makeup": -468.1982,
+            "taxable": -398.9351,
+            "incomeTax": 0.0,
+            "netProfit": 69.2631
+          },
+          "2032": {
+            "incomeAT": 1729.6101,
+            "costAT": 1464.3701,
+            "pretax": 265.24,
+            "tax": 100.1512,
+            "totalProfit": 165.0888,
+            "makeup": -398.9351,
+            "taxable": -233.8463,
+            "incomeTax": 0.0,
+            "netProfit": 165.0888
+          },
+          "2033": {
+            "incomeAT": 1729.6101,
+            "costAT": 1441.0367,
+            "pretax": 288.5734,
+            "tax": 101.7192,
+            "totalProfit": 186.8542,
+            "makeup": -233.8463,
+            "taxable": -46.9921,
+            "incomeTax": 0.0,
+            "netProfit": 186.8542
+          },
+          "2034": {
+            "incomeAT": 1729.6101,
+            "costAT": 1417.7033,
+            "pretax": 311.9068,
+            "tax": 103.2872,
+            "totalProfit": 208.6196,
+            "makeup": 0.0,
+            "taxable": 208.6196,
+            "incomeTax": 52.1549,
+            "netProfit": 156.4647
+          },
+          "2035": {
+            "incomeAT": 1816.0906,
+            "costAT": 1394.3699,
+            "pretax": 421.7207,
+            "tax": 113.5724,
+            "totalProfit": 308.1483,
+            "makeup": 0.0,
+            "taxable": 308.1483,
+            "incomeTax": 77.0371,
+            "netProfit": 231.1112
+          },
+          "2036": {
+            "incomeAT": 1816.0906,
+            "costAT": 1371.0365,
+            "pretax": 445.0541,
+            "tax": 115.1404,
+            "totalProfit": 329.9137,
+            "makeup": 0.0,
+            "taxable": 329.9137,
+            "incomeTax": 82.4784,
+            "netProfit": 247.4353
+          },
+          "2037": {
+            "incomeAT": 454.0226,
+            "costAT": 371.9252,
+            "pretax": 82.0974,
+            "tax": 26.8251,
+            "totalProfit": 55.2723,
+            "makeup": 0.0,
+            "taxable": 55.2723,
+            "incomeTax": 13.8181,
+            "netProfit": 41.4542
+          }
+        },
+        "cf": {
+          "2025": {
+            "inflow": 0.0,
+            "outflow": 148.4,
+            "net": -148.4,
+            "cumNet": -148.4,
+            "npv": -144.1388,
+            "cumNpv": -144.1388
+          },
+          "2026": {
+            "inflow": 1147.5,
+            "outflow": 1392.8276,
+            "net": -245.3276,
+            "cumNet": -393.7276,
+            "npv": -224.7955,
+            "cumNpv": -368.9343
+          },
+          "2027": {
+            "inflow": 1710.0,
+            "outflow": 1777.4478,
+            "net": -67.4478,
+            "cumNet": -461.1754,
+            "npv": -58.3046,
+            "cumNpv": -427.2389
+          },
+          "2028": {
+            "inflow": 1710.0,
+            "outflow": 1754.2824,
+            "net": -44.2824,
+            "cumNet": -505.4578,
+            "npv": -36.1128,
+            "cumNpv": -463.3517
+          },
+          "2029": {
+            "inflow": 1795.5,
+            "outflow": 1739.0238,
+            "net": 56.4762,
+            "cumNet": -448.9816,
+            "npv": 43.4499,
+            "cumNpv": -419.9018
+          },
+          "2030": {
+            "inflow": 1795.5,
+            "outflow": 1715.8584,
+            "net": 79.6416,
+            "cumNet": -369.34,
+            "npv": 57.804,
+            "cumNpv": -362.0978
+          },
+          "2031": {
+            "inflow": 1795.5,
+            "outflow": 1692.693,
+            "net": 102.807,
+            "cumNet": -266.533,
+            "npv": 70.3938,
+            "cumNpv": -291.704
+          },
+          "2032": {
+            "inflow": 1885.275,
+            "outflow": 1677.8297,
+            "net": 207.4453,
+            "cumNet": -59.0877,
+            "npv": 134.0015,
+            "cumNpv": -157.7025
+          },
+          "2033": {
+            "inflow": 1885.275,
+            "outflow": 1654.6643,
+            "net": 230.6107,
+            "cumNet": 171.523,
+            "npv": 140.5334,
+            "cumNpv": -17.1691
+          },
+          "2034": {
+            "inflow": 1885.275,
+            "outflow": 1683.6538,
+            "net": 201.6212,
+            "cumNet": 373.1442,
+            "npv": 115.9126,
+            "cumNpv": 98.7435
+          },
+          "2035": {
+            "inflow": 1979.5387,
+            "outflow": 1694.0878,
+            "net": 285.4509,
+            "cumNet": 658.5951,
+            "npv": 154.8174,
+            "cumNpv": 253.5609
+          },
+          "2036": {
+            "inflow": 1979.5387,
+            "outflow": 1676.3637,
+            "net": 303.175,
+            "cumNet": 961.7701,
+            "npv": 155.1229,
+            "cumNpv": 408.6838
+          },
+          "2037": {
+            "inflow": 494.8847,
+            "outflow": 441.2456,
+            "net": 53.6391,
+            "cumNet": 1015.4092,
+            "npv": 25.8916,
+            "cumNpv": 434.5754
+          }
+        },
+        "loan": {
+          "2025": {
+            "begin": 0.0,
+            "borrow": 13892.0,
+            "interest": 148.4,
+            "repay": 0.0,
+            "payTotal": 148.4,
+            "end": 13892.0
+          },
+          "2026": {
+            "begin": 13892.0,
+            "borrow": 0.0,
+            "interest": 296.8,
+            "repay": 0.0,
+            "payTotal": 296.8,
+            "end": 13892.0
+          },
+          "2027": {
+            "begin": 13892.0,
+            "borrow": 0.0,
+            "interest": 296.8,
+            "repay": 1157.67,
+            "payTotal": 1454.47,
+            "end": 12734.33
+          },
+          "2028": {
+            "begin": 12734.33,
+            "borrow": 0.0,
+            "interest": 272.0666,
+            "repay": 1157.67,
+            "payTotal": 1429.7366,
+            "end": 11576.66
+          },
+          "2029": {
+            "begin": 11576.66,
+            "borrow": 0.0,
+            "interest": 247.3332,
+            "repay": 1157.67,
+            "payTotal": 1405.0032,
+            "end": 10418.99
+          },
+          "2030": {
+            "begin": 10418.99,
+            "borrow": 0.0,
+            "interest": 222.5998,
+            "repay": 1157.67,
+            "payTotal": 1380.2698,
+            "end": 9261.32
+          },
+          "2031": {
+            "begin": 9261.32,
+            "borrow": 0.0,
+            "interest": 197.8664,
+            "repay": 1157.67,
+            "payTotal": 1355.5364,
+            "end": 8103.65
+          },
+          "2032": {
+            "begin": 8103.65,
+            "borrow": 0.0,
+            "interest": 173.133,
+            "repay": 1157.67,
+            "payTotal": 1330.803,
+            "end": 6945.98
+          },
+          "2033": {
+            "begin": 6945.98,
+            "borrow": 0.0,
+            "interest": 148.3996,
+            "repay": 1157.67,
+            "payTotal": 1306.0696,
+            "end": 5788.31
+          },
+          "2034": {
+            "begin": 5788.31,
+            "borrow": 0.0,
+            "interest": 123.6662,
+            "repay": 1157.67,
+            "payTotal": 1281.3362,
+            "end": 4630.64
+          },
+          "2035": {
+            "begin": 4630.64,
+            "borrow": 0.0,
+            "interest": 98.9328,
+            "repay": 1157.67,
+            "payTotal": 1256.6028,
+            "end": 3472.97
+          },
+          "2036": {
+            "begin": 3472.97,
+            "borrow": 0.0,
+            "interest": 74.1994,
+            "repay": 1157.67,
+            "payTotal": 1231.8694,
+            "end": 2315.3
+          },
+          "2037": {
+            "begin": 2315.3,
+            "borrow": 0.0,
+            "interest": 49.466,
+            "repay": 1157.67,
+            "payTotal": 1207.136,
+            "end": 1157.63
+          }
+        }
+      },
+      "checks": 533,
+      "differences": []
+    },
+    {
+      "name": "one-month",
+      "params": {
+        "buildStart": 2025,
+        "buildYears": 1,
+        "operateYears": 12,
+        "firstMonths": 12,
+        "area": 20000,
+        "rent": 75,
+        "rentSpan": 3,
+        "rentRate": 5,
+        "rampOcc": 0.85,
+        "stableOcc": 0.95,
+        "collect": 25,
+        "deco": 1500,
+        "decoInt": 10,
+        "decoRatio": 0.3,
+        "units": 500,
+        "unitCost": 800,
+        "startup": 50,
+        "loan": 13892,
+        "interestBase": 10600,
+        "rateDiscount": 0.8,
+        "loanRate": 3.5,
+        "repay": 1157.67,
+        "discount": 6,
+        "mode": "lease",
+        "buildStartMonth": "2025-01",
+        "buildEndMonth": "2025-02",
+        "operateStartMonth": "2025-03",
+        "operateEndMonth": "2025-03"
+      },
+      "expected": {
+        "income": {
+          "2025": {
+            "rent": 127.5,
+            "rentAfterTax": 116.9725
+          }
+        },
+        "cost": {
+          "2025": {
+            "collect": 42.5,
+            "collectAT": 38.9908,
+            "eng": 3000.0,
+            "engAT": 2752.2936,
+            "op": 90.0,
+            "opAT": 84.9057,
+            "fin": 148.4,
+            "finAT": 140.0,
+            "total": 3280.9,
+            "totalAT": 3016.1901,
+            "finBuild": 148.4,
+            "finOperate": 148.4
+          }
+        },
+        "tax": {
+          "2025": {
+            "output": 10.5275,
+            "input": 261.2008,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.9,
+            "total": 0.9
+          }
+        },
+        "profit": {
+          "2025": {
+            "incomeAT": 116.9725,
+            "costAT": 3016.1901,
+            "pretax": -2899.2176,
+            "tax": 0.9,
+            "totalProfit": -2900.1176,
+            "makeup": 0.0,
+            "taxable": -2900.1176,
+            "incomeTax": 0.0,
+            "netProfit": -2900.1176
+          }
+        },
+        "cf": {
+          "2025": {
+            "inflow": 127.5,
+            "outflow": 3281.8,
+            "net": -3154.3,
+            "cumNet": -3154.3,
+            "npv": -3063.727,
+            "cumNpv": -3063.727
+          }
+        },
+        "loan": {
+          "2025": {
+            "begin": 0.0,
+            "borrow": 13892.0,
+            "interest": 148.4,
+            "repay": 0.0,
+            "payTotal": 148.4,
+            "end": 13892.0
+          }
+        }
+      },
+      "checks": 41,
+      "differences": []
+    },
+    {
+      "name": "same-year",
+      "params": {
+        "buildStart": 2025,
+        "buildYears": 1,
+        "operateYears": 12,
+        "firstMonths": 12,
+        "area": 20000,
+        "rent": 75,
+        "rentSpan": 3,
+        "rentRate": 5,
+        "rampOcc": 0.85,
+        "stableOcc": 0.95,
+        "collect": 25,
+        "deco": 1500,
+        "decoInt": 10,
+        "decoRatio": 0.3,
+        "units": 500,
+        "unitCost": 800,
+        "startup": 50,
+        "loan": 13892,
+        "interestBase": 10600,
+        "rateDiscount": 0.8,
+        "loanRate": 3.5,
+        "repay": 1157.67,
+        "discount": 6,
+        "mode": "lease",
+        "buildStartMonth": "2025-01",
+        "buildEndMonth": "2025-04",
+        "operateStartMonth": "2025-05",
+        "operateEndMonth": "2025-12"
+      },
+      "expected": {
+        "income": {
+          "2025": {
+            "rent": 1020.0,
+            "rentAfterTax": 935.7798
+          }
+        },
+        "cost": {
+          "2025": {
+            "collect": 340.0,
+            "collectAT": 311.9266,
+            "eng": 3000.0,
+            "engAT": 2752.2936,
+            "op": 370.0,
+            "opAT": 349.0566,
+            "fin": 148.4,
+            "finAT": 140.0,
+            "total": 3858.4,
+            "totalAT": 3553.2768,
+            "finBuild": 148.4,
+            "finOperate": 148.4
+          }
+        },
+        "tax": {
+          "2025": {
+            "output": 84.2202,
+            "input": 277.0498,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.9,
+            "total": 0.9
+          }
+        },
+        "profit": {
+          "2025": {
+            "incomeAT": 935.7798,
+            "costAT": 3553.2768,
+            "pretax": -2617.497,
+            "tax": 0.9,
+            "totalProfit": -2618.397,
+            "makeup": 0.0,
+            "taxable": -2618.397,
+            "incomeTax": 0.0,
+            "netProfit": -2618.397
+          }
+        },
+        "cf": {
+          "2025": {
+            "inflow": 1020.0,
+            "outflow": 3859.3,
+            "net": -2839.3,
+            "cumNet": -2839.3,
+            "npv": -2757.7719,
+            "cumNpv": -2757.7719
+          }
+        },
+        "loan": {
+          "2025": {
+            "begin": 0.0,
+            "borrow": 13892.0,
+            "interest": 148.4,
+            "repay": 0.0,
+            "payTotal": 148.4,
+            "end": 13892.0
+          }
+        }
+      },
+      "checks": 41,
+      "differences": []
+    },
+    {
+      "name": "annual-plans",
+      "params": {
+        "buildStart": 2025,
+        "buildYears": 1,
+        "operateYears": 12,
+        "firstMonths": 12,
+        "area": 20000,
+        "rent": 75,
+        "rentSpan": 3,
+        "rentRate": 5,
+        "rampOcc": 0.85,
+        "stableOcc": 0.95,
+        "collect": 25,
+        "deco": 1500,
+        "decoInt": 10,
+        "decoRatio": 0.3,
+        "units": 500,
+        "unitCost": 800,
+        "startup": 50,
+        "loan": 13892,
+        "interestBase": 10600,
+        "rateDiscount": 0.8,
+        "loanRate": 3.5,
+        "repay": 1157.67,
+        "discount": 6,
+        "mode": "lease",
+        "costSpan": 2,
+        "costRate": 3.5,
+        "occupancyRamp": {
+          "2026": 0.5,
+          "2027": 0.65,
+          "2028": 0.8
+        },
+        "stableStart": 2029,
+        "loanPlan": {
+          "2025": 6000,
+          "2026": 7892
+        },
+        "repayPlan": {
+          "2027": 1000,
+          "2029": 3000,
+          "2032": 9892
+        }
+      },
+      "expected": {
+        "income": {
+          "2025": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2026": {
+            "rent": 900.0,
+            "rentAfterTax": 825.6881
+          },
+          "2027": {
+            "rent": 1170.0,
+            "rentAfterTax": 1073.3945
+          },
+          "2028": {
+            "rent": 1440.0,
+            "rentAfterTax": 1321.1009
+          },
+          "2029": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2030": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2031": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2032": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2033": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2034": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2035": {
+            "rent": 1979.5387,
+            "rentAfterTax": 1816.0906
+          },
+          "2036": {
+            "rent": 1979.5387,
+            "rentAfterTax": 1816.0906
+          },
+          "2037": {
+            "rent": 1979.5387,
+            "rentAfterTax": 1816.0906
+          }
+        },
+        "cost": {
+          "2025": {
+            "collect": 0.0,
+            "collectAT": 0.0,
+            "eng": 0.0,
+            "engAT": 0.0,
+            "op": 0.0,
+            "opAT": 0.0,
+            "fin": 64.0944,
+            "finAT": 60.4664,
+            "total": 64.0944,
+            "totalAT": 60.4664,
+            "finBuild": 64.0944,
+            "finOperate": 0.0
+          },
+          "2026": {
+            "collect": 300.0,
+            "collectAT": 275.2294,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 530.0,
+            "opAT": 500.0,
+            "fin": 212.4944,
+            "finAT": 200.4664,
+            "total": 1367.4944,
+            "totalAT": 1273.8609,
+            "finBuild": 0.0,
+            "finOperate": 212.4944
+          },
+          "2027": {
+            "collect": 390.0,
+            "collectAT": 357.7982,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 296.8,
+            "finAT": 280.0,
+            "total": 1491.8,
+            "totalAT": 1388.7935,
+            "finBuild": 0.0,
+            "finOperate": 296.8
+          },
+          "2028": {
+            "collect": 480.0,
+            "collectAT": 440.367,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 496.8,
+            "opAT": 468.6792,
+            "fin": 275.4352,
+            "finAT": 259.8445,
+            "total": 1577.2352,
+            "totalAT": 1467.0558,
+            "finBuild": 0.0,
+            "finOperate": 275.4352
+          },
+          "2029": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 496.8,
+            "opAT": 468.6792,
+            "fin": 275.4352,
+            "finAT": 259.8445,
+            "total": 1667.2352,
+            "totalAT": 1549.6246,
+            "finBuild": 0.0,
+            "finOperate": 275.4352
+          },
+          "2030": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 514.188,
+            "opAT": 485.083,
+            "fin": 211.3407,
+            "finAT": 199.378,
+            "total": 1620.5287,
+            "totalAT": 1505.5619,
+            "finBuild": 0.0,
+            "finOperate": 211.3407
+          },
+          "2031": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 514.188,
+            "opAT": 485.083,
+            "fin": 211.3407,
+            "finAT": 199.378,
+            "total": 1620.5287,
+            "totalAT": 1505.5619,
+            "finBuild": 0.0,
+            "finOperate": 211.3407
+          },
+          "2032": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 532.1846,
+            "opAT": 502.0609,
+            "fin": 211.3407,
+            "finAT": 199.378,
+            "total": 1638.5253,
+            "totalAT": 1522.5398,
+            "finBuild": 0.0,
+            "finOperate": 211.3407
+          },
+          "2033": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 532.1846,
+            "opAT": 502.0609,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1427.1846,
+            "totalAT": 1323.1618,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2034": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 550.811,
+            "opAT": 519.6331,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1445.811,
+            "totalAT": 1340.734,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2035": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 550.811,
+            "opAT": 519.6331,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1445.811,
+            "totalAT": 1340.734,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2036": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 570.0894,
+            "opAT": 537.8202,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1465.0894,
+            "totalAT": 1358.9211,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2037": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 570.0894,
+            "opAT": 537.8202,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1465.0894,
+            "totalAT": 1358.9211,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          }
+        },
+        "tax": {
+          "2025": {
+            "output": 0.0,
+            "input": 0.0,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2026": {
+            "output": 74.3119,
+            "input": 68.8628,
+            "vat": 5.4491,
+            "surcharge": 0.6539,
+            "stamp": 0.9,
+            "total": 7.003
+          },
+          "2027": {
+            "output": 96.6055,
+            "input": 70.8047,
+            "vat": 25.8008,
+            "surcharge": 3.0961,
+            "stamp": 0.0,
+            "total": 28.8969
+          },
+          "2028": {
+            "output": 118.8991,
+            "input": 70.5463,
+            "vat": 48.3528,
+            "surcharge": 5.8023,
+            "stamp": 0.0,
+            "total": 54.1551
+          },
+          "2029": {
+            "output": 148.2523,
+            "input": 70.5463,
+            "vat": 77.706,
+            "surcharge": 9.3247,
+            "stamp": 0.0,
+            "total": 87.0307
+          },
+          "2030": {
+            "output": 148.2523,
+            "input": 67.9025,
+            "vat": 80.3498,
+            "surcharge": 9.642,
+            "stamp": 0.0,
+            "total": 89.9917
+          },
+          "2031": {
+            "output": 148.2523,
+            "input": 67.9025,
+            "vat": 80.3498,
+            "surcharge": 9.642,
+            "stamp": 0.0,
+            "total": 89.9917
+          },
+          "2032": {
+            "output": 155.6649,
+            "input": 68.9212,
+            "vat": 86.7437,
+            "surcharge": 10.4092,
+            "stamp": 0.0,
+            "total": 97.153
+          },
+          "2033": {
+            "output": 155.6649,
+            "input": 56.9585,
+            "vat": 98.7064,
+            "surcharge": 11.8448,
+            "stamp": 0.0,
+            "total": 110.5512
+          },
+          "2034": {
+            "output": 155.6649,
+            "input": 58.0128,
+            "vat": 97.6521,
+            "surcharge": 11.7182,
+            "stamp": 0.0,
+            "total": 109.3703
+          },
+          "2035": {
+            "output": 163.4481,
+            "input": 58.0128,
+            "vat": 105.4353,
+            "surcharge": 12.6522,
+            "stamp": 0.0,
+            "total": 118.0875
+          },
+          "2036": {
+            "output": 163.4481,
+            "input": 59.1041,
+            "vat": 104.3441,
+            "surcharge": 12.5213,
+            "stamp": 0.0,
+            "total": 116.8654
+          },
+          "2037": {
+            "output": 163.4481,
+            "input": 59.1041,
+            "vat": 104.3441,
+            "surcharge": 12.5213,
+            "stamp": 0.0,
+            "total": 116.8654
+          }
+        },
+        "profit": {
+          "2025": {
+            "incomeAT": 0.0,
+            "costAT": 60.4664,
+            "pretax": -60.4664,
+            "tax": 0.0,
+            "totalProfit": -60.4664,
+            "makeup": 0.0,
+            "taxable": -60.4664,
+            "incomeTax": 0.0,
+            "netProfit": -60.4664
+          },
+          "2026": {
+            "incomeAT": 825.6881,
+            "costAT": 1273.8609,
+            "pretax": -448.1728,
+            "tax": 7.003,
+            "totalProfit": -455.1758,
+            "makeup": 0.0,
+            "taxable": -455.1758,
+            "incomeTax": 0.0,
+            "netProfit": -455.1758
+          },
+          "2027": {
+            "incomeAT": 1073.3945,
+            "costAT": 1388.7935,
+            "pretax": -315.399,
+            "tax": 28.8969,
+            "totalProfit": -344.2959,
+            "makeup": 0.0,
+            "taxable": -344.2959,
+            "incomeTax": 0.0,
+            "netProfit": -344.2959
+          },
+          "2028": {
+            "incomeAT": 1321.1009,
+            "costAT": 1467.0558,
+            "pretax": -145.9549,
+            "tax": 54.1551,
+            "totalProfit": -200.11,
+            "makeup": 0.0,
+            "taxable": -200.11,
+            "incomeTax": 0.0,
+            "netProfit": -200.11
+          },
+          "2029": {
+            "incomeAT": 1647.2477,
+            "costAT": 1549.6246,
+            "pretax": 97.6231,
+            "tax": 87.0307,
+            "totalProfit": 10.5924,
+            "makeup": -1060.0481,
+            "taxable": -1049.4557,
+            "incomeTax": 0.0,
+            "netProfit": 10.5924
+          },
+          "2030": {
+            "incomeAT": 1647.2477,
+            "costAT": 1505.5619,
+            "pretax": 141.6858,
+            "tax": 89.9917,
+            "totalProfit": 51.6941,
+            "makeup": -1049.4557,
+            "taxable": -997.7616,
+            "incomeTax": 0.0,
+            "netProfit": 51.6941
+          },
+          "2031": {
+            "incomeAT": 1647.2477,
+            "costAT": 1505.5619,
+            "pretax": 141.6858,
+            "tax": 89.9917,
+            "totalProfit": 51.6941,
+            "makeup": -997.7616,
+            "taxable": -946.0675,
+            "incomeTax": 0.0,
+            "netProfit": 51.6941
+          },
+          "2032": {
+            "incomeAT": 1729.6101,
+            "costAT": 1522.5398,
+            "pretax": 207.0703,
+            "tax": 97.153,
+            "totalProfit": 109.9173,
+            "makeup": -946.0675,
+            "taxable": -836.1502,
+            "incomeTax": 0.0,
+            "netProfit": 109.9173
+          },
+          "2033": {
+            "incomeAT": 1729.6101,
+            "costAT": 1323.1618,
+            "pretax": 406.4483,
+            "tax": 110.5512,
+            "totalProfit": 295.8971,
+            "makeup": -836.1502,
+            "taxable": -540.2531,
+            "incomeTax": 0.0,
+            "netProfit": 295.8971
+          },
+          "2034": {
+            "incomeAT": 1729.6101,
+            "costAT": 1340.734,
+            "pretax": 388.8761,
+            "tax": 109.3703,
+            "totalProfit": 279.5058,
+            "makeup": 0.0,
+            "taxable": 279.5058,
+            "incomeTax": 69.8765,
+            "netProfit": 209.6293
+          },
+          "2035": {
+            "incomeAT": 1816.0906,
+            "costAT": 1340.734,
+            "pretax": 475.3566,
+            "tax": 118.0875,
+            "totalProfit": 357.2691,
+            "makeup": 0.0,
+            "taxable": 357.2691,
+            "incomeTax": 89.3173,
+            "netProfit": 267.9518
+          },
+          "2036": {
+            "incomeAT": 1816.0906,
+            "costAT": 1358.9211,
+            "pretax": 457.1695,
+            "tax": 116.8654,
+            "totalProfit": 340.3041,
+            "makeup": 0.0,
+            "taxable": 340.3041,
+            "incomeTax": 85.076,
+            "netProfit": 255.2281
+          },
+          "2037": {
+            "incomeAT": 1816.0906,
+            "costAT": 1358.9211,
+            "pretax": 457.1695,
+            "tax": 116.8654,
+            "totalProfit": 340.3041,
+            "makeup": 0.0,
+            "taxable": 340.3041,
+            "incomeTax": 85.076,
+            "netProfit": 255.2281
+          }
+        },
+        "cf": {
+          "2025": {
+            "inflow": 0.0,
+            "outflow": 64.0944,
+            "net": -64.0944,
+            "cumNet": -64.0944,
+            "npv": -62.254,
+            "cumNpv": -62.254
+          },
+          "2026": {
+            "inflow": 900.0,
+            "outflow": 1374.4974,
+            "net": -474.4974,
+            "cumNet": -538.5918,
+            "npv": -434.7855,
+            "cumNpv": -497.0395
+          },
+          "2027": {
+            "inflow": 1170.0,
+            "outflow": 1520.6969,
+            "net": -350.6969,
+            "cumNet": -889.2887,
+            "npv": -303.1568,
+            "cumNpv": -800.1963
+          },
+          "2028": {
+            "inflow": 1440.0,
+            "outflow": 1631.3903,
+            "net": -191.3903,
+            "cumNet": -1080.679,
+            "npv": -156.0808,
+            "cumNpv": -956.2771
+          },
+          "2029": {
+            "inflow": 1795.5,
+            "outflow": 1754.2659,
+            "net": 41.2341,
+            "cumNet": -1039.4449,
+            "npv": 31.7234,
+            "cumNpv": -924.5537
+          },
+          "2030": {
+            "inflow": 1795.5,
+            "outflow": 1710.5204,
+            "net": 84.9796,
+            "cumNet": -954.4653,
+            "npv": 61.6783,
+            "cumNpv": -862.8754
+          },
+          "2031": {
+            "inflow": 1795.5,
+            "outflow": 1710.5204,
+            "net": 84.9796,
+            "cumNet": -869.4857,
+            "npv": 58.1871,
+            "cumNpv": -804.6883
+          },
+          "2032": {
+            "inflow": 1885.275,
+            "outflow": 1735.6783,
+            "net": 149.5967,
+            "cumNet": -719.889,
+            "npv": 96.6336,
+            "cumNpv": -708.0547
+          },
+          "2033": {
+            "inflow": 1885.275,
+            "outflow": 1537.7358,
+            "net": 347.5392,
+            "cumNet": -372.3498,
+            "npv": 211.7893,
+            "cumNpv": -496.2654
+          },
+          "2034": {
+            "inflow": 1885.275,
+            "outflow": 1625.0578,
+            "net": 260.2172,
+            "cumNet": -112.1326,
+            "npv": 149.5995,
+            "cumNpv": -346.6659
+          },
+          "2035": {
+            "inflow": 1979.5387,
+            "outflow": 1653.2158,
+            "net": 326.3229,
+            "cumNet": 214.1903,
+            "npv": 176.9848,
+            "cumNpv": -169.6811
+          },
+          "2036": {
+            "inflow": 1979.5387,
+            "outflow": 1667.0308,
+            "net": 312.5079,
+            "cumNet": 526.6982,
+            "npv": 159.8982,
+            "cumNpv": -9.7829
+          },
+          "2037": {
+            "inflow": 1979.5387,
+            "outflow": 1667.0308,
+            "net": 312.5079,
+            "cumNet": 839.2061,
+            "npv": 150.8473,
+            "cumNpv": 141.0644
+          }
+        },
+        "loan": {
+          "2025": {
+            "begin": 0.0,
+            "borrow": 6000.0,
+            "interest": 64.0944,
+            "repay": 0.0,
+            "payTotal": 64.0944,
+            "end": 6000.0
+          },
+          "2026": {
+            "begin": 6000.0,
+            "borrow": 7892.0,
+            "interest": 212.4944,
+            "repay": 0.0,
+            "payTotal": 212.4944,
+            "end": 13892.0
+          },
+          "2027": {
+            "begin": 13892.0,
+            "borrow": 0.0,
+            "interest": 296.8,
+            "repay": 1000.0,
+            "payTotal": 1296.8,
+            "end": 12892.0
+          },
+          "2028": {
+            "begin": 12892.0,
+            "borrow": 0.0,
+            "interest": 275.4352,
+            "repay": 0.0,
+            "payTotal": 275.4352,
+            "end": 12892.0
+          },
+          "2029": {
+            "begin": 12892.0,
+            "borrow": 0.0,
+            "interest": 275.4352,
+            "repay": 3000.0,
+            "payTotal": 3275.4352,
+            "end": 9892.0
+          },
+          "2030": {
+            "begin": 9892.0,
+            "borrow": 0.0,
+            "interest": 211.3407,
+            "repay": 0.0,
+            "payTotal": 211.3407,
+            "end": 9892.0
+          },
+          "2031": {
+            "begin": 9892.0,
+            "borrow": 0.0,
+            "interest": 211.3407,
+            "repay": 0.0,
+            "payTotal": 211.3407,
+            "end": 9892.0
+          },
+          "2032": {
+            "begin": 9892.0,
+            "borrow": 0.0,
+            "interest": 211.3407,
+            "repay": 9892.0,
+            "payTotal": 10103.3407,
+            "end": 0.0
+          },
+          "2033": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2034": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2035": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2036": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2037": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          }
+        }
+      },
+      "checks": 533,
+      "differences": []
+    },
+    {
+      "name": "no-loan",
+      "params": {
+        "buildStart": 2025,
+        "buildYears": 1,
+        "operateYears": 12,
+        "firstMonths": 12,
+        "area": 20000,
+        "rent": 75,
+        "rentSpan": 3,
+        "rentRate": 5,
+        "rampOcc": 0.85,
+        "stableOcc": 0.95,
+        "collect": 25,
+        "deco": 1500,
+        "decoInt": 10,
+        "decoRatio": 0.3,
+        "units": 500,
+        "unitCost": 800,
+        "startup": 50,
+        "loan": 0,
+        "interestBase": 0,
+        "rateDiscount": 0.8,
+        "loanRate": 3.5,
+        "repay": 0,
+        "discount": 6,
+        "mode": "lease"
+      },
+      "expected": {
+        "income": {
+          "2025": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2026": {
+            "rent": 1530.0,
+            "rentAfterTax": 1403.6697
+          },
+          "2027": {
+            "rent": 1710.0,
+            "rentAfterTax": 1568.8073
+          },
+          "2028": {
+            "rent": 1710.0,
+            "rentAfterTax": 1568.8073
+          },
+          "2029": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2030": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2031": {
+            "rent": 1795.5,
+            "rentAfterTax": 1647.2477
+          },
+          "2032": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2033": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2034": {
+            "rent": 1885.275,
+            "rentAfterTax": 1729.6101
+          },
+          "2035": {
+            "rent": 1979.5387,
+            "rentAfterTax": 1816.0906
+          },
+          "2036": {
+            "rent": 1979.5387,
+            "rentAfterTax": 1816.0906
+          },
+          "2037": {
+            "rent": 1979.5387,
+            "rentAfterTax": 1816.0906
+          }
+        },
+        "cost": {
+          "2025": {
+            "collect": 0.0,
+            "collectAT": 0.0,
+            "eng": 0.0,
+            "engAT": 0.0,
+            "op": 0.0,
+            "opAT": 0.0,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 0.0,
+            "totalAT": 0.0,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2026": {
+            "collect": 510.0,
+            "collectAT": 467.8899,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 530.0,
+            "opAT": 500.0,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1365.0,
+            "totalAT": 1266.055,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2027": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1375.0,
+            "totalAT": 1273.9311,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2028": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1375.0,
+            "totalAT": 1273.9311,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2029": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1375.0,
+            "totalAT": 1273.9311,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2030": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1375.0,
+            "totalAT": 1273.9311,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2031": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1375.0,
+            "totalAT": 1273.9311,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2032": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1375.0,
+            "totalAT": 1273.9311,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2033": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1375.0,
+            "totalAT": 1273.9311,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2034": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1375.0,
+            "totalAT": 1273.9311,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2035": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1375.0,
+            "totalAT": 1273.9311,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2036": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1375.0,
+            "totalAT": 1273.9311,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2037": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 0.0,
+            "finAT": 0.0,
+            "total": 1375.0,
+            "totalAT": 1273.9311,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          }
+        },
+        "tax": {
+          "2025": {
+            "output": 0.0,
+            "input": 0.0,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2026": {
+            "output": 126.3303,
+            "input": 56.8349,
+            "vat": 69.4954,
+            "surcharge": 8.3394,
+            "stamp": 0.9,
+            "total": 78.7349
+          },
+          "2027": {
+            "output": 141.1927,
+            "input": 54.0047,
+            "vat": 87.188,
+            "surcharge": 10.4626,
+            "stamp": 0.0,
+            "total": 97.6505
+          },
+          "2028": {
+            "output": 141.1927,
+            "input": 54.0047,
+            "vat": 87.188,
+            "surcharge": 10.4626,
+            "stamp": 0.0,
+            "total": 97.6505
+          },
+          "2029": {
+            "output": 148.2523,
+            "input": 54.0047,
+            "vat": 94.2476,
+            "surcharge": 11.3097,
+            "stamp": 0.0,
+            "total": 105.5573
+          },
+          "2030": {
+            "output": 148.2523,
+            "input": 54.0047,
+            "vat": 94.2476,
+            "surcharge": 11.3097,
+            "stamp": 0.0,
+            "total": 105.5573
+          },
+          "2031": {
+            "output": 148.2523,
+            "input": 54.0047,
+            "vat": 94.2476,
+            "surcharge": 11.3097,
+            "stamp": 0.0,
+            "total": 105.5573
+          },
+          "2032": {
+            "output": 155.6649,
+            "input": 54.0047,
+            "vat": 101.6602,
+            "surcharge": 12.1992,
+            "stamp": 0.0,
+            "total": 113.8595
+          },
+          "2033": {
+            "output": 155.6649,
+            "input": 54.0047,
+            "vat": 101.6602,
+            "surcharge": 12.1992,
+            "stamp": 0.0,
+            "total": 113.8595
+          },
+          "2034": {
+            "output": 155.6649,
+            "input": 54.0047,
+            "vat": 101.6602,
+            "surcharge": 12.1992,
+            "stamp": 0.0,
+            "total": 113.8595
+          },
+          "2035": {
+            "output": 163.4481,
+            "input": 54.0047,
+            "vat": 109.4435,
+            "surcharge": 13.1332,
+            "stamp": 0.0,
+            "total": 122.5767
+          },
+          "2036": {
+            "output": 163.4481,
+            "input": 54.0047,
+            "vat": 109.4435,
+            "surcharge": 13.1332,
+            "stamp": 0.0,
+            "total": 122.5767
+          },
+          "2037": {
+            "output": 163.4481,
+            "input": 54.0047,
+            "vat": 109.4435,
+            "surcharge": 13.1332,
+            "stamp": 0.0,
+            "total": 122.5767
+          }
+        },
+        "profit": {
+          "2025": {
+            "incomeAT": 0.0,
+            "costAT": 0.0,
+            "pretax": 0.0,
+            "tax": 0.0,
+            "totalProfit": 0.0,
+            "makeup": 0.0,
+            "taxable": 0.0,
+            "incomeTax": 0.0,
+            "netProfit": 0.0
+          },
+          "2026": {
+            "incomeAT": 1403.6697,
+            "costAT": 1266.055,
+            "pretax": 137.6147,
+            "tax": 78.7349,
+            "totalProfit": 58.8798,
+            "makeup": 0.0,
+            "taxable": 58.8798,
+            "incomeTax": 14.72,
+            "netProfit": 44.1598
+          },
+          "2027": {
+            "incomeAT": 1568.8073,
+            "costAT": 1273.9311,
+            "pretax": 294.8762,
+            "tax": 97.6505,
+            "totalProfit": 197.2257,
+            "makeup": 0.0,
+            "taxable": 197.2257,
+            "incomeTax": 49.3064,
+            "netProfit": 147.9193
+          },
+          "2028": {
+            "incomeAT": 1568.8073,
+            "costAT": 1273.9311,
+            "pretax": 294.8762,
+            "tax": 97.6505,
+            "totalProfit": 197.2257,
+            "makeup": 0.0,
+            "taxable": 197.2257,
+            "incomeTax": 49.3064,
+            "netProfit": 147.9193
+          },
+          "2029": {
+            "incomeAT": 1647.2477,
+            "costAT": 1273.9311,
+            "pretax": 373.3166,
+            "tax": 105.5573,
+            "totalProfit": 267.7593,
+            "makeup": 0.0,
+            "taxable": 267.7593,
+            "incomeTax": 66.9398,
+            "netProfit": 200.8195
+          },
+          "2030": {
+            "incomeAT": 1647.2477,
+            "costAT": 1273.9311,
+            "pretax": 373.3166,
+            "tax": 105.5573,
+            "totalProfit": 267.7593,
+            "makeup": 0.0,
+            "taxable": 267.7593,
+            "incomeTax": 66.9398,
+            "netProfit": 200.8195
+          },
+          "2031": {
+            "incomeAT": 1647.2477,
+            "costAT": 1273.9311,
+            "pretax": 373.3166,
+            "tax": 105.5573,
+            "totalProfit": 267.7593,
+            "makeup": 0.0,
+            "taxable": 267.7593,
+            "incomeTax": 66.9398,
+            "netProfit": 200.8195
+          },
+          "2032": {
+            "incomeAT": 1729.6101,
+            "costAT": 1273.9311,
+            "pretax": 455.679,
+            "tax": 113.8595,
+            "totalProfit": 341.8195,
+            "makeup": 0.0,
+            "taxable": 341.8195,
+            "incomeTax": 85.4549,
+            "netProfit": 256.3646
+          },
+          "2033": {
+            "incomeAT": 1729.6101,
+            "costAT": 1273.9311,
+            "pretax": 455.679,
+            "tax": 113.8595,
+            "totalProfit": 341.8195,
+            "makeup": 0.0,
+            "taxable": 341.8195,
+            "incomeTax": 85.4549,
+            "netProfit": 256.3646
+          },
+          "2034": {
+            "incomeAT": 1729.6101,
+            "costAT": 1273.9311,
+            "pretax": 455.679,
+            "tax": 113.8595,
+            "totalProfit": 341.8195,
+            "makeup": 0.0,
+            "taxable": 341.8195,
+            "incomeTax": 85.4549,
+            "netProfit": 256.3646
+          },
+          "2035": {
+            "incomeAT": 1816.0906,
+            "costAT": 1273.9311,
+            "pretax": 542.1595,
+            "tax": 122.5767,
+            "totalProfit": 419.5828,
+            "makeup": 0.0,
+            "taxable": 419.5828,
+            "incomeTax": 104.8957,
+            "netProfit": 314.6871
+          },
+          "2036": {
+            "incomeAT": 1816.0906,
+            "costAT": 1273.9311,
+            "pretax": 542.1595,
+            "tax": 122.5767,
+            "totalProfit": 419.5828,
+            "makeup": 0.0,
+            "taxable": 419.5828,
+            "incomeTax": 104.8957,
+            "netProfit": 314.6871
+          },
+          "2037": {
+            "incomeAT": 1816.0906,
+            "costAT": 1273.9311,
+            "pretax": 542.1595,
+            "tax": 122.5767,
+            "totalProfit": 419.5828,
+            "makeup": 0.0,
+            "taxable": 419.5828,
+            "incomeTax": 104.8957,
+            "netProfit": 314.6871
+          }
+        },
+        "cf": {
+          "2025": {
+            "inflow": 0.0,
+            "outflow": 0.0,
+            "net": 0.0,
+            "cumNet": 0.0,
+            "npv": 0.0,
+            "cumNpv": 0.0
+          },
+          "2026": {
+            "inflow": 1530.0,
+            "outflow": 1458.4549,
+            "net": 71.5451,
+            "cumNet": 71.5451,
+            "npv": 65.5573,
+            "cumNpv": 65.5573
+          },
+          "2027": {
+            "inflow": 1710.0,
+            "outflow": 1521.9569,
+            "net": 188.0431,
+            "cumNet": 259.5882,
+            "npv": 162.5522,
+            "cumNpv": 228.1095
+          },
+          "2028": {
+            "inflow": 1710.0,
+            "outflow": 1521.9569,
+            "net": 188.0431,
+            "cumNet": 447.6313,
+            "npv": 153.3511,
+            "cumNpv": 381.4606
+          },
+          "2029": {
+            "inflow": 1795.5,
+            "outflow": 1547.4971,
+            "net": 248.0029,
+            "cumNet": 695.6342,
+            "npv": 190.8009,
+            "cumNpv": 572.2615
+          },
+          "2030": {
+            "inflow": 1795.5,
+            "outflow": 1547.4971,
+            "net": 248.0029,
+            "cumNet": 943.6371,
+            "npv": 180.0008,
+            "cumNpv": 752.2623
+          },
+          "2031": {
+            "inflow": 1795.5,
+            "outflow": 1547.4971,
+            "net": 248.0029,
+            "cumNet": 1191.64,
+            "npv": 169.8121,
+            "cumNpv": 922.0744
+          },
+          "2032": {
+            "inflow": 1885.275,
+            "outflow": 1574.3144,
+            "net": 310.9606,
+            "cumNet": 1502.6006,
+            "npv": 200.8683,
+            "cumNpv": 1122.9427
+          },
+          "2033": {
+            "inflow": 1885.275,
+            "outflow": 1574.3144,
+            "net": 310.9606,
+            "cumNet": 1813.5612,
+            "npv": 189.4984,
+            "cumNpv": 1312.4411
+          },
+          "2034": {
+            "inflow": 1885.275,
+            "outflow": 1574.3144,
+            "net": 310.9606,
+            "cumNet": 2124.5218,
+            "npv": 178.7721,
+            "cumNpv": 1491.2132
+          },
+          "2035": {
+            "inflow": 1979.5387,
+            "outflow": 1602.4724,
+            "net": 377.0663,
+            "cumNet": 2501.5881,
+            "npv": 204.506,
+            "cumNpv": 1695.7192
+          },
+          "2036": {
+            "inflow": 1979.5387,
+            "outflow": 1602.4724,
+            "net": 377.0663,
+            "cumNet": 2878.6544,
+            "npv": 192.9302,
+            "cumNpv": 1888.6494
+          },
+          "2037": {
+            "inflow": 1979.5387,
+            "outflow": 1602.4724,
+            "net": 377.0663,
+            "cumNet": 3255.7207,
+            "npv": 182.0096,
+            "cumNpv": 2070.659
+          }
+        },
+        "loan": {
+          "2025": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2026": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2027": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2028": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2029": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2030": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2031": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2032": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2033": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2034": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2035": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2036": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          },
+          "2037": {
+            "begin": 0.0,
+            "borrow": 0.0,
+            "interest": 0.0,
+            "repay": 0.0,
+            "payTotal": 0.0,
+            "end": 0.0
+          }
+        }
+      },
+      "checks": 533,
+      "differences": []
+    },
+    {
+      "name": "no-income",
+      "params": {
+        "buildStart": 2025,
+        "buildYears": 1,
+        "operateYears": 12,
+        "firstMonths": 12,
+        "area": 20000,
+        "rent": 0,
+        "rentSpan": 3,
+        "rentRate": 5,
+        "rampOcc": 0.85,
+        "stableOcc": 0.95,
+        "collect": 25,
+        "deco": 1500,
+        "decoInt": 10,
+        "decoRatio": 0.3,
+        "units": 500,
+        "unitCost": 800,
+        "startup": 50,
+        "loan": 13892,
+        "interestBase": 10600,
+        "rateDiscount": 0.8,
+        "loanRate": 3.5,
+        "repay": 1157.67,
+        "discount": 6,
+        "mode": "lease"
+      },
+      "expected": {
+        "income": {
+          "2025": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2026": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2027": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2028": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2029": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2030": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2031": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2032": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2033": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2034": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2035": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2036": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2037": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          }
+        },
+        "cost": {
+          "2025": {
+            "collect": 0.0,
+            "collectAT": 0.0,
+            "eng": 0.0,
+            "engAT": 0.0,
+            "op": 0.0,
+            "opAT": 0.0,
+            "fin": 148.4,
+            "finAT": 140.0,
+            "total": 148.4,
+            "totalAT": 140.0,
+            "finBuild": 148.4,
+            "finOperate": 0.0
+          },
+          "2026": {
+            "collect": 510.0,
+            "collectAT": 467.8899,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 530.0,
+            "opAT": 500.0,
+            "fin": 296.8,
+            "finAT": 280.0,
+            "total": 1661.8,
+            "totalAT": 1546.055,
+            "finBuild": 0.0,
+            "finOperate": 296.8
+          },
+          "2027": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 296.8,
+            "finAT": 280.0,
+            "total": 1671.8,
+            "totalAT": 1553.9311,
+            "finBuild": 0.0,
+            "finOperate": 296.8
+          },
+          "2028": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 272.0666,
+            "finAT": 256.6666,
+            "total": 1647.0666,
+            "totalAT": 1530.5977,
+            "finBuild": 0.0,
+            "finOperate": 272.0666
+          },
+          "2029": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 247.3332,
+            "finAT": 233.3332,
+            "total": 1622.3332,
+            "totalAT": 1507.2643,
+            "finBuild": 0.0,
+            "finOperate": 247.3332
+          },
+          "2030": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 222.5998,
+            "finAT": 209.9998,
+            "total": 1597.5998,
+            "totalAT": 1483.9309,
+            "finBuild": 0.0,
+            "finOperate": 222.5998
+          },
+          "2031": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 197.8664,
+            "finAT": 186.6664,
+            "total": 1572.8664,
+            "totalAT": 1460.5975,
+            "finBuild": 0.0,
+            "finOperate": 197.8664
+          },
+          "2032": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 173.133,
+            "finAT": 163.333,
+            "total": 1548.133,
+            "totalAT": 1437.2641,
+            "finBuild": 0.0,
+            "finOperate": 173.133
+          },
+          "2033": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 148.3996,
+            "finAT": 139.9996,
+            "total": 1523.3996,
+            "totalAT": 1413.9307,
+            "finBuild": 0.0,
+            "finOperate": 148.3996
+          },
+          "2034": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 123.6662,
+            "finAT": 116.6662,
+            "total": 1498.6662,
+            "totalAT": 1390.5973,
+            "finBuild": 0.0,
+            "finOperate": 123.6662
+          },
+          "2035": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 98.9328,
+            "finAT": 93.3328,
+            "total": 1473.9328,
+            "totalAT": 1367.2639,
+            "finBuild": 0.0,
+            "finOperate": 98.9328
+          },
+          "2036": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 74.1994,
+            "finAT": 69.9994,
+            "total": 1449.1994,
+            "totalAT": 1343.9305,
+            "finBuild": 0.0,
+            "finOperate": 74.1994
+          },
+          "2037": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 325.0,
+            "engAT": 298.1651,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 49.466,
+            "finAT": 46.666,
+            "total": 1424.466,
+            "totalAT": 1320.5971,
+            "finBuild": 0.0,
+            "finOperate": 49.466
+          }
+        },
+        "tax": {
+          "2025": {
+            "output": 0.0,
+            "input": 0.0,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2026": {
+            "output": 0.0,
+            "input": 73.6349,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.9,
+            "total": 0.9
+          },
+          "2027": {
+            "output": 0.0,
+            "input": 70.8047,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2028": {
+            "output": 0.0,
+            "input": 69.4047,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2029": {
+            "output": 0.0,
+            "input": 68.0047,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2030": {
+            "output": 0.0,
+            "input": 66.6047,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2031": {
+            "output": 0.0,
+            "input": 65.2047,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2032": {
+            "output": 0.0,
+            "input": 63.8047,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2033": {
+            "output": 0.0,
+            "input": 62.4047,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2034": {
+            "output": 0.0,
+            "input": 61.0046,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2035": {
+            "output": 0.0,
+            "input": 59.6046,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2036": {
+            "output": 0.0,
+            "input": 58.2046,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2037": {
+            "output": 0.0,
+            "input": 56.8046,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          }
+        },
+        "profit": {
+          "2025": {
+            "incomeAT": 0.0,
+            "costAT": 140.0,
+            "pretax": -140.0,
+            "tax": 0.0,
+            "totalProfit": -140.0,
+            "makeup": 0.0,
+            "taxable": -140.0,
+            "incomeTax": 0.0,
+            "netProfit": -140.0
+          },
+          "2026": {
+            "incomeAT": 0.0,
+            "costAT": 1546.055,
+            "pretax": -1546.055,
+            "tax": 0.9,
+            "totalProfit": -1546.955,
+            "makeup": 0.0,
+            "taxable": -1546.955,
+            "incomeTax": 0.0,
+            "netProfit": -1546.955
+          },
+          "2027": {
+            "incomeAT": 0.0,
+            "costAT": 1553.9311,
+            "pretax": -1553.9311,
+            "tax": 0.0,
+            "totalProfit": -1553.9311,
+            "makeup": 0.0,
+            "taxable": -1553.9311,
+            "incomeTax": 0.0,
+            "netProfit": -1553.9311
+          },
+          "2028": {
+            "incomeAT": 0.0,
+            "costAT": 1530.5977,
+            "pretax": -1530.5977,
+            "tax": 0.0,
+            "totalProfit": -1530.5977,
+            "makeup": 0.0,
+            "taxable": -1530.5977,
+            "incomeTax": 0.0,
+            "netProfit": -1530.5977
+          },
+          "2029": {
+            "incomeAT": 0.0,
+            "costAT": 1507.2643,
+            "pretax": -1507.2643,
+            "tax": 0.0,
+            "totalProfit": -1507.2643,
+            "makeup": 0.0,
+            "taxable": -1507.2643,
+            "incomeTax": 0.0,
+            "netProfit": -1507.2643
+          },
+          "2030": {
+            "incomeAT": 0.0,
+            "costAT": 1483.9309,
+            "pretax": -1483.9309,
+            "tax": 0.0,
+            "totalProfit": -1483.9309,
+            "makeup": 0.0,
+            "taxable": -1483.9309,
+            "incomeTax": 0.0,
+            "netProfit": -1483.9309
+          },
+          "2031": {
+            "incomeAT": 0.0,
+            "costAT": 1460.5975,
+            "pretax": -1460.5975,
+            "tax": 0.0,
+            "totalProfit": -1460.5975,
+            "makeup": 0.0,
+            "taxable": -1460.5975,
+            "incomeTax": 0.0,
+            "netProfit": -1460.5975
+          },
+          "2032": {
+            "incomeAT": 0.0,
+            "costAT": 1437.2641,
+            "pretax": -1437.2641,
+            "tax": 0.0,
+            "totalProfit": -1437.2641,
+            "makeup": 0.0,
+            "taxable": -1437.2641,
+            "incomeTax": 0.0,
+            "netProfit": -1437.2641
+          },
+          "2033": {
+            "incomeAT": 0.0,
+            "costAT": 1413.9307,
+            "pretax": -1413.9307,
+            "tax": 0.0,
+            "totalProfit": -1413.9307,
+            "makeup": 0.0,
+            "taxable": -1413.9307,
+            "incomeTax": 0.0,
+            "netProfit": -1413.9307
+          },
+          "2034": {
+            "incomeAT": 0.0,
+            "costAT": 1390.5973,
+            "pretax": -1390.5973,
+            "tax": 0.0,
+            "totalProfit": -1390.5973,
+            "makeup": 0.0,
+            "taxable": -1390.5973,
+            "incomeTax": 0.0,
+            "netProfit": -1390.5973
+          },
+          "2035": {
+            "incomeAT": 0.0,
+            "costAT": 1367.2639,
+            "pretax": -1367.2639,
+            "tax": 0.0,
+            "totalProfit": -1367.2639,
+            "makeup": 0.0,
+            "taxable": -1367.2639,
+            "incomeTax": 0.0,
+            "netProfit": -1367.2639
+          },
+          "2036": {
+            "incomeAT": 0.0,
+            "costAT": 1343.9305,
+            "pretax": -1343.9305,
+            "tax": 0.0,
+            "totalProfit": -1343.9305,
+            "makeup": 0.0,
+            "taxable": -1343.9305,
+            "incomeTax": 0.0,
+            "netProfit": -1343.9305
+          },
+          "2037": {
+            "incomeAT": 0.0,
+            "costAT": 1320.5971,
+            "pretax": -1320.5971,
+            "tax": 0.0,
+            "totalProfit": -1320.5971,
+            "makeup": 0.0,
+            "taxable": -1320.5971,
+            "incomeTax": 0.0,
+            "netProfit": -1320.5971
+          }
+        },
+        "cf": {
+          "2025": {
+            "inflow": 0.0,
+            "outflow": 148.4,
+            "net": -148.4,
+            "cumNet": -148.4,
+            "npv": -144.1388,
+            "cumNpv": -144.1388
+          },
+          "2026": {
+            "inflow": 0.0,
+            "outflow": 1662.7,
+            "net": -1662.7,
+            "cumNet": -1811.1,
+            "npv": -1523.5443,
+            "cumNpv": -1667.6831
+          },
+          "2027": {
+            "inflow": 0.0,
+            "outflow": 1671.8,
+            "net": -1671.8,
+            "cumNet": -3482.9,
+            "npv": -1445.1724,
+            "cumNpv": -3112.8555
+          },
+          "2028": {
+            "inflow": 0.0,
+            "outflow": 1647.0666,
+            "net": -1647.0666,
+            "cumNet": -5129.9666,
+            "npv": -1343.1998,
+            "cumNpv": -4456.0553
+          },
+          "2029": {
+            "inflow": 0.0,
+            "outflow": 1622.3332,
+            "net": -1622.3332,
+            "cumNet": -6752.2998,
+            "npv": -1248.141,
+            "cumNpv": -5704.1963
+          },
+          "2030": {
+            "inflow": 0.0,
+            "outflow": 1597.5998,
+            "net": -1597.5998,
+            "cumNet": -8349.8996,
+            "npv": -1159.54,
+            "cumNpv": -6863.7363
+          },
+          "2031": {
+            "inflow": 0.0,
+            "outflow": 1572.8664,
+            "net": -1572.8664,
+            "cumNet": -9922.766,
+            "npv": -1076.9703,
+            "cumNpv": -7940.7066
+          },
+          "2032": {
+            "inflow": 0.0,
+            "outflow": 1548.133,
+            "net": -1548.133,
+            "cumNet": -11470.899,
+            "npv": -1000.0329,
+            "cumNpv": -8940.7395
+          },
+          "2033": {
+            "inflow": 0.0,
+            "outflow": 1523.3996,
+            "net": -1523.3996,
+            "cumNet": -12994.2986,
+            "npv": -928.3548,
+            "cumNpv": -9869.0943
+          },
+          "2034": {
+            "inflow": 0.0,
+            "outflow": 1498.6662,
+            "net": -1498.6662,
+            "cumNet": -14492.9648,
+            "npv": -861.5871,
+            "cumNpv": -10730.6814
+          },
+          "2035": {
+            "inflow": 0.0,
+            "outflow": 1473.9328,
+            "net": -1473.9328,
+            "cumNet": -15966.8976,
+            "npv": -799.4036,
+            "cumNpv": -11530.085
+          },
+          "2036": {
+            "inflow": 0.0,
+            "outflow": 1449.1994,
+            "net": -1449.1994,
+            "cumNet": -17416.097,
+            "npv": -741.4992,
+            "cumNpv": -12271.5842
+          },
+          "2037": {
+            "inflow": 0.0,
+            "outflow": 1424.466,
+            "net": -1424.466,
+            "cumNet": -18840.563,
+            "npv": -687.5888,
+            "cumNpv": -12959.173
+          }
+        },
+        "loan": {
+          "2025": {
+            "begin": 0.0,
+            "borrow": 13892.0,
+            "interest": 148.4,
+            "repay": 0.0,
+            "payTotal": 148.4,
+            "end": 13892.0
+          },
+          "2026": {
+            "begin": 13892.0,
+            "borrow": 0.0,
+            "interest": 296.8,
+            "repay": 0.0,
+            "payTotal": 296.8,
+            "end": 13892.0
+          },
+          "2027": {
+            "begin": 13892.0,
+            "borrow": 0.0,
+            "interest": 296.8,
+            "repay": 1157.67,
+            "payTotal": 1454.47,
+            "end": 12734.33
+          },
+          "2028": {
+            "begin": 12734.33,
+            "borrow": 0.0,
+            "interest": 272.0666,
+            "repay": 1157.67,
+            "payTotal": 1429.7366,
+            "end": 11576.66
+          },
+          "2029": {
+            "begin": 11576.66,
+            "borrow": 0.0,
+            "interest": 247.3332,
+            "repay": 1157.67,
+            "payTotal": 1405.0032,
+            "end": 10418.99
+          },
+          "2030": {
+            "begin": 10418.99,
+            "borrow": 0.0,
+            "interest": 222.5998,
+            "repay": 1157.67,
+            "payTotal": 1380.2698,
+            "end": 9261.32
+          },
+          "2031": {
+            "begin": 9261.32,
+            "borrow": 0.0,
+            "interest": 197.8664,
+            "repay": 1157.67,
+            "payTotal": 1355.5364,
+            "end": 8103.65
+          },
+          "2032": {
+            "begin": 8103.65,
+            "borrow": 0.0,
+            "interest": 173.133,
+            "repay": 1157.67,
+            "payTotal": 1330.803,
+            "end": 6945.98
+          },
+          "2033": {
+            "begin": 6945.98,
+            "borrow": 0.0,
+            "interest": 148.3996,
+            "repay": 1157.67,
+            "payTotal": 1306.0696,
+            "end": 5788.31
+          },
+          "2034": {
+            "begin": 5788.31,
+            "borrow": 0.0,
+            "interest": 123.6662,
+            "repay": 1157.67,
+            "payTotal": 1281.3362,
+            "end": 4630.64
+          },
+          "2035": {
+            "begin": 4630.64,
+            "borrow": 0.0,
+            "interest": 98.9328,
+            "repay": 1157.67,
+            "payTotal": 1256.6028,
+            "end": 3472.97
+          },
+          "2036": {
+            "begin": 3472.97,
+            "borrow": 0.0,
+            "interest": 74.1994,
+            "repay": 1157.67,
+            "payTotal": 1231.8694,
+            "end": 2315.3
+          },
+          "2037": {
+            "begin": 2315.3,
+            "borrow": 0.0,
+            "interest": 49.466,
+            "repay": 1157.67,
+            "payTotal": 1207.136,
+            "end": 1157.63
+          }
+        }
+      },
+      "checks": 533,
+      "differences": []
+    },
+    {
+      "name": "gap-years",
+      "params": {
+        "buildStart": 2025,
+        "buildYears": 1,
+        "operateYears": 12,
+        "firstMonths": 12,
+        "area": 20000,
+        "rent": 75,
+        "rentSpan": 3,
+        "rentRate": 5,
+        "rampOcc": 0.85,
+        "stableOcc": 0.95,
+        "collect": 25,
+        "deco": 1500,
+        "decoInt": 10,
+        "decoRatio": 0.3,
+        "units": 500,
+        "unitCost": 800,
+        "startup": 50,
+        "loan": 13892,
+        "interestBase": 10600,
+        "rateDiscount": 0.8,
+        "loanRate": 3.5,
+        "repay": 1157.67,
+        "discount": 6,
+        "mode": "lease",
+        "buildStartMonth": "2025-03",
+        "buildEndMonth": "2025-09",
+        "operateStartMonth": "2027-07",
+        "operateEndMonth": "2029-02"
+      },
+      "expected": {
+        "income": {
+          "2025": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2026": {
+            "rent": 0.0,
+            "rentAfterTax": 0.0
+          },
+          "2027": {
+            "rent": 765.0,
+            "rentAfterTax": 701.8349
+          },
+          "2028": {
+            "rent": 1710.0,
+            "rentAfterTax": 1568.8073
+          },
+          "2029": {
+            "rent": 285.0,
+            "rentAfterTax": 261.4679
+          }
+        },
+        "cost": {
+          "2025": {
+            "collect": 0.0,
+            "collectAT": 0.0,
+            "eng": 0.0,
+            "engAT": 0.0,
+            "op": 0.0,
+            "opAT": 0.0,
+            "fin": 148.4,
+            "finAT": 140.0,
+            "total": 148.4,
+            "totalAT": 140.0,
+            "finBuild": 148.4,
+            "finOperate": 0.0
+          },
+          "2026": {
+            "collect": 0.0,
+            "collectAT": 0.0,
+            "eng": 0.0,
+            "engAT": 0.0,
+            "op": 0.0,
+            "opAT": 0.0,
+            "fin": 296.8,
+            "finAT": 280.0,
+            "total": 296.8,
+            "totalAT": 280.0,
+            "finBuild": 0.0,
+            "finOperate": 0.0
+          },
+          "2027": {
+            "collect": 255.0,
+            "collectAT": 233.945,
+            "eng": 900.0,
+            "engAT": 825.6881,
+            "op": 290.0,
+            "opAT": 273.5849,
+            "fin": 296.8,
+            "finAT": 280.0,
+            "total": 1741.8,
+            "totalAT": 1613.218,
+            "finBuild": 0.0,
+            "finOperate": 296.8
+          },
+          "2028": {
+            "collect": 570.0,
+            "collectAT": 522.9358,
+            "eng": 1800.0,
+            "engAT": 1651.3761,
+            "op": 480.0,
+            "opAT": 452.8302,
+            "fin": 296.8,
+            "finAT": 280.0,
+            "total": 3146.8,
+            "totalAT": 2907.1421,
+            "finBuild": 0.0,
+            "finOperate": 296.8
+          },
+          "2029": {
+            "collect": 95.0,
+            "collectAT": 87.156,
+            "eng": 300.0,
+            "engAT": 275.2294,
+            "op": 80.0,
+            "opAT": 75.4717,
+            "fin": 272.0666,
+            "finAT": 256.6666,
+            "total": 747.0666,
+            "totalAT": 694.5237,
+            "finBuild": 0.0,
+            "finOperate": 272.0666
+          }
+        },
+        "tax": {
+          "2025": {
+            "output": 0.0,
+            "input": 0.0,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2026": {
+            "output": 0.0,
+            "input": 0.0,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2027": {
+            "output": 63.1651,
+            "input": 107.527,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.9,
+            "total": 0.9
+          },
+          "2028": {
+            "output": 141.1927,
+            "input": 192.5937,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          },
+          "2029": {
+            "output": 23.5321,
+            "input": 44.6989,
+            "vat": 0.0,
+            "surcharge": 0.0,
+            "stamp": 0.0,
+            "total": 0.0
+          }
+        },
+        "profit": {
+          "2025": {
+            "incomeAT": 0.0,
+            "costAT": 140.0,
+            "pretax": -140.0,
+            "tax": 0.0,
+            "totalProfit": -140.0,
+            "makeup": 0.0,
+            "taxable": -140.0,
+            "incomeTax": 0.0,
+            "netProfit": -140.0
+          },
+          "2026": {
+            "incomeAT": 0.0,
+            "costAT": 280.0,
+            "pretax": -280.0,
+            "tax": 0.0,
+            "totalProfit": -280.0,
+            "makeup": 0.0,
+            "taxable": -280.0,
+            "incomeTax": 0.0,
+            "netProfit": -280.0
+          },
+          "2027": {
+            "incomeAT": 701.8349,
+            "costAT": 1613.218,
+            "pretax": -911.3831,
+            "tax": 0.9,
+            "totalProfit": -912.2831,
+            "makeup": 0.0,
+            "taxable": -912.2831,
+            "incomeTax": 0.0,
+            "netProfit": -912.2831
+          },
+          "2028": {
+            "incomeAT": 1568.8073,
+            "costAT": 2907.1421,
+            "pretax": -1338.3348,
+            "tax": 0.0,
+            "totalProfit": -1338.3348,
+            "makeup": 0.0,
+            "taxable": -1338.3348,
+            "incomeTax": 0.0,
+            "netProfit": -1338.3348
+          },
+          "2029": {
+            "incomeAT": 261.4679,
+            "costAT": 694.5237,
+            "pretax": -433.0558,
+            "tax": 0.0,
+            "totalProfit": -433.0558,
+            "makeup": 0.0,
+            "taxable": -433.0558,
+            "incomeTax": 0.0,
+            "netProfit": -433.0558
+          }
+        },
+        "cf": {
+          "2025": {
+            "inflow": 0.0,
+            "outflow": 148.4,
+            "net": -148.4,
+            "cumNet": -148.4,
+            "npv": -144.1388,
+            "cumNpv": -144.1388
+          },
+          "2026": {
+            "inflow": 0.0,
+            "outflow": 296.8,
+            "net": -296.8,
+            "cumNet": -445.2,
+            "npv": -271.96,
+            "cumNpv": -416.0988
+          },
+          "2027": {
+            "inflow": 765.0,
+            "outflow": 1742.7,
+            "net": -977.7,
+            "cumNet": -1422.9,
+            "npv": -845.1639,
+            "cumNpv": -1261.2627
+          },
+          "2028": {
+            "inflow": 1710.0,
+            "outflow": 3146.8,
+            "net": -1436.8,
+            "cumNet": -2859.7,
+            "npv": -1171.7253,
+            "cumNpv": -2432.988
+          },
+          "2029": {
+            "inflow": 285.0,
+            "outflow": 747.0666,
+            "net": -462.0666,
+            "cumNet": -3321.7666,
+            "npv": -355.4907,
+            "cumNpv": -2788.4787
+          }
+        },
+        "loan": {
+          "2025": {
+            "begin": 0.0,
+            "borrow": 13892.0,
+            "interest": 148.4,
+            "repay": 0.0,
+            "payTotal": 148.4,
+            "end": 13892.0
+          },
+          "2026": {
+            "begin": 13892.0,
+            "borrow": 0.0,
+            "interest": 296.8,
+            "repay": 0.0,
+            "payTotal": 296.8,
+            "end": 13892.0
+          },
+          "2027": {
+            "begin": 13892.0,
+            "borrow": 0.0,
+            "interest": 296.8,
+            "repay": 0.0,
+            "payTotal": 296.8,
+            "end": 13892.0
+          },
+          "2028": {
+            "begin": 13892.0,
+            "borrow": 0.0,
+            "interest": 296.8,
+            "repay": 1157.67,
+            "payTotal": 1454.47,
+            "end": 12734.33
+          },
+          "2029": {
+            "begin": 12734.33,
+            "borrow": 0.0,
+            "interest": 272.0666,
+            "repay": 1157.67,
+            "payTotal": 1429.7366,
+            "end": 11576.66
+          }
+        }
+      },
+      "checks": 205,
+      "differences": []
+    }
+  ]
+}

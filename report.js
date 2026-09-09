@@ -88,7 +88,7 @@ function restoreDraft(d, options){
   // “我的项目→打开”及草稿栏的人工恢复仍沿用原模式，保持完整工作现场恢复能力。
   appMode = options.openHome ? null
     : (window.ProjectWorkflow?ProjectWorkflow.resumeAppMode(d.appMode,!!d.aiReportSession):(d.aiReportSession?"aireport":"report"));
-  domainKey = d.domainKey; signed = !!d.signed; docNo = d.docNo||null;
+  domainKey = d.domainKey; signed = false; docNo = d.docNo||null; // Legacy flags never confer formal approval on a working draft.
   reportDocumentRevision=Math.max(reportDocumentRevision,Number(d.documentRevision)||0);
   reportLocalPersistedRevision=reportDocumentRevision;reportCloudPersistedRevision=-1;
   Object.assign(project, d.project||{});
@@ -489,6 +489,12 @@ function sectionFormalTemplates(c,s){
 }
 function renderSectionContent(c,s,useEdited){
   const base=useEdited&&s.editedHtml?s.editedHtml:renderContent(s.content||"");
+  if(window.ReportSectionLayout?.composeDocument&&reportTableProjectType()==='gaibao-housing'){
+    const entries=chapters.flatMap(ch=>ch.sections.map(sec=>({html:sec===s?base:(sec.editedHtml||renderContent(sec.content||'')),context:{type:reportTableProjectType(),chapter:ch.name,section:sec.t,number:(chapters.indexOf(ch)+1)+'.'+(ch.sections.indexOf(sec)+1)},section:sec}))).filter(e=>e.html.trim());
+    const index=entries.findIndex(e=>e.section===s);
+    if(index>=0)return window.ReportSectionLayout.composeDocument(entries,window.ReportTableTemplates)[index];
+  }
+  if(window.ReportSectionLayout)return window.ReportSectionLayout.compose(base,{type:reportTableProjectType(),chapter:c.name,section:s.t,number:(chapters.indexOf(c)+1)+'.'+(c.sections.indexOf(s)+1)},window.ReportTableTemplates);
   if(/data-template-id=/.test(base))return base;
   const type=reportTableProjectType();
   const tables=type&&window.ReportTableTemplates?window.ReportTableTemplates.renderSection(type,c.name,s.t):"";
@@ -497,6 +503,7 @@ function renderSectionContent(c,s,useEdited){
 function reportSiteWritingPlan(){
   if(!window.ProjectWorkflow?.siteWritingPlan)return null;
   const plan=ProjectWorkflow.siteWritingPlan(project.analysisSites||[]);
+  if(plan.isBatch&&rlProjectType()==='gaibao'&&rlBusinessScenario()==='housing_conversion')return Object.assign({},plan,{strategy:'全部房源按同一主题统一综合分析，实质差异在同一段或同一张表中对照；不按主次点位分别论述，不逐点重复模板。'});
   return plan.isBatch?plan:null;
 }
 function reportGlobalRequirementsHtml(){
@@ -982,7 +989,7 @@ async function generateSection(c, s, onChunk){
   if(window.ReportLogicCore){try{await ReportLogicCore.load(rlProjectType());}catch(e){}}
   await ensureReportTableTemplates();
   const formalTemplates=sectionFormalTemplates(c,s);
-  const sitePlan=reportSiteWritingPlan(),siteInstruction=sitePlan?'\n6. 本报告含多个分析点位。'+sitePlan.strategy+'凡本节涉及区位、市场、建设条件、实施影响或风险时，按重要程度先后形成整体判断，再用一个压缩段落概括其余点位的实质差异；正文不得出现“主项目”“次项目”标签，与本节无关时不要机械罗列点位，也不得逐点复制同一套模板。':'';
+  const sitePlan=reportSiteWritingPlan(),siteInstruction=sitePlan?'\n6. 本报告含多个分析点位。'+sitePlan.strategy+'正文不得出现“主项目”“次项目”标签，与本节无关时不要机械罗列点位，也不得逐点复制同一套模板。':'';
   const digest = s.numeric ? buildCalcDigest() : null;
   if(digest){
     collector.hasCalcData = true;
@@ -993,7 +1000,7 @@ async function generateSection(c, s, onChunk){
   }
   let tableHint = "";
   if(formalTemplates.length){
-    tableHint='\n本节已由系统按公司出租类标准报告自动插入以下固定表格：'+formalTemplates.map(t=>'《'+t.title+'》').join('、')+'。正文只负责解释口径、分析结论和表格前后衔接，不得自行重画表格、重复罗列表头或改变表格结构；项目专属数值由资料与测算引擎后续填充。'+(digest?'\n\n【真实财务测算结果】\n'+digest:'');
+    tableHint='\n本节使用后台标准表格。以下每个模板只输出一次 [[TABLE]] 数据表，表头必须逐字保持一致，系统会把数据填入原模板，不再保留另一套AI表格。只填资料中有明确依据的值，没有数据的单元格留空；不得虚构数字或擅自调整表头、单位、固定行标签。模板：'+formalTemplates.map(t=>'《'+t.title+'》'+t.segments.map(g=>'\n'+g.rows[0].cells.map(x=>x.text).join('|')).join('')).join('\n')+(digest?'\n\n【真实财务测算结果】\n'+digest:'');
   } else if(s.numeric && digest){
     tableHint = '\n本子标题涉及财务数字。下面提供了本项目由内置公式实际计算出的真实测算结果，请：①严格依据这些真实数字撰写分析（数字直接引用，不得改动、不得另行编造）；②在正文中生成1-2个数据表格支撑论述，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔）：\n[[TABLE]]\n列1|列2|列3\n行1|数值|数值\n[[/TABLE]]\n表格数据从测算结果中选取，允许按年份归并或取关键年份，但数值必须与测算结果一致。\n\n'+digest;
   } else if(s.numeric){
@@ -1011,7 +1018,8 @@ async function generateSection(c, s, onChunk){
   const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +(sitePlan?'\n【本节必须执行的多点位写作逻辑】\n'+sitePlan.strategy+'\n':'')+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + reportLocalLogicPrompt(s) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t, collector) + kbRetrieve(c.name, s.t, collector) + webEvidenceRetrieve(c.name,s.t,collector) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t, collector);
 
   const argumentPrompt=ReportArgument.prompt(c.name,s.t,{hasCalculation:!!digest});
-  let text = await reportDurableSectionCall(c,s,sys.replace('篇幅约500-800字。','篇幅服从本节论证任务与材料。')+argumentPrompt,user+summaryContext,onChunk);
+  const sectionNumber=(chapters.indexOf(c)+1)+'.'+(c.sections.indexOf(s)+1);
+  let text = await reportDurableSectionCall(c,s,sys.replace('篇幅约500-800字。','篇幅服从本节论证任务与材料。')+argumentPrompt+'\n当前小节编号为'+sectionNumber+'。不重复章标题或本小节标题；下级标题从'+sectionNumber+'.1、'+sectionNumber+'.2连续编号，更下级使用'+sectionNumber+'.1.1。禁止沿用示例中的1.1编号。',user+summaryContext,onChunk);
   if(!text || text === "（未返回内容）" || reportBodyContainsInternalLogic(text)){
     text = window.ReportLogicCore?.fallbackDraft
       ? ReportLogicCore.fallbackDraft(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),numeric:!!s.numeric,context:typeof airMaterialContext==="function"?airMaterialContext():{hasCalculation:!!(calcParams&&calcResult)}})

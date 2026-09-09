@@ -1,31 +1,9 @@
 {
-  "schemaVersion": 1,
-  "setId": "report-table-templates-gaibao-housing-v1",
-  "name": "非居改保、居改居等住房改造报告标准表格（经理审定框架v2）",
-  "projectType": "gaibao-housing",
-  "businessScenario": "housing_conversion",
-  "version": 4,
-  "source": {
-    "fileName": "市税务局第一批合作房源改造为保障性租赁住房项目_阶段稿V6【更新版】.docx",
-    "sha256": "cf333751502b31960960a0acf00c0e245f97c3b83cca7a679dd5450aaed9e3f6",
-    "physicalTableCount": 21,
-    "logicalTemplateCount": 26,
-    "note": "源Word表模与依据文字要求补充设计的表分别标注；仅去除示例数据，固定标签与汇总行保留。"
-  },
+  "fileName": "市税务局第一批合作房源改造为保障性租赁住房项目_阶段稿V6【更新版】.docx",
+  "sha256": "cf333751502b31960960a0acf00c0e245f97c3b83cca7a679dd5450aaed9e3f6",
   "templates": [
     {
       "id": "gaibao-housing-table-01",
-      "title": "项目基本情况表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第一章 项目总论",
-      "match": [
-        "项目本体情况"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         1
       ],
@@ -729,22 +707,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-02",
-      "title": "改造前户型及物业现状表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第一章 项目总论",
-      "match": [
-        "项目本体情况"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         2
       ],
@@ -1055,23 +1021,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-03",
-      "title": "法定改建条件符合性研判表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第一章 项目总论",
-      "match": [
-        "政策符合性",
-        "改造情况"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         3
       ],
@@ -1303,22 +1256,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-04",
-      "title": "改造后户型及房源表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第一章 项目总论",
-      "match": [
-        "改造目标"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         5
       ],
@@ -1629,22 +1570,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-05",
-      "title": "软硬装投资估算表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第一章 项目总论",
-      "match": [
-        "投资估算与经济效益"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         6
       ],
@@ -2242,22 +2171,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-06",
-      "title": "项目经济效益核心指标表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第一章 项目总论",
-      "match": [
-        "投资估算与经济效益"
-      ],
-      "placement": "按经理审定框架放置于第一章 项目总论相关小节",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         7
       ],
@@ -2519,22 +2436,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-07",
-      "title": "住房租赁供需分层分析表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "人口、就业与租赁市场基础"
-      ],
-      "placement": "按经理审定框架放置于第三章 项目市场分析相关小节",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         9
       ],
@@ -2842,22 +2747,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-08",
-      "title": "住房租赁竞品比较表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "竞品与租金水平分析"
-      ],
-      "placement": "按经理审定框架放置于第三章 项目市场分析相关小节",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         15
       ],
@@ -3303,23 +3196,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-09",
-      "title": "目标客群定位表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第五章 项目策划定位",
-      "match": [
-        "目标客群画像",
-        "客群定位"
-      ],
-      "placement": "按经理审定框架放置于第五章 项目策划定位相关小节",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         18
       ],
@@ -3673,22 +3553,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-10",
-      "title": "改造内容及责任分工表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第六章 改造运营方案",
-      "match": [
-        "改造实施计划及效果"
-      ],
-      "placement": "按经理审定框架放置于第六章 改造运营方案相关小节",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         21
       ],
@@ -4042,24 +3910,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-11",
-      "title": "财务评价指标表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第九章 财务评价",
-      "match": [
-        "财务评价",
-        "盈利能力分析",
-        "不确定性分析"
-      ],
-      "placement": "按经理审定框架放置于第九章 财务评价相关小节",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         31
       ],
@@ -4367,22 +4221,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-12",
-      "title": "项目实施进度计划表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第六章 改造运营方案",
-      "match": [
-        "项目管理与实施进度计划"
-      ],
-      "placement": "按经理审定框架放置于第六章 改造运营方案相关小节",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         23
       ],
@@ -4690,22 +4532,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-13",
-      "title": "风险分析及对策表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第十一章 项目风险分析及对策",
-      "match": [
-        "风险"
-      ],
-      "placement": "按经理审定框架放置于第十一章 项目风险分析及对策相关小节",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         38
       ],
@@ -5059,23 +4889,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-14",
-      "title": "合作核心条款表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第七章 项目合作模式",
-      "match": [
-        "合作核心条款",
-        "合作模式"
-      ],
-      "placement": "按经理审定框架放置于第七章 项目合作模式相关小节",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         25
       ],
@@ -5383,22 +5200,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-15",
-      "title": "合作单位企业信息表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第一章 项目总论",
-      "match": [
-        "合作模式及合作期限"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         4
       ],
@@ -5566,22 +5371,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-16",
-      "title": "市区宏观经济与人口指标表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "宏观经济环境"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         8
       ],
@@ -5813,22 +5606,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-17",
-      "title": "客群来源表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "目标客群画像"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         11
       ],
@@ -6204,22 +5985,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-18",
-      "title": "项目周边房源情况表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "住房租赁供给分析"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         12
       ],
@@ -6628,22 +6397,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-19",
-      "title": "项目3公里内房源情况表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "住房租赁供给分析"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         13
       ],
@@ -7131,1306 +6888,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
-    },
-    {
-      "id": "gaibao-housing-table-20",
-      "title": "散租市区历史成交租金表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "竞品与租金水平分析"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
-      "sourceTableNumbers": [],
-      "segments": [
-        {
-          "sourceTableNumber": 0,
-          "gridWidths": [
-            2500,
-            2500,
-            2500,
-            2500,
-            2500,
-            2500
-          ],
-          "rows": [
-            {
-              "cells": [
-                {
-                  "text": "地域",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "统计期",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "成交租金（元/㎡·月）",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "累计变化",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "年均变化",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "样本口径及来源",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            }
-          ]
-        }
-      ],
-      "schemaOrigin": "依据经理文字要求补充设计（源Word无实体表）"
-    },
-    {
-      "id": "gaibao-housing-table-21",
-      "title": "散租板块历史成交租金表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "竞品与租金水平分析"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
-      "sourceTableNumbers": [],
-      "segments": [
-        {
-          "sourceTableNumber": 0,
-          "gridWidths": [
-            2500,
-            2500,
-            2500,
-            2500,
-            2500,
-            2500
-          ],
-          "rows": [
-            {
-              "cells": [
-                {
-                  "text": "地域",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "统计期",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "成交租金（元/㎡·月）",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "累计变化",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "年均变化",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "样本口径及来源",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            }
-          ]
-        }
-      ],
-      "schemaOrigin": "依据经理文字要求补充设计（源Word无实体表）"
-    },
-    {
-      "id": "gaibao-housing-table-22",
-      "title": "集中式长租市区历史成交租金表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "竞品与租金水平分析"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
-      "sourceTableNumbers": [],
-      "segments": [
-        {
-          "sourceTableNumber": 0,
-          "gridWidths": [
-            2500,
-            2500,
-            2500,
-            2500,
-            2500,
-            2500
-          ],
-          "rows": [
-            {
-              "cells": [
-                {
-                  "text": "地域",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "统计期",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "成交租金（元/㎡·月）",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "累计变化",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "年均变化",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "样本口径及来源",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            }
-          ]
-        }
-      ],
-      "schemaOrigin": "依据经理文字要求补充设计（源Word无实体表）"
-    },
-    {
-      "id": "gaibao-housing-table-23",
-      "title": "集中式长租板块历史成交租金表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "竞品与租金水平分析"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
-      "sourceTableNumbers": [],
-      "segments": [
-        {
-          "sourceTableNumber": 0,
-          "gridWidths": [
-            2500,
-            2500,
-            2500,
-            2500,
-            2500,
-            2500
-          ],
-          "rows": [
-            {
-              "cells": [
-                {
-                  "text": "地域",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "统计期",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "成交租金（元/㎡·月）",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "累计变化",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "年均变化",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "样本口径及来源",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 5,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            }
-          ]
-        }
-      ],
-      "schemaOrigin": "依据经理文字要求补充设计（源Word无实体表）"
+      ]
     },
     {
       "id": "gaibao-housing-table-24",
-      "title": "所选案例租金汇总表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "竞品与租金水平分析"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         16
       ],
@@ -8798,22 +7259,10 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
+      ]
     },
     {
       "id": "gaibao-housing-table-25",
-      "title": "产品定位表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "产品定位分析"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
       "sourceTableNumbers": [
         17
       ],
@@ -9295,283 +7744,7 @@
             }
           ]
         }
-      ],
-      "schemaOrigin": "源Word原始表模：保留列宽、表头、固定行及合并结构"
-    },
-    {
-      "id": "gaibao-housing-table-26",
-      "title": "年龄学历收入分布表",
-      "projectType": "gaibao-housing",
-      "businessScenario": "housing_conversion",
-      "version": 4,
-      "chapter": "第三章 项目市场分析",
-      "match": [
-        "职住关系与产业分析"
-      ],
-      "placement": "紧随对应分析；实际填充注明来源、统计期与单位，缺失待补",
-      "appendix": false,
-      "longPeriod": false,
-      "sourceTableNumbers": [],
-      "segments": [
-        {
-          "sourceTableNumber": 0,
-          "gridWidths": [
-            3000,
-            3000,
-            3000,
-            3000,
-            3000
-          ],
-          "rows": [
-            {
-              "cells": [
-                {
-                  "text": "地域范围",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "维度",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "分组",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "人数或比例",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                },
-                {
-                  "text": "统计期及来源",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "E2EFDA",
-                  "align": "center",
-                  "role": "static"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "街道",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "static"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "3公里范围",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "static"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            },
-            {
-              "cells": [
-                {
-                  "text": "",
-                  "col": 0,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 1,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 2,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 3,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                },
-                {
-                  "text": "",
-                  "col": 4,
-                  "colSpan": 1,
-                  "vMerge": "",
-                  "fill": "",
-                  "align": "left",
-                  "role": "value"
-                }
-              ]
-            }
-          ]
-        }
-      ],
-      "schemaOrigin": "依据经理文字要求补充设计（源Word无实体表）"
+      ]
     }
   ]
 }

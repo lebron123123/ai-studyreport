@@ -19,7 +19,8 @@
     return widths;
   }
 
-  function run(text, opt){ return new D.TextRun(Object.assign({text:text, font:FONT}, opt||{})); }
+  // 报告成稿统一黑字；保留待补标记和加粗，不沿用编辑态强调色。
+  function run(text, opt){ return new D.TextRun(Object.assign({text:text, font:FONT}, opt||{}, {color:"000000"})); }
   function cleanWordText(text){
     return String(text==null?"":text).replace(/\u00a0/g," ").replace(/[\t ]+/g," ").replace(/\s+([，。；：！？、）】])/g,"$1").replace(/([（【])\s+/g,"$1").trim();
   }
@@ -110,6 +111,7 @@
       out.push(new D.Paragraph({
         children:textRuns(index?template.title+"（续表"+index+"）":template.title,{size:22,bold:true}),
         alignment:D.AlignmentType.CENTER,
+        keepNext:true,
         pageBreakBefore:!!(template.longPeriod&&index>0),
         spacing:{before:index?0:180,after:100},
       }));
@@ -118,6 +120,10 @@
     return out;
   }
   function blockToElems(b){
+    if(b.type==="tableCaption" && b.text) return [new D.Paragraph({
+      children:textRuns(b.text,{size:24,bold:true}),alignment:D.AlignmentType.CENTER,
+      keepNext:true,spacing:{before:120,after:80}
+    })];
     if(b.type==="table" && b.rows && b.rows.length) return [makeTable(b.rows)];
     if(b.type==="templateTable" && b.template) return templateTableElems(b.template);
     if(b.type==="logic" && b.text) return [new D.Paragraph({
@@ -127,7 +133,7 @@
     })];
     // 小标题：正文里的 ## 三级标题，加粗略大，与正文拉开层次
     if(b.type==="h" && b.text) return [new D.Paragraph({
-      heading:D.HeadingLevel.HEADING_3,keepNext:true,
+      heading:D.HeadingLevel['HEADING_'+Math.min(6,Math.max(3,Number(b.level)||3))],keepNext:true,
       children:textRuns(b.text,{size:24, bold:true}),
       spacing:{before:160, after:80, line:360, lineRule:D.LineRuleType.AUTO},
     })];
@@ -142,7 +148,7 @@
     alignment:D.AlignmentType.CENTER, spacing:{before:4800, after:600, line:360, lineRule:D.LineRuleType.AUTO},
   }));
   children.push(new D.Paragraph({
-    children:[run("可 行 性 研 究 报 告",{size:44,bold:true})],
+    children:[run(payload.documentTitle||"可 行 性 研 究 报 告",{size:44,bold:true})],
     alignment:D.AlignmentType.CENTER, spacing:{after:2400},
   }));
   const meta = [
@@ -152,7 +158,7 @@
     payload.project.scale? "投资规模："+payload.project.scale+"万元" : "",
   ].filter(Boolean);
   meta.forEach(m=> children.push(new D.Paragraph({children:[run(m,{size:24})], alignment:D.AlignmentType.CENTER, spacing:{after:120}})));
-  children.push(new D.Paragraph({children:[run(new Date().toLocaleDateString("zh-CN"),{size:24})], alignment:D.AlignmentType.CENTER}));
+  children.push(new D.Paragraph({children:[run(payload.documentDate||new Date().toLocaleDateString("zh-CN"),{size:24})], alignment:D.AlignmentType.CENTER}));
   if(payload.docNo) children.push(new D.Paragraph({children:[run("文档编号："+payload.docNo,{size:21,color:"666666"})], alignment:D.AlignmentType.CENTER, spacing:{before:200}}));
   if(payload.versionNote)children.push(new D.Paragraph({children:[run(payload.versionNote,{size:20,color:"666666"})],alignment:D.AlignmentType.CENTER,spacing:{before:120}}));
 
@@ -177,7 +183,7 @@
     c.sections.forEach((s,si)=>{
       children.push(new D.Paragraph({
         tabStops:tocTab, indent:{left:420}, spacing:{after:40, line:300, lineRule:D.LineRuleType.AUTO},
-        children:[ ...textRuns((c.num||ci+1)+"."+(si+1)+"　"+(s.title||""),{size:24}), run("\t"),
+        children:[ ...textRuns((c.num||ci+1)+"."+(s.num||si+1)+"　"+(s.title||""),{size:24}), run("\t"),
           new D.SimpleField("PAGEREF _tc"+ci+"_"+si+" \\h") ],
       }));
     });
@@ -197,7 +203,7 @@
     c.sections.forEach((s,si)=>{
       children.push(new D.Paragraph({
         heading: D.HeadingLevel.HEADING_2,
-        children:[ new D.Bookmark({id:"_tc"+ci+"_"+si, children:textRuns((c.num||ci+1)+"."+(si+1)+"　"+s.title,{size:28,bold:true})}) ],
+        children:[ new D.Bookmark({id:"_tc"+ci+"_"+si, children:textRuns((c.num||ci+1)+"."+(s.num||si+1)+"　"+s.title,{size:28,bold:true})}) ],
         spacing: Object.assign({before:280, after:160}, LINE13),
       }));
       (s.blocks||[]).forEach(b=> blockToElems(b).forEach(e=>children.push(e)));
@@ -234,8 +240,8 @@
 
   /* ---------- 签发说明 ---------- */
   const signNote = payload.signed
-    ? "本报告已经人工复核确认签发，签发日期："+new Date().toLocaleDateString("zh-CN")
-    : "本报告为AI生成初稿，尚未经过人工复核签发，其中标注\u201c待填\u201d的数据须补充真实测算结果，正式使用前须完成审核。";
+    ? "本报告已经人工复核确认签发，签发日期："+(payload.approvalDate||payload.documentDate||"见冻结版本复核记录")
+    : (payload.unsignedNote||"本报告为AI生成初稿，尚未经过人工复核签发，其中标注\u201c待填\u201d的数据须补充真实测算结果，正式使用前须完成审核。");
   // ===== 附图（图表PNG） =====
   // ===== 溯源附录：逐节生成依据与置信度（可追溯审计） =====
   if(payload.provenance && payload.provenance.rows && payload.provenance.rows.length > 1){
@@ -272,13 +278,16 @@
   return new D.Document({
     features:{ updateFields:true },
     styles:{
-      default:{ document:{ run:{ font:FONT, size:24 },paragraph:{spacing:Object.assign({before:0,after:0},LINE13)} } },
+      default:{ document:{ run:{ font:FONT, size:24, color:"000000" },paragraph:{spacing:Object.assign({before:0,after:0},LINE13)} },
+        heading1:{run:{color:"000000"}},heading2:{run:{color:"000000"}},heading3:{run:{color:"000000"}},
+        heading4:{run:{color:"000000"}},heading5:{run:{color:"000000"}},heading6:{run:{color:"000000"}},
+        hyperlink:{run:{color:"000000"}} },
       paragraphStyles:[
         { id:"Heading1", name:"Heading 1", basedOn:"Normal", next:"Normal", quickFormat:true,
-          run:{ size:44, bold:true, font:FONT },
+          run:{ size:44, bold:true, font:FONT, color:"000000" },
           paragraph:{ alignment:D.AlignmentType.CENTER, spacing:{before:0, after:360} } },
         { id:"Heading2", name:"Heading 2", basedOn:"Normal", next:"Normal", quickFormat:true,
-          run:{ size:28, bold:true, font:FONT },
+          run:{ size:28, bold:true, font:FONT, color:"000000" },
           paragraph:{ spacing:{before:280, after:160} } },
       ],
     },
@@ -292,7 +301,7 @@
       footers:{ default: new D.Footer({ children:[ new D.Paragraph({
         alignment:D.AlignmentType.CENTER,
         children:[ run("— ",{size:18,color:"666666"}),
-          new D.TextRun({children:[D.PageNumber.CURRENT], size:18, color:"666666", font:FONT}),
+          new D.TextRun({children:[D.PageNumber.CURRENT], size:18, color:"000000", font:FONT}),
           run(" —",{size:18,color:"666666"}) ],
       })]})},
       children: children,

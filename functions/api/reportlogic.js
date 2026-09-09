@@ -4,6 +4,7 @@ import { adaptEnv } from "./_adapters.js";
 import rentSeed from "./_reportlogic-seed.js";
 import gaibaoSeed from "./_reportlogic-gaibao-seed.js";
 import writingPolicy from "../../report-writing-policy.js";
+import { mergeHousingRevision } from "./_reportlogic-scoped-migration.js";
 
 const REPORT_LOGIC_SEEDS = { rent: rentSeed, gaibao: gaibaoSeed };
 const GAIBAO_SCENARIOS = ["housing_conversion", "commercial_renovation"];
@@ -195,10 +196,16 @@ function evaluateRuleRevisionData(baseData,input){
 async function ensureSeeds(env) {
   const now = Date.now();
   for (const [projectType, sourceSeed] of Object.entries(REPORT_LOGIC_SEEDS)) {
-    const data = validateSet(sourceSeed, projectType), seedId = data.setId || `report-logic-${projectType}-v1`;
+    let data = validateSet(sourceSeed, projectType);
+    const seedId = data.setId || `report-logic-${projectType}-v1`;
     const existing = await env.DB.prepare("SELECT id,version,created_by,data FROM report_logic_sets WHERE project_type=? AND status='published' ORDER BY version DESC LIMIT 1").bind(projectType).first();
     if (existing) {
       if (needsAuthoritativeBaseline(existing.data, data)) {
+        if(projectType==='gaibao' && data.source?.scopedMigration==='housing_conversion' && parse(existing.data,{}).rules?.some(r=>r.id==='gaibao-v1-003')){
+          const previous=validateSet(parse(existing.data,{}),projectType);
+          data=validateSet(mergeHousingRevision(previous,data),projectType);
+          bumpLogicVersion(data,previous,projectType,'housing_conversion');
+        }
         const latest = await env.DB.prepare("SELECT version FROM report_logic_sets WHERE project_type=? ORDER BY version DESC LIMIT 1").bind(projectType).first();
         const version = Number(latest?.version || existing.version || 0) + 1;
         const id = `report-logic-${projectType}-v${version}-${now.toString(36)}`;

@@ -222,25 +222,7 @@ const GAIBAO_PARAMS = [
   {k:"repay", label:"年均还款额(万元/年)", lo:500, hi:2000, group:"融资"},
 ];
 function assembleCalcInputStandalone(p){
-  const buildYearsArr = Array.from({length:p.buildYears},(_,i)=>p.buildStart+i);
-  const opStart = p.buildStart + p.buildYears;
-  const operateYearsArr = Array.from({length:p.operateYears},(_,i)=>opStart+i);
-  const loanPlan = {}; loanPlan[p.buildStart] = p.loan;
-  const repayPlan = {};
-  for(let i=1;i<p.operateYears;i++){ repayPlan[opStart+i] = p.repay; }
-  const ramp = {}; ramp[opStart] = p.rampOcc;
-  return {
-    buildYears:buildYearsArr, operateYears:operateYearsArr, firstOperateMonths:p.firstMonths,
-    residentialArea:p.area, rentStartPrice:p.rent, rentIncreaseSpan:p.rentSpan, rentIncreaseRate:p.rentRate,
-    costIncreaseSpan:1, costIncreaseRate:0,
-    occupancyRamp:ramp, stableStart:opStart+1, stableEnd:operateYearsArr[operateYearsArr.length-1], occupancyStable:p.stableOcc,
-    collectPrice:p.collect, decorationUnitCost:p.deco, decorationInterval:p.decoInt, redecorationRatio:p.decoRatio,
-    totalUnits:p.units, unitOperateCost:p.unitCost, startupFee:p.startup,
-    loanAmount:p.loan, interestBase:p.interestBase, rateDiscount:p.rateDiscount, loanAnnualRate:p.loanRate,
-    loanPlan:loanPlan, repayPlan:repayPlan, discountRatePct:p.discount,
-    collectFactor: p.mode==="share"? (p.collectPct||50)/100 : 1,
-    shareRatio: p.mode==="share"? (p.sharePct||0)/100 : 0,
-  };
+  return window.NRCalc.fromParams(p);
 }
 function gaibaoEvalIrr(vec, cfg){
   const NRCalc = window.NRCalc;

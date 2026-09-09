@@ -13,7 +13,7 @@ function safeEval(expr, scope){
 function metricScope(){
   const s = scResult.summary;
   return { totalIncome:s.totalIncome||0, totalCost:s.totalCost||0, totalTax:s.totalTax||0,
-    totalNetProfit:s.totalNetProfit||0, totalNpv:s.totalNpv||0, irr:s.irr||0, icr:s.icr||0,
+    totalNetProfit:s.totalNetProfit||0, totalNpv:s.totalNpv||0, irr:s.irr||0, icr:s.icr??s.interestCoverageReference??NaN,
     totalSaleIncome:s.totalSaleIncome||0, rentalPvTotal:s.rentalPvTotal||0, totalInterest:s.totalInterest||0,
     paybackYears: (s.payback||s.paybackInfo)? (s.payback||s.paybackInfo).index : 999 };
 }
@@ -45,7 +45,8 @@ function evalScore(){
     else{ band="差"; score=20; }
     const w = parseFloat(r.weight)||0;
     wSum += w; sSum += score*w;
-    rows.push({name:r.name, v, band, score, w, dir:r.dir, gv:r.goodV, mv:r.midV});
+    const name=calcType==='gaibao'&&/\bicr\b/.test(String(r.expr))?r.name+'（参考口径，待财务复核）':r.name;
+    rows.push({name, v, band, score, w, dir:r.dir, gv:r.goodV, mv:r.midV});
   });
   const total = wSum? Math.round(sSum/wSum) : 0;
   const grade = total>=85? "优" : total>=60? "良" : total>=40? "中" : "差";

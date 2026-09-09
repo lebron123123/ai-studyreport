@@ -118,6 +118,8 @@ test("非居改保（NRCalc）默认参数基准数值回归", () => {
     paybackInfo: { year: 2033, index: 8 },
     decoTimes: 2,
     totalEngCost: 3900,
+    totalOperateMonths: 144,
+    interestCoverageReference: 1.56,
   });
 });
 

@@ -68,7 +68,7 @@ test("Word构建器可输出含合并单元格和续表的真实docx",async()=>{
   assert.equal(buffer.subarray(0,2).toString(),"PK");
 });
 
-test("Word各类报告内容的待补标记统一红色且正文段前段后为0磅",async()=>{
+test("Word各类报告内容的待补标记保留加粗黑字且正文段前段后为0磅",async()=>{
   const docx=require("../docx.umd.js"),build=require("../docxgen.js"),JSZip=require("../local-server/node_modules/jszip");
   const markers=["【待补：章节依据】","【待补：标题依据】","【待补：竞品租金及出租率实地调研数据】","【待补：小标题依据】","【待补：表格依据】","【待补：附表依据】"];
   const doc=build(docx,{project:{name:"[系统测试]Word格式"},signed:false,docNo:"",chapters:[{cn:"一",name:"总论",num:1,sections:[{title:"项目概况",blocks:[{type:"p",text:"竞品情况  【待补：竞品租金及出租率实地调研数据】  。"},{type:"p",text:"   "}]}]}],appendix:null,tableAppendix:[],provenance:null});
@@ -79,10 +79,10 @@ test("Word各类报告内容的待补标记统一红色且正文段前段后为0
   markers.forEach(marker=>{
     const at=xml.indexOf(marker),runStart=xml.lastIndexOf("<w:r>",at),runEnd=xml.indexOf("</w:r>",at),markerRun=xml.slice(runStart,runEnd+6);
     assert.ok(at>0,marker+" 应写入Word");
-    assert.match(markerRun,/w:color w:val="C62828"/,marker+" 应为红色");
+    assert.match(markerRun,/w:color w:val="000000"/,marker+" 应为黑色");
     assert.match(markerRun,/w:b\/>/,marker+" 应加粗");
   });
-  assert.match(paragraph,/w:color w:val="C62828"/);
+  assert.match(paragraph,/w:color w:val="000000"/);
   assert.match(paragraph,/w:b\/>/);
   assert.match(paragraph,/w:before="0"/);
   assert.match(paragraph,/w:after="0"/);
@@ -122,15 +122,31 @@ test("33套模板可按正文与财务附表两章打包为完整Word查看版",
   assert.equal(buffer.subarray(0,2).toString(),"PK");
 });
 
-test("非居改保和商业改造分别加载14张与22张Word表格，场景之间不串表",async()=>{
+test("非居改保26套表模对应21张来源表，商业改造22张，场景之间不串表",async()=>{
   await ReportTableTemplates.load("gaibao-housing");await ReportTableTemplates.load("gaibao-commercial");
-  assert.deepEqual(ReportTableTemplates.stats("gaibao-housing"),{templates:14,physicalTables:14,appendix:0,longPeriod:0});
+  assert.deepEqual(ReportTableTemplates.stats("gaibao-housing"),{templates:26,physicalTables:21,appendix:0,longPeriod:0});
   assert.deepEqual(ReportTableTemplates.stats("gaibao-commercial"),{templates:22,physicalTables:22,appendix:0,longPeriod:0});
   assert.equal(ReportTableTemplates.resolveType("gaibao",{businessScenario:"housing_conversion"}),"gaibao-housing");
   assert.equal(ReportTableTemplates.resolveType("gaibao",{businessScenario:"commercial_renovation"}),"gaibao-commercial");
   assert.ok(ReportTableTemplates.forSection("gaibao-housing","项目总论","项目本体情况、改造情况与政策符合性").some(t=>t.title==="法定改建条件符合性研判表"));
   assert.ok(ReportTableTemplates.forSection("gaibao-commercial","项目建设必要性","遏制经营下滑态势").some(t=>t.title==="经营现状及趋势分析表"));
   assert.equal(ReportTableTemplates.forSection("gaibao-housing","项目建设必要性","遏制经营下滑态势").length,0);
+});
+
+test("住房租金修正表在页面与真实Word中保留八列和加权合并行",async()=>{
+  const template=housingSet.templates.find(t=>t.id.endsWith('-24'));
+  const html=ReportTableTemplates.renderTemplate(template);
+  assert.equal((html.match(/<tr>/g)||[]).length,6);
+  assert.match(html,/colspan="8"/);
+  for(const cell of template.segments[0].rows[0].cells)assert.ok(html.includes(cell.text));
+  const docx=require('../docx.umd.js'),build=require('../docxgen.js'),JSZip=require('../local-server/node_modules/jszip');
+  const doc=build(docx,{project:{name:'[系统测试]修正表结构'},signed:false,docNo:'',chapters:[{cn:'三',name:'市场分析',num:3,sections:[{title:'租金修正',blocks:[{type:'templateTable',template}]}]}],appendix:null,tableAppendix:[],provenance:null});
+  const zip=await JSZip.loadAsync(await docx.Packer.toBuffer(doc));
+  const xml=await zip.file('word/document.xml').async('string');
+  assert.match(xml,/w:gridSpan w:val="8"/);
+  assert.ok(xml.includes('各比较物业修正价格'));
+  assert.ok(xml.includes('装修家私修正'));
+  assert.ok(!xml.includes('32元'));
 });
 
 test("后台差异支持新增、删除、章节与匹配小节修改",()=>{

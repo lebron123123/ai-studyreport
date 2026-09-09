@@ -51,9 +51,14 @@ function buildCalcWorkbook(){
   const paramCell = {};
   const pRows = [["参数","键","值","说明"]];
   const pushP = (label,key,val,note)=>{ pRows.push([label,key,val,note||""]); paramCell[key] = "'参数'!$C$"+pRows.length; };
-  Object.entries(scParams||{}).forEach(([k,v])=>{ if(typeof v==="number") pushP("输入参数",k,v); else pRows.push(["输入参数",k,String(v),""]); });
+  Object.entries(scParams||{}).forEach(([k,v])=>{ if(typeof v==="number") pushP("输入参数",k,v); else if(v!=null) pRows.push(["输入参数",k,typeof v==='object'?JSON.stringify(v):String(v),""]); });
+  if(calcType==='gaibao'){
+    pushP('有效分成比例','effectiveShareRatio',scParams.mode==='share'?(scParams.sharePct??0)/100:0,'整租模式为0');
+    pRows.push(['实际运营月数','monthDict',JSON.stringify(R.monthDict),'起止月份均计入']);
+    (R.warnings||[]).forEach(t=>pRows.push(['口径提示','','',t]));
+  }
   Object.entries(K).forEach(([k,v])=>pushP("计算系数",k,v,"引擎口径/后台配置"));
-  pRows.push(["说明","","","本工作簿由可研报告工坊导出：蓝色区域为公式单元格（双击可见引用），修改'参数'页数值后Excel将自动重算；灰底数值来自过程性计算（如弥补亏损、增值税迭代），以导出时引擎结果为准。公式重算与缓存值在小数第4位可能存在±0.0001量级差异。"]);
+  pRows.push(["说明","","","本工作簿为导出时测算快照：公式单元格可查看引用，但并非完整独立测算引擎。日期、年度计划或其他参数修改后，请回网站重新测算并导出；不要只改本表参数作为新结果。过程性数值以导出时引擎结果为准，小数第4位可能存在±0.0001量级差异。"]);
   const wsP = X.utils.aoa_to_sheet(pRows);
   wsP["!cols"] = [{wch:10},{wch:20},{wch:14},{wch:60}];
   X.utils.book_append_sheet(wb, wsP, "参数");
@@ -159,7 +164,7 @@ function loadScript(src){
 async function ensureDocxLib(){
   if(window.docx && window.buildDocxDocument) return;
   if(!docxLibLoading){
-    docxLibLoading = Promise.all([loadScript("docx.umd.js"), loadScript("docxgen.js")]);
+    docxLibLoading = Promise.all([loadScript("docx.umd.js"), loadScript("docxgen.js?v=20260909.1")]);
   }
   await docxLibLoading;
 }
@@ -185,6 +190,9 @@ function htmlToBlocks(htmlStr){
           const segment=template.segments&&template.segments[si];
           if(!segment)return;
           segEl.querySelectorAll("[data-row][data-col]").forEach(cellEl=>{
+            if(segment.rows.length>1){
+              while(segment.rows.length<=Number(cellEl.getAttribute('data-row')))segment.rows.push({cells:segment.rows[0].cells.map(c=>Object.assign({},c,{text:'',role:'value'}))});
+            }
             const row=segment.rows[Number(cellEl.getAttribute("data-row"))];
             const cell=row&&row.cells.find(c=>Number(c.col)===Number(cellEl.getAttribute("data-col")));
             if(cell)cell.text=cellEl.querySelector(".rpt-template-empty")?"":cellEl.textContent.trim();
@@ -192,6 +200,8 @@ function htmlToBlocks(htmlStr){
         });
         blocks.push({type:"templateTable",template});
       }
+    }else if(node.classList.contains("rpt-table-caption")){
+      blocks.push({type:"tableCaption",text:node.textContent.trim()});
     }else if(tag==="TABLE"){
       const rows = [...node.querySelectorAll("tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
       if(rows.length) blocks.push({type:"table", rows});
@@ -203,7 +213,7 @@ function htmlToBlocks(htmlStr){
       });
     }else if(/^H[1-6]$/.test(tag)){
       const t = node.textContent.trim();
-      if(t) blocks.push({type:"h", text:t});
+      if(t) blocks.push({type:"h", level:Number(tag.slice(1)), text:t});
     }else if(tag==="HR"){
       blocks.push({type:"p", text:""});
     }else if(tag==="DIV" && /font-weight:\s*600/.test(node.getAttribute("style")||"")){
@@ -244,28 +254,48 @@ function exportProvenance(active){
   return rows.length>1?{rows,note:"本表记录生成时可追溯的来源、版本和核验状态。检索命中或提供测算上下文不代表正文逐句、逐数已核验；不按素材种类计算准确率。未标注版本、页码或效力的来源仍须人工核对，参考范例不可替代项目事实。"}:null;
 }
 
+async function exportFrozenDeliveryWord(projectId,deliveryId){
+  const response=await fetch('/api/reportdelivery?projectId='+encodeURIComponent(projectId)+'&id='+encodeURIComponent(deliveryId),{headers:authHeaders(),signal:AbortSignal.timeout(30000)}),data=await response.json();
+  if(!response.ok||!data.ok)throw new Error(data.error||'无法读取后台冻结版本');
+  const record=data.result,snapshot=record.snapshot;
+  if(!record.integrity?.verified||snapshot.schemaVersion<3)throw new Error('该旧版本缺少项目身份快照，请重新冻结；不能借用当前项目数据导出。');
+  const approved=record.formalExportAllowed===true;
+  if(record.status==='approved'&&!approved)throw new Error('批准记录不完整，禁止正式导出');
+  await ensureDocxLib();
+  const payload={project:snapshot.project,signed:approved,docNo:snapshot.exportContext.docNo||record.id,chapters:snapshot.chapters.map((c,i)=>({cn:c.sourceId,num:i+1,name:c.name,sections:c.sections.map(s=>({title:s.title,blocks:htmlToBlocks(typeof renderContent==='function'&&!/<(?:p|table|div)\b/i.test(s.content)?renderContent(s.content):s.content)}))})),appendix:null,tableAppendix:[],images:[],provenance:[],versionNote:(approved?'后台独立复核批准版本':'冻结待复核稿')+' · '+record.id+' · SHA-256 '+record.contentHash+' · 复核人 '+(record.approval.reviewerId||'未指定')+' · 不读取当前工作稿或当前测算'};
+  payload.documentDate=new Date(record.createdAt).toLocaleDateString('zh-CN');
+  if(snapshot.references?.evidenceSnapshot?.reportId){payload.documentTitle='投 资 风 险 报 告';payload.unsignedNote='本报告依据已记录事项生成并冻结，尚未独立复核签发；未记录或未核验不代表无风险。';}
+  payload.approvalDate=record.approval.reviewedAt?new Date(Number(record.approval.reviewedAt)).toLocaleDateString('zh-CN'):'未批准';
+  payload.chapters.forEach((c,i)=>{c.cn=c.cn||i+1;});
+  payload.provenance={note:'以下是冻结时保存的来源记录，不代表原文已经人工核实。',rows:[['章节','记录类别','版本','冻结来源记录'],...snapshot.chapters.flatMap(c=>c.sections.filter(s=>s.prov).map(s=>[c.name+' / '+s.title,'来源快照',record.contentHash.slice(0,12),JSON.stringify(s.prov)]))]};
+  if(!snapshot.references?.evidenceSnapshot?.reportId)payload.chapters.push({cn:'附',name:'冻结测算与引用快照',sections:[{title:'测算快照（历史封存，不重新计算）',blocks:[{type:'p',text:JSON.stringify({calculations:snapshot.calculations,exportContext:snapshot.exportContext,references:snapshot.references},null,2)}]}]});
+  const blob=await window.docx.Packer.toBlob(window.buildDocxDocument(window.docx,payload)),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=(snapshot.project.name||'可行性研究报告')+(approved?'_正式版_':'_冻结待复核_')+record.contentHash.slice(0,12)+'.docx';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
 function buildExportPayload(){
   const active = chapters.filter(c=>c.checked);
   const secEls = document.querySelectorAll("#sheet .section-block");
   const elMap = {};
   secEls.forEach(el=>{ const b = el.querySelector(".body"); if(el.dataset.cn!==undefined) elMap[el.dataset.cn+'_'+el.dataset.si] = b; });
+  const reportEntries=active.flatMap(c=>c.sections.map((s,si)=>({section:s,html:elMap[c.cn+'_'+si]?.innerHTML||s.editedHtml||renderContent(s.content||''),context:{type:typeof reportTableProjectType==='function'?reportTableProjectType():null,chapter:c.name,section:s.t,number:(chapters.indexOf(c)+1)+'.'+(si+1)}}))).filter(e=>e.html.trim());
+  const composed=window.ReportSectionLayout?.composeDocument?window.ReportSectionLayout.composeDocument(reportEntries,window.ReportTableTemplates):null;
 
   const chs = active.map(c=>({ cn:c.cn, name:c.name, num: chapters.indexOf(c)+1,
     sections: c.sections.map((s,si)=>{
       if(!String(s.content||"").trim()&&!String(s.editedHtml||"").trim())return null;
       const el = elMap[c.cn+'_'+si];
-      const htmlStr = el? el.innerHTML : (s.editedHtml || renderContent(s.content||""));
+      const originalHtml = el? el.innerHTML : (s.editedHtml || renderContent(s.content||""));
+      const htmlStr=composed?composed[reportEntries.findIndex(e=>e.section===s)]:window.ReportSectionLayout?window.ReportSectionLayout.compose(originalHtml,{type:typeof reportTableProjectType==='function'?reportTableProjectType():null,chapter:c.name,section:s.t,number:(chapters.indexOf(c)+1)+'.'+(si+1)},window.ReportTableTemplates):originalHtml;
       const blocks=htmlToBlocks(htmlStr);
       // 绿色“本节生成逻辑”只用于网页解释和交互，不属于正式报告正文，禁止进入Word。
       // 导出只读取 .body 或正式正文状态，不读取相邻的逻辑卡、材料框架卡和操作按钮。
       const type=typeof reportTableProjectType==="function"?reportTableProjectType():null;
-      if(type&&window.ReportTableTemplates){
+      if(!window.ReportSectionLayout&&type&&window.ReportTableTemplates){
         const used=new Set(blocks.filter(b=>b.type==="templateTable").map(b=>b.template&&b.template.id));
         window.ReportTableTemplates.forSection(type,c.name,s.t).forEach(t=>{
           if(!used.has(t.id))blocks.push({type:"templateTable",template:window.ReportTableTemplates.exportTemplate(t.id,type)});
         });
       }
-      return { title:s.title||s.t, blocks };
+      return { title:s.title||s.t, num:si+1, blocks };
     }).filter(Boolean)
   })).filter(c=>c.sections.length);
 
@@ -278,7 +308,8 @@ function buildExportPayload(){
     const mainRows = [["年份","租金收入","总成本","税金","净利润","净现金流","累计净现金流"]];
     r.allYears.forEach(y=> mainRows.push([y, fmt(r.income[y].rent), fmt(r.cost[y].total), fmt(r.tax[y].total), fmt(r.profit[y].netProfit), fmt(r.cf[y].net), fmt(r.cf[y].cumNet)]));
     let sensRows = null;
-    if(r.sens){
+    const hasSensitivityTable=chs.some(c=>c.sections.some(s=>s.blocks.some(b=>b.type==='table'&&/敏感因素|变动因素/.test((b.rows?.[0]||[]).join('|')))));
+    if(r.sens&&!hasSensitivityTable){
       sensRows = [["变动因素","IRR","累计净现值（万元）"]];
       r.sens.forEach(x=> sensRows.push([x.label, x.irr===null?"—":x.irr+" %", fmt(x.npv)]));
     }
@@ -288,13 +319,14 @@ function buildExportPayload(){
     };
   }
   const type=typeof reportTableProjectType==="function"?reportTableProjectType():null;
+  const bodyTemplateIds=new Set(chs.flatMap(c=>c.sections.flatMap(s=>s.blocks.filter(b=>b.type==='templateTable').map(b=>b.template.id))));
   const tableAppendix=type&&window.ReportTableTemplates
-    ?window.ReportTableTemplates.appendix(type).map(t=>window.ReportTableTemplates.exportTemplate(t.id,type))
+    ?window.ReportTableTemplates.appendix(type).filter(t=>!bodyTemplateIds.has(t.id)).map(t=>window.ReportTableTemplates.exportTemplate(t.id,type))
     :[];
   const workflow=typeof projectWorkflow!=="undefined"?projectWorkflow:null;
   const current=workflow?.reportVersions?.find(v=>v.id===workflow.currentReportVersionId);
   const versionNote=[current?"关联报告版本 V"+current.version:null,typeof reportDocumentRevision!=="undefined"?"工作稿修订 "+reportDocumentRevision:null].filter(Boolean).join(" · ");
-  return { project: project, signed: signed, docNo: getDocNo(), chapters: chs, appendix, tableAppendix, provenance, versionNote };
+  return { project: project, signed: false, docNo: getDocNo(), chapters: chs, appendix, tableAppendix, provenance, versionNote:versionNote+' · 未签发工作稿' };
 }
 
 /* ===== 图表转PNG(嵌入Word用) ===== */
@@ -366,7 +398,7 @@ async function exportWord(){
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     const versions=projectWorkflow&&Array.isArray(projectWorkflow.reportVersions)?projectWorkflow.reportVersions:[],current=versions.find(v=>v.id===projectWorkflow.currentReportVersionId)||versions[versions.length-1];
-    a.href = url; a.download = (project.name||"可行性研究报告")+(signed?"_正式版":"_阶段稿"+(current?"V"+current.version:""))+".docx";
+    a.href = url; a.download = (project.name||"可行性研究报告")+"_未签发工作稿"+(current?"V"+current.version:"")+".docx";
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }catch(e){
@@ -570,6 +602,10 @@ async function exportCalcWord(){
   // ---- 一、主要输入参数 ----
   kids.push(para("一、主要输入参数",{font:"黑体",size:24},{spacing:{line:380,lineRule:"exact",before:160,after:60}}));
   const PL = {buildStart:"建设期起始年", buildStartQuarter:"建设期起始季度", buildYears:"建设期年数", operateYears:"运营期年数",
+    buildStartMonth:"建设开始年月",buildEndMonth:"建设结束年月",operateStartMonth:"运营开始年月",operateEndMonth:"运营结束年月",
+    costSpan:"运营成本递增跨度（年）",costRate:"运营成本递增率（%）",stableStart:"稳定期开始年",stableEnd:"稳定期结束年",
+    occupancyRamp:"分年出租率",loanPlan:"分年借款计划（万元）",repayPlan:"分年还款计划（万元）",
+    collect:"收楼单价（元/㎡/月）",deco:"首次装修单方造价（元/㎡）",decoInt:"装修间隔（年）",decoRatio:"二次装修系数",units:"总套数",unitCost:"单套月运营成本（元）",startup:"开办费（万元）",loan:"总借款额（万元）",interestBase:"计息本金（万元）",rateDiscount:"利率折扣系数",discount:"折现率（%）",repay:"默认年均还款（万元）",collectPct:"收楼支付比例（%）",sharePct:"业主分成比例（%）",
     firstMonths:"运营首年计租月数", area:"住宅面积（㎡）", rent:"起始租金（元/㎡/月）",
     rentDiscount:"租金折扣系数", subsidyArea:"政府补贴对应面积（㎡）", subsidyPrice:"补贴单价（元/㎡/月）",
     subsidyDiscount:"补贴折扣系数", subsidyStableOcc:"补贴部分出租率",
@@ -583,9 +619,17 @@ async function exportCalcWord(){
     loanTotalYears:"借款总年数", discountPct:"折现率（%）"};
   Object.keys(PL).forEach(k=>{
     const v=P[k];
-    if(v===undefined || v===null || v==="" || v===0) return;   // 未填或为0的参数不列出，避免干扰阅读
-    kids.push(para("　"+PL[k]+"："+v,null,{spacing:{line:320,lineRule:"exact"}}));
+    if(v===undefined || v===null || v==="" || (v===0&&type!=='gaibao')) return;
+    if(type==='gaibao'&&R.dates&&['buildStart','buildYears','operateYears','firstMonths'].includes(k)) return;
+    kids.push(para("　"+PL[k]+"："+(typeof v==='object'?Object.entries(v).map(([y,n])=>y+'='+n).join('；'):v),null,{spacing:{line:320,lineRule:"exact"}}));
   });
+  if(type==='gaibao'){
+    kids.push(para('合作模式：'+(P.mode==='share'?'减租金合作分成（本站扩展口径）':'满租金整租经营')));
+    if(R.dates && !P.buildStartMonth) Object.entries(R.dates).forEach(([k,v])=>kids.push(para(PL[k]+'：'+v)));
+    kids.push(para('年度实际运营月份：'+Object.entries(R.monthDict||{}).map(([y,m])=>y+'年 '+m+'个月').join('；')));
+    kids.push(para('实际运营月数合计：'+R.summary.totalOperateMonths+'；利息备付率（参考口径）：'+R.summary.interestCoverageReference));
+    (R.warnings||[]).forEach(t=>kids.push(para(t)));
+  }
   if(P.investSchedule&&P.investSchedule.periods){
     const sch=P.investSchedule,total=Number(sch.totalInvestment)||0;
     kids.push(para("二、工期进度与投资计划",{font:"黑体",size:24},{spacing:{line:380,lineRule:"exact",before:200,after:60}}));
@@ -613,7 +657,7 @@ async function exportCalcWord(){
              + (r.f==="pct"?"":"万元");
       }else{
         // 出租率、单价这类比率/单价行没有"合计"概念，改为列示运营期首末取值，便于核对
-        const ops=R.operateArr.map(y=>{ try{ return r.g(R,y); }catch(e){ return null; } })
+        const ops=(R.operateArr||R.allYears.filter(y=>(R.monthDict||{})[y]>0)).map(y=>{ try{ return r.g(R,y); }catch(e){ return null; } })
                               .filter(v=>typeof v==="number"&&isFinite(v));
         if(ops.length){
           const sh=v=> r.f==="pct" ? (v*100).toFixed(1)+"%" : Number(v).toLocaleString("zh-CN",{maximumFractionDigits:2});
