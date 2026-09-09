@@ -10,21 +10,22 @@ const check=(condition,message)=>{if(!condition)failures.push(message);};
 const hash=value=>crypto.createHash("sha256").update(value).digest("hex");
 const fileHash=relative=>hash(fs.readFileSync(path.join(root,relative)));
 const logicSets=[
-  ["rent","data/report-logic-rent-v1.json","functions/api/_reportlogic-seed.js",137,14],
-  ["gaibao","data/report-logic-gaibao-v1.json","functions/api/_reportlogic-gaibao-seed.js",74,13]
+  ["rent","data/report-logic-rent-v1.json","functions/api/_reportlogic-seed.js",137,14,137],
+  ["gaibao","data/report-logic-gaibao-v1.json","functions/api/_reportlogic-gaibao-seed.js",78,13,74]
 ];
-for(const [name,canonicalFile,runtimeFile,rules,chapters] of logicSets){
+for(const [name,canonicalFile,runtimeFile,rules,chapters,sourceRows] of logicSets){
   const canonical=readJson(canonicalFile);
   const runtime=(await import(pathToFileURL(path.join(root,runtimeFile)).href+"?gate="+Date.now())).default;
   check(canonical.rules?.length===rules,`Canonical ${name} 规则不是 ${rules} 条`);
   check(canonical.structure?.chapterCount===chapters,`Canonical ${name} 规则不是 ${chapters} 章`);
-  check(canonical.source?.authoritativeRows===rules,`Canonical ${name} 权威行数元数据不是 ${rules}`);
+  // 原始导入行数是来源证据，不等于后续经理批示扩展后的规则数。
+  check(canonical.source?.authoritativeRows===sourceRows,`Canonical ${name} 来源权威行数元数据不是 ${sourceRows}`);
   check(JSON.stringify(runtime)===JSON.stringify(canonical),`${name} Canonical JSON 与 Runtime Seed 不一致，请运行 npm run generate:reportlogic-seed`);
 }
 
 const tables=[
   ["rent","data/report-table-templates-rent-v1.json",33,70],
-  ["gaibao-housing","data/report-table-templates-gaibao-housing-v1.json",14,14],
+  ["gaibao-housing","data/report-table-templates-gaibao-housing-v1.json",26,21],
   ["gaibao-commercial","data/report-table-templates-gaibao-commercial-v1.json",22,22]
 ];
 for(const [type,file,logical,physical] of tables){
@@ -32,7 +33,9 @@ for(const [type,file,logical,physical] of tables){
   check(set.projectType===type,`${file} 项目类型串场景`);
   check(set.templates?.length===logical,`${file} 逻辑表数量应为 ${logical}`);
   check(physicalCount===physical,`${file} 源 Word 物理表数量应为 ${physical}`);
-  check(new Set((set.templates||[]).map(item=>item.id)).size===logical,`${file} 存在重复表格 ID`);
+  const ids=(set.templates||[]).map(item=>item.id);
+  check(ids.every(id=>typeof id==="string"&&id.trim()),`${file} 存在空表格 ID`);
+  check(new Set(ids).size===ids.length,`${file} 存在重复表格 ID`);
 }
 
 const reportlogic=await import(pathToFileURL(path.join(root,"functions","api","reportlogic.js")).href+"?gate="+Date.now());
