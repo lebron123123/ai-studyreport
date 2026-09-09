@@ -34,7 +34,7 @@ test('隔离PostgreSQL：冻结审批、撤销登录、账单幂等',{skip:!targ
       assert.ok(await DB.prepare("SELECT table_name FROM information_schema.tables WHERE table_name='project_artifacts'").first());
     });
     await t.test('自审、越权、版本变化、重复审批均阻止，刷新保留',async()=>{
-      const b={action:'freeze',projectId:pid,reviewerId:reviewer,contract:{numbers:[{label:'总投资',value:100,unit:'万元'}]}};
+      const b={action:'freeze',projectId:pid,reviewerId:reviewer,contract:{expected:[{label:'总投资',value:100,unit:'万元',sourceRef:'test-calculation',version:1}]}};
       await assert.rejects(()=>deliveryAction(env,owner,{...b,reviewerId:owner}),/自审/);
       await assert.rejects(()=>deliveryAction(env,owner,{...b,expectedContentHash:'0'.repeat(64)}),/重新读取版本/);
       const frozen=await deliveryAction(env,owner,b);assert.equal((await deliveryAction(env,owner,b)).id,frozen.id);

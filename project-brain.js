@@ -56,6 +56,7 @@
       if(def.requirement==="optional")status="optional";
       else if(conditional&&def.conditionMet===false)status="not_required";
       else if(conditional&&def.conditionMet!==true)status="condition_pending";
+      else if(fact&&(fact.validFrom&&fact.validFrom>new Date().toISOString().slice(0,10)||fact.validTo&&fact.validTo<new Date().toISOString().slice(0,10)))status="expired_or_not_effective";
       else if(fact?.status==="not_applicable")status=fact.naReason?"not_applicable":"unverified";
       else if(fact?.status==="conflict"||arr(fact?.conflictValues).length>1)status="conflict";
       else if(fact&&present(fact.value))status=fact.status==="confirmed"?(fact.factType==="FACT"?"confirmed":"assumption"):"unverified";

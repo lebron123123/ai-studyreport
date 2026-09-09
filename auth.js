@@ -182,12 +182,20 @@ function mountUserBar(){
     +'</span></div>');
   document.getElementById("ubLogout").onclick = ()=>{ clearAuth(); location.reload(); };
   document.getElementById("ubNew").onclick = ()=>{
-    if(!confirm("开始一个全新项目？当前项目已自动保存到云端。")) return;
+    if(!confirm("开始一个全新项目？将先确认当前改动保存成功，失败时留在当前项目。")) return;
     newProject();
   };
   document.getElementById("ubProjects").onclick = openProjectsPanel;
 }
-function newProject(){
+async function authPreserveCurrentDraft(){
+  if(!projectCanEdit())return true;
+  if(cloudTimer)return (await flushCloudSave())===true;
+  const settled=await cloudSaveInFlight.catch(()=>false);
+  if(typeof reportHasUnsavedChanges==='function'&&reportHasUnsavedChanges()||typeof reportDocumentRevision!=='undefined'&&reportDocumentRevision>0&&reportDocumentRevision>reportCloudPersistedRevision)return (await flushCloudSave())===true;
+  return settled!==false;
+}
+async function newProject(discardDeleted=false){
+  if(!discardDeleted&&!(await authPreserveCurrentDraft())){alert('保存未成功，未新建项目；请先重试保存。');return false;}
   currentProjectRole='OWNER';currentProjectReadOnlyData=null;
   if(typeof airSwitchProjectSession==="function")airSwitchProjectSession();
   currentProjectId = null; currentProjectUpdatedAt=null; domainKey = null; chapters = []; signed = false;
@@ -204,14 +212,7 @@ function newProject(){
 async function openProjectsPanel(){
   if(window.ProjectManager)return window.ProjectManager.open({
     userId:getUser()||'',
-    preserveDraft:async()=>{
-      if(!currentProjectId||!projectCanEdit())return true;
-      // Viewing stages does not itself create a save. Drain only already pending edits.
-      if(cloudTimer)return (await flushCloudSave())===true;
-      const settled=await cloudSaveInFlight.catch(()=>false);
-      if(typeof reportDocumentRevision!=='undefined'&&reportDocumentRevision>0&&reportDocumentRevision>reportCloudPersistedRevision)return (await flushCloudSave())===true;
-      return settled!==false||!(typeof reportHasUnsavedChanges==='function'&&reportHasUnsavedChanges());
-    },
+    preserveDraft:authPreserveCurrentDraft,
     headers:authHeaders,currentId:()=>currentProjectId,genId:genProjectId,openProject,openAiReport:openAiReportProject,newProject,
     updateCurrentMeta:(meta,updatedAt)=>{currentProjectUpdatedAt=Number(updatedAt)||currentProjectUpdatedAt;projectWorkflow=window.ProjectWorkflow?ProjectWorkflow.ensureState(projectWorkflow):projectWorkflow;projectWorkflow.management=Object.assign(projectWorkflow.management||{},meta||{});saveDraft();}
   });
@@ -247,6 +248,7 @@ async function openProjectsPanel(){
 }
 async function openProject(id){
   try{
+    if(!(await authPreserveCurrentDraft())){alert('保存未成功，未切换项目；请先重试保存。');return false;}
     const resp = await fetch("/api/projects?id="+encodeURIComponent(id), {headers:authHeaders()});
     const d = await resp.json();
     if(!d.ok){ alert(d.error||"打开失败"); return false; }

@@ -14,7 +14,7 @@ test("项目索引从既有JSON提取进度、版本、资料与风险",()=>{
 test("归档状态与报告完成阶段可从管理元数据恢复",()=>{
   const data={signed:true,workflow:{management:{archived:true,archivedAt:99}},chapters:[]};
   const out=summarizeProjectRow({id:"project-456",name:"已签发项目",data:JSON.stringify(data),updated_at:456});
-  assert.equal(out.archived,true);assert.equal(out.archivedAt,99);assert.equal(out.stage,"已签发");assert.equal(out.progress,100);
+  assert.equal(out.archived,true);assert.equal(out.archivedAt,99);assert.equal(out.stage,"新建草稿");assert.notEqual(out.progress,100);
 });
 
 test("投资全周期显式阶段优先显示且不被旧可研进度覆盖",()=>{

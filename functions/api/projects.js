@@ -7,6 +7,7 @@ import { verifyAuth, json } from "./_auth.js";
 import { adaptEnv } from "./_adapters.js";
 import { ensureProjectMemberships,resolveProjectAccess,projectRolePermissions } from "./_project-access.js";
 import "../../project-brain.js";
+import {ensureLifecycleIntegrity,readWorkStage} from './_lifecycle-integrity.js';
 
 function parseData(raw){
   try{ return typeof raw==="string"?JSON.parse(raw):(raw||{}); }catch(e){ return {}; }
@@ -17,7 +18,6 @@ function projectStage(data){
   if(investmentStage&&globalThis.ProjectBrain){const stage=globalThis.ProjectBrain.stage(investmentStage);return {key:investmentStage,label:stage.label,progress:stage.progress};}
   const sections=chapters.flatMap(c=>Array.isArray(c.sections)?c.sections:[]);
   const generated=sections.filter(s=>String(s.editedHtml||s.content||"").trim()).length;
-  if(data.signed)return {key:"signed",label:"已签发",progress:100};
   if((wf.reportVersions||[]).length||generated===sections.length&&sections.length)return {key:"review",label:"复核签发",progress:92};
   if(generated)return {key:"generating",label:"逐章生成",progress:Math.max(66,Math.min(88,66+Math.round(generated/Math.max(1,sections.length)*22)))};
   if(data.calcParams||(wf.calcSnapshots||[]).length)return {key:"calculated",label:"测算完成",progress:58};
@@ -55,13 +55,14 @@ export async function onRequestGet(context){
     const access=await resolveProjectAccess(env,user.userId,id);
     if(!access) return json({ok:false, error:"项目不存在或已无访问权限"}, 404);
     const row=access.row;
+    await ensureLifecycleIntegrity(env);const stage=await readWorkStage(env,row),data=parseData(row.data);data.signed=false;data.workflow=data.workflow||{};data.workflow.management={...data.workflow.management,investmentStage:stage.key,workStageVersion:stage.version};row.data=JSON.stringify(data);
     return json({ok:true, project:{id:row.id, name:row.name, updated_at:row.updated_at, data:JSON.parse(row.data),role:access.role,permissions:{...access.permissions,delete:access.ownerUserId===Number(user.userId),duplicate:access.ownerUserId===Number(user.userId)}}});
   }
   await ensureProjectMemberships(env);
   const rows = await env.DB.prepare(
     "SELECT p.id,p.user_id,p.name,p.data,p.updated_at,CASE WHEN p.user_id=? THEN 'OWNER' ELSE m.role END AS role FROM projects p LEFT JOIN project_memberships m ON m.project_id=p.id AND m.user_id=? AND m.status='active' WHERE p.user_id=? OR m.role IN ('OWNER','EDITOR','VIEWER') ORDER BY p.updated_at DESC LIMIT 100")
     .bind(user.userId,user.userId,user.userId).all();
-  return json({ok:true, list:(rows.results||[]).map(row=>({...summarizeProjectRow(row),role:row.role,permissions:{...projectRolePermissions(row.role),delete:Number(row.user_id)===Number(user.userId),duplicate:Number(row.user_id)===Number(user.userId)}}))});
+  await ensureLifecycleIntegrity(env);const list=[];for(const row of rows.results||[]){const stage=await readWorkStage(env,row),data=parseData(row.data);data.workflow=data.workflow||{};data.workflow.management={...data.workflow.management,investmentStage:stage.key};list.push({...summarizeProjectRow({...row,data}),status:stage.key,stage:stage.label,workStageVersion:stage.version,role:row.role,permissions:{...projectRolePermissions(row.role),delete:Number(row.user_id)===Number(user.userId),duplicate:Number(row.user_id)===Number(user.userId)}});}return json({ok:true,list});
 }
 
 export async function onRequestPost(context){
@@ -102,7 +103,7 @@ export async function onRequestPost(context){
     if(changed.meta?.changes!==1)return json({ok:false,error:'项目已更新，请重新载入后重试',conflict:true},409);
     return json({ok:true,id,updatedAt:now});
   }
-  const dataStr = JSON.stringify(body.data||{});
+  let dataStr = JSON.stringify({...body.data,signed:false});
   // PostgreSQL 部署不受 D1 单行限制；历史版本保留完整，不为适配小行限额而丢弃。
   const oversized=env.DEPLOY_MODE==="local"?new TextEncoder().encode(dataStr).byteLength>32*1024*1024:dataStr.length>900000;
   if(oversized) return json({ok:false, error:env.DEPLOY_MODE==="local"?"项目超过32MiB保存上限，请保留本机草稿并联系管理员归档历史版本":"项目超过当前云数据库单条保存上限，请保留本机草稿并联系管理员配置大文件存储"}, 413);
@@ -112,6 +113,7 @@ export async function onRequestPost(context){
   if(exist && !access?.permissions.edit) return json({ok:false, error:"当前账号没有项目编辑权限"}, 403);
 
   if(exist){
+    await ensureLifecycleIntegrity(env);const stage=await readWorkStage(env,access.row),data=parseData(dataStr);data.workflow=data.workflow||{};const previous=parseData(access.row.data).workflow?.management||{};data.workflow.management={...data.workflow.management,investmentStage:stage.key,workStageVersion:stage.version,stageUpdatedAt:previous.stageUpdatedAt,stageUpdatedBy:previous.stageUpdatedBy};if(data.project)data.project.investmentStage=stage.key;dataStr=JSON.stringify(data);
     await ensureProjectMemberships(env);
     const expected=body.expectedUpdatedAt==null?Number(access.row.updated_at):Number(body.expectedUpdatedAt);
     if(!Number.isSafeInteger(expected)||Number(access.row.updated_at)!==expected)return json({ok:false,error:"项目已在其他页面更新，请重新载入后再保存",conflict:true,updatedAt:Number(access.row.updated_at)},409);

@@ -595,8 +595,22 @@
 
   // 轻量意图路由：只向模型暴露与本次问题相关的工具。
   // 未命中工具意图时保持“纯模型单轮回答”，避免模型为了简单概念问题误调工具再跑第二轮。
+  AC.registerTool('get_investment_risks',{
+    schema:{type:'function',function:{name:'get_investment_risks',description:'只读查询当前投资工作台项目的本周风险、责任人、期限、规则版本与下一步建议。不关闭风险、不调整期限、不签发报告。',parameters:{type:'object',properties:{},additionalProperties:false}}},
+    risk:'read',toolset:'report',version:'1.0.0',timeoutMs:10000,
+    label:()=> '读取投资风险与依据',
+    run:async()=>{
+      const route=window.ProjectWorkspaceUI?.parseRoute(location.hash);
+      if(!route?.projectId)return '请先进入项目工作台的具体项目，再查询风险。';
+      const response=await fetch('/api/investmentops?view=watch&projectId='+encodeURIComponent(route.projectId),{headers:authHeaders(),signal:AbortSignal.timeout(10000)}),d=await response.json();
+      if(!response.ok||!d.ok)throw Error(d.error||'风险查询失败，请稍后重试');
+      if(window.ProjectWorkspaceUI?.parseRoute(location.hash)?.projectId!==route.projectId)throw Error('项目已切换，请重新查询');
+      return JSON.stringify({scope:'本周已记录事项，未记录不代表无风险',projectId:route.projectId,coverage:d.view.coverage,totals:d.view.totals,items:d.view.items.map(r=>({title:r.title,level:r.level,status:r.status,assignee:r.assignee,dueDate:r.dueDate,reason:r.latest?.reason,ruleId:r.latest?.ruleId,ruleVersion:r.latest?.ruleVersion})),next:'在行动与风险核对原件及适用规则，明确责任人，提交整改证据给独立人员复核。生成报告请自行点击风险报告的生成并保存草稿；查询不修改任何记录。'});
+    }
+  });
   function awAllowedTools(text){
     const q=String(text||"").replace(/\s/g,"");
+    if(/(风险|预警|为什么.*红|谁.*处理|风险报告)/.test(q))return ['get_investment_risks'];
     if(/(IRR|净现值|NPV|回本|收入|成本|利润|现金流|测算结果|财务指标)/i.test(q))return ["get_calc_summary"];
     if(/(政策|规范|制度|税率|标准|知识库|依据|历史可研|行业惯例|成本基准)/.test(q))return ["search_knowledge_base"];
     if(/(周边|配套|竞品|地铁|学校|医院|商业|客群定位|这个位置)/.test(q))return ["get_site_survey"];

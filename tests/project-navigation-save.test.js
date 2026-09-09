@@ -1,9 +1,9 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 function fixture(overrides={}){
-  const source=fs.readFileSync('auth.js','utf8'),match=source.match(/preserveDraft:(async\(\)=>\{[\s\S]*?\n    \}),\r?\n    headers:/);
+  const source=fs.readFileSync('auth.js','utf8'),match=source.match(/async function authPreserveCurrentDraft\(\)\{[\s\S]*?\r?\n\}/);
   assert.ok(match,'真实导航保存回调缺失');let saves=0;
   const ctx={currentProjectId:'test',projectCanEdit:()=>true,cloudTimer:null,cloudSaveInFlight:Promise.resolve(true),reportDocumentRevision:1,reportCloudPersistedRevision:1,reportHasUnsavedChanges:()=>false,flushCloudSave:async()=>{saves++;return true;},...overrides};
-  vm.createContext(ctx);return {ctx,run:vm.runInContext('('+match[1]+')',ctx),saves:()=>saves};
+  vm.createContext(ctx);return {ctx,run:vm.runInContext('('+match[0]+')',ctx),saves:()=>saves};
 }
 test('阶段浏览不隐式保存；只读角色不触发写入',async()=>{
   const a=fixture();assert.equal(await a.run(),true);assert.equal(a.saves(),0);

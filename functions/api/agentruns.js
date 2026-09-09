@@ -92,7 +92,7 @@ export async function onRequestPost(context){
   }
   if(b.action==="authorize"){
     const principal=await resolveAgentPrincipal(env,user),run=await findOwnedRun(env,user.userId,runId);
-    const decision=await authorizeAgentAction(env,principal,{projectId:run.project_id,securityLevel:b.securityLevel,action:b.permission||((b.riskLevel==="read"||!b.riskLevel)?"read":"write"),toolMeta:b.meta});
+    const decision=await authorizeAgentAction(env,principal,{projectId:run.project_id,toolName:b.toolName,securityLevel:b.securityLevel,action:b.permission||((b.riskLevel==="read"||!b.riskLevel)?"read":"write"),toolMeta:b.meta});
     await appendAgentStep(env,user.userId,runId,{kind:"authorization",toolName:b.toolName,riskLevel:b.riskLevel,status:decision.ok?"completed":"failed",input:{permission:b.permission,meta:b.meta},output:decision});
     return decision.ok?json({ok:true,decision}):json({ok:false,error:decision.reason,decision},403);
   }

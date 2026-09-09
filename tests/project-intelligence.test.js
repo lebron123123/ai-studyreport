@@ -31,3 +31,7 @@ test('采用方案必须显式selected，空数据不显示100分，选中冲突
   assert.equal(context([{id:'one',status:'selected'},{id:'two',status:'selected'}]).scenarioSelectionStatus,'conflict');
   assert.equal(PI.dataHealth({}).score,null);assert.equal(PI.normalizeDeliverable({required:0}).required,false);
 });
+test('过期事实不能被旧的满分检查表覆盖',()=>{
+  const result=PI.dataHealth({facts:[{status:'confirmed',validTo:'2000-01-01'}],requirements:{score:100,missingCount:0,requiredCount:1,items:[]}});
+  assert.equal(result.score,0);assert.equal(result.status,'attention');
+});

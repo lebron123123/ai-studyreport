@@ -91,6 +91,8 @@ test("阶段导航保护器等待保存，失败不跳转，较旧异步请求�
   assert.equal(await older,false);assert.deepEqual(commits,["new"]);
   assert.equal(await guard.run(()=>Promise.reject(new Error("保存失败")),()=>commits.push("bad"),e=>errors.push(e.message)),false);
   assert.deepEqual(commits,["new"]);assert.deepEqual(errors,["保存失败"]);
+  assert.equal(await guard.run(async()=>false,()=>commits.push('false-save'),e=>errors.push(e.message)),false);
+  assert.deepEqual(commits,['new']);assert.match(errors.at(-1),/未保存/);
   let finish;const cancelled=guard.run(()=>new Promise(resolve=>finish=resolve),()=>commits.push("cancelled"));guard.cancel();finish();
   assert.equal(await cancelled,false);assert.deepEqual(commits,["new"]);
 });

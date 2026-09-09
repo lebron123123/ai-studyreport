@@ -1,4 +1,10 @@
 import '../../investment-ops.js';
+import {step4Actions,ensureStep4,readStep4,mutateStep4} from './_investment-step4.js';
+import {ensureRiskReports,createRiskReport,readRiskReports} from './_investment-risk-report.js';
+import {watchActions,ensureInvestmentWatch,mutateInvestmentWatch,readInvestmentWatch} from './_investment-watch.js';
+import {formalFactActions,ensureFormalFacts,readFormalFacts,mutateFormalFact} from './_investment-formal-facts.js';
+import {ensureInvestmentMonitor,runInvestmentCheck,readInvestmentChecks} from './_investment-monitor.js';
+import {ensureObligations,readObligations,mutateObligation,obligationActions} from './_investment-obligations.js';
 import {verifyAuth,json} from './_auth.js';
 import {adaptEnv} from './_adapters.js';
 import {resolveProjectAccess} from './_project-access.js';
@@ -28,11 +34,11 @@ function scenarioRow(row){
   return Ops.normalizeScenario({id:row.id,name:row.name,kind:row.kind,calcType:row.calc_type,calcSnapshotId:row.calc_snapshot_id,engine:versioned?row.engine:'unverified',params:versioned?params.values:params,metrics:versioned?metrics.values:metrics,metricMeta:versioned?metrics.metricMeta:{},invalidMetrics:versioned?metrics.invalidMetrics:[],verification:versioned?metrics.verification:{status:'legacy_unverified'},risks:parse(row.risks_json,[]),status:row.status});
 }
 async function rows(env,table,projectId,userId){return (await env.DB.prepare(`SELECT * FROM ${table} WHERE project_id=? AND user_id=? ORDER BY updated_at DESC LIMIT 100`).bind(projectId,userId).all()).results||[];}
-async function visibleScenarios(env,actor,access){return (await env.DB.prepare("SELECT * FROM project_scenarios WHERE project_id=? AND (user_id=? OR status='selected') ORDER BY updated_at DESC LIMIT 100").bind(access.row.id,actor.userId).all()).results||[];}
+async function visibleScenarios(env,actor,access){const privateRows=(await env.DB.prepare("SELECT * FROM project_scenarios WHERE project_id=? AND user_id=? AND status<>'selected' ORDER BY updated_at DESC LIMIT 100").bind(access.row.id,actor.userId).all()).results||[],shared=(await env.DB.prepare("SELECT * FROM project_scenarios WHERE project_id=? AND (status='selected' OR (status='submitted' AND ?=1)) ORDER BY updated_at DESC").bind(access.row.id,access.permissions.manage?1:0).all()).results||[];return [...new Map([...shared,...privateRows].map(x=>[x.id,x])).values()];}
 async function list(env,actor,access){
   const projectId=access.row.id,owner=access.ownerUserId;
   const [meetings,tasks,risks,scenarioRows,packages,evaluations,optimizations]=await Promise.all([rows(env,'project_meetings',projectId,actor.userId),rows(env,'project_tasks',projectId,owner),rows(env,'project_risks',projectId,owner),visibleScenarios(env,actor,access),rows(env,'project_decision_packages',projectId,owner),rows(env,'project_evaluations',projectId,actor.userId),rows(env,'optimization_ledger',projectId,actor.userId)]);
-  const scenarios=scenarioRows.map(scenarioRow),selected=scenarios.filter(s=>s.status==='selected');
+  const scenarios=scenarioRows.map(row=>({...scenarioRow(row),status:row.status,createdBy:Number(row.user_id),canSubmit:Number(row.user_id)===Number(actor.userId)&&['draft','returned'].includes(row.status),canAdopt:access.permissions.manage&&(Number(row.user_id)===Number(actor.userId)||row.status==='submitted'),canReturn:access.permissions.manage&&row.status==='submitted'})),selected=scenarios.filter(s=>s.status==='selected');
   const itemContexts=await readInvestmentItemContexts(env,access,tasks.concat(risks));
   const currentHash=await reportEvidenceHash(deliverySnapshot(parse(access.row.data))),packageList=[];
   let selectedValid=false;if(selected.length===1){try{selectedValid=await verifyScenario(env,scenarioRows.find(x=>x.id===selected[0].id),parse(access.row.data));}catch{}}
@@ -49,7 +55,7 @@ async function list(env,actor,access){
 }
 async function findScenario(env,actor,access,id){
   const row=await assertProjectObject(env,'project_scenarios',id,access.row.id);
-  if(!row||Number(row.user_id)!==Number(actor.userId)&&row.status!=='selected')fail(404,'情景不存在或属于其他成员个人草稿');
+  if(!row||Number(row.user_id)!==Number(actor.userId)&&row.status!=='selected'&&!(access.permissions.manage&&row.status==='submitted'))fail(404,'情景不存在或属于其他成员个人草稿');
   return row;
 }
 async function verifyScenario(env,row,data){
@@ -119,6 +125,12 @@ async function createPackage(env,actor,access,b){
   await lifecycleEvent(env,actor,access.ownerUserId,projectId,'decision.package.created',{packageId:id,scenarioId:row.id,status:pack.status,deliveryId:pack.deliveryId});return {ok:true,id,package:pack};
 }
 async function mutate(env,actor,access,b,request){
+  if(step4Actions.has(b.action))return mutateStep4(env,actor,access,b);
+  if(b.action==='createRiskReport')return createRiskReport(env,actor,access,b);
+  if(watchActions.has(b.action))return mutateInvestmentWatch(env,actor,access,b);
+  if(b.action==='runInvestmentCheck')return runInvestmentCheck(env,actor,access,b,{verifyScenario});
+  if(formalFactActions.has(b.action))return mutateFormalFact(env,actor,access,b);
+  if(obligationActions.has(b.action))return mutateObligation(env,actor,access,b);
   const projectId=access.row.id,now=Date.now();
   if(INVESTMENT_LIFECYCLE_ACTIONS.has(b.action))return investmentLifecycleAction(env,actor,access,b,{verifyScenario});
   if(b.action==='extractMeeting'){
@@ -128,6 +140,15 @@ async function mutate(env,actor,access,b,request){
   }
   if(b.action==='confirmMeeting')return confirmMeeting(env,actor,access,b);
   if(b.action==='saveScenario')return saveScenario(env,actor,access,b,request);
+  if(b.action==='submitScenario'||b.action==='returnScenario'){
+    if(b.action==='returnScenario'&&!access.permissions.manage)fail(403,'仅项目负责人可以退回已提交方案');
+    const row=await findScenario(env,actor,access,clean(b.scenarioId,100)),submit=b.action==='submitScenario';
+    if(submit&&(Number(row.user_id)!==Number(actor.userId)||!['draft','returned'].includes(row.status)))fail(409,'仅能提交自己的草稿或退回方案');
+    if(!submit&&(row.status!=='submitted'||!clean(b.reason)))fail(400,'请填写退回原因，且只能退回待采纳方案');
+    if(submit)await verifyScenario(env,row,parse(access.row.data));
+    const status=submit?'submitted':'returned';await env.DB.prepare('UPDATE project_scenarios SET status=?,updated_at=? WHERE id=? AND project_id=?').bind(status,now,row.id,projectId).run();
+    await lifecycleEvent(env,actor,access.ownerUserId,projectId,'scenario.'+status,{scenarioId:row.id,reason:clean(b.reason),authorId:row.user_id,formalApproval:false});return {ok:true,id:row.id,status};
+  }
   if(b.action==='selectScenario'){
     const row=await findScenario(env,actor,access,clean(b.scenarioId,100));await verifyScenario(env,row,parse(access.row.data));const scenario=scenarioRow(row),required=['irr','npv','payback'].concat(scenario.calcType==='gaibao'?[]:['totalInvestment']);
     if(required.some(key=>!Number.isFinite(scenario.metrics[key]))||scenario.invalidMetrics.length)fail(409,'关键指标无法计算或缺失，不能采纳此情景');
@@ -153,9 +174,21 @@ async function mutate(env,actor,access,b,request){
 }
 export async function onRequestGet(c){
   const env=adaptEnv(c.env),actor=await verifyAuth(c.request,env);if(!actor)return json({ok:false,error:'未登录或登录已过期'},401);
-  try{const query=new URL(c.request.url).searchParams;if(query.get('view')==='lifecyclePortfolio')return json({ok:true,portfolio:await investmentPortfolioRead(env,actor,(query.get('projectIds')||'').split(',').filter(Boolean))});const projectId=pid(query.get('projectId'));if(!projectId)fail(400,'项目ID不合法');const access=await resolveProjectAccess(env,actor.userId,projectId);if(!access)fail(404,'项目不存在或无权访问');await ensure(env);if(query.get('view')==='lifecycle')return json({ok:true,lifecycle:await investmentLifecycleRead(env,actor,access)});return json({ok:true,ops:await list(env,actor,access)});}catch(error){return json({ok:false,error:error.status?error.message:'运营台账读取失败，请稍后重试'},error.status||500);}
+  try{const query=new URL(c.request.url).searchParams;if(query.get('view')==='lifecyclePortfolio')return json({ok:true,portfolio:await investmentPortfolioRead(env,actor,(query.get('projectIds')||'').split(',').filter(Boolean))});const projectId=pid(query.get('projectId'));if(!projectId)fail(400,'项目ID不合法');const access=await resolveProjectAccess(env,actor.userId,projectId);if(!access)fail(404,'项目不存在或无权访问');await ensure(env);
+  if(query.get('view')==='riskReports'){await ensureRiskReports(env);return json(await withProjectMutation(env,actor,projectId,'view',(tx,current)=>readRiskReports(tx,actor,current,query)));}
+  if(query.get('view')==='step4'){await ensureStep4(env);return json(await withProjectMutation(env,actor,projectId,'view',(tx,current)=>readStep4(tx,actor,current)));}
+  if(query.get('view')==='watch'){await ensureInvestmentWatch(env);return json(await readInvestmentWatch(env,actor,access,query.get('period')||'week'));}
+  if(query.get('view')==='formalFacts'){
+    await ensureInvestmentMonitor(env);
+    const formalFacts=await readFormalFacts(env,actor,access);
+    formalFacts.checks=await readInvestmentChecks(env,access);
+    formalFacts.obligations=((await env.DB.prepare('SELECT id,detail_json FROM project_obligations WHERE project_id=? ORDER BY id').bind(projectId).all()).results||[]).map(r=>({id:r.id,title:parse(r.detail_json).title}));
+    formalFacts.scenarios=(await env.DB.prepare("SELECT id,name FROM project_scenarios WHERE project_id=? AND status='selected'").bind(projectId).all()).results||[];
+    return json({ok:true,formalFacts});
+  }
+  if(query.get('view')==='handoffs'){await ensureObligations(env);return json({ok:true,handoffs:await readObligations(env,actor,access)});}if(query.get('view')==='lifecycle')return json({ok:true,lifecycle:await investmentLifecycleRead(env,actor,access)});return json({ok:true,ops:await list(env,actor,access)});}catch(error){return json({ok:false,error:error.status?error.message:'运营台账读取失败，请稍后重试'},error.status||500);}
 }
 export async function onRequestPost(c){
   const env=adaptEnv(c.env),actor=await verifyAuth(c.request,env);if(!actor)return json({ok:false,error:'未登录或登录已过期'},401);let b;try{b=await c.request.json();}catch{return json({ok:false,error:'请求格式有误'},400);}
-  try{if(!b||!pid(b.projectId))fail(400,'项目ID不合法');const access=await resolveProjectAccess(env,actor.userId,b.projectId);if(!access)fail(404,'项目不存在或无权访问');if(!access.permissions.edit)fail(403,'当前项目角色只读，不能修改运营台账');await ensure(env);if(INVESTMENT_LIFECYCLE_ACTIONS.has(b.action))await ensureInvestmentLifecycle(env);const result=await withProjectMutation(env,actor,b.projectId,['selectScenario','freezeForecast'].includes(b.action)?'manage':'edit',(tx,current)=>mutate(tx,actor,current,b,c.request));return json(result);}catch(error){return json({ok:false,error:error.status?error.message:'运营台账未保存，请稍后重试；本次事务已回滚'},error.status||500);}
+  try{if(!b||!pid(b.projectId))fail(400,'项目ID不合法');const access=await resolveProjectAccess(env,actor.userId,b.projectId);if(!access)fail(404,'项目不存在或无权访问');if(!access.permissions.edit)fail(403,'当前项目角色只读，不能修改运营台账');await ensure(env);if(step4Actions.has(b.action))await ensureStep4(env);if(b.action==='createRiskReport')await ensureRiskReports(env);if(watchActions.has(b.action))await ensureInvestmentWatch(env);if(formalFactActions.has(b.action)||b.action==='runInvestmentCheck')await ensureInvestmentMonitor(env);if(obligationActions.has(b.action))await ensureObligations(env);if(INVESTMENT_LIFECYCLE_ACTIONS.has(b.action))await ensureInvestmentLifecycle(env);const result=await withProjectMutation(env,actor,b.projectId,['selectScenario','freezeForecast','runInvestmentCheck','watchConfigure'].includes(b.action)?'manage':'edit',(tx,current)=>mutate(tx,actor,current,b,c.request));return json(result);}catch(error){return json({ok:false,error:error.status?error.message:'运营台账未保存，请稍后重试；本次事务已回滚'},error.status||500);}
 }

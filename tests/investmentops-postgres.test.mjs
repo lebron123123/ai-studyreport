@@ -29,9 +29,9 @@ test('隔离PostgreSQL：可信情景、独立版本、会议幂等和事务回�
       assert.equal((await call(null,editor)).data.ops.scenarios.length,0);assert.equal((await call({action:'selectScenario',scenarioId},editor)).status,403);assert.equal((await call({action:'selectScenario',scenarioId})).status,200);assert.equal((await call(null,editor)).data.ops.adoptedScenarioId,scenarioId);
     });
     await t.test('只有项目有效证据+当前独立复核能生成就绪包；修改后失效',async()=>{
-      const evidenceId=crypto.randomUUID();await DB.prepare("INSERT INTO project_facts(id,project_id,user_id,fact_type,fact_key,value_json,status,created_at,updated_at) VALUES(?,?,?,'investment','verified.input','1','confirmed',?,?)").bind(evidenceId,projectId,owner,Date.now(),Date.now()).run();
+      const evidenceId=crypto.randomUUID();await DB.prepare("INSERT INTO project_facts(id,project_id,user_id,fact_type,fact_key,value_json,status,source_ref,created_by,created_at,updated_at) VALUES(?,?,?,'investment','verified.input','1','confirmed','test-source','test-reviewer',?,?)").bind(evidenceId,projectId,owner,Date.now(),Date.now()).run();
       const body={action:'createDecisionPackage',scenarioId,evidenceIds:[evidenceId]};assert.equal((await call({...body,evidenceIds:['missing']})).status,404);assert.equal((await call(body)).data.package.status,'blocked');
-      const frozen=await deliveryAction(env,owner,{action:'freeze',projectId,reviewerId:viewer,contract:{numbers:[{label:'净现值',value:768.04,unit:'万元'}]}});await deliveryAction(env,viewer,{action:'approve',projectId,id:frozen.id,note:'[系统测试]模拟独立核验',factsReviewed:true,wordLayoutReviewed:true});
+      const frozen=await deliveryAction(env,owner,{action:'freeze',projectId,reviewerId:viewer,contract:{expected:[{label:'净现值',value:768.04,unit:'万元',sourceRef:'测试白箱快照',version:'1'}]}});await deliveryAction(env,viewer,{action:'approve',projectId,id:frozen.id,note:'[系统测试]模拟独立核验',factsReviewed:true,wordLayoutReviewed:true});
       const ready=await call(body);assert.equal(ready.status,200,JSON.stringify(ready.data));assert.equal(ready.data.package.status,'ready');
       const readReady=async()=>(await call(null)).data.ops.packages.find(x=>x.id===ready.data.id);assert.equal((await readReady()).status,'ready');
       await DB.prepare("UPDATE project_facts SET value_json='2' WHERE id=?").bind(evidenceId).run();assert.equal((await readReady()).status,'blocked');assert.equal((await readReady()).historicalStatus,'ready');
@@ -55,7 +55,7 @@ test('隔离PostgreSQL：可信情景、独立版本、会议幂等和事务回�
     });
     await t.test('完成证据与阶段里程碑：归属、失效、兼容、幂等及审计原子性',async()=>{
       const now=Date.now(),evidenceId=crypto.randomUUID(),foreignEvidence=crypto.randomUUID(),milestoneId=crypto.randomUUID(),foreignMilestone=crypto.randomUUID();
-      for(const [id,project] of [[evidenceId,projectId],[foreignEvidence,'foreign-project']])await DB.prepare("INSERT INTO project_facts(id,project_id,user_id,fact_type,fact_key,value_json,status,created_at,updated_at) VALUES(?,?,?,'investment','completion.input','1','confirmed',?,?)").bind(id,project,owner,now,now).run();
+      for(const [id,project] of [[evidenceId,projectId],[foreignEvidence,'foreign-project']])await DB.prepare("INSERT INTO project_facts(id,project_id,user_id,fact_type,fact_key,value_json,status,source_ref,created_by,created_at,updated_at) VALUES(?,?,?,'investment','completion.input','1','confirmed','test-source','test-reviewer',?,?)").bind(id,project,owner,now,now).run();
       for(const [id,project] of [[milestoneId,projectId],[foreignMilestone,'foreign-project']])await DB.prepare("INSERT INTO project_milestones(id,project_id,name,stage_key,status,created_at,updated_at) VALUES(?,?,'[系统测试]交付核验','implementation','in_progress',?,?)").bind(id,project,now,now).run();
       const initial=(await call(null,editor)).data.ops,task=initial.tasks[0],risk=initial.risks[0],body={action:'updateItem',type:'task',id:task.id,status:'done'};
       assert.equal((await call(body,editor)).status,409);assert.equal((await call({...body,evidenceIds:[foreignEvidence]},editor)).status,404);

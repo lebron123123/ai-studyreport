@@ -16,10 +16,10 @@ test('冻结v1/v2兼容、引用防篡改与显式恢复历史（真实隔离Pos
   const owner=await makeUser(),reviewer=await makeUser();
   const original={documentRevision:4,signed:true,docNo:'[系统测试]历史编号',chapters:[{cn:1,name:'总论',sections:[{t:'投资',content:'总投资：100万元',prov:{web:[{url:'https://example.test/original',version:'v1',excerpt:'总投资：100万元'}]},logicSnapshot:{version:'19.2'},lineage:{input:'material-v1'}}]}],calcParams:{investment:999},workflow:{reportVersions:[{id:'old-report',version:1,chapters:[{name:'历史保留'}]}],calcSnapshots:[{id:'calc-current',version:1,params:{investment:999}}],currentCalcSnapshotId:'calc-current'}};
   await DB.prepare('INSERT INTO projects(id,user_id,name,data,updated_at) VALUES(?,?,?,?,?)').bind(pid,owner,'[系统测试]冻结引用与恢复',JSON.stringify(original),100).run();await changeProjectMember(env,owner,pid,reviewer,'VIEWER');
-  const freeze={action:'freeze',projectId:pid,reviewerId:reviewer,contract:{numbers:[{label:'总投资',value:100,unit:'万元'}]}},frozen=await deliveryAction(env,owner,freeze);
+  const freeze={action:'freeze',projectId:pid,reviewerId:reviewer,contract:{expected:[{label:'总投资',value:100,unit:'万元',sourceRef:'test-calculation',version:1}]}},frozen=await deliveryAction(env,owner,freeze);
   const approval={action:'approve',projectId:pid,id:frozen.id,note:'[系统测试]模拟核查非正式签发',factsReviewed:true,wordLayoutReviewed:true};
   await t.test('只改引用也使新版不再current并阻止审批，正文不变不能绕过',async()=>{
-   const detail=await listDeliveries(env,owner,pid,frozen.id);assert.equal(detail.snapshot.schemaVersion,2);assert.equal(detail.snapshot.chapters[0].sections[0].paragraphs[0].id,'c1:s1:p1');
+   const detail=await listDeliveries(env,owner,pid,frozen.id);assert.equal(detail.snapshot.schemaVersion,3);assert.equal(detail.snapshot.chapters[0].sections[0].paragraphs[0].id,'c1:s1:p1');
    const changed=structuredClone(original);changed.chapters[0].sections[0].prov.web[0].url='https://example.test/changed';await DB.prepare('UPDATE projects SET data=? WHERE id=?').bind(JSON.stringify(changed),pid).run();
    assert.equal((await listDeliveries(env,owner,pid)).versions[0].current,false);await assert.rejects(()=>deliveryAction(env,reviewer,approval),/变化/);
    await DB.prepare('UPDATE projects SET data=? WHERE id=?').bind(JSON.stringify(original),pid).run();await deliveryAction(env,reviewer,approval);

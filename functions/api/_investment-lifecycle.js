@@ -1,4 +1,5 @@
 import '../../investment-lifecycle.js';
+import {readFormalFacts} from './_investment-formal-facts.js';
 import {lifecycleError,lifecycleEvent,assertProjectObject} from './_lifecycle-integrity.js';
 import {resolveProjectAccess} from './_project-access.js';
 import {reportEvidenceHash} from './_report-trusted-evaluation.js';
@@ -24,7 +25,7 @@ export async function ensureInvestmentLifecycle(env){
   ];for(const sql of statements)await env.DB.prepare(sql).run();
 }
 function actualRow(x){return {id:x.id,projectId:x.project_id,metricKey:x.metric_key,periodStart:x.period_start,periodEnd:x.period_end,unit:x.unit,currency:x.currency,basis:x.basis,value:Number(x.value),sourceRef:x.source_ref,sourceEvidenceId:x.source_evidence_id,sourceHash:x.source_hash,version:Number(x.version),supersedesId:x.supersedes_id,confirmedBy:Number(x.confirmed_by),confirmation:'actor_confirmed_not_independently_audited',createdAt:Number(x.created_at)};}
-async function actuals(env,access){const result=(await env.DB.prepare('SELECT * FROM investment_actual_values WHERE project_id=? AND user_id=? ORDER BY created_at DESC LIMIT 5001').bind(access.row.id,access.ownerUserId).all()).results||[];if(result.length>5000)fail(413,'实际值台账超过本次安全读取上限，请先按期间归档/查询，未生成不完整汇总');return result.map(actualRow);}
+async function actuals(env,access){const result=(await env.DB.prepare('SELECT * FROM investment_actual_values WHERE project_id=? AND user_id=? ORDER BY created_at DESC LIMIT 5001').bind(access.row.id,access.ownerUserId).all()).results||[];if(result.length>5000)fail(413,'实际值台账超过本次安全读取上限，请先按期间归档/查询，未生成不完整汇总');const values=[];for(const row of result){const value=actualRow(row);try{const evidence=await verifyInvestmentEvidence(env,access,row.source_evidence_id);value.currentSourceStatus=await hash(evidence)===row.source_hash?'valid':'changed';}catch{value.currentSourceStatus='unavailable_or_expired';}value.requiresReview=value.currentSourceStatus!=='valid';values.push(value);}return values;}
 async function versionRow(env,access,id){
   const row=await env.DB.prepare('SELECT * FROM investment_versions WHERE id=? AND project_id=? AND user_id=?').bind(clean(id,100),access.row.id,access.ownerUserId).first();if(!row)fail(404,'本项目冻结版本不存在');
   const payload=parse(row.payload_json);if(payload.schemaVersion!==1||payload.kind!=='forecast'||await hash(payload)!==row.content_hash)fail(409,'冻结版本内容校验失败，不可作为预演或申请依据');return {row,payload};
@@ -36,7 +37,8 @@ export async function investmentLifecycleRead(env,actor,access){
   const requests=(await env.DB.prepare('SELECT * FROM investment_change_requests WHERE project_id=? AND user_id=? ORDER BY created_at DESC LIMIT 100').bind(access.row.id,access.ownerUserId).all()).results||[],values=await actuals(env,access),selected=(await env.DB.prepare("SELECT id,name FROM project_scenarios WHERE project_id=? AND status='selected'").bind(access.row.id).all()).results||[];
   const verified=[];for(const row of versions){const payload=parse(row.payload_json),valid=payload.schemaVersion===1&&payload.kind==='forecast'&&await hash(payload)===row.content_hash;verified.push({id:row.id,name:row.name,number:Number(row.version_number),kind:'forecast',scenarioId:row.scenario_id,contentHash:row.content_hash,valid,createdBy:Number(row.created_by),createdAt:Number(row.created_at),payload:valid?payload:null});}
   const latest=verified.find(x=>x.valid);
-  return {projectId:access.row.id,actorUserId:Number(actor.userId),permissions:access.permissions,approvalConfigured:false,approvedBaseline:null,approvedAdjustment:null,selectedScenario:selected.length===1?selected[0]:null,selectionConflict:selected.length>1,versions:verified,requests:requests.map(x=>({id:x.id,versionId:x.version_id,baselineVersionId:x.baseline_version_id,status:'requested',requestType:x.request_type,reason:x.reason,createdBy:Number(x.created_by),createdAt:Number(x.created_at)})),actuals:values,latestForecastId:latest?.id||null,variance:L.compareActuals(latest?.payload,values),warning:'企业审批职责与效力未配置：这里只冻结预测、预演差异及登记审批申请。实际值为录入人确认，不等于独立财务审计。'};
+  const formal=await readFormalFacts(env,actor,access);
+  return {projectId:access.row.id,actorUserId:Number(actor.userId),permissions:access.permissions,approvalConfigured:false,externalFactsVerification:true,approvedBaseline:formal.approvedBaseline,approvedAdjustment:formal.approvedAdjustment,selectedScenario:selected.length===1?selected[0]:null,selectionConflict:selected.length>1,versions:verified,requests:requests.map(x=>({id:x.id,versionId:x.version_id,baselineVersionId:x.baseline_version_id,status:'requested',requestType:x.request_type,reason:x.reason,createdBy:Number(x.created_by),createdAt:Number(x.created_at)})),actuals:values,latestForecastId:latest?.id||null,variance:L.compareActuals(latest?.payload,values),warning:'原批准及调整批准来自独立核验的外部原件，不代替企业审批；预测单独保存。实际值为录入人确认，不等于独立财务审计。'};
 }
 export async function investmentPortfolioRead(env,actor,projectIds){
   if(!Array.isArray(projectIds)||!projectIds.length||projectIds.length>30||projectIds.some(id=>!/^[A-Za-z0-9_-]{8,100}$/.test(id)))fail(400,'请明确选择1至30个项目');
@@ -45,7 +47,11 @@ export async function investmentPortfolioRead(env,actor,projectIds){
 }
 export async function verifyInvestmentEvidence(env,access,id){
   let row=await assertProjectObject(env,'project_artifacts',id,access.row.id,{allowMissing:true,ownerUserId:access.ownerUserId});if(!row)row=await assertProjectObject(env,'project_facts',id,access.row.id,{ownerUserId:access.ownerUserId});
-  const today=new Date().toISOString().slice(0,10);if(!row||!['confirmed','accepted','approved','final','published','ready','active'].includes(row.status)||row.valid_from&&row.valid_from>today||row.valid_to&&row.valid_to<today)fail(409,'实际数据来源未确认或已失效');return row;
+  const today=new Date().toISOString().slice(0,10);if(!row||!['confirmed','accepted','approved','final','published','ready','active'].includes(row.status)||row.valid_from&&row.valid_from>today||row.valid_to&&row.valid_to<today)fail(409,'实际数据来源未确认或已失效');
+  const meaningful=v=>v!==null&&v!==undefined&&(typeof v==='object'?Object.keys(v).length>0:!!String(v).replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi,'').replace(/<[^>]*>|&nbsp;|[\u200b-\u200d\ufeff]/g,'').trim());
+  if(Object.hasOwn(row,'value_json')){if(!meaningful(parse(row.value_json,null))||!clean(row.source_ref)||!Number(row.version)||!clean(row.created_by))fail(409,'事实缺少有效值、来源、版本或确认人，不能作为已核验证据');}
+  else {const meta=parse(row.meta_json);if(!clean(row.title)||!clean(row.version)||!meaningful(meta.content)||!clean(meta.sourceRef)||!clean(meta.sourceLocator)||meta.confirmed!==true||!meta.confirmedBy)fail(409,'成果只有登记状态，缺少正文、来源定位、版本或人工确认，不能关闭风险');if(meta.validFrom&&meta.validFrom>today||meta.validTo&&meta.validTo<today)fail(409,'成果依据已过期或尚未生效');}
+  return row;
 }
 export async function investmentLifecycleAction(env,actor,access,b,{verifyScenario}){
   const projectId=access.row.id,owner=access.ownerUserId,now=Date.now();

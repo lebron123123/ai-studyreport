@@ -18,6 +18,8 @@ export async function investmentItemLinks(env,access,b,previous={}){
 export async function updateInvestmentItem(env,actor,access,b){
   const table={task:'project_tasks',risk:'project_risks'}[b.type],allowed={task:['open','done','cancelled'],risk:['open','mitigated','closed']}[b.type];if(!table||!allowed.includes(b.status))fail(400,'事项类型或状态无效');
   const id=clean(b.id),projectId=access.row.id,row=await env.DB.prepare(`SELECT * FROM ${table} WHERE id=? AND project_id=? AND user_id=?`).bind(id,projectId,access.ownerUserId).first();if(!row)fail(404,'项目事项不存在');
+  if(b.type==='risk'&&String(row.source_ref).startsWith('investment-check:'))fail(409,'持续检查风险请在周月风险面板提交整改并独立复核，不能从旧入口直接关闭');
+  if(b.type==='task'&&String(row.source_ref).startsWith('post-evaluation:'))fail(409,'后评价整改请在协议与后评价中提交证据并独立复核，不能从普通待办直接关闭');
   const previous=await env.DB.prepare('SELECT * FROM investment_item_context WHERE item_id=? AND project_id=?').bind(id,projectId).first(),links=await investmentItemLinks(env,access,b,previous||{});
   if(b.expectedVersion!==undefined&&(!Number.isInteger(b.expectedVersion)||b.expectedVersion!==Number(previous?.version||0)))fail(409,'事项关联已变化，请刷新后重试');
   const ids=b.evidenceIds===undefined?parse(previous?.evidence_ids_json,[]):b.evidenceIds;if(!Array.isArray(ids)||ids.length>20||ids.some(x=>typeof x!=='string'||!x.trim()))fail(400,'请提供最多20条有效的项目证据ID');

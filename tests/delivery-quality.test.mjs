@@ -9,7 +9,8 @@ import path from 'node:path';
 test('结构化检查拒绝只出现关键词、错数值、缺表和占位',()=>{
   const contract={headings:['投资'],numbers:[{label:'总投资',value:123.5,unit:'万元'}],tables:[{title:'投资表',columns:['项目','金额'],minRows:1}],noPending:true};
   const text='# 投资\n总投资：123.5万元\n投资表\n|项目|金额|\n|---|---|\n|改造|123.5|';
-  assert.equal(scoreReportQuality(contract,text).passed,true);
+  assert.equal(scoreReportQuality(contract,text).declaredChecksPassed,true);
+  assert.equal(scoreReportQuality(contract,text).passed,false); // Legacy numbers have no source/version; table numbers remain uncovered.
   for(const broken of [text.replace('# 投资','提及投资'),text.replace('123.5万元','123.6万元'),text.replace('|---|---|',''),text+'\n【待补：依据】'])assert.equal(scoreReportQuality(contract,broken).passed,false);
   assert.throws(()=>validateQualityContract({numbers:[{label:'总投资',unit:'元',value:'123'}]}));
   assert.equal(scoreReportQuality({required:['a.b'],numbers:[{label:'a.b',value:2,unit:'元'}]},'axb 2元').passed,false);
@@ -23,8 +24,8 @@ test('新expected全文核验有来源版本、全部出现勾稽，旧numbers�
   assert.equal(scoreReportQuality(contract,'总投资待核对').passed,false);
   assert.equal(scoreReportQuality({expected:[]},good).passed,false);
   assert.throws(()=>validateQualityContract({expected:[{label:'总投资',value:1,unit:'万元'}]}),/来源与版本/);
-  assert.equal(scoreReportQuality({numbers:[{label:'总投资',value:1,unit:'万元'}]},'总投资1万元').passed,true);
-  const partial=scoreReportQuality(contract,good+'\n收入300万元');assert.equal(partial.passed,true);assert.equal(partial.numericReconciliation.passed,false);assert.equal(partial.numericReconciliation.unmatched.length,1);
+  assert.equal(scoreReportQuality({numbers:[{label:'总投资',value:1,unit:'万元'}]},'总投资1万元').passed,false);
+  const partial=scoreReportQuality(contract,good+'\n收入300万元');assert.equal(partial.passed,false);assert.ok(partial.score<100);assert.equal(partial.coverageComplete,false);assert.equal(partial.numericReconciliation.passed,false);assert.equal(partial.numericReconciliation.unmatched.length,1);
 });
 test('冻结只含成果与测算，不受页面滚动和保存时间影响',()=>{
   const data={chapters:[{name:'第一章',sections:[{t:'项目',content:'正文',syncStatus:'stale'}]}],workflow:{calcSnapshots:[{value:1}]}};

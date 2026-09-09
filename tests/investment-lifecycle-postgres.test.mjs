@@ -19,8 +19,22 @@ test('隔离PostgreSQL：预测冻结、申请框架、实际值版本与授权�
     await DB.prepare('INSERT INTO projects(id,user_id,name,data,updated_at) VALUES(?,?,?,?,?)').bind(projectId,owner,'[系统测试]投资周期',JSON.stringify(data),Date.now()).run();
     await DB.prepare('INSERT INTO projects(id,user_id,name,data,updated_at) VALUES(?,?,?,?,?)').bind(otherProjectId,outsider,'[系统测试]其他项目','{}',Date.now()).run();
     await changeProjectMember(env,owner,projectId,editor,'EDITOR');await changeProjectMember(env,owner,projectId,viewer,'VIEWER');
-    const evidenceId=crypto.randomUUID();await DB.prepare("INSERT INTO project_facts(id,project_id,user_id,fact_type,fact_key,value_json,status,created_at,updated_at) VALUES(?,?,?,'operations','actual.source','1','confirmed',?,?)").bind(evidenceId,projectId,owner,Date.now(),Date.now()).run();
+    const evidenceId=crypto.randomUUID();await DB.prepare("INSERT INTO project_facts(id,project_id,user_id,fact_type,fact_key,value_json,status,source_ref,created_by,created_at,updated_at) VALUES(?,?,?,'operations','actual.source','1','confirmed','verified-bill','test-reviewer',?,?)").bind(evidenceId,projectId,owner,Date.now(),Date.now()).run();
     async function call(body,actor=owner,query='',extra={}){const request=new Request('http://test/api/investmentops?projectId='+projectId+query,{method:body?'POST':'GET',headers:{authorization:'Bearer '+await signToken(env,actor,'[系统测试]'),'content-type':'application/json'},body:body?JSON.stringify({projectId,...body}):undefined}),response=await(body?onRequestPost:onRequestGet)({env:{...env,...extra},request});return {status:response.status,data:await response.json()};}
+    await t.test('编辑者私稿提交后负责人可退回再采纳，查看者不可操作，刷新保留状态',async()=>{
+      const saved=await call({action:'saveScenario',scenario:{name:'[系统测试]编辑者私人方案'}},editor);assert.equal(saved.status,200,JSON.stringify(saved.data));const scenarioId=saved.data.id;
+      assert.equal((await call(null)).data.ops.scenarios.some(s=>s.id===scenarioId),false);
+      assert.equal((await call({action:'selectScenario',scenarioId})).status,404);
+      assert.equal((await call({action:'submitScenario',scenarioId},viewer)).status,403);
+      assert.equal((await call({action:'submitScenario',scenarioId},editor)).status,200);
+      assert.equal((await call({action:'submitScenario',scenarioId},editor)).status,409);
+      assert.equal((await call(null)).data.ops.scenarios.find(s=>s.id===scenarioId).canReturn,true);
+      assert.equal((await call({action:'returnScenario',scenarioId,reason:'补充来源'})).status,200);
+      assert.equal((await call(null,editor)).data.ops.scenarios.find(s=>s.id===scenarioId).status,'returned');
+      assert.equal((await call({action:'submitScenario',scenarioId},editor)).status,200);
+      assert.equal((await call({action:'selectScenario',scenarioId})).status,200);
+      for(const actor of [owner,editor,viewer])assert.equal((await call(null,actor)).data.ops.adoptedScenarioId,scenarioId);
+    });
     let scenarioId,versionId,secondVersion,annual,actualId;
     await t.test('旧数据不升级批准，明确采纳后冻结幂等，客户端内容不能覆盖',async()=>{
       const empty=await call(null,viewer,'&view=lifecycle');assert.equal(empty.status,200,JSON.stringify(empty.data));assert.equal(empty.data.lifecycle.approvedBaseline,null);assert.equal(empty.data.lifecycle.versions.length,0);

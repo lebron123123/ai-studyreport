@@ -5,7 +5,7 @@ const sha=file=>crypto.createHash("sha256").update(fs.readFileSync(path.join(roo
 
 test("Release Manifest 锁定双规则单一真源与训练/留出隔离",async()=>{
   const manifest=read("data/release-manifest-v1.json");
-  for(const [name,file,rules,chapters] of [["rent","data/report-logic-rent-v1.json",137,14],["gaibao","data/report-logic-gaibao-v1.json",74,13]]){
+  for(const [name,file,rules,chapters] of [["rent","data/report-logic-rent-v1.json",137,14],["gaibao","data/report-logic-gaibao-v1.json",78,13]]){
     assert.equal(manifest.reportLogic[name].rules,rules);assert.equal(manifest.reportLogic[name].chapters,chapters);assert.equal(manifest.reportLogic[name].canonicalSha256,sha(file));
   }
   assert.equal(manifest.evaluation.training.datasetRole,"training");assert.equal(manifest.evaluation.holdout.datasetRole,"holdout");

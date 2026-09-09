@@ -288,7 +288,8 @@ function bindEvents(){
       const issues=runAudit();const box=document.getElementById("auditBox");if(box)box.innerHTML=auditPanelHtml(issues);
       alert("签发前审计发现 "+evidenceAudit.blockerCount+" 项硬阻断。请先处理数字无来源或正文版本过期问题；普通资料缺口不会阻止继续完善。");return;
     }
-    signed=true;if(projectWorkflow)projectWorkflow.reviewSnapshot={status:"signed",signedAt:new Date().toISOString(),evidenceAudit:{ready:true,claimCoverage:evidenceAudit.claimCoverage,graphHash:evidenceAudit.graph.hash}};saveDraft();renderSheet();
+    if(window.ReportDeliveryUI)window.ReportDeliveryUI.open();
+    else alert("正式签发需要后台冻结版本及独立复核，请刷新后进入‘验收与运行保障’。");
   };
   if(s("printBtn")) s("printBtn").onclick = ()=> window.print();
   if(s("exportWordBtn")) s("exportWordBtn").onclick = exportWord;

@@ -93,7 +93,9 @@ async function brainMutate(env,user,row,body,action,projectId){
   if(action==="registerArtifact"){
     const a=body.artifact||body,type=clean(a.artifactType||a.type,50);if(!type)return json({ok:false,error:"成果类型不能为空"},400);const id=clean(a.id,100)||uid("artifact");
     if(['signed','approved','published','frozen'].includes(a.status))throw lifecycleError(403,'手工登记不能创建正式签发或批准成果，请使用成果复核发布流程');
-    await env.DB.prepare("INSERT INTO project_artifacts(id,project_id,user_id,artifact_type,title,module_ref,version,status,evidence_audit_id,meta_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,projectId,user.userId,type,clean(a.title,200),clean(a.moduleRef,240),clean(a.version,40),clean(a.status||"draft",30),clean(a.evidenceAuditId,120),JSON.stringify(a.meta||{}),now,now).run();
+    const meta={...(a.meta||{})};if(meta.confirmed===true){meta.confirmedBy=user.actorUserId||user.userId;meta.confirmedAt=now;}
+    if(type==='evidence'&&a.status==='ready'&&(!clean(a.title)||!clean(a.version)||!clean(meta.content)||!clean(meta.sourceRef)||!clean(meta.sourceLocator)||meta.confirmed!==true))throw lifecycleError(400,'就绪证据必须填写正文、标题、版本、来源及定位，并由当前成员确认');
+    await env.DB.prepare("INSERT INTO project_artifacts(id,project_id,user_id,artifact_type,title,module_ref,version,status,evidence_audit_id,meta_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,projectId,user.userId,type,clean(a.title,200),clean(a.moduleRef,240),clean(a.version,40),clean(a.status||"draft",30),clean(a.evidenceAuditId,120),JSON.stringify(meta),now,now).run();
     await insertEvent(env,user,projectId,"artifact.registered",{artifactId:id,artifactType:type});return json({ok:true,id});
   }
   if(action==="createDecision"){

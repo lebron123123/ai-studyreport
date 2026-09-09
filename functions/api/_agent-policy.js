@@ -11,6 +11,7 @@ export async function resolveAgentPrincipal(env,user){
 }
 
 export async function authorizeAgentAction(env,principal,req={}){
+  if(String(req.toolName||'').includes('investment')&&(req.toolName!=='get_investment_risks'||req.action!=='read'))return {ok:false,reason:'投资助手仅允许只读风险查询；禁止调整期限、关闭风险或签发'};
   if(Number((await accountSecurity(env,principal.userId))?.disabled))return {ok:false,reason:'账号已停用'};
   const projectId=String(req.projectId||""), action=String(req.action||"read"), level=Math.max(1,Number(req.securityLevel)||1);
   if(level>principal.clearance) return {ok:false,reason:"资料密级超过当前用户权限"};

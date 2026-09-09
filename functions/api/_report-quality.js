@@ -31,10 +31,10 @@ export function scoreReportQuality(contract, raw) {
     const values=matching.flatMap(line=>Array.from(line.matchAll(re),m=>Number(m[1].replaceAll(',',''))));
     add('number',n.label,values.length>0&&values.every(v=>Math.abs(v-n.value)<=(n.tolerance||0)),{expected:n.value,unit:n.unit,observed:values});
   }
-  const numericReconciliation=contract.expected!==undefined?numericAudit.audit({text,expected:contract.expected}):null;
+  const numericReconciliation=numericAudit.audit({text,expected:contract.expected||[]});
   if(numericReconciliation) {
     for(const item of numericReconciliation.checked) add('numeric_reconciliation',item.label,item.status==='matched',{key:item.key,status:item.status,expected:item.expected,observed:item.occurrences,sourceRef:item.sourceRef,version:item.version});
-    if(!numericReconciliation.checked.length)add('numeric_reconciliation','已声明核验指标',false,{status:'not_configured'});
+    if(contract.expected!==undefined&&!numericReconciliation.checked.length)add('numeric_reconciliation','已声明核验指标',false,{status:'not_configured'});
   }
   for(const t of list(contract.tables)) {
     const titleIndex=lines.findIndex(l=>l.includes(t.title));let found=false,rows=0;
@@ -48,6 +48,9 @@ export function scoreReportQuality(contract, raw) {
   }
   for(const c of list(contract.citations)) add('citation',c.marker,lines.some(l=>l.includes(c.marker)&&l.includes(c.location)),{sourceHash:c.sourceHash,location:c.location});
   if(contract.noPending===true)add('pending','无待补占位',!/(?:【|\[)\s*(?:待补|待核|待确认)|\bTODO\b/.test(text));
-  const passed=!!text.trim()&&checks.length>0&&checks.every(c=>c.passed);
-  return {passed,score:checks.length?Math.round(checks.filter(c=>c.passed).length/checks.length*100):0,checks,method:numericReconciliation?'deterministic-structured-v3':'deterministic-structured-v2',...(numericReconciliation?{numericReconciliation}:{}),semanticAccuracyVerified:false,wordLayoutVerified:false};
+  const declaredChecksPassed=!!text.trim()&&checks.length>0&&checks.every(c=>c.passed);
+  const coverageComplete=numericReconciliation.unmatched.length===0&&numericReconciliation.checked.every(x=>x.status==='matched');
+  const meaningfulChecks=checks.some(c=>!['pending','forbidden'].includes(c.kind));
+  const passed=declaredChecksPassed&&coverageComplete&&meaningfulChecks;
+  return {passed,declaredChecksPassed,coverageComplete,humanReviewed:false,score:passed?100:Math.min(99,checks.length?Math.round(checks.filter(c=>c.passed).length/checks.length*100):0),checks,method:'deterministic-structured-v4',numericReconciliation,scope:'仅检查已声明条件和可识别数字；不代表全文事实、引用效力或版式已核验',semanticAccuracyVerified:false,wordLayoutVerified:false};
 }

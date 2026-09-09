@@ -314,6 +314,8 @@ const httpServer = serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" }, 
   console.log("   （同一局域网内其他电脑可用本机IP访问）\n");
 });
 const agentWorker=startAgentWorker(ENV,{pollMs:process.env.AGENT_WORKER_POLL_MS,leaseMs:process.env.AGENT_WORKER_LEASE_MS});
+const investmentWorker=await (await import('./investment-worker.js')).startInvestmentWorker(ENV);
+console.log('投资持续检查Worker已启动（仅扫描负责人启用的项目）');
 console.log("Agent后台Worker已启动："+agentWorker.workerId);
 const operationsMonitor=await (await import('./operations-monitor.js')).startOperationsMonitor(ENV);
 console.log('自动运行监控：'+(operationsMonitor.enabled?'已启动':'已停用'));

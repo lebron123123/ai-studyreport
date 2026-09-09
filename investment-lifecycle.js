@@ -20,8 +20,8 @@
   function latestActuals(items){const rows=new Map();for(const x of items||[]){const key=basisKey(x),old=rows.get(key);if(!old||x.version>old.version)rows.set(key,x);}return [...rows.values()];}
   function compareActuals(forecast,actuals){
     const expected=forecast?.annualValues||[];
-    return latestActuals(actuals).map(actual=>{const matches=expected.filter(x=>basisKey(x)===basisKey(actual)),planned=matches.length===1&&Number.isFinite(matches[0].value)?matches[0].value:null,delta=planned===null?null:actual.value-planned;
-      return {...actual,forecastValue:planned,delta,relativeDelta:planned===null||planned===0?null:delta/Math.abs(planned),comparable:planned!==null,reason:planned===null?'缺少同指标、期间、单位、币种及口径的预测，未折算或摊分':'',attribution:{quantity:null,price:null,timing:null,basis:null,unexplained:delta},approvalStatus:'forecast_only'};});
+    return latestActuals(actuals).map(actual=>{const matches=expected.filter(x=>basisKey(x)===basisKey(actual)),planned=!actual.requiresReview&&matches.length===1&&Number.isFinite(matches[0].value)?matches[0].value:null,delta=planned===null?null:actual.value-planned;
+      return {...actual,forecastValue:planned,delta,relativeDelta:planned===null||planned===0?null:delta/Math.abs(planned),comparable:planned!==null,reason:actual.requiresReview?'来源已失效或发生变化，请重新核验实际值':planned===null?'缺少同指标、期间、单位、币种及口径的预测，未折算或摊分':'',attribution:{quantity:null,price:null,timing:null,basis:null,unexplained:delta},approvalStatus:'forecast_only'};});
   }
   function changedPaths(a,b,prefix=''){
     const keys=new Set([...Object.keys(a||{}),...Object.keys(b||{})]),out=[];
@@ -33,7 +33,7 @@
     return {parameters,annual,dependenciesChanged:changedPaths(baseline?.dependencies,forecast?.dependencies),baselineKind:baseline?.kind||null,targetKind:'forecast',formalApproval:false,warning:'仅比较已冻结预测，申请不会改变批准基准；未配置企业审批职责与规则，不支持正式批准。'};
   }
   function aggregateActuals(projects){
-    const groups=new Map();for(const project of projects||[])for(const item of latestActuals(project.actuals)){if(!METRICS[item.metricKey]?.additive||!Number.isFinite(item.value))continue;const key=basisKey(item);if(!groups.has(key))groups.set(key,{metricKey:item.metricKey,periodStart:item.periodStart,periodEnd:item.periodEnd,unit:item.unit,currency:item.currency,basis:item.basis,value:0,projectIds:[]});const group=groups.get(key);group.value+=item.value;group.projectIds.push(project.projectId);}
+    const groups=new Map();for(const project of projects||[])for(const item of latestActuals(project.actuals)){if(item.requiresReview||!METRICS[item.metricKey]?.additive||!Number.isFinite(item.value))continue;const key=basisKey(item);if(!groups.has(key))groups.set(key,{metricKey:item.metricKey,periodStart:item.periodStart,periodEnd:item.periodEnd,unit:item.unit,currency:item.currency,basis:item.basis,value:0,projectIds:[]});const group=groups.get(key);group.value+=item.value;group.projectIds.push(project.projectId);}
     return {groups:[...groups.values()],excludedMetrics:['irr','capitalIrr','occupancy'],warning:'仅汇总授权项目已录入实际值；合同、履约、应付、已付分组展示，不跨层相加；不平均IRR或出租率。'};
   }
   const drafts=new Map(),bindings=new WeakMap(),escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

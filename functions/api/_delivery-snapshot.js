@@ -8,8 +8,10 @@ function paragraphs(content,sectionId){
   // IDs are stable positions within this immutable version, scoped by its content hash.
   return String(content).replace(/<\/(?:p|div|li|tr|h[1-6])>|<br\s*\/?>/gi,'\n').split(/\r?\n/).map(text=>text.replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/g,' ').trim()).filter(Boolean).map((text,index)=>({id:sectionId+':p'+(index+1),ordinal:index+1,text}));
 }
-export function deliverySnapshot(data,schemaVersion=2){
+export function deliveryVisibleText(content){return String(content||'').replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi,'').replace(/<[^>]*>/g,' ').replace(/&(?:nbsp|#160|#xA0);/gi,' ').replace(/[\s\u200b-\u200d\ufeff]/g,'');}
+export function deliverySnapshot(data,schemaVersion=3){
   if(schemaVersion===1)return legacyDeliverySnapshot(data);
+  if(schemaVersion===3){const snapshot=deliverySnapshot(data,2);snapshot.schemaVersion=3;snapshot.chapters=snapshot.chapters.filter(c=>c.checked);snapshot.project=copy(data.project||{});snapshot.exportContext={calcResult:copy(data.calcResult),calcSummary:copy(data.calcSummary),domainKey:copy(data.domainKey),docNo:copy(data.docNo)};return canonical(snapshot);}
   if(schemaVersion!==2)throw new Error('不支持的冻结快照版本');
   const wf=data.workflow||{},active=(wf.reportVersions||[]).find(v=>v.id===wf.currentReportVersionId);
   const logic={};for(const key of ['globalRequirements','reportGlobalRequirements','reportLogicVersion','logicVersion','reportLogicPlan','promptVersion','workflowVersion'])if(wf[key]!==undefined)logic[key]=copy(wf[key]);
@@ -20,8 +22,8 @@ export function deliverySnapshot(data,schemaVersion=2){
 }
 export function deliverySchema(snapshot){
   if(snapshot?.schemaVersion===undefined)return 1;
-  if(snapshot.schemaVersion!==2)throw new Error('不支持的冻结快照版本');
-  return 2;
+  if(![2,3].includes(snapshot.schemaVersion))throw new Error('不支持的冻结快照版本');
+  return snapshot.schemaVersion;
 }
 export function restoreDeliveryDraft(data,snapshot,deliveryId,contentHash){
   const schema=deliverySchema(snapshot),next=copy(data),wf=next.workflow||(next.workflow={});
@@ -29,7 +31,7 @@ export function restoreDeliveryDraft(data,snapshot,deliveryId,contentHash){
   next.signed=false;next.docNo=null;next.documentRevision=(Number(data.documentRevision)||0)+1;
   wf.currentReportVersionId=null; // reportVersions and every formal delivery remain append-only history.
   wf.restoredDelivery={id:deliveryId,contentHash,schemaVersion:schema,referenceStatus:schema===1?'unknown':'recorded_unverified',requiresReview:true};
-  if(schema===2){next.kb=copy(snapshot.references.kb||[]);wf.lineage=copy(snapshot.references.lineage);for(const [key,value]of Object.entries(snapshot.references.logic||{}))wf[key]=copy(value);}
+  if(schema>=2){next.kb=copy(snapshot.references.kb||[]);wf.lineage=copy(snapshot.references.lineage);for(const [key,value]of Object.entries(snapshot.references.logic||{}))wf[key]=copy(value);}
   else next.kb=[]; // Old snapshots did not record sources; never borrow today's references as historical evidence.
   // Do not roll back current project facts/calculation parameters or remove calculation history.
   // Their exact historical values remain available in the immutable snapshot for manual reconciliation.
