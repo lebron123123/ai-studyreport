@@ -69,3 +69,10 @@ outputs/pet-video-source/**/*.json
 
 # 可重新下载的超大地图原始数据不进入 Git（GitHub 单文件上限 100 MiB）
 outputs/baoan-source/*.osm.pbf
+
+# Cloudflare Pages 单文件上限为 25 MiB；这些本地原始数据/模型不进入静态发布包
+local-server/chi_sim.traineddata
+outputs/baoan-source/parallel-parts/
+outputs/city-dem-source/*.tif
+project-map/city/buildings.glb
+project-map/baoan-lod-v1/overview-known.glb
