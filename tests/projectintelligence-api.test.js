@@ -5,7 +5,7 @@ import {signToken} from "../functions/api/_auth.js";
 
 function makeDb(){
   const state={project:{id:"project-intel",name:"真实项目",user_id:1,updated_at:10,data:JSON.stringify({project:{name:"真实项目",type:"rent",location:"深圳",owner:"投资部"},calcSummary:{totalInvestment:12000,irr:4.2},kb:[{title:"材料"}]})},profile:null,members:[],gates:[],milestones:[],deliverables:[],events:[]};
-  return {state,prepare(sql){const q={args:[]};return {bind(...args){q.args=args;return this;},async first(){
+  return {state,async _transaction(work){return work(this);},prepare(sql){const q={args:[]};return {bind(...args){q.args=args;return this;},async first(){
     if(sql.startsWith("SELECT id,name,data,updated_at,user_id FROM projects"))return q.args[0]===state.project.id?state.project:null;
     if(sql.startsWith("SELECT project_id,user_id,role,status FROM project_memberships"))return state.members.find(x=>x.project_id===q.args[0]&&x.user_id===q.args[1]&&x.status==="active")||null;
     if(sql.startsWith("SELECT * FROM project_profiles"))return state.profile;

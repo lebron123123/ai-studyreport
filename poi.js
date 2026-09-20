@@ -1,4 +1,10 @@
 // POI相关模块 —— 从 index.html 内联脚本拆分而来（周边配套/竞品调研/AI选址建议）
+async function openProjectCityMap(confirmedPlace){
+  try{
+    const module=await import('./project-map/host.mjs');
+    module.openMap(confirmedPlace?.location?{name:confirmedPlace.name,poiLoc:confirmedPlace.location}:(typeof project==='object'?project:{}),()=>typeof authHeaders==='function'?authHeaders():{},{facilities:!!confirmedPlace?.location});
+  }catch(error){alert('地图暂时无法打开，请刷新后重试。项目资料未改动。');}
+}
 async function fetchPoi(){
   saveProject();
   const btn = document.getElementById("poiBtn");

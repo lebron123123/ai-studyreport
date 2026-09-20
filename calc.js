@@ -17,10 +17,68 @@ async function fetchCalcConfig(){
 }
 let calcResult = null;   // 财务测算结果（null表示跳过测算，走"待填"模式）
 let calcParams = null;
+const CALC_EXPERIENCE_PARAM_KEYS={
+  gaibao:new Set(['area','rent','rentSpan','rentRate','rampOcc','stableOcc','collect','mode','collectPct','sharePct','deco','decoInt','decoRatio','units','unitCost','startup','loan','interestBase','rateDiscount','loanRate','discount','repay','loanTotalYears','costSpan','costRate','stableStart','stableEnd','occupancyRamp','loanPlan','repayPlan']),
+  rent:new Set(['buildStart','buildStartQuarter','buildYears','landTerm','operateYears','firstMonths','area','rent','rentSpan','rentRate','rampOcc','stableOcc','rentDiscount','subsidyArea','subsidyPrice','subsidyDiscount','subsidyStableOcc','parkCount','parkPrice','parkRatio','otherTotal','areaPostOffice','postOfficePrice','areaKindergarten','areaPropertyRoom','areaPoliceRoom','totalBuildArea','manageCoeff','decorationCost','totalInvestment','landArea','constructionCost','loanAmount','loanRate','firstRepayRatio','repayIncreaseRate','loanTotalYears','invest','discountPct','ie_basementArea','ie_commArea','ie_landPriceResi','ie_postOfficeLandPrice','ie_curbCutCount','ie_highVoltageBuryFee','ie_treeRelocFee','ie_fenceArea','ie_facilityArea','ie_facilityUnitPrice','ie_occupyArea','ie_feasibilityFee','ie_envReportFee','ie_geoHazardFee','ie_chargerCount','ie_displayArea']),
+  sale:new Set(['buildStart','buildStartQuarter','buildYears','landTerm','operateYears','otherTotal','saleArea','saleAvgPrice','rate1','rate2','rate3','commArea','commRent','commRentSpan','commRentRate','commStableOcc','commRentStableStart','leaseMonths','parkCount','projectInputTax','landUseArea','landFloorPrice','transferArea','transferPrice','prop2AnnualBase','loanAmount','loanRate','loanTotalYears','repayStart','repayAmount','repayYears','firstRepayRatio','repayIncreaseRate','discountPct','residentialArea','commercialArea','supportArea','basementArea','residentialLandPrice','commercialLandPrice','pipelineRelocationFee','outsideMunicipalFee','landOtherFee','chargerCount','pvCount','curbCutCount','fenceArea','facilityArea','facilityUnitPrice','occupyArea','displayArea','showroomArea','feasibilityFee','envReportFee','geoHazardFee'])
+};
+function calcApplyExperienceMetrics(record,metrics){
+  const type=record&&record.projectType,allowed=CALC_EXPERIENCE_PARAM_KEYS[type];
+  if(!allowed)throw new Error('该项目类型暂未接入自动套用，请先查看经验数据。');
+  const next=Object.assign({},calcType===type?(scParams||calcParams||{}):{}),series={};let count=0;
+  (metrics||[]).forEach(metric=>{
+    const match=String(metric.metricKey||'').match(/^(.+)\.(\d{4})$/),key=match?match[1]:metric.metricKey;
+    if(!allowed.has(key)||!Number.isFinite(Number(metric.value)))return;
+    let value=Number(metric.value);
+    if(['rampOcc','stableOcc','occupancyRamp'].includes(key))value=metric.unit==='%'?value/100:(value>1?value/100:value);
+    if(match){if(!series[key])series[key]={};series[key][match[2]]=value;}else next[key]=value;
+    count++;
+  });
+  Object.entries(series).forEach(([key,value])=>{next[key]=value;});
+  if(!count)throw new Error('这条经验记录没有可直接套用到当前测算的参数。');
+  calcType=type;scParams=next;calcParams=next;scResult=null;calcResult=null;scStep=1;pgSelectedKey=null;pgJointCache=null;
+  if(window.CalcExperienceLibrary)CalcExperienceLibrary.close();
+  renderTOC();renderSheet();
+  setTimeout(()=>{const box=document.getElementById('scRunError');if(box){box.style.display='block';box.style.background='#eef8f2';box.style.color='#27734a';box.textContent='已从经验库套用 '+count+' 项参数。请核对后点击“执行测算”。';}},0);
+  return count;
+}
 function renderCalcModule(){
   const body=scStep===0?scStepType():(scStep===1?scStepForm():scStepResult());
   let fromAi=false;try{fromAi=sessionStorage.getItem("studyreport:calc-return-aireport:v1")==="1";}catch(e){}
   return (fromAi?'<div class="calc-air-return"><b>当前测算来自 AI 可研项目</b><span>可在这里查看或修改完整参数；返回后会把本次测算结果同步回 AI 可研并继续原流程。</span><button type="button" class="btn" id="scReturnAiReport">← 返回 AI 可研继续</button></div>':'')+body;
+}
+function calcOpenExperienceLibrary(){
+  if(!window.CalcExperienceLibrary){alert("财务测算经验库组件尚未加载，请刷新页面后重试。");return;}
+  const extracted=typeof aiReportExtracted!=="undefined"&&aiReportExtracted?aiReportExtracted:{};
+  const activeProject=typeof project!=="undefined"&&project?project:{};
+  const result=scResult||calcResult||{};
+  const params=scParams||calcParams||{};
+  const type=calcType||result.__ctype||extracted.calcType||"gaibao";
+  CalcExperienceLibrary.open({
+    projectId:typeof currentProjectId!=="undefined"?(currentProjectId||""):"",
+    projectName:extracted.projectName||activeProject.name||"当前测算项目",
+    projectType:type,
+    region:extracted.location||activeProject.location||"",
+    baseYear:extracted.startYear||new Date().getFullYear(),
+    params,
+    summary:result.summary||{},
+    paramMeta:typeof aiReportSuggested!=="undefined"&&aiReportSuggested&&aiReportSuggested.paramMeta?aiReportSuggested.paramMeta:{},
+    onApply:calcApplyExperienceMetrics,
+    onCalculate:calcExperienceCalculate
+  });
+}
+function calcExperienceCalculate(type,params){
+  if(!['gaibao','rent','sale'].includes(type))throw new Error('该类型暂未接入自动计算');
+  const required={gaibao:['area','rent','rentSpan','rentRate','rampOcc','stableOcc','collect','deco','decoInt','decoRatio','units','unitCost','startup','loan','interestBase','rateDiscount','loanRate','discount'],rent:['buildStart','buildYears','operateYears','area','rent','rentSpan','rentRate','rampOcc','stableOcc','parkCount','parkPrice','parkRatio','otherTotal','totalBuildArea','manageCoeff','decorationCost','totalInvestment','landArea','constructionCost','loanAmount','loanRate','firstRepayRatio','repayIncreaseRate','loanTotalYears','invest','discountPct'],sale:['buildStart','buildYears','operateYears','saleArea','saleAvgPrice','rate1','rate2','rate3','commArea','commRent','loanAmount','loanRate','discountPct']};
+  const missing=required[type].filter(key=>params[key]===null||params[key]===undefined||params[key]===''||!Number.isFinite(Number(params[key])));
+  if(missing.length)throw new Error('请补充参数：'+missing.join('、'));
+  const result=runCalcEngine(type,JSON.parse(JSON.stringify(params))),summary={};
+  for(const key of ['totalIncome','totalCost','totalTax','totalNetProfit','totalNpv','irr']){
+    const value=result.summary?.[key];if(value!==null&&value!==undefined){if(!Number.isFinite(value))throw new Error('参数不完整或计算无效：'+key);summary[key]=value;}
+  }
+  if(Number.isFinite(params.totalInvestment))summary.totalInvestment=params.totalInvestment;
+  if(!Object.keys(summary).length)throw new Error('没有有效计算结果');
+  return summary;
 }
 function scStepType(){
   const card=(k,n,d,dis)=>'<div class="domain-card '+(calcType===k?'sel':'')+(dis?'" style="opacity:.55;':'"')+' data-sct="'+k+'"><div class="dn">'+n+'</div><div class="dd">'+d+'</div>'+(dis?'<div class="dc" style="color:var(--seal-red);">建设中 · 下一轮上线</div>':'')+'</div>';
@@ -31,10 +89,10 @@ function scStepType(){
     + card("rent","出租类（公租房/保租房）","住宅+车位+其他收入，八项经营成本（含装修重置20/10年规则）、六税种、还本付息迭代、利息保障倍数。")
     + card("sale","出售类（配保房等）","配保房销售爬坡+商业出租净收益现值+地价抵减增值税+调整所得税，出售类专用现金流与利息保障倍数。")
     +'</div>'
-    +'<div class="actions"><button class="btn" id="scNext1" '+(calcType?'':'disabled')+'>下一步：录入参数 →</button></div>';
+    +'<div class="actions"><button type="button" class="btn ghost" id="scExperienceLibrary">📚 财务测算经验库</button><button class="btn" id="scNext1" '+(calcType?'':'disabled')+'>下一步：录入参数 →</button></div>';
 }
 function scStepForm(){
-  const inner = calcType==="gaibao"? calcFormHtml() : (calcType==="sale"? saleFormHtml() : rentFormHtml());
+  const inner = calcType==="gaibao"? calcFormHtml(scParams) : (calcType==="sale"? saleFormHtml() : rentFormHtml());
   return '<div class="doc-eyebrow">财务测算 · STEP 02 · '+(calcType==="gaibao"?"非居改保":(calcType==="sale"?"出售类":"出租类"))+'</div>'
     +'<h1 class="doc-title">录入测算参数</h1>'+inner
     +'<div id="scRunError" style="display:none;margin-top:12px;padding:9px 11px;border-radius:6px;background:#fff3f1;color:#8b3a2d;font-size:12px;"></div><div class="actions"><button class="btn ghost" id="scBack0">← 上一步</button><button class="btn" id="scRun">执行测算 →</button></div>';
@@ -350,10 +408,10 @@ function specGaibao(){
     {id:"c_op",  l:"运营费用", g:(R,y)=>R.cost[y].op},
     {id:"c_fin", l:"财务费用", g:(R,y)=>R.cost[y].fin},
     {id:"c_shr", l:"合作分成支出", g:(R,y)=>R.cost[y].share||0,
-      xf:{expr:(c,i)=>{ try{ return "ROUND("+c.cell("i_rent",i)+"*"+c.param("sharePct")+"/100,4)"; }catch(e){ return null; } }}},
+      xf:{expr:(c,i)=>"ROUND("+c.cell("i_rent",i)+"*"+c.param("effectiveShareRatio")+",4)"}},
     {id:"c_tot", l:"总成本费用", g:(R,y)=>R.cost[y].total, hl:1, xf:{sum:["c_col","c_eng","c_op","c_fin","c_shr"]}},
     {id:"c_totAT", l:"总成本费用（不含税）", g:(R,y)=>R.cost[y].totalAT,
-      xf:{expr:(c,i)=>"ROUND(("+c.cell("c_col",i)+"+"+c.cell("c_eng",i)+")/(1+"+c.param("vatOut")+")+"+c.cell("c_op",i)+"/(1+"+c.param("vatOps")+")+IF("+c.cell("c_fin",i)+">0,"+c.cell("c_fin",i)+"/(1+"+c.param("vatOps")+"),0),4)"}},
+      xf:{expr:(c,i)=>"ROUND("+['c_col','c_eng','c_shr'].map(id=>'ROUND('+c.cell(id,i)+'/(1+'+c.param('vatOut')+'),4)').concat(['c_op','c_fin'].map(id=>'ROUND('+c.cell(id,i)+'/(1+'+c.param('vatOps')+'),4)')).join('+')+",4)"}},
    ]},
    {sheet:"还本付息", title:"还本付息计划表（万元）", rows:[
     {id:"l_beg", l:"期初借款余额", g:(R,y)=>R.loan[y].begin, t:"none",
@@ -859,6 +917,7 @@ function scStepResult(){
   const tile=(l,v,hl)=>'<div class="metric'+(hl?' hl':'')+'"><div class="mv">'+v+'</div><div class="ml">'+l+'</div></div>';
   const pct=x=>x===null||x===undefined?"—":(x*100).toLocaleString("zh-CN",{maximumFractionDigits:2})+"%";
   let extra = (calcType==="rent"||calcType==="sale")? tile("利息保障倍数", s.icr) : "";
+  if(calcType==='gaibao') extra+=tile('实际运营月数',s.totalOperateMonths??'—')+tile('利息备付率（参考口径，待财务复核）',fmt(s.interestCoverageReference??null));
   if(calcType==="sale") extra += tile("配保房销售收入合计（万元）", fmt(s.totalSaleIncome)) + tile("出租净收益现值合计（万元）", fmt(s.rentalPvTotal));
   if(calcType==="sale") extra += tile("年中折现NPV（万元）",fmt(s.totalNpv))+tile("资本金现金流IRR",s.capitalIrr===null?"—":s.capitalIrr+" %");
   const paybackStr=pb=> pb? pb.period+"年" : "未回正";
@@ -883,6 +942,7 @@ function scStepResult(){
     + tile("现金流回正", s.payback? (s.payback.period!=null? s.payback.period : s.payback.year)+"年" : "未回正")
     + extra
     +'</div>'
+    + (calcType==='gaibao'?'<div class="note-box">'+(scResult.warnings||[]).map(escapeHtml).join('<br>')+'</div>':'')
     + scoreCardHtml()
     + parameterGovernanceHtml()
     + (calcType==="rent" && scParams && scParams.investEstimate ? investEstimateHtml(scParams.investEstimate, scParams.investSchedule) : "")
@@ -1068,7 +1128,13 @@ function runCalcEngine(type, params){
 }
 
 function pgParamDefs(type){
-  return (window.SensitivityCore&&SensitivityCore.REGISTRY&&SensitivityCore.REGISTRY[type]) ? SensitivityCore.REGISTRY[type].params : [];
+  const defs=(window.SensitivityCore&&SensitivityCore.REGISTRY&&SensitivityCore.REGISTRY[type]) ? SensitivityCore.REGISTRY[type].params : [];
+  if(type!=='gaibao'||!scParams) return defs;
+  const masked=[];
+  if(scParams.buildStartMonth) masked.push('buildYears','operateYears','firstMonths');
+  if(scParams.occupancyRamp!=null) masked.push('rampOcc');
+  if(scParams.repayPlan!=null) masked.push('repay');
+  return defs.filter(d=>!masked.includes(d.k));
 }
 function pgImpactRows(type){
   if(!window.ParamGovernance) return [];
@@ -1139,6 +1205,8 @@ function bindParameterGovernanceEvents(){
 
 function bindCalcEvents(){
   const s=id=>document.getElementById(id);
+  if(window.CalcMonthPicker)window.CalcMonthPicker.mount(document);
+  if(s("scExperienceLibrary"))s("scExperienceLibrary").onclick=calcOpenExperienceLibrary;
   if(s("scReturnAiReport"))s("scReturnAiReport").onclick=()=>{
     if(scParams&&scResult){calcParams=scParams;calcResult=scResult;calcResult.__ctype=calcType;if(typeof aiReportSuggested!=="undefined"&&aiReportSuggested)aiReportSuggested.params=Object.assign({},scParams);if(typeof aiReportParamsConfirmed!=="undefined")aiReportParamsConfirmed=true;if(typeof airSaveState==="function")airSaveState();}
     try{sessionStorage.removeItem("studyreport:calc-return-aireport:v1");}catch(e){}
@@ -1150,10 +1218,10 @@ function bindCalcEvents(){
   if(s("scBack1")) s("scBack1").onclick=()=>{ scStep=1; renderTOC(); renderSheet(); };
   if(s("scRun")) s("scRun").onclick=()=>{
     try{
-      if(calcType==="gaibao") scParams = readCalcForm();
-      else if(calcType==="sale") scParams = readSaleForm();
-      else scParams = readRentForm();
-      scResult = runCalcEngine(calcType, scParams);
+      const nextParams = calcType==="gaibao" ? readCalcForm() : calcType==="sale" ? readSaleForm() : readRentForm();
+      const nextResult = runCalcEngine(calcType, nextParams);
+      scParams = nextParams;
+      scResult = nextResult;
       pgSelectedKey=null; pgJointCache=null;
       aiChat = [];
       scStep=2; renderTOC(); renderSheet();
@@ -1174,90 +1242,71 @@ function bindCalcEvents(){
   if(s("homeAnalysis")) s("homeAnalysis").onclick=()=>{ appMode="analysis"; renderTOC(); renderSheet(); };
 }
 
-function calcFormHtml(){
-  const v = calcParams || {};
+function calcFormHtml(params){
+  const v = (params===undefined?calcParams:params) || {};
   const expert=(CALC_CFG.paramdefaults&&CALC_CFG.paramdefaults.gaibao)||{};
   const g = (k,d)=> v[k]!==undefined? v[k]:(expert[k]!==undefined?expert[k]:d);
+  const nrDates=window.NRCalc.datesFromParams(Object.assign({buildStart:g('buildStart',2026),buildYears:g('buildYears',1),operateYears:g('operateYears',12),firstMonths:g('firstMonths',12)},v));
+  const F=(label,id,value,attrs)=>'<div><label>'+label+'</label><input id="'+id+'" type="number" value="'+value+'" '+(attrs||'')+'></div>';
+  const nrSeries=key=>{const entries=Object.entries(v[key]||{}).sort((a,b)=>Number(a[0])-Number(b[0]));if(!entries.length)return {years:'',values:''};const years=entries.map(x=>Number(x[0])),consecutive=years.every((year,index)=>index===0||year===years[index-1]+1);return {years:consecutive?(years[0]+'-'+years[years.length-1]):years.join('；'),values:entries.map(x=>x[1]).join('；')};};
+  const occupancy=nrSeries('occupancyRamp'),loanPlan=nrSeries('loanPlan'),repayPlan=nrSeries('repayPlan');
+  const section=(title,note,body,open)=>'<details class="calc-param-section" '+(open?'open':'')+'><summary><span>'+title+'</span><small>'+note+'</small></summary><div class="calc-param-section-body grid2">'+body+'</div></details>';
+  const monthField=(label,id,value)=>'<div><label>'+label+'</label><div class="calc-month-field"><input id="'+id+'" type="text" inputmode="numeric" autocomplete="off" readonly data-calc-month value="'+value+'" aria-label="'+label+'，点击选择月份"><button type="button" class="calc-month-trigger" data-calc-month-for="'+id+'" aria-label="选择'+label+'">选择</button></div></div>';
   return ''
-  +'<div class="grid2">'
-  +'<div><label>建设期起始年</label><input id="c_buildStart" type="number" value="'+g("buildStart",2026)+'"></div>'
-  +'<div><label>建设期年数</label><input id="c_buildYears" type="number" value="'+g("buildYears",1)+'"></div>'
-  +'</div><div class="grid2">'
-  +'<div><label>运营期年数</label><input id="c_operateYears" type="number" value="'+g("operateYears",12)+'"></div>'
-  +'<div><label>运营首年实际月数</label><input id="c_firstMonths" type="number" value="'+g("firstMonths",12)+'"></div>'
-  +'</div><div class="grid2">'
-  +'<div><label>住宅面积（㎡）</label><input id="c_area" type="number" value="'+g("area",20000)+'"></div>'
-  +'<div><label>起始租金（元/㎡/月）</label><input id="c_rent" type="number" step="0.1" value="'+g("rent",75)+'"></div>'
-  +'</div><div class="grid2">'
-  +'<div><label>租金递增跨度（年）</label><input id="c_rentSpan" type="number" value="'+g("rentSpan",3)+'"></div>'
-  +'<div><label>租金递增率（%）</label><input id="c_rentRate" type="number" step="0.1" value="'+g("rentRate",5)+'"></div>'
-  +'</div><div class="grid2">'
-  +'<div><label>首年出租率（爬坡）</label><input id="c_rampOcc" type="number" step="0.01" value="'+g("rampOcc",0.85)+'"></div>'
-  +'<div><label>稳定期出租率</label><input id="c_stableOcc" type="number" step="0.01" value="'+g("stableOcc",0.95)+'"></div>'
-  +'</div><div class="grid2">'
-  +'<div><label>收楼单价（元/㎡/月）</label><input id="c_collect" type="number" step="0.1" value="'+g("collect",25)+'"></div>'
-  +'<div><label>合作模式</label><select id="c_mode" onchange="document.getElementById(\'modeExtra\').style.display=this.value===\'share\'?\'contents\':\'none\';"><option value="lease" '+(g("mode","lease")==="lease"?"selected":"")+'>满租金整租经营</option><option value="share" '+(g("mode","lease")==="share"?"selected":"")+'>减租金合作分成</option></select></div>'
-  +'<div id="modeExtra" style="display:'+(g("mode","lease")==="share"?"contents":"none")+';">'
-  +'<div><label>收楼租金支付比例（%，减租后实付业主）</label><input id="c_collectPct" type="number" step="any" value="'+g("collectPct",50)+'"></div>'
-  +'<div><label>业主分成比例（%，占租金收入）</label><input id="c_sharePct" type="number" step="any" value="'+g("sharePct",30)+'"></div>'
-  +'</div>'
-  +'<div><label>首次装修单方造价（元/㎡）</label><input id="c_deco" type="number" value="'+g("deco",1500)+'"></div>'
-  +'</div><div class="grid2">'
-  +'<div><label>装修间隔（年）</label><input id="c_decoInt" type="number" value="'+g("decoInt",10)+'"></div>'
-  +'<div><label>二次装修成本系数</label><input id="c_decoRatio" type="number" step="0.05" value="'+g("decoRatio",0.30)+'"></div>'
-  +'</div><div class="grid2">'
-  +'<div><label>总套数</label><input id="c_units" type="number" value="'+g("units",500)+'"></div>'
-  +'<div><label>单套月运营成本（元/套/月）</label><input id="c_unitCost" type="number" value="'+g("unitCost",800)+'"></div>'
-  +'</div><div class="grid2">'
-  +'<div><label>开办费（万元，首年计入）</label><input id="c_startup" type="number" value="'+g("startup",50)+'"></div>'
-  +'<div><label>总借款额（万元）</label><input id="c_loan" type="number" value="'+g("loan",13892)+'"></div>'
-  +'</div><div class="grid2">'
-  +'<div><label>计息本金（万元）</label><input id="c_interestBase" type="number" value="'+g("interestBase",10600)+'"></div>'
-  +'<div><label>利率折扣系数</label><input id="c_rateDiscount" type="number" step="0.05" value="'+g("rateDiscount",0.80)+'"></div>'
-  +'</div><div class="grid2">'
-  +'<div><label>贷款年利率（%）</label><input id="c_loanRate" type="number" step="0.05" value="'+g("loanRate",3.5)+'"></div>'
-  +'<div><label>折现率（%）</label><input id="c_discount" type="number" step="0.5" value="'+g("discount",6)+'"></div>'
-  +'</div><div class="grid2">'
-  +'<div><label>年均还款额（万元/年，运营第2年起）</label><input id="c_repay" type="number" value="'+g("repay",1157.67)+'"></div>'
-  +'<div></div>'
-  +'</div>';
+  +'<p class="muted">按重点分类录入，可点击每组标题收起或展开。先核对带“核心”的收入、成本和融资参数，再补充分年计划。</p>'
+  +section('① 期限与项目规模','核心｜项目边界',
+    monthField('建设开始年月','c_buildStartMonth',nrDates.buildStartMonth)+
+    monthField('建设结束年月','c_buildEndMonth',nrDates.buildEndMonth)+
+    monthField('运营开始年月','c_operateStartMonth',nrDates.operateStartMonth)+
+    monthField('运营结束年月','c_operateEndMonth',nrDates.operateEndMonth)+
+    F('住宅面积（㎡）','c_area',g('area',20000))+F('总套数','c_units',g('units',500)),true)
+  +section('② 收入与出租运营','核心｜决定收入',
+    F('起始租金（元/㎡/月）','c_rent',g('rent',75),'step="0.1"')+F('租金递增跨度（年）','c_rentSpan',g('rentSpan',3))+
+    F('租金递增率（%）','c_rentRate',g('rentRate',5),'step="0.1"')+F('首年出租率（爬坡）','c_rampOcc',g('rampOcc',0.85),'step="0.01"')+
+    F('稳定期出租率','c_stableOcc',g('stableOcc',0.95),'step="0.01"')+F('收楼单价（元/㎡/月）','c_collect',g('collect',25),'step="0.1"')+
+    '<div><label>合作模式</label><select id="c_mode" onchange="document.getElementById(\'modeExtra\').style.display=this.value===\'share\'?\'contents\':\'none\';"><option value="lease" '+(g('mode','lease')==='lease'?'selected':'')+'>满租金整租经营</option><option value="share" '+(g('mode','lease')==='share'?'selected':'')+'>减租金合作分成</option></select></div><div></div>'+
+    '<div id="modeExtra" style="display:'+(g('mode','lease')==='share'?'contents':'none')+';">'+F('收楼租金支付比例（%）','c_collectPct',g('collectPct',50),'step="any"')+F('业主分成比例（%）','c_sharePct',g('sharePct',30),'step="any"')+'</div>',true)
+  +section('③ 装修与运营成本','核心｜决定支出',
+    F('首次装修单方造价（元/㎡）','c_deco',g('deco',1500))+F('装修间隔（年）','c_decoInt',g('decoInt',10))+
+    F('二次装修成本系数','c_decoRatio',g('decoRatio',0.30),'step="0.05"')+F('单套月运营成本（元/套/月）','c_unitCost',g('unitCost',800))+
+    F('开办费（万元，首年计入）','c_startup',g('startup',50))+F('运营成本递增跨度（年）','c_costSpan',g('costSpan',1),'min="1"')+
+    F('运营成本递增率（%）','c_costRate',g('costRate',0),'step="any"'),true)
+  +section('④ 融资与财务评价','核心｜贷款与折现',
+    F('总借款额（万元）','c_loan',g('loan',13892))+F('计息本金（万元）','c_interestBase',g('interestBase',10600))+
+    F('利率折扣系数','c_rateDiscount',g('rateDiscount',0.80),'step="0.05"')+F('贷款年利率（%）','c_loanRate',g('loanRate',3.5),'step="0.05"')+
+    F('折现率（%）','c_discount',g('discount',6),'step="0.5"')+F('年均还款额（万元/年）','c_repay',g('repay',1157.67))+
+    F('借款期限（年）','c_loanTotalYears',g('loanTotalYears',Number(nrDates.operateEndMonth.slice(0,4))-Number(nrDates.buildStartMonth.slice(0,4))+1),'min="1" max="100"'),true)
+  +section('⑤ 分年计划','选填｜年份范围 + 分号数值',
+    F('稳定期开始年（留空：运营第二年）','c_stableStart',g('stableStart',''))+F('稳定期结束年（留空：运营末年）','c_stableEnd',g('stableEnd',''))+
+    '<div class="calc-series-row"><b>分年出租率</b><div><label>年份范围</label><input id="c_occupancyRampYears" type="text" placeholder="如 2027-2029" value="'+escapeHtml(occupancy.years)+'"></div><div><label>对应数值（分号分隔）</label><input id="c_occupancyRampValues" type="text" placeholder="如 0.85；0.90；0.95" value="'+escapeHtml(occupancy.values)+'"></div></div>'+
+    '<div class="calc-series-row"><b>借款计划（万元）</b><div><label>年份范围</label><input id="c_loanPlanYears" type="text" placeholder="如 2026-2028" value="'+escapeHtml(loanPlan.years)+'"></div><div><label>对应数值（分号分隔）</label><input id="c_loanPlanValues" type="text" placeholder="如 5000；5000；3892" value="'+escapeHtml(loanPlan.values)+'"></div></div>'+
+    '<div class="calc-series-row"><b>还款计划（万元）</b><div><label>年份范围</label><input id="c_repayPlanYears" type="text" placeholder="如 2028-2030" value="'+escapeHtml(repayPlan.years)+'"></div><div><label>对应数值（分号分隔）</label><input id="c_repayPlanValues" type="text" placeholder="如 500；600；700" value="'+escapeHtml(repayPlan.values)+'"></div></div>',false)
+  +'<p class="muted">年份可填连续范围“2028-2030”，也可填“2028；2030”；数值按同一顺序用分号分隔。留空时沿用通用规则。</p>';
 }
 
 function readCalcForm(){
-  const n = id=>parseFloat(document.getElementById(id).value)||0;
-  return {
-    buildStart:n("c_buildStart"), buildYears:n("c_buildYears"), operateYears:n("c_operateYears"),
-    firstMonths:n("c_firstMonths"), area:n("c_area"), rent:n("c_rent"),
+  const n = id=>{const value=document.getElementById(id).value;if(value.trim()===''||!Number.isFinite(Number(value))) throw new Error('请填写有效数字：'+document.getElementById(id).parentElement.textContent);return Number(value);};
+  const nrReadPlan=id=>{const yearsText=document.getElementById(id+'Years').value.trim(),valuesText=document.getElementById(id+'Values').value.trim();if(!yearsText&&!valuesText)return undefined;if(!yearsText||!valuesText)throw new Error('分年计划需要同时填写年份范围和对应数值');let years=[];const range=yearsText.replace(/年/g,'').match(/^\s*(\d{4})\s*[-至~～]\s*(\d{4})\s*$/);if(range){const start=Number(range[1]),end=Number(range[2]);if(end<start||end-start>100)throw new Error('分年计划年份范围不合法');for(let year=start;year<=end;year++)years.push(String(year));}else years=yearsText.split(/[；;,，\s]+/).filter(Boolean);if(years.some(year=>!/^\d{4}$/.test(year))||new Set(years).size!==years.length)throw new Error('年份请填写“2028-2030”或用分号列出，且不能重复');const values=valuesText.split(/[；;,，\s]+/).filter(Boolean).map(Number);if(values.some(value=>!Number.isFinite(value))||values.length!==years.length)throw new Error('分年计划的数值个数必须与年份个数一致');return Object.fromEntries(years.map((year,index)=>[year,values[index]]));};
+  const dates=Object.fromEntries(['buildStartMonth','buildEndMonth','operateStartMonth','operateEndMonth'].map(k=>[k,document.getElementById('c_'+k).value]));
+  const result=Object.assign({},dates,{
+    area:n("c_area"), rent:n("c_rent"),
     rentSpan:n("c_rentSpan"), rentRate:n("c_rentRate"), rampOcc:n("c_rampOcc"), stableOcc:n("c_stableOcc"),
     collect:n("c_collect"), deco:n("c_deco"), decoInt:n("c_decoInt"), decoRatio:n("c_decoRatio"),
     units:n("c_units"), unitCost:n("c_unitCost"), startup:n("c_startup"),
     loan:n("c_loan"), interestBase:n("c_interestBase"), rateDiscount:n("c_rateDiscount"),
     loanRate:n("c_loanRate"), discount:n("c_discount"), repay:n("c_repay"),
     mode: document.getElementById("c_mode")? document.getElementById("c_mode").value : "lease",
-    collectPct:n("c_collectPct")||100, sharePct:n("c_sharePct")||0,
-  };
+    collectPct:n("c_collectPct"), sharePct:n("c_sharePct"),costSpan:n('c_costSpan'),costRate:n('c_costRate'),loanTotalYears:n('c_loanTotalYears'),
+    occupancyRamp:nrReadPlan('c_occupancyRamp'),loanPlan:nrReadPlan('c_loanPlan'),repayPlan:nrReadPlan('c_repayPlan'),
+    stableStart:document.getElementById('c_stableStart').value===''?undefined:n('c_stableStart'),
+    stableEnd:document.getElementById('c_stableEnd').value===''?undefined:n('c_stableEnd')
+  });
+  const input=window.NRCalc.fromParams(result);
+  return Object.assign(result,{buildStart:input.buildYears[0],buildYears:input.buildYears.length,operateYears:input.operateYears.length,firstMonths:input.firstOperateMonths});
 }
 
 function assembleCalcInput(p){
-  const buildYearsArr = Array.from({length:p.buildYears},(_,i)=>p.buildStart+i);
-  const opStart = p.buildStart + p.buildYears;
-  const operateYearsArr = Array.from({length:p.operateYears},(_,i)=>opStart+i);
-  const loanPlan = {}; loanPlan[p.buildStart] = p.loan;
-  const repayPlan = {};
-  for(let i=1;i<p.operateYears;i++){ repayPlan[opStart+i] = p.repay; }
-  const ramp = {}; ramp[opStart] = p.rampOcc;
-  return {
-    buildYears:buildYearsArr, operateYears:operateYearsArr, firstOperateMonths:p.firstMonths,
-    residentialArea:p.area, rentStartPrice:p.rent, rentIncreaseSpan:p.rentSpan, rentIncreaseRate:p.rentRate,
-    costIncreaseSpan:1, costIncreaseRate:0,
-    occupancyRamp:ramp, stableStart:opStart+1, stableEnd:operateYearsArr[operateYearsArr.length-1], occupancyStable:p.stableOcc,
-    collectPrice:p.collect, decorationUnitCost:p.deco, decorationInterval:p.decoInt, redecorationRatio:p.decoRatio,
-    totalUnits:p.units, unitOperateCost:p.unitCost, startupFee:p.startup,
-    loanAmount:p.loan, interestBase:p.interestBase, rateDiscount:p.rateDiscount, loanAnnualRate:p.loanRate,
-    loanPlan:loanPlan, repayPlan:repayPlan, discountRatePct:p.discount,
-    collectFactor: p.mode==="share"? (p.collectPct||50)/100 : 1,
-    shareRatio: p.mode==="share"? (p.sharePct||0)/100 : 0,
-  };
+  return window.NRCalc.fromParams(p);
 }
 
 function computeSensitivity(p){
@@ -1270,7 +1319,9 @@ function computeSensitivity(p){
     {label:"装修造价 +10%",    mod:{deco:p.deco*1.1}},
   ];
   return cases.map(cs=>{
-    const r = window.NRCalc.calc(assembleCalcInput(Object.assign({}, p, cs.mod)), CALC_CFG.gaibao);
+    const changed=Object.assign({},p,cs.mod);
+    if(p.occupancyRamp && cs.mod.rampOcc!==undefined){const delta=cs.mod.rampOcc-p.rampOcc;changed.occupancyRamp=Object.fromEntries(Object.entries(p.occupancyRamp).map(([y,v])=>[y,Math.max(0,Math.min(1,v+delta))]));}
+    const r = window.NRCalc.calc(assembleCalcInput(changed), CALC_CFG.gaibao);
     return {label:cs.label, irr:r.summary.irr, npv:r.summary.totalNpv};
   });
 }
@@ -1298,7 +1349,7 @@ function computeModeCompare(p){
     return {label, totalIncome:s.totalIncome, totalCost:s.totalCost, totalNetProfit:s.totalNetProfit,
       totalNpv:s.totalNpv, irr:s.irr, payback:s.payback};
   };
-  const cp = p.collectPct||50, sp = p.sharePct||30;
+  const cp = p.collectPct??50, sp = p.sharePct??30;
   return [
     mk("满租金整租经营","lease",100,0),
     mk("减租金合作分成（收楼付"+cp+"%｜分成"+sp+"%）","share",cp,sp),
@@ -1338,7 +1389,7 @@ function calcResultHtml(){
     + cashflowChartHtml()
     + detailTablesHtml(calcResult, (calcResult&&calcResult.__ctype)||"gaibao")
     + sensTableHtml()
-    +'<div class="note-box" style="margin-top:14px;">以上结果由内置公式实时计算（与内部测算器口径一致），将自动写入报告财务章节；数值可复算、可追溯。</div>';
+    +'<div class="note-box" style="margin-top:14px;">以上结果由内置公式计算。'+escapeHtml((calcResult.warnings||[]).join(' '))+'</div>';
 }
 
 function animateCountUps(){
@@ -1368,7 +1419,7 @@ function buildCalcDigest(){
   let modeBlock = "";
   if((r.__ctype||"gaibao") !== "gaibao"){ /* 非改保无合作模式块 */ }
   else{
-  const modeName = (p&&p.mode)==="share"? ("减租金合作分成（收楼支付"+(p.collectPct||50)+"%，业主分成"+(p.sharePct||30)+"%）") : "满租金整租经营";
+  const modeName = (p&&p.mode)==="share"? ("减租金合作分成（收楼支付"+(p.collectPct??50)+"%，业主分成"+(p.sharePct??30)+"%）") : "满租金整租经营";
   modeBlock += "【合作模式】本项目采用："+modeName+"\n";
   if(r.modeCompare && r.modeCompare.length){
     modeBlock += "【合作模式比选表】模式|总收入(万)|总成本(万)|净利润(万)|净现值(万)|IRR|回正\n";
@@ -1392,8 +1443,9 @@ function buildCalcDigest(){
     const c=r.cost[y];
     if(c.total>0) costRows += y+"|"+fmt(c.collect)+"|"+fmt(c.eng)+"|"+fmt(c.op)+"|"+fmt(c.fin)+"|"+fmt(c.total)+"\n";
   });
-  const digest = "【真实财务测算结果（由内置公式计算，可直接引用）】\n"
-    +"测算周期："+y0+"—"+yN+"年（建设期"+p.buildYears+"年，运营期"+p.operateYears+"年）\n"
+  const digest = (r.dates?'【精确期间】建设：'+r.dates.buildStartMonth+'至'+r.dates.buildEndMonth+'；运营：'+r.dates.operateStartMonth+'至'+r.dates.operateEndMonth+'；实际运营'+s.totalOperateMonths+'个月。年份数仅表示跨越的自然年数量，不是完整年时长。\n各年运营月数：'+JSON.stringify(r.monthDict)+'\n':'')
+    +(r.warnings||[]).join('\n')+'\n【真实财务测算结果（由内置公式计算，可直接引用）】\n'
+    +"测算年度："+y0+"—"+yN+"年"+(r.dates?"（具体时长以上述起止年月和实际月数为准）":"（建设期"+p.buildYears+"年，运营期"+p.operateYears+"年）")+"\n"
     +"核心参数：住宅面积"+fmt(p.area)+"㎡，起始租金"+p.rent+"元/㎡/月（每"+p.rentSpan+"年递增"+p.rentRate+"%），首年出租率"+(p.rampOcc*100)+"%，稳定期"+(p.stableOcc*100)+"%；收楼单价"+p.collect+"元/㎡/月；首次装修"+p.deco+"元/㎡（共装修"+s.decoTimes+"次，工程费合计"+fmt(s.totalEngCost)+"万元）；总套数"+p.units+"套，单套运营成本"+p.unitCost+"元/套/月；总借款"+fmt(p.loan)+"万元（计息本金"+fmt(p.interestBase)+"万元，利率"+p.loanRate+"%×折扣"+p.rateDiscount+"），折现率"+p.discount+"%。\n"
     +"汇总结果：全周期总收入"+fmt(s.totalIncome)+"万元；总成本费用"+fmt(s.totalCost)+"万元；税金及附加合计"+fmt(s.totalTax)+"万元；净利润合计"+fmt(s.totalNetProfit)+"万元；累计净现值"+fmt(s.totalNpv)+"万元；全投资内部收益率IRR为"+(s.irr===null?"无法计算":s.irr+"%")+"；累计净现金流"+(s.paybackInfo?("于"+s.paybackInfo.year+"年（第"+s.paybackInfo.index+"年）回正"):"全周期内未回正")+"。\n"
     +"\n分年收入明细：\n"+incomeRows

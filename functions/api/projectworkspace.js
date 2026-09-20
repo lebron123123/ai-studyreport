@@ -4,6 +4,7 @@ import { verifyAuth, json } from "./_auth.js";
 import { adaptEnv } from "./_adapters.js";
 import { resolveProjectAccess } from "./_project-access.js";
 import { changeProjectMember } from "./_project-members.js";
+import {ensureLifecycleIntegrity,readWorkStage} from './_lifecycle-integrity.js';
 
 const Enterprise=globalThis.ProjectEnterprise;
 const clean=(v,n=240)=>String(v==null?"":v).trim().slice(0,n);
@@ -28,10 +29,10 @@ async function event(env,user,projectId,type,payload){try{await env.DB.prepare("
 async function access(env,user,projectId){
   const row=await one(env,"SELECT id,name,data,updated_at,user_id FROM projects WHERE id=?",projectId);if(!row)return null;
   let profile=await one(env,"SELECT * FROM project_profiles WHERE project_id=?",projectId),member=await one(env,"SELECT * FROM project_memberships WHERE project_id=? AND user_id=? AND status='active'",projectId,user.userId),now=Date.now();
-  if(!profile&&Number(row.user_id)===Number(user.userId)){await env.DB.prepare("INSERT INTO project_profiles(project_id,owner_user_id,lifecycle_stage,created_at,updated_at) VALUES(?,?,?,?,?)").bind(projectId,row.user_id,"discovery",now,now).run();profile={project_id:projectId,owner_user_id:row.user_id,organization_id:"",department_id:"",visibility:"private",confidentiality_level:"internal",lifecycle_stage:"discovery"};}
+  await ensureLifecycleIntegrity(env);const workStage=await readWorkStage(env,row,profile);profile={...(profile||{}),lifecycle_stage:workStage.key};
   if(!member&&Number(row.user_id)===Number(user.userId)){await env.DB.prepare("INSERT INTO project_memberships(project_id,user_id,role,status,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role,status='active',updated_at=excluded.updated_at").bind(projectId,user.userId,"OWNER","active",now,now).run();member={project_id:projectId,user_id:user.userId,role:"OWNER",status:"active"};}
   const resolved=await resolveProjectAccess(env,user.userId,projectId);if(!resolved)return null;
-  return {...resolved,profile:profile||{},member};
+  return {...resolved,actorId:user.userId,profile:profile||{},member};
 }
 async function registerFileRecord(env,a,user,projectId,file,now){
   const f=Enterprise.normalizeFile({...file,projectId}),name=clean(f.name,220);if(!name)throw new Error("文件名不能为空");
@@ -61,7 +62,7 @@ async function loadView(env,a,view){
     const [files,extractions]=await Promise.all([all(env,"SELECT * FROM project_files WHERE project_id=? ORDER BY updated_at DESC",pid),all(env,"SELECT * FROM project_file_extractions WHERE project_id=? ORDER BY updated_at DESC",pid)]);return {...base,data:Enterprise.buildFileIntelligence({files:files.map(fileRow),extractions:extractions.map(extractionRow)})};
   }
   if(view==="decisions"){
-    const [decisions,changes,scenarios,artifacts]=await Promise.all([all(env,"SELECT * FROM project_decisions WHERE project_id=? AND user_id=? ORDER BY updated_at DESC",pid,uid),all(env,"SELECT * FROM project_change_sets WHERE project_id=? AND user_id=? ORDER BY updated_at DESC",pid,uid),all(env,"SELECT * FROM project_scenarios WHERE project_id=? AND user_id=? ORDER BY updated_at DESC",pid,uid),all(env,"SELECT * FROM project_artifacts WHERE project_id=? AND user_id=? ORDER BY updated_at DESC",pid,uid)]);return {...base,data:{chains:Enterprise.buildImpactChains({decisions:decisions.map(decisionRow),changes:changes.map(changeRow),scenarios:scenarios.map(scenarioRow),artifacts:artifacts.map(artifactRow)}),summary:{decisions:decisions.length,changes:changes.length,scenarios:scenarios.length}}};
+    const [decisions,changes,scenarios,artifacts]=await Promise.all([all(env,"SELECT * FROM project_decisions WHERE project_id=? AND user_id=? ORDER BY updated_at DESC",pid,uid),all(env,"SELECT * FROM project_change_sets WHERE project_id=? AND user_id=? ORDER BY updated_at DESC",pid,uid),all(env,"SELECT * FROM project_scenarios WHERE project_id=? AND (user_id=? OR status='selected' OR (status='submitted' AND ?=1)) ORDER BY updated_at DESC",pid,a.actorId,a.permissions.manage?1:0),all(env,"SELECT * FROM project_artifacts WHERE project_id=? AND user_id=? ORDER BY updated_at DESC",pid,uid)]);return {...base,data:{chains:Enterprise.buildImpactChains({decisions:decisions.map(decisionRow),changes:changes.map(changeRow),scenarios:scenarios.map(scenarioRow),artifacts:artifacts.map(artifactRow)}),summary:{decisions:decisions.length,changes:changes.length,scenarios:scenarios.length}}};
   }
   if(view==="spatial"){
     const [scope,observations,pois,odFlows,snapshots]=await Promise.all([one(env,"SELECT * FROM project_analysis_scopes WHERE project_id=? AND user_id=?",pid,uid),all(env,"SELECT * FROM analysis_observations WHERE project_id=? AND user_id=? AND review_status='approved' ORDER BY updated_at DESC",pid,uid),all(env,"SELECT * FROM project_pois WHERE project_id=? AND user_id=? AND review_status='approved' ORDER BY updated_at DESC",pid,uid),all(env,"SELECT * FROM project_od_flows WHERE project_id=? AND user_id=? AND review_status='approved' ORDER BY updated_at DESC",pid,uid),all(env,"SELECT * FROM project_analysis_snapshots WHERE project_id=? AND user_id=? ORDER BY version DESC",pid,uid)]);return {...base,data:Enterprise.buildSpatialWorkspace({scope,observations,pois,odFlows,snapshots})};
@@ -121,7 +122,7 @@ export async function onRequestPost(contextArg){
     const result=await changeProjectMember(env,user.userId,projectId,Number(b.userId),'',true);return json(result,result.status||200);
   }
   if(action==="updateProfile"){
-    if(!a.permissions.manage)return json({ok:false,error:"仅项目OWNER可修改项目边界"},403);const p=b.profile||{},visibility=["private","department","organization"].includes(p.visibility)?p.visibility:"private",level=["public","internal","confidential","restricted"].includes(p.confidentialityLevel)?p.confidentialityLevel:"internal";await env.DB.prepare("UPDATE project_profiles SET organization_id=?,department_id=?,visibility=?,confidentiality_level=?,updated_at=? WHERE project_id=?").bind(clean(p.organizationId,100),clean(p.departmentId,100),visibility,level,now,projectId).run();await event(env,user,projectId,"project.profile.updated",{visibility,confidentialityLevel:level});return json({ok:true});
+    if(!a.permissions.manage)return json({ok:false,error:"仅项目OWNER可修改项目边界"},403);const p=b.profile||{},visibility=["private","department","organization"].includes(p.visibility)?p.visibility:"private",level=["public","internal","confidential","restricted"].includes(p.confidentialityLevel)?p.confidentialityLevel:"internal";await env.DB.prepare("INSERT INTO project_profiles(organization_id,department_id,visibility,confidentiality_level,updated_at,project_id,owner_user_id,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET organization_id=excluded.organization_id,department_id=excluded.department_id,visibility=excluded.visibility,confidentiality_level=excluded.confidentiality_level,updated_at=excluded.updated_at").bind(clean(p.organizationId,100),clean(p.departmentId,100),visibility,level,now,projectId,a.ownerUserId,now).run();await event(env,user,projectId,"project.profile.updated",{visibility,confidentialityLevel:level});return json({ok:true});
   }
   return json({ok:false,error:"不支持的项目工作区操作"},400);
 }

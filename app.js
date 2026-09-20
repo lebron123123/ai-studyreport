@@ -57,22 +57,22 @@ function mountAnchorNav(){
 
 function renderTOC(){
   const el = document.getElementById("tocList");
-  let items = "";
+  let items = '<section class="toc-group"><b class="toc-group-label">投资管理</b><div class="toc-item" data-project-manager style="cursor:pointer;"><span class="num">◈</span><span>投资全周期</span><i class="toc-arrow">›</i></div></section>';
   if(appMode===null){
     const HM = [
       {id:"homeAiReport",ic:"✨", label:"AI可研生成"},
-      {id:"homeInvestmentOS",ic:"◈", label:"投资全周期"},
       {id:"homeCalc",  ic:"📊", label:"财务测算"},
       {id:"homeReview",ic:"🔍", label:"可研智能审查"},
       {id:"homeReport",ic:"📄", label:"可研生成"},
       {id:"homeOffice",ic:"💬", label:"AI办公助手"},
       {id:"homePersonalKnowledge",ic:"◇", label:"个人知识库"},
       {id:"homeAnalysis",ic:"◎", label:"项目数据分析"},
+      {id:"homeProjectMap",ic:"🗺", label:"项目地图"},
     ];
     const groups=[
-      {label:"项目决策",ids:["homeAiReport","homeInvestmentOS","homeCalc"]},
-      {label:"生成与审查",ids:["homeReview","homeReport","homeOffice"]},
-      {label:"知识与数据",ids:["homePersonalKnowledge","homeAnalysis"]},
+      {label:"可研与测算",ids:["homeAiReport","homeCalc","homeReport","homeReview"]},
+      {label:"AI办公",ids:["homeOffice"]},
+      {label:"知识与数据",ids:["homePersonalKnowledge","homeAnalysis","homeProjectMap"]},
     ];
     items += groups.map(group=>'<section class="toc-group"><b class="toc-group-label">'+group.label+'</b>'
       +group.ids.map(id=>{const m=HM.find(x=>x.id===id);return '<div class="toc-item" data-home="'+m.id+'" style="cursor:pointer;"><span class="num">'+m.ic+'</span><span>'+m.label+'</span><i class="toc-arrow">›</i></div>';}).join("")+'</section>').join("");
@@ -80,12 +80,11 @@ function renderTOC(){
   if(appMode!==null){
     items += '<section class="toc-group"><b class="toc-group-label">当前工作区</b><div class="toc-item" style="cursor:pointer;" onclick="goHome()"><span class="num">⌂</span><span>返回首页</span><i class="toc-arrow">›</i></div>';
   }
-  if(appMode==="aireport"){
-    items += '<div class="toc-item" data-project-manager style="cursor:pointer;"><span class="num">◈</span><span>投资全周期</span><i class="toc-arrow">›</i></div></section>';
-  }else if(appMode!==null){
-    items += '</section>';
+  if(appMode!==null){
+    items += '<div class="toc-item" data-home="homeProjectMap" style="cursor:pointer;"><span class="num">🗺</span><span>项目地图</span><i class="toc-arrow">›</i></div></section>';
   }
   if(appMode==="calc"){
+    items += '<div class="toc-item" data-calc-experience style="cursor:pointer;"><span class="num">▦</span><span>经验数据库</span><i class="toc-arrow">›</i></div>';
     const CS = ["选择类型","参数录入","测算结果"];
     items += CS.map((s,i)=>{
       const cls = i===scStep?"active":(i<scStep?"done":"");
@@ -109,10 +108,12 @@ function renderTOC(){
   el.innerHTML = items;
   el.querySelectorAll("[data-gor]").forEach(it=>{ it.onclick = ()=>{ currentStep = +it.dataset.gor; renderTOC(); renderSheet(); }; });
   el.querySelectorAll("[data-goc]").forEach(it=>{ it.onclick = ()=>{ scStep = +it.dataset.goc; renderTOC(); renderSheet(); }; });
+  el.querySelectorAll("[data-calc-experience]").forEach(it=>{ it.onclick = ()=>{ if(typeof calcOpenExperienceLibrary==="function")calcOpenExperienceLibrary(); }; });
   el.querySelectorAll("[data-gov]").forEach(it=>{ it.onclick = ()=>{ rvStep = +it.dataset.gov; renderTOC(); renderSheet(); }; });
   el.querySelectorAll("[data-home]").forEach(it=>{
     it.onclick = ()=>{
       if(it.dataset.home==="homeInvestmentOS"){ openProjectsPanel(); return; }
+      if(it.dataset.home==="homeProjectMap"){ openProjectCityMap(); return; }
       const card = document.getElementById(it.dataset.home); if(card) card.click();
     };
   });
@@ -222,6 +223,7 @@ function escapeHtml(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").repla
 
 // 把测算结果整理成给AI的数据摘要 + 现成表格
 function bindEvents(){
+  if(window.ReportEvidenceGraph?.bindDetails)ReportEvidenceGraph.bindDetails(document.getElementById('sheet'));
   const s = id=>document.getElementById(id);
   document.querySelectorAll(".domain-card").forEach(card=>{
     card.onclick = ()=>{ loadDomain(card.dataset.key); renderSheet(); };
@@ -287,7 +289,8 @@ function bindEvents(){
       const issues=runAudit();const box=document.getElementById("auditBox");if(box)box.innerHTML=auditPanelHtml(issues);
       alert("签发前审计发现 "+evidenceAudit.blockerCount+" 项硬阻断。请先处理数字无来源或正文版本过期问题；普通资料缺口不会阻止继续完善。");return;
     }
-    signed=true;if(projectWorkflow)projectWorkflow.reviewSnapshot={status:"signed",signedAt:new Date().toISOString(),evidenceAudit:{ready:true,claimCoverage:evidenceAudit.claimCoverage,graphHash:evidenceAudit.graph.hash}};saveDraft();renderSheet();
+    if(window.ReportDeliveryUI)window.ReportDeliveryUI.open();
+    else alert("正式签发需要后台冻结版本及独立复核，请刷新后进入‘验收与运行保障’。");
   };
   if(s("printBtn")) s("printBtn").onclick = ()=> window.print();
   if(s("exportWordBtn")) s("exportWordBtn").onclick = exportWord;

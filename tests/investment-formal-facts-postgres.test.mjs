@@ -1,0 +1,68 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createD1Shim} from '../local-server/d1-shim.js';
+import {testDatabaseUrl} from '../scripts/require-test-database.mjs';
+import {ensureFormalFacts,mutateFormalFact,readFormalFacts,normalizeFormalFact} from '../functions/api/_investment-formal-facts.js';
+import {ensureInvestmentTables} from '../functions/api/investmentops.js';
+import {ensureLifecycleIntegrity,withProjectMutation} from '../functions/api/_lifecycle-integrity.js';
+import {resolveProjectAccess,ensureProjectMemberships} from '../functions/api/_project-access.js';
+import {ensureObligations,mutateObligation,readObligations} from '../functions/api/_investment-obligations.js';
+import {investmentLifecycleRead} from '../functions/api/_investment-lifecycle.js';
+const target=testDatabaseUrl();
+const common={title:'[系统测试]正式事实',date:'2026-01-02',locator:'原件第1页',reason:'核对来源',note:''};
+test('事实输入不接受预测、无效日期和缺失条件',()=>{
+ assert.throws(()=>normalizeFormalFact({...common,kind:'forecast'}),{status:400});
+ assert.throws(()=>normalizeFormalFact({...common,kind:'held',date:'2026-02-30'}),{status:400});
+ assert.throws(()=>normalizeFormalFact({...common,kind:'decision',result:'conditional'}),{status:400});
+ assert.throws(()=>normalizeFormalFact({...common,kind:'original',amount:'NaN',currency:'CNY'}),{status:400});
+ assert.equal(normalizeFormalFact({...common,kind:'held'}).date,common.date);
+});
+test('正式事实真实数据库：独立授权、依赖、更正、原调整隔离、并发和原子审计',{skip:!target},async()=>{
+ const DB=createD1Shim(target),env={DB,RAG_OBJECTS:{verify:async()=>({ok:true,sizeBytes:10})}},projectId=crypto.randomUUID(),eventId=crypto.randomUUID(),sourceId=crypto.randomUUID();
+ try{
+  await ensureInvestmentTables(env);await ensureLifecycleIntegrity(env);await ensureFormalFacts(env);await ensureFormalFacts(env);await ensureProjectMemberships(env);
+  const users=[];for(let i=0;i<3;i++){const name='[系统测试]formal-'+crypto.randomUUID();await DB.prepare('INSERT INTO users(username,pass_hash,salt,created_at) VALUES(?,?,?,?)').bind(name,'disabled','disabled',Date.now()).run();users.push(Number((await DB.prepare('SELECT id FROM users WHERE username=?').bind(name).first()).id));}
+  const [owner,editor,viewer]=users;
+  await DB.prepare('INSERT INTO projects(id,user_id,name,data,updated_at) VALUES(?,?,?,?,?)').bind(projectId,owner,'[系统测试]正式事实','{}',Date.now()).run();
+  for(const [u,r]of[[editor,'EDITOR'],[viewer,'VIEWER']])await DB.prepare("INSERT INTO project_memberships(project_id,user_id,role,status,created_at,updated_at) VALUES(?,?,?,'active',?,?)").bind(projectId,u,r,Date.now(),Date.now()).run();
+  await DB.prepare('INSERT INTO project_meetings(id,project_id,user_id,title,content,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(eventId,projectId,owner,'[系统测试]董事会','原件会议内容',Date.now(),Date.now()).run();
+  await DB.prepare('INSERT INTO report_source_artifacts(id,project_id,user_id,content_hash,storage_key,file_name,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?,?,?)').bind(sourceId,projectId,owner,'test-hash','test-only','[系统测试]纪要.txt','text/plain',10,Date.now()).run();
+  const call=(b,u=owner,override=env)=>withProjectMutation(override,{userId:u},projectId,'edit',(tx,a)=>mutateFormalFact(tx,{userId:u},a,b));
+  const read=async()=>readFormalFacts(env,{userId:owner},await resolveProjectAccess(env,owner,projectId));
+  const base={...common,action:'saveFormalFact',eventId,sourceId,round:1,expectedVersion:0,newRoundConfirmed:true};
+  const verify=(id,v=1,u=editor)=>call({action:'verifyFormalFact',id,expectedVersion:v,confirmed:true,reason:'已对原件逐项核验'},u);
+  await assert.rejects(call({...base,kind:'held'},viewer),{status:403});
+  const held=await call({...base,kind:'held'});
+  await assert.rejects(verify(held.id),{status:403});
+  const grant={action:'grantFactVerifier',userId:editor,basis:'负责人指定独立核验人',active:true,expectedVersion:0};
+  await assert.rejects(call(grant,editor),{status:403});await call(grant);
+  await call({...grant,userId:owner});await assert.rejects(verify(held.id,1,owner),{status:403});
+  await assert.rejects(call({action:'verifyFormalFact',id:held.id,expectedVersion:1,confirmed:true,reason:'验证损坏原件'},editor,{...env,RAG_OBJECTS:{verify:async()=>({ok:false,sizeBytes:10})}}),{status:409});
+  const decision=await call({...base,kind:'decision',result:'conditional',conditions:['签署协议']});
+  await assert.rejects(verify(decision.id),{status:409});await verify(held.id);await verify(decision.id);
+  const money={amount:'1000000.25',currency:'CNY',amountBasis:'含税总投资',decisionId:decision.id,plannedStart:'2026-06-01'};
+  const original=await call({...base,...money,kind:'original'});
+  await assert.rejects(verify(original.id),{status:409});
+  const condition=await call({...base,kind:'condition',decisionId:decision.id,condition:'签署协议'});await verify(condition.id);await verify(original.id);
+  let result=await read();assert.equal(result.approvedBaseline.payload.amount,'1000000.25');assert.equal(result.approvedAdjustment,null);
+  const adjustment=await call({...base,...money,kind:'adjustment',amount:'1200000',originalId:original.id});await verify(adjustment.id);
+  result=await read();assert.equal(result.approvedBaseline.id,original.id);assert.equal(result.approvedAdjustment.id,adjustment.id);
+  const lifecycle=await investmentLifecycleRead(env,{userId:owner},await resolveProjectAccess(env,owner,projectId));assert.equal(lifecycle.approvedBaseline.id,original.id);assert.equal(lifecycle.approvedAdjustment.id,adjustment.id);assert.equal(lifecycle.approvalConfigured,false);
+  await ensureObligations(env);
+  const handoffCall=(b,u=owner)=>withProjectMutation(env,{userId:u},projectId,'edit',(tx,a)=>mutateObligation(tx,{userId:u},a,b));
+  const handoff=await handoffCall({action:'saveHandoff',eventId,type:'board_materials',round:1,expectedVersion:0,newRoundConfirmed:true,title:'准备下一阶段材料',basis:'正式决议',result:'conditional',reason:'交接',assigneeId:editor});
+  const corrected=await call({...base,...money,kind:'adjustment',amount:'1250000',originalId:original.id,expectedVersion:2});assert.equal(corrected.id,adjustment.id);assert.equal((await read()).approvedAdjustment,null);
+  await assert.rejects(verify(adjustment.id,2),{status:409});await verify(adjustment.id,3);
+  await call({...base,kind:'held',expectedVersion:2,reason:'日期依据更正'});
+  result=await read();assert.equal(result.approvedBaseline,null);assert.equal(result.approvedAdjustment,null);assert.equal(result.items.find(r=>r.id===decision.id).currentValid,false);
+  const obligations=await readObligations(env,{userId:owner},await resolveProjectAccess(env,owner,projectId));assert.equal(obligations.items[0].requiresReview,true);assert.equal(obligations.items[0].status,'pending');
+  await assert.rejects(handoffCall({action:'acceptHandoff',id:handoff.id,expectedVersion:1},editor),{status:409});
+  const race=await Promise.allSettled([call({...base,kind:'scheduled'}),call({...base,kind:'scheduled'})]);assert.equal(race.filter(x=>x.status==='fulfilled').length,1);assert.equal(race.find(x=>x.status==='rejected').reason.status,409);
+  await assert.rejects(call({...base,kind:'held',eventId:crypto.randomUUID()}),{status:404});
+  await assert.rejects(call({...base,kind:'scheduled',round:2,sourceId:crypto.randomUUID()}),{status:409});
+  const broken={...env,DB:{...DB,_transaction:fn=>DB._transaction(tx=>fn({...tx,prepare(sql){if(sql.startsWith('INSERT INTO project_events'))return {bind(){return this;},run(){throw Error('audit-failure');}};return tx.prepare(sql);}}))}};
+  await assert.rejects(call({...base,kind:'scheduled',round:3},owner,broken));assert.equal((await read()).items.filter(r=>r.kind==='scheduled').length,1);
+  await call({...grant,active:false,expectedVersion:1});await assert.rejects(verify(held.id,3),{status:403});
+  const events=(await DB.prepare('SELECT payload_json FROM project_events WHERE project_id=?').bind(projectId).all()).results.map(x=>JSON.parse(x.payload_json));assert.ok(events.some(x=>x.before?.id===adjustment.id&&x.after?.amount==='1250000'));
+ }finally{await DB._close();}
+});

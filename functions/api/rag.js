@@ -5,6 +5,7 @@
 import { verifyAuth, json } from "./_auth.js";
 
 import { adaptEnv } from "./_adapters.js";
+import {ensureWikiSourceAccess,wikiRetrievalAccess,filterWikiRagRows} from './_wiki-source-access.js';
 function isAdmin(env, user){
   const admins = (env.ADMIN_USERS || "").split(",").map(s=>s.trim()).filter(Boolean);
   return admins.includes(user.username) || admins.includes(String(user.userId));
@@ -313,7 +314,14 @@ export async function onRequestPost(context){
       });
     }catch(e){}
     const iAmAdmin = isAdmin(env, user);
-    const canSee = (title)=>{
+    const wikiTitles=[...(r.matches||[]).map(m=>m.metadata?.title),...exactRows.map(x=>x.title)].filter(t=>String(t||'').startsWith('【Wiki】'));
+    let wikiCanSee=()=>true;
+    if(wikiTitles.length){
+      await ensureWikiSourceAccess(env);
+      wikiCanSee=await wikiRetrievalAccess(env,user.userId,wikiTitles);
+    }
+    const canSee = (title,chunkId)=>{
+      if(!wikiCanSee(title,chunkId))return false;
       if(iAmAdmin) return true;
       const p = permMap[title];
       if(!p) return true;
@@ -365,7 +373,7 @@ export async function onRequestPost(context){
       };
     }).filter(m=>{
       if(disabled.has(m.title)) return false;
-      if(!canSee(m.title)) return false;
+      if(!canSee(m.title,m.id)) return false;
       if(wantCat && m.category !== wantCat) return false;
       return true;
     });
@@ -381,7 +389,7 @@ export async function onRequestPost(context){
       };
     }).filter(m=>{
       if(disabled.has(m.title)) return false;
-      if(!canSee(m.title)) return false;
+      if(!canSee(m.title,m.id)) return false;
       if(wantCat && m.category !== wantCat) return false;
       return true;
     });
@@ -413,6 +421,11 @@ export async function onRequestPost(context){
           }
         }
       }catch(e){}
+    }
+    // A reranker may take seconds: re-read grants/source validity before responding.
+    if(wikiTitles.length){
+      const stillAllowed=await wikiRetrievalAccess(env,user.userId,wikiTitles);
+      matches=matches.filter(m=>stillAllowed(m.title,m.id));
     }
     return { all: matches, top: matches.slice(0, topK), category: wantCat, tier: CFG.tier };
   }
@@ -450,6 +463,7 @@ export async function onRequestPost(context){
       rows = dr.results || [];
     }catch(e){ return json({ok:true, total:0, categories:[], note:"知识库台账暂不可用"}); }
 
+    rows=await filterWikiRagRows(env,user.userId,rows);
     const byCat = {};
     let total = 0, expiredTotal = 0;
     rows.forEach(x=>{
@@ -486,7 +500,7 @@ export async function onRequestPost(context){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
   if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
     const rows = await env.DB.prepare("SELECT f.title, f.chunks, f.category, f.level, f.enabled, f.security, f.dept_scope, f.effective_date, f.expiry_date, f.version, f.updated_at, f.created_at, m.doc_no, m.issuer, m.source_ref, o.content_hash AS source_object_hash, o.file_name AS source_file_name, o.size_bytes AS source_size_bytes FROM rag_files_v2 f LEFT JOIN rag_file_meta m ON f.title=m.title LEFT JOIN rag_source_links sl ON sl.title=f.title AND sl.version=f.version LEFT JOIN rag_source_objects o ON o.content_hash=sl.content_hash ORDER BY f.created_at DESC LIMIT 500").all();
-    return json({ok:true, files: rows.results||[]});
+    return json({ok:true, files: await filterWikiRagRows(env,user.userId,rows.results||[])});
   }
 
   if(body.action === "toggle"){
@@ -520,14 +534,19 @@ export async function onRequestPost(context){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
     if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
     const rows = await env.DB.prepare("SELECT l.query, l.category, l.hit_titles, l.hit_count, l.top_score, l.created_at, u.username FROM rag_logs l LEFT JOIN users u ON l.user_id=u.id ORDER BY l.id DESC LIMIT 200").all();
-    return json({ok:true, logs: rows.results||[]});
+    const visibleLogs=[];
+    for(const row of rows.results||[]){
+      const titles=String(row.hit_titles||'').split('；').filter(Boolean).map(title=>({title}));
+      if((await filterWikiRagRows(env,user.userId,titles)).length===titles.length)visibleLogs.push(row);
+    }
+    return json({ok:true, logs: visibleLogs});
   }
 
   if(body.action === "graph"){
     if(!isAdmin(env, user)) return json({ok:false, error:"仅管理员"}, 403);
     if(!passOk(env, request)) return json({ok:false, error:"管理员密码校验失败，请重新进入后台"}, 403);
     const rows = await env.DB.prepare("SELECT title, category, level FROM rag_files_v2 WHERE enabled=1 LIMIT 60").all();
-    const files = rows.results || [];
+    const files = await filterWikiRagRows(env,user.userId,rows.results || []);
     // 节点=文件,边=同分类 或 标题共享2字以上词
     const nodes = files.map((f,i)=>({id:i, title:f.title, category:f.category||"未分类", level:parseInt(f.level)||2}));
     const edges = [];
@@ -576,6 +595,9 @@ export async function onRequestPost(context){
       const fb = await env.DB.prepare("SELECT title, SUM(CASE WHEN useful=1 THEN 1 ELSE 0 END) as good, SUM(CASE WHEN useful=0 THEN 1 ELSE 0 END) as bad FROM rag_feedback GROUP BY title HAVING bad > 0 ORDER BY bad DESC LIMIT 10").all();
       out.poorFiles = (fb.results||[]).map(f=>({title:f.title, good:f.good, bad:f.bad}));
     }catch(e){ out.error = e.message; }
+    out.hotFiles=await filterWikiRagRows(env,user.userId,out.hotFiles||[]);
+    out.coldFiles=(await filterWikiRagRows(env,user.userId,(out.coldFiles||[]).map(title=>({title})))).map(row=>row.title);
+    out.poorFiles=await filterWikiRagRows(env,user.userId,out.poorFiles||[]);
     return json({ok:true, dashboard: out});
   }
 

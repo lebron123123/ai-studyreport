@@ -1,0 +1,3 @@
+-- Additive registry of externally approved facts; does not implement corporate approval.
+CREATE TABLE IF NOT EXISTS investment_fact_verifiers(project_id TEXT NOT NULL,user_id INTEGER NOT NULL,basis TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,version INTEGER NOT NULL,updated_at BIGINT NOT NULL,PRIMARY KEY(project_id,user_id));
+CREATE TABLE IF NOT EXISTS investment_formal_facts(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,event_id TEXT NOT NULL,kind TEXT NOT NULL,round INTEGER NOT NULL,version INTEGER NOT NULL,status TEXT NOT NULL,payload_json TEXT NOT NULL,source_id TEXT NOT NULL,source_hash TEXT NOT NULL,created_by INTEGER NOT NULL,verified_by INTEGER,updated_at BIGINT NOT NULL,UNIQUE(project_id,event_id,kind,round));

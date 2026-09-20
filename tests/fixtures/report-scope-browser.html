@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><title>研究正文接收定向测试</title><pre id="result">加载中</pre><script>
+(async()=>{try{
+ const source=await (await fetch('/report.js?v=20260909.scope-fix')).text();
+ const call=new Function('return async function reportDurableSectionCall'+source.split('async function reportDurableSectionCall')[1].split('async function callGen')[0])();
+ window.currentProjectId=null;window.projectWorkflow={};window.rlProjectType=()=> 'gaibao';window.saveDraft=()=>{};
+ let allowed=true,switched=false;window.ResearchUI={active:()=>true,flush:async()=>{},capture:()=>({researchId:'test',runId:'test'}),accepts:()=>allowed,guard:async()=>{}};
+ window.ReportOrchestrationClient={generateSection:async(input,progress)=>{progress({id:'test',status:'running'});if(switched)allowed=false;progress({id:'test',status:'completed'});return {text:'测试正文'};}};
+ const section={};if(await call({name:'测试'},section,'','')!=='测试正文'||section.executionTask.status!=='completed')throw Error('正常路径失败');
+ switched=true;let blocked=false;try{await call({name:'测试'},{},'','');}catch(e){blocked=/已切换/.test(e.message);}if(!blocked)throw Error('切换隔离失败');
+ document.getElementById('result').textContent='PASS：私人研究接收正文；轮次切换拒绝旧结果。仅内存模拟，无项目写入、无模型调用。';
+ }catch(e){document.getElementById('result').textContent='FAIL：'+e.message;}})();
+</script>

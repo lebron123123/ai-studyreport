@@ -1,0 +1,17 @@
+const {chromium}=require('C:/Users/HP/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');const assert=require('node:assert/strict');
+(async()=>{const b=await chromium.launch({headless:true,channel:'msedge'}),p=await b.newPage({viewport:{width:1440,height:900}}),errors=[];p.on('pageerror',e=>errors.push(e.message));
+await p.route('https://tiles.openfreemap.org/**',r=>r.fulfill({contentType:'application/json',body:JSON.stringify({version:8,sources:{},layers:[]})}));
+try{await p.goto('http://127.0.0.1:8080/project-map/index.html');await p.waitForTimeout(2500);await p.locator('#baoan-enter').click();await p.waitForFunction(()=>{const s=globalThis.BABYLON?.Engine.Instances[0]?.scenes[0];if(s?.metadata.baoanError)throw Error(s.metadata.baoanError);return document.querySelector('#map').dataset.details==='ready'&&s?.metadata.baoanLoaded>0;},null,{timeout:180000});await p.waitForTimeout(8000);
+await p.screenshot({path:'outputs/baoan-unified-sunset.png'});
+const scene=()=>p.evaluate(()=>({loaded:BABYLON.Engine.Instances[0].scenes[0].metadata.baoanLoaded,meshes:BABYLON.Engine.Instances[0].scenes[0].meshes.filter(m=>m.metadata?.baoan).length}));console.log('BAOAN',await scene());assert.ok((await scene()).meshes>0);assert.ok((await scene()).loaded<=9);
+await p.getByRole('button',{name:'宝安估算楼高：关',exact:true}).click();await p.waitForTimeout(10000);assert.ok((await scene()).loaded<=18);
+for(let i=0;i<5;i++){await p.locator('#day').click();await p.locator('#night').click();await p.locator('#sunset').click();}
+await p.locator('#night').click();await p.waitForTimeout(1500);await p.screenshot({path:'outputs/baoan-unified-night.png'});
+await p.locator('#day').click();await p.waitForTimeout(1500);await p.screenshot({path:'outputs/baoan-unified-day.png'});
+await p.locator('#landmark-query').fill('腾讯');await p.locator('[data-landmark]').first().click();await p.waitForTimeout(3000);assert.equal((await scene()).loaded,0);assert.equal(await p.evaluate(()=>BABYLON.Engine.Instances.length),1);
+await p.locator('#baoan-enter').click();await p.waitForTimeout(8000);assert.ok((await scene()).loaded>0);
+await p.locator('[data-landmark]').first().click();await p.waitForTimeout(3000);
+await p.route('**/baoan-lod-v2/mesh/**',r=>r.fulfill({status:503,body:'isolated test failure'}));await p.locator('#baoan-enter').click();await p.waitForFunction(()=>BABYLON.Engine.Instances[0].scenes[0].metadata.baoanError?.includes('503'));assert.equal((await scene()).loaded,0);
+await p.locator('[data-landmark]').first().click();await p.waitForTimeout(1500);await p.unroute('**/baoan-lod-v2/mesh/**');await p.locator('#baoan-enter').click();await p.waitForFunction(()=>BABYLON.Engine.Instances[0].scenes[0].metadata.baoanLoaded>0);
+await p.locator('#city').click();assert.equal(await p.evaluate(()=>BABYLON.Engine.Instances.length),0);await p.reload();await p.waitForTimeout(1500);assert.equal(await p.locator('#baoan-enter').count(),1);assert.deepEqual(errors,[]);console.log('PASS unified engine, bounded streaming, estimates, 5 light cycles, district roundtrip, 503 isolation/retry, release, refresh, zero page errors');
+}catch(e){console.log('DIAGNOSTIC',await p.evaluate(()=>({text:document.body.innerText.slice(-3000),engines:globalThis.BABYLON?.Engine.Instances.length})),errors);await p.screenshot({path:'outputs/baoan-unified-failure.png'});throw e;}finally{await b.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

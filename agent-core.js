@@ -224,6 +224,8 @@ window.AgentCore = (function(){
    */
   async function run(opt){
     opt = opt || {};
+    const researchScope=opt.research?JSON.parse(JSON.stringify(opt.research)):null;
+    const assertContext=()=>{if(researchScope&&typeof opt.isContextCurrent==='function'&&!opt.isContextCurrent())throw new Error('研究轮次已切换，本次任务已停止');};
     const notifyTrace = (lines)=>{
       if(typeof opt.onTrace === "function"){
         try{ opt.onTrace(lines.slice()); }catch(e){}
@@ -239,7 +241,7 @@ window.AgentCore = (function(){
     const maxDurationMs = Math.max(5000, Number(opt.maxDurationMs)||180000);
     const maxToolCalls = Math.max(1, Number(opt.maxToolCalls)||12);
     const maxRepeatCalls = Math.max(1, Number(opt.maxRepeatCalls)||2);
-    const deferRuntime = opt.deferRuntime === true;
+    const deferRuntime = !researchScope && opt.deferRuntime === true;
     const callFingerprints = {};
     const activeContextLayers = opt.contextLayers ? (opt.contextLayers.instruction ? opt.contextLayers : buildContextLayers(opt.contextLayers)) : null;
     let runtimeRunId = "";
@@ -252,8 +254,11 @@ window.AgentCore = (function(){
       budgetCostMicros:opt.budgetCostMicros||0,
       input:{toolset:opt.toolset||"",allowedTools:allow||[],messageCount:(opt.messages||[]).length,contextId:activeContextLayers&&activeContextLayers.working&&activeContextLayers.working.projectContext&&activeContextLayers.working.projectContext.contextId||"",contextHash:activeContextLayers&&activeContextLayers.working&&activeContextLayers.working.projectContext&&activeContextLayers.working.projectContext.contextHash||""},
     };
+    if(researchScope){runtimeCreatePayload.research=researchScope;runtimeCreatePayload.projectId='';}
+    assertContext();
     const created = deferRuntime ? null : await runtimeCall("create", runtimeCreatePayload);
     if(created && created.run) runtimeRunId=created.run.id;
+    if(researchScope&&!runtimeRunId)throw new Error('研究运行权限或版本已变化，请重新进入当前研究后重试');
 
     let convo = (opt.messages || []).slice();
     // 长期记忆：自动加载并注入系统提示词(可用 opt.useMemory=false 关闭)
@@ -284,11 +289,13 @@ window.AgentCore = (function(){
 
     try{
       while(rounds < maxRounds){
+        assertContext();
         if(Date.now()-startedAt > maxDurationMs) throw new Error("Agent运行超过时间上限，请缩小任务范围后重试");
         if(runtimeRunId && !await runtimeCall("budget",{runId:runtimeRunId})) throw new Error("本次Agent的Token或费用预算已用尽");
         rounds++;
         pushTrace(rounds===1 ? "🧭 正在判断需要直接回答还是调用工具" : "🔄 正在结合已取得的信息继续分析");
         const payload = { system: sysWithMem, messages: convo };
+        if(researchScope){payload.research=researchScope;payload.researchRuntime=runtimeRunId;}
         if(opt.maxTokens) payload.max_tokens=Math.max(100,Math.min(4000,Number(opt.maxTokens)||1200));
         if(opt.latencyProfile) payload.latency_profile=String(opt.latencyProfile);
         if(schemas.length) payload.tools = schemas;
@@ -299,6 +306,7 @@ window.AgentCore = (function(){
           body: JSON.stringify(payload),
         });
         const data = await resp.json();
+        assertContext();
         if(data.error) throw new Error(data.error);
 
         if(runtimeRunId && data.usage) await runtimeCall("usage", {runId:runtimeRunId,usage:data.usage,provider:data.provider||"",model:data.model||""});
@@ -314,6 +322,7 @@ window.AgentCore = (function(){
             let args = {};
             try{ args = JSON.parse(c.function.arguments || "{}"); }catch(e){}
             const name = c.function.name;
+            if(researchScope&&Array.isArray(allow)&&!allow.includes(name))throw new Error('该工具不属于本研究允许的工具范围');
             if(allToolCalls.length >= maxToolCalls) throw new Error("工具调用次数超过上限，请拆分任务后继续");
             const fp=name+":"+JSON.stringify(args||{});
             callFingerprints[fp]=(callFingerprints[fp]||0)+1;
@@ -364,11 +373,13 @@ window.AgentCore = (function(){
 
             let result;
             const toolStarted=Date.now();
+            assertContext();
             try{
               result = await withTimeout(t.run(args),meta.timeoutMs,label);
             }catch(e){
               result = "（工具执行失败：" + e.message + "）";
             }
+            assertContext();
             convo.push({ role:"tool", tool_call_id:c.id, content: String(result == null ? "" : result) });
             allToolCalls.push({ name, args, risk:meta.risk, toolset:meta.toolset });
             if(runtimeRunId){
@@ -411,6 +422,8 @@ window.AgentCore = (function(){
                   : "未调用任何工具")
               + "\n\n【回答】" + candidate;
             const checkBody={ system: checkSys, messages: [{role:"user", content: checkUser}] };
+            assertContext();
+            if(researchScope){checkBody.research=researchScope;checkBody.researchRuntime=runtimeRunId;}
             if(opt.maxTokens) checkBody.max_tokens=Math.max(100,Math.min(800,Number(opt.maxTokens)||400));
             if(opt.latencyProfile) checkBody.latency_profile=String(opt.latencyProfile);
             const cr = await fetch("/api/generate", {
@@ -464,6 +477,8 @@ window.AgentCore = (function(){
           const closeConvo = convo.concat([{ role:"user",
             content:"请基于以上全部信息，直接给出最终回答（不要再调用工具）。" }]);
           const closeBody={ system: closeSys, messages: closeConvo };
+          assertContext();
+          if(researchScope){closeBody.research=researchScope;closeBody.researchRuntime=runtimeRunId;}
           if(opt.maxTokens) closeBody.max_tokens=Math.max(100,Math.min(1200,Number(opt.maxTokens)||600));
           if(opt.latencyProfile) closeBody.latency_profile=String(opt.latencyProfile);
           const fr = await fetch("/api/generate", {
@@ -497,7 +512,9 @@ window.AgentCore = (function(){
     }
 
     if(runtimeRunId && !waitingApproval){
-      await runtimeCall(errorMsg?"fail":"complete",{runId:runtimeRunId,output:{text:finalText,rounds,toolCalls:allToolCalls,selfChecked:selfCheckCount>0,clarified},error:errorMsg});
+      assertContext();
+      const finished=await runtimeCall(errorMsg?"fail":"complete",{runId:runtimeRunId,output:{text:finalText,rounds,toolCalls:allToolCalls,selfChecked:selfCheckCount>0,clarified},error:errorMsg});
+      if(researchScope&&!finished)throw new Error('研究轮次或权限已变化，旧结果未写入');
     }else if(deferRuntime){
       // 网站客服先返回答案，再异步补记粗粒度运行台账；不让审计写入阻塞用户响应。
       Promise.resolve(runtimeCall("create",runtimeCreatePayload)).then(createdLater=>{
@@ -508,6 +525,7 @@ window.AgentCore = (function(){
 
     // 链路日志（自建，数据留在本账号内；失败不影响使用）
     try{
+      if(researchScope)throw new Error('研究轨迹仅保存在隔离运行台账');
       const traceRequest=fetch("/api/agent", {
         method:"POST",
         headers: Object.assign({ "Content-Type":"application/json" }, (window.authHeaders ? window.authHeaders() : {})),

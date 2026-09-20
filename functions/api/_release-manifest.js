@@ -21,11 +21,11 @@ export default {
       "setId": "report-logic-gaibao-v1",
       "version": 2,
       "status": "published",
-      "rules": 74,
+      "rules": 78,
       "chapters": 13,
       "canonicalPath": "data/report-logic-gaibao-v1.json",
       "runtimePath": "functions/api/_reportlogic-gaibao-seed.js",
-      "canonicalSha256": "75641028dae9b1a672b6535fb6ffcc1832b717b60168ff973aa835a577979f96"
+      "canonicalSha256": "5aa64a3c4043b80b2505a39874f270c4e97021d5af5bfd2588d5e02230aa6513"
     }
   },
   "reportTables": {
@@ -39,11 +39,11 @@ export default {
     },
     "gaibaoHousing": {
       "setId": "report-table-templates-gaibao-housing-v1",
-      "version": 2,
+      "version": 4,
       "projectType": "gaibao-housing",
-      "templates": 14,
+      "templates": 26,
       "file": "data/report-table-templates-gaibao-housing-v1.json",
-      "fileSha256": "37c6a2c0d4f0e2860491ed5bd6eb4eb6551b301cd89ede98672061fc28777470"
+      "fileSha256": "796d4424bade9e13c2a39dbd41a3597a404ac4da6e76ae6a6c665e567019f0f3"
     },
     "gaibaoCommercial": {
       "setId": "report-table-templates-gaibao-commercial-v1",
@@ -73,9 +73,9 @@ export default {
     }
   },
   "migrations": {
-    "count": 21,
-    "latest": "0021_report_execution_evidence.sql",
-    "orderedListSha256": "7ebe398e61473c68b3f4e2b14b435af4c1b8acf792647b7c0b4452d2d01a8932"
+    "count": 38,
+    "latest": "0038_calc_experience_workspaces.sql",
+    "orderedListSha256": "c4b041c4a634688adcceb01def78344f5440c5c7e5fe1779ab5243889369e34f"
   },
   "capabilities": {
     "evidenceSigningGate": {

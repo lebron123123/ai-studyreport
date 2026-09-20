@@ -1,0 +1,20 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>报告通用规则核验</title>
+<style>body{font:16px sans-serif;max-width:900px;margin:35px auto;color:#222}button{padding:10px;margin:6px}.rpt-missing-placeholder{color:#b33f37;font-weight:600}#result{padding:15px;border:1px solid #ccc}</style>
+<h1>合成报告核验（不操作真实项目）</h1><button id="normal">正常表格</button><button id="broken">缺结束标记</button><button id="empty">空内容</button><button id="failure">页数服务失败</button><div id="status" role="status">加载中</div><div id="result"></div>
+<script src="/md.js"></script><script src="/report-output-policy.js"></script><script>
+(async()=>{
+ const source=await(await fetch('/report.js')).text(),start=source.indexOf('function renderContent(text){'),next=source.indexOf('\nfunction ',start+1);
+ const render=new Function(source.slice(start,next)+';return renderContent;')();
+ const base='项目房源195套。【待补：竞品调研数据】（来源：测试表。）\n\n[[TABLE]]\n房型|套数|面积\n标准层|195|5973';
+ function show(text){document.querySelector('#result').innerHTML=render(text);document.querySelector('#status').textContent='已显示：'+document.querySelectorAll('#result table').length+'张表；不改写原数据';}
+ document.querySelector('#normal').onclick=()=>show(base+'\n[[/TABLE]]');
+ document.querySelector('#broken').onclick=()=>show(base+'\n注：建筑面积需核实。');
+ document.querySelector('#empty').onclick=()=>show('');
+ document.querySelector('#failure').onclick=async()=>{
+  const code=await(await fetch('/export.js')).text(),at=code.indexOf('async function verifyReportPageLimit(blob){'),end=code.indexOf('\n}',at)+2;
+  const verify=new Function('authHeaders',code.slice(at,end)+';return verifyReportPageLimit;')(()=>({}));
+  try{await verify(new Blob(['invalid']));document.querySelector('#status').textContent='错误：不应放行';}catch(e){document.querySelector('#status').textContent=e.message;}
+ };
+ show(base+'\n[[/TABLE]]');
+})().catch(e=>document.querySelector('#status').textContent=e.message);
+</script></html>

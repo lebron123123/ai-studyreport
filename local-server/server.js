@@ -23,6 +23,8 @@ import { createAIAdapter } from "./ai-ollama.js";
 import { createWorker } from "tesseract.js";
 import chiSimData from "@tesseract.js-data/chi_sim";
 import { verifyAuth } from "../functions/api/_auth.js";
+import { reportPaginationResponse } from './report-pagination.js';
+import {createWorkAdmission,WorkAdmissionError,admitResponse} from './work-admission.mjs';
 import { buildPptxBuffer, validatePptxBuffer } from "./ppt-export.js";
 import { buildNativeTemplatePptx } from "./ppt-native-template.js";
 import { enrichCustomTemplatePlan } from "./ppt-custom-template-export.js";
@@ -32,6 +34,9 @@ import { createLimiter, generatePptImage, imageProviderStatus } from "./ppt-imag
 import { providerStatus as llmProviderStatus, probeProviderNetwork } from "../functions/api/_llm-providers.js";
 import { startAgentWorker } from "./agent-worker.js";
 import { createRagObjectStore } from "./rag-object-store.js";
+import { createRuntimeMetrics } from "./runtime-metrics.js";
+import { publicStaticPath } from './static-policy.js';
+import { createInvestmentCalculator } from './investment-calculator.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 公司内网模型与第三方生图单独放在.env.company，避免改写原.env中的数据库及云端兜底密钥。
@@ -63,7 +68,17 @@ const ENV = {
   VECTORIZE: vectorize,
   AI: ai,
   RAG_OBJECTS: ragObjects,
+  RUNTIME_METRICS: createRuntimeMetrics(),
+  INVESTMENT_CALCULATOR: createInvestmentCalculator(),
 };
+// Advertise the new protocol only after the additive table exists. An explicit
+// zero keeps old clients on the compatible full-state write path for rollback.
+if(process.env.RESEARCH_STORAGE_V2!=='0'){
+  try{
+    const storageSchema=await db.prepare("SELECT to_regclass('public.research_state_objects') AS present").first();
+    ENV.RESEARCH_STORAGE_V2=storageSchema?.present?'1':'0';
+  }catch{ENV.RESEARCH_STORAGE_V2='0';}
+}
 
 /* ---------- 2. 启动自检：早点发现问题，别等用户点了才报错 ---------- */
 async function selfCheck() {
@@ -131,6 +146,27 @@ async function selfCheck() {
 
 /* ---------- 3. 路由 ---------- */
 const app = new Hono();
+// Direct calls and the durable agent worker share this process budget.
+// These conservative numbers are not a 300-user capacity certification.
+const directGenerationAdmission=createWorkAdmission({concurrency:2,maxQueued:8,waitMs:10000});
+// Admit before reading JSON/base64: waiting OCR requests must not hold decoded
+// images. On Linux at most two exports plus one OCR run on the 4-core host.
+const documentAdmission=createWorkAdmission({concurrency:process.platform==='linux'?2:1,maxQueued:8,waitMs:30000});
+// The shared OCR worker is not reentrant. Keep its own single execution slot.
+const ocrAdmission=createWorkAdmission({concurrency:1,maxQueued:3,waitMs:15000});
+for(const [route,gate] of [['/api/generate',directGenerationAdmission],['/api/report-pagination',documentAdmission],['/api/local-ocr',ocrAdmission],['/api/ppt-export',documentAdmission]]){
+ app.use(route,async(c,next)=>{
+  if(c.req.method!=='POST')return next();
+  if(!await verifyAuth(c.req.raw,ENV))return c.json({ok:false,error:'请先登录'},401);
+  try{return await admitResponse(gate,async()=>{await next();return c.res;},{signal:c.req.raw.signal});}
+  catch(error){
+   if(!(error instanceof WorkAdmissionError))throw error;
+   c.header('Retry-After','5');return c.json({ok:false,error:error.message,retryable:error.status!==499},error.status);
+  }
+ });
+}
+app.post('/api/report-pagination',c=>reportPaginationResponse(c.req.raw,request=>verifyAuth(request,ENV)));
+app.use('/api/*',async(c,next)=>{const finish=ENV.RUNTIME_METRICS.begin();try{await next();finish(c.res.status);}catch(e){finish(500);throw e;}});
 const runImageGeneration = createLimiter(process.env.PPT_IMAGE_MAX_CONCURRENCY || 1);
 
 // PPT图片服务统一网关：浏览器不直接接触云端密钥或ComfyUI地址。
@@ -157,7 +193,6 @@ app.post("/api/ppt-image-generate", async c=>{
 
 // 本地离线 OCR：中文训练数据随本地服务安装，不把扫描件上传到任何云端。
 let ocrWorkerPromise = null;
-let ocrQueue = Promise.resolve();
 async function getOcrWorker(){
   if(!ocrWorkerPromise) ocrWorkerPromise = createWorker("chi_sim", 1, { langPath: chiSimData.langPath, gzip: chiSimData.gzip });
   return ocrWorkerPromise;
@@ -168,7 +203,7 @@ app.post("/api/local-ocr", async c=>{
     const body=await c.req.json(), b64=String(body.dataBase64||"");
     if(!b64||b64.length>18*1024*1024) return c.json({ok:false,error:"OCR图片为空或超过限制"},400);
     const worker=await getOcrWorker(), image=Buffer.from(b64,"base64");
-    const job=ocrQueue.then(()=>worker.recognize(image)); ocrQueue=job.catch(()=>{}); const result=await job;
+    const result=await worker.recognize(image);
     const text=String(result.data&&result.data.text||"").trim(); return c.json({ok:true,text,confidence:Number(result.data&&result.data.confidence||0)});
   }catch(e){return c.json({ok:false,error:"本地OCR失败："+(e.message||e)},500);}
 });
@@ -291,29 +326,40 @@ app.all("/api/:name", async (c) => {
 });
 
 // 静态文件：网页本体
+app.use('/*',async(c,next)=>publicStaticPath(c.req.path)?next():c.text('Not found',404));
 app.use("/*", serveStatic({ root: path.relative(process.cwd(), ROOT) || "." }));
 app.get("/", serveStatic({ path: path.join(path.relative(process.cwd(), ROOT) || ".", "index.html") }));
 
 /* ---------- 4. 启动 ---------- */
 const PORT = parseInt(process.env.PORT) || 8080;
 await selfCheck();
+// Initialize additive delivery tables before concurrent HTTP requests arrive.
+await (await import('../functions/api/_account-security.js')).ensureAccountSecurity(ENV);
+await (await import('../functions/api/projectartifacts.js')).ensureProjectArtifacts(ENV);
+await (await import('../functions/api/_delivery.js')).ensureDelivery(ENV);
 console.log("接口已加载：" + apiNames.join("、"));
 const httpServer = serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" }, (info) => {
   console.log("\n🚀 本地站已启动：http://localhost:" + info.port);
   console.log("   （同一局域网内其他电脑可用本机IP访问）\n");
 });
-const agentWorker=startAgentWorker(ENV,{pollMs:process.env.AGENT_WORKER_POLL_MS,leaseMs:process.env.AGENT_WORKER_LEASE_MS});
-console.log("Agent后台Worker已启动："+agentWorker.workerId);
 // 端口占用等启动失败原来是"未捕获异常"，Node会直接打一串英文堆栈然后退出——
 // 双击桌面快捷方式时窗口一闪而过，根本来不及看是什么问题。这里接住，打印人话原因再退出。
 httpServer.on("error", (err) => {
   if (err.code === "EADDRINUSE") {
     console.error("\n❌ 启动失败：端口 " + PORT + " 已经被占用。");
     console.error("   最常见的原因：这个本地站已经在另一个窗口里启动着了。");
-    console.error("   解决办法：关掉之前那个还开着的本地站窗口，再重新运行；");
-    console.error("   或者打开 local-server\\.env，把 PORT 改成别的数字（比如 8081）后再启动。\n");
+    console.error("   请先继续使用已有网页，不要重复启动或关闭正在生成报告的服务。");
+    console.error("   本次重复启动将退出，不影响已经运行的服务。\n");
   } else {
     console.error("\n❌ 服务器启动失败：" + err.message + "\n");
   }
   process.exit(1);
 });
+// Register the error handler before any asynchronous worker initialization.
+await new Promise(resolve=>{if(httpServer.listening)resolve();else httpServer.once('listening',resolve);});
+const agentWorker=startAgentWorker(ENV,{pollMs:process.env.AGENT_WORKER_POLL_MS,leaseMs:process.env.AGENT_WORKER_LEASE_MS,admission:directGenerationAdmission});
+const investmentWorker=await (await import('./investment-worker.js')).startInvestmentWorker(ENV);
+console.log('投资持续检查Worker已启动（仅扫描负责人启用的项目）');
+console.log("Agent后台Worker已启动："+agentWorker.workerId);
+const operationsMonitor=await (await import('./operations-monitor.js')).startOperationsMonitor(ENV);
+console.log('自动运行监控：'+(operationsMonitor.enabled?'已启动':'已停用'));

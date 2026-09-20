@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS investment_risk_reports(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,request_id TEXT NOT NULL,request_hash TEXT NOT NULL,content_hash TEXT NOT NULL,basis_hash TEXT NOT NULL,snapshot_json TEXT NOT NULL,created_by INTEGER NOT NULL,created_at BIGINT NOT NULL,UNIQUE(project_id,request_id));

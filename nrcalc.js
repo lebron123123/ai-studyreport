@@ -1,5 +1,5 @@
-// 非居改保财务测算引擎 —— 1:1 翻译自 calculator3.py 的 calc_non_resi_reform
-// 保持与 Streamlit 版完全一致的计算口径 
+// 非居改保：对照 calculator3.py @ 4d1c23b 的年度算法。
+// 月份用于收入/摊销/运营成本；利息仍为参考模型的年度平均占用算法。
 
 window.NRCalc = (function(){
 const NR_DEFAULTS = {
@@ -14,6 +14,73 @@ const NR_DEFAULTS = {
 
 function round4(x){ return Math.round(x * 10000) / 10000; }
 function round2(x){ return Math.round(x * 100) / 100; }
+
+function monthIndex(value){
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(value))) throw new Error('请填写有效的起止年月（YYYY-MM）');
+  const [y,m]=String(value).split('-').map(Number);
+  if(y<1900 || y>2200) throw new Error('年份须在1900至2200之间');
+  return y*12+m-1;
+}
+function period(start,end){
+  const a=monthIndex(start), b=monthIndex(end);
+  if(b<a || b-a>=1200) throw new Error('结束年月不得早于开始年月，单个期间不得超过100年');
+  const months={};
+  for(let i=a;i<=b;i++){const y=Math.floor(i/12);months[y]=(months[y]||0)+1;}
+  return {years:Object.keys(months).map(Number),months};
+}
+function datesFromParams(p){
+  if(p.buildStartMonth || p.buildEndMonth || p.operateStartMonth || p.operateEndMonth){
+    ['buildStartMonth','buildEndMonth','operateStartMonth','operateEndMonth'].forEach(k=>monthIndex(p[k]));
+    return Object.fromEntries(['buildStartMonth','buildEndMonth','operateStartMonth','operateEndMonth'].map(k=>[k,p[k]]));
+  }
+  const bs=Number(p.buildStart), by=Number(p.buildYears), oy=Number(p.operateYears), fm=Number(p.firstMonths??12);
+  if(![bs,by,oy,fm].every(Number.isInteger)||by<1||by>100||oy<1||oy>100||fm<1||fm>12) throw new Error('建设/运营年数须为1至100的整数，首年月数须为1至12');
+  const op=bs+by;
+  return {buildStartMonth:bs+'-01',buildEndMonth:(op-1)+'-12',operateStartMonth:op+'-'+String(13-fm).padStart(2,'0'),operateEndMonth:(op+oy-1)+'-12'};
+}
+function annualMap(value,label,years,maximum){
+  if(value==null) return null;
+  if(typeof value!=='object'||Array.isArray(value)) throw new Error(label+'须为年度数值表');
+  const result={};
+  Object.entries(value).forEach(([y,v])=>{
+    if(!/^\d{4}$/.test(y)||!years.includes(Number(y))||typeof v!=='number'||!Number.isFinite(v)||v<0||(maximum!=null&&v>maximum)) throw new Error(label+'含越界年份或无效数值：'+y);
+    result[y]=v;
+  });
+  return result;
+}
+// 页面、报告、敏感性统一调用，不再复制年度适配逻辑。
+function fromParams(p){
+  const dates=datesFromParams(p), build=period(dates.buildStartMonth,dates.buildEndMonth), op=period(dates.operateStartMonth,dates.operateEndMonth);
+  if(monthIndex(dates.operateStartMonth)<monthIndex(dates.buildStartMonth)) throw new Error('运营开始年月不得早于建设开始年月');
+  const years=Array.from({length:Math.max(...build.years,...op.years)-Math.min(...build.years,...op.years)+1},(_,i)=>Math.min(...build.years,...op.years)+i);
+  const loanPlan=annualMap(p.loanPlan,'借款计划',years)??{[build.years[0]]:p.loan};
+  const repayPlan=annualMap(p.repayPlan,'还款计划',years)??Object.fromEntries(op.years.slice(1).map(y=>[y,p.repay]));
+  const occupancyRamp=annualMap(p.occupancyRamp,'出租率计划',op.years,1)??{[op.years[0]]:p.rampOcc};
+  return {
+    buildYears:build.years,operateYears:op.years,allYears:years,monthDict:op.months,dates,
+    firstOperateMonths:op.months[op.years[0]],
+    residentialArea:p.area,rentStartPrice:p.rent,rentIncreaseSpan:p.rentSpan,rentIncreaseRate:p.rentRate,
+    costIncreaseSpan:p.costSpan??1,costIncreaseRate:p.costRate??0,
+    occupancyRamp,stableStart:p.stableStart??op.years[0]+1,stableEnd:p.stableEnd??op.years.at(-1),occupancyStable:p.stableOcc,
+    collectPrice:p.collect,decorationUnitCost:p.deco,decorationInterval:p.decoInt,redecorationRatio:p.decoRatio,
+    totalUnits:p.units,unitOperateCost:p.unitCost,startupFee:p.startup,
+    loanAmount:p.loan,interestBase:p.interestBase,rateDiscount:p.rateDiscount,loanAnnualRate:p.loanRate,
+    loanPlan,repayPlan,loanTotalYears:p.loanTotalYears??years.length,discountRatePct:p.discount,
+    collectFactor:p.mode==='share'?(p.collectPct??50)/100:1,shareRatio:p.mode==='share'?(p.sharePct??0)/100:0
+  };
+}
+function validate(p){
+  for(const key of ['buildYears','operateYears']){
+    if(!Array.isArray(p[key])||!p[key].length||p[key].length>100||p[key].some((y,i,a)=>!Number.isInteger(y)||y<1900||y>2200||(i&&y<=a[i-1]))) throw new Error('建设及运营年份须按顺序填写且不得重复');
+  }
+  for(const key of ['residentialArea','rentStartPrice','collectPrice','decorationUnitCost','redecorationRatio','totalUnits','unitOperateCost','startupFee','loanAmount','interestBase','rateDiscount','loanAnnualRate','discountRatePct']){
+    if(typeof p[key]!=='number'||!Number.isFinite(p[key])||p[key]<0) throw new Error('参数须为有效非负数：'+key);
+  }
+  for(const key of ['rentIncreaseSpan','costIncreaseSpan','decorationInterval']) if(!Number.isInteger(p[key])||p[key]<1) throw new Error('递增跨度及装修间隔须为正整数');
+  for(const key of ['rentIncreaseRate','costIncreaseRate']) if(!Number.isFinite(p[key])||p[key]<=-100) throw new Error('递增率须大于-100%');
+  if(!Number.isFinite(p.occupancyStable)||p.occupancyStable<0||p.occupancyStable>1) throw new Error('出租率须在0至1之间');
+  if(!Number.isInteger(p.stableStart)||!Number.isInteger(p.stableEnd)||p.stableStart>p.stableEnd+1) throw new Error('稳定期年份范围无效');
+}
 
 /**
  * p 参数对象（与Streamlit输入一一对应，含默认值）:
@@ -46,20 +113,28 @@ function round2(x){ return Math.round(x * 100) / 100; }
  *  discountRatePct: 6            折现率 %
  */
 function calcNonResiReform(p, cfgIn){
+  p=Object.assign({costIncreaseSpan:1,costIncreaseRate:0,loanPlan:{},repayPlan:{},occupancyRamp:{}},p);
+  validate(p);
   const K = Object.assign({}, NR_DEFAULTS, cfgIn||{});
-  const allYears = [...p.buildYears, ...p.operateYears].sort((a,b)=>a-b).filter((v,i,a)=>a.indexOf(v)===i);
+  const allYears = [...(p.allYears||[]),...p.buildYears, ...p.operateYears].sort((a,b)=>a-b).filter((v,i,a)=>a.indexOf(v)===i);
+  if(allYears.some(y=>!Number.isInteger(y)||y<1900||y>2200)) throw new Error('测算年份无效');
+  for(const key of ['collectFactor','shareRatio']) if(p[key]!=null&&(!Number.isFinite(p[key])||p[key]<0||p[key]>1)) throw new Error('合作比例须在0至1之间');
+  annualMap(p.loanPlan,'借款计划',allYears);annualMap(p.repayPlan,'还款计划',allYears);annualMap(p.occupancyRamp,'出租率计划',p.operateYears,1);
   const operateSet = new Set(p.operateYears);
   const buildSet = new Set(p.buildYears);
   const isOperate = {}; allYears.forEach(y=>isOperate[y]=operateSet.has(y));
   const monthDict = {};
   allYears.forEach(y=>{
-    if(!operateSet.has(y)) monthDict[y]=12;
-    else if(y===p.operateYears[0]) monthDict[y]=p.firstOperateMonths||12;
+    if(!operateSet.has(y)) monthDict[y]=0;
+    else if(p.monthDict) monthDict[y]=p.monthDict[y];
+    else if(y===p.operateYears[0]) monthDict[y]=p.firstOperateMonths??12;
     else monthDict[y]=12;
+    if(!Number.isInteger(monthDict[y])||monthDict[y]<0||monthDict[y]>12) throw new Error('年度运营月数须为0至12的整数：'+y);
   });
   const rate = p.loanAnnualRate/100;
   const discountR = p.discountRatePct/100;
   const totalOperateMonths = p.operateYears.reduce((s,y)=>s+monthDict[y],0);
+  if(!totalOperateMonths) throw new Error('总运营月数须大于0');
 
   // ===== 1. 收入 =====
   const resiOccupancy = {}, resiRentPrice = {};
@@ -142,6 +217,9 @@ function calcNonResiReform(p, cfgIn){
     const f=loan[y].interest;
     cost[y].fin=round4(f);
     cost[y].finAT = f>0? round4(f/(1+K.vatOps)):0;
+    // 保留参考分类，重合年份可能两列同时出现，不能再次相加作为总成本。
+    cost[y].finBuild=buildSet.has(y)?round4(f):0;
+    cost[y].finOperate=operateSet.has(y)?round4(f):0;
   });
   // 2e 总成本
   allYears.forEach(y=>{
@@ -196,7 +274,7 @@ function calcNonResiReform(p, cfgIn){
     lastNegTaxable = taxable<0? taxable:0;
     profit[y].makeup=round4(makeup);
     profit[y].taxable=round4(taxable);
-    profit[y].incomeTax = taxable>0? round4(taxable*K.incomeTax):0;
+    profit[y].incomeTax = profit[y].taxable>0? round4(profit[y].taxable*K.incomeTax):0;
     profit[y].netProfit = round4(profit[y].totalProfit - profit[y].incomeTax);
   });
 
@@ -211,7 +289,7 @@ function calcNonResiReform(p, cfgIn){
     const n=idx+1;
     const factor=Math.pow(1+discountR, n-0.5);
     const npv=net/factor;
-    cumNpv+=npv;
+    cumNpv+=round4(npv);
     cf[y]={inflow:round4(inflow), outflow:outflow, net:net, cumNet:round4(cum), npv:round4(npv), cumNpv:round4(cumNpv)};
   });
 
@@ -221,6 +299,11 @@ function calcNonResiReform(p, cfgIn){
 
   // ===== 7. 汇总指标 =====
   const sum = f=>allYears.reduce((s,y)=>s+f(y),0);
+  const loanTotalYears=p.loanTotalYears??allYears.length;
+  if(!Number.isInteger(loanTotalYears)||loanTotalYears<1||loanTotalYears>100) throw new Error('借款期限须为1至100年');
+  const lastLoanYear=p.buildYears[0]+loanTotalYears-1;
+  const refFin=sum(y=>cost[y].finBuild+cost[y].finOperate);
+  const refProfit=sum(y=>y>=p.buildYears[0]&&y<=lastLoanYear?profit[y].totalProfit:0);
   const summary = {
     totalIncome: round2(sum(y=>income[y].rent)),
     totalCost: round2(sum(y=>cost[y].total)),
@@ -231,9 +314,13 @@ function calcNonResiReform(p, cfgIn){
     paybackInfo: calcPayback(allYears, cf),
     decoTimes: decoTimes,
     totalEngCost: round2(totalEng),
+    totalOperateMonths,
+    interestCoverageReference:refFin?round2((refProfit+sum(y=>cost[y].finOperate))/refFin):0,
   };
 
-  return { allYears, monthDict, income, cost, tax, profit, cf, loan, resiOccupancy, resiRentPrice, summary };
+  const warnings=['利息采用参考模型年度平均占用算法，非逐月计息；利息备付率为参考口径，需财务复核。'];
+  if(p.buildYears.some(y=>operateSet.has(y))) warnings.push('建设与运营年份重合：参考财务费用分类存在交叉，备付率不可直接作正式审签依据。');
+  return { allYears, monthDict, income, cost, tax, profit, cf, loan, resiOccupancy, resiRentPrice, summary, dates:p.dates||null, modelVersion:'anju-4d1c23b-month-v1', warnings };
 }
 
 function calcNpvAtRate(r, flows){
@@ -270,5 +357,5 @@ function calcPayback(years, cf){
   return null;
 }
 
-return { calc: calcNonResiReform, defaults: NR_DEFAULTS };
+return { calc: calcNonResiReform, defaults: NR_DEFAULTS, fromParams, datesFromParams };
 })();

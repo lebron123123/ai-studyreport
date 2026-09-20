@@ -3,7 +3,7 @@ import {onRequestPost} from '../functions/api/projects.js';import {signToken} fr
 async function save(mode,size){
   let stored=null;
   const env={DEPLOY_MODE:mode,SESSION_SECRET:'isolated-test-only',DB:{
-    prepare(){return {bind(...args){return {first:async()=>null,run:async()=>{stored=args[3];return {success:true};}};}};}
+    prepare(sql){return {run:async()=>({success:true}),bind(...args){return {first:async()=>null,run:async()=>{if(/INSERT INTO projects/i.test(sql))stored=args[3];return {success:true};}};}};}
   }};
   const token=await signToken(env,1,'test');
   const response=await onRequestPost({env,request:new Request('http://test/api/projects',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({id:'test-size-project',data:{content:'中'.repeat(size)}})})});

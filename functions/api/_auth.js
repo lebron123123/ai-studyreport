@@ -1,5 +1,7 @@
 // 共享鉴权工具（文件名以_开头，不会成为对外路由）
+import {accountSecurity} from './_account-security.js';
 const enc = new TextEncoder();
+const SESSION_TTL=30*24*3600*1000;
 
 function bufToHex(buf){
   return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
@@ -31,7 +33,9 @@ async function hmacHex(secret, msg){
 
 // 令牌格式：userId.用户名(URL编码).过期时间戳.签名
 export async function signToken(env, userId, username){
-  const exp = Date.now() + 30*24*3600*1000; // 30天
+  const state=await accountSecurity(env,userId);
+  if(Number(state?.disabled))throw new Error('账号已停用，请联系管理员');
+  const exp = Math.max(Date.now(),Number(state?.revoked_before||0)+1) + SESSION_TTL;
   const payload = userId + "." + encodeURIComponent(username) + "." + exp;
   const sig = await hmacHex(env.SESSION_SECRET, payload);
   return payload + "." + sig;
@@ -44,11 +48,14 @@ export async function verifyAuth(request, env){
   const parts = token.split(".");
   if(parts.length !== 4) return null;
   const [uid, uname, exp, sig] = parts;
+  if(!/^\d+$/.test(uid)||!Number.isSafeInteger(Number(uid))||Number(uid)<=0||!/^\d+$/.test(exp)||!Number.isSafeInteger(Number(exp)))return null;
   const payload = uid + "." + uname + "." + exp;
   const expect = await hmacHex(env.SESSION_SECRET, payload);
   if(sig !== expect) return null;
   if(Date.now() > +exp) return null;
-  return { userId: +uid, username: decodeURIComponent(uname) };
+  const state=await accountSecurity(env,+uid);
+  if(Number(state?.disabled)||(+exp-SESSION_TTL)<=Number(state?.revoked_before||0))return null;
+  try{return { userId: +uid, username: decodeURIComponent(uname) };}catch{return null;}
 }
 
 export function json(obj, status=200){

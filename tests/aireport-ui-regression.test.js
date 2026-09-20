@@ -29,13 +29,13 @@ test("报告候选稿提供批量接受入口且正式后台逻辑不再要求�
 
 test("受影响候选稿显示逐项完成进度且批量接受明确生成可进入版本",()=>{
   assert.match(reportSource,/生成进度 ["+]*aiReportImpactedProgress\.done\+"\/"\+aiReportImpactedProgress\.total/);
-  assert.match(reportSource,/finally\{aiReportImpactedProgress\.done\+\+;updateProgress\(\);\}/);
+  assert.match(reportSource,/finally\{batch\.done\+\+;if\(aiReportImpactedProgress===batch\)updateProgress\(\);\}/);
   assert.match(reportSource,/保存为报告第"\+version\.version\+"版，可在右上角“查看版本”进入/);
   assert.match(reportSource,/airOpenReportVersionById\(selector\.value\)/);
 });
 
 test("空白受影响小节也可生成且候选完成后不再伪装成持续加载",()=>{
-  assert.match(reportSource,/unlocked:rows\.filter\(x=>!x\.s\.locked&&x\.s\.syncStatus==="stale"&&!x\.s\.pendingRevision\)\.length/);
+  assert.match(reportSource,/unlocked:rows\.filter\(x=>!x\.s\.locked&&x\.s\.syncStatus!=="locked-stale"&&!x\.s\.pendingRevision\)\.length/);
   assert.match(reportSource,/候选稿已生成，等待接受后成为当前工作稿/);
   assert.match(reportSource,/data-status="'\+\(ready\?'done':hasCandidate\?'candidate':'pending'\)/);
   assert.match(reportSource,/if\(body\)body\.innerHTML=airGenerationSkeletonHtml\(\)/);
@@ -54,4 +54,11 @@ test("逻辑候选生成期间不把历史整篇生成记录改写为第二轮�
   assert.match(reportSource,/if\(!historicalLogicProgress&&aiReportProgressMsg&&window\.ProjectWorkflow\?\.reconcileGenerationProgress\)/);
   assert.match(reportSource,/这是逻辑调整流程，不是整篇报告重新生成/);
   assert.match(reportSource,/const actions=logicRevision[\s\S]*?:complete/);
+});
+
+test("重复打开独立模块复用现有界面，不反复重绘长报告和材料台账",()=>{
+  assert.match(reportSource,/if\(document\.querySelector\("#airDocPane \.air-doc-head"\)\)\{airSetDocVisible\(true\);return;\}/);
+  assert.match(reportSource,/if\(airFocusExistingMessage\("materialCheck"\)\)return;/);
+  assert.match(reportSource,/if\(airFocusExistingMessage\("infoCard"\)\)return;/);
+  assert.match(reportSource,/data-air-msg-kind=/);
 });

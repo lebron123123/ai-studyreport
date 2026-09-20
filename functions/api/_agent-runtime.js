@@ -1,3 +1,5 @@
+import {createSchemaInitializer} from './_schema-once.js';
+
 const RUNTIME_DDL = [
   "CREATE TABLE IF NOT EXISTS agent_runs (id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,agent_type TEXT NOT NULL DEFAULT 'general',project_id TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'running',query_text TEXT NOT NULL DEFAULT '',idempotency_key TEXT NOT NULL DEFAULT '',input_json TEXT NOT NULL DEFAULT '{}',output_json TEXT NOT NULL DEFAULT '{}',error_text TEXT NOT NULL DEFAULT '',current_step INTEGER NOT NULL DEFAULT 0,tool_call_count INTEGER NOT NULL DEFAULT 0,created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL,completed_at BIGINT DEFAULT 0,UNIQUE(user_id,idempotency_key))",
   "CREATE INDEX IF NOT EXISTS idx_agent_runs_user_updated ON agent_runs(user_id,updated_at DESC)",
@@ -12,12 +14,7 @@ const RUNTIME_DDL = [
   "CREATE INDEX IF NOT EXISTS idx_agent_skills_status ON agent_skill_candidates(status,updated_at DESC)"
 ];
 
-const initialized = new WeakSet();
-export async function ensureAgentRuntime(env){
-  if(initialized.has(env.DB)) return;
-  for(const sql of RUNTIME_DDL) await env.DB.prepare(sql).run();
-  initialized.add(env.DB);
-}
+export const ensureAgentRuntime = createSchemaInitializer(RUNTIME_DDL);
 
 export function agentId(prefix){
   const id = (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);

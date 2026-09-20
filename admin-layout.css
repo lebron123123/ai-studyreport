@@ -1,0 +1,15 @@
+/* 全后台内容区使用可用宽度；弹窗不受影响。 */
+.shell>.main{max-width:none;width:calc(100% - 230px);padding:28px clamp(20px,2.4vw,46px);}
+.main #listBox,.main #editBox{width:100%;min-width:0;}
+.contribution-batch{grid-column:1/-1;padding:14px 18px;background:#edf5fc;border:1px solid var(--line);border-radius:10px;}
+.contribution-batch label{display:flex;align-items:center;gap:8px;margin:0;}
+.contribution-batch input,.contribution-classification input{width:auto;flex:none;}
+.contribution-classification{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+.contribution-classification select{width:auto;max-width:100%;flex:1;min-width:190px;}
+.contribution-classification .sub{flex-basis:100%;margin:0;line-height:1.6;}
+#contribList{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:16px;align-items:start;}
+#contribList>.contrib-card{margin:0;min-width:0;overflow-wrap:anywhere;}
+#contribList .contrib-head>div{min-width:0;flex:1;}
+#contribList .contrib-head>.contrib-kind{flex:none;white-space:nowrap;}
+#contribList>.empty,#contribList>.msg{grid-column:1/-1;}
+@media(max-width:760px){.shell>.main{padding:18px 14px;} .side{width:190px;} #contribList{grid-template-columns:minmax(0,1fr);}}

@@ -1,23 +1,24 @@
 {
   "schemaVersion": 1,
   "setId": "report-logic-gaibao-v1",
-  "name": "改造项目逐小节生成逻辑（住房改造经理审定框架v2 / 商业自持兼容）",
+  "name": "改造项目逐小节生成逻辑（住房改造V6 / 商业自持兼容）",
   "projectType": "gaibao",
   "version": 2,
   "status": "published",
   "logicVersions": {
-    "housing_conversion": "2.0",
+    "housing_conversion": "4.0",
     "commercial_renovation": "1.0"
   },
   "source": {
-    "fileName": "8非居改保可研报告全逻辑梳理表_通用模版版.xlsx",
+    "fileName": "市税务局第一批合作房源改造为保障性租赁住房项目_阶段稿V6【更新版】.docx",
     "sheetName": "非居改保可研全逻辑梳理表",
     "sheetIndex": 1,
     "selectionPolicy": "first_sheet_only",
-    "baselineId": "gaibao-first-sheet-74-scenario-separated-20260903-v5",
+    "baselineId": "housing-manager-v6-20260908-table-fix",
     "importedAt": "2026-09-03T05:07:17.241Z",
     "authoritativeRows": 74,
-    "changeBasis": "2026-09-04经理审定稿红色批示：住房改造12章结构、总论六表、市场主题化、改造运营合并、合作模式纠偏"
+    "changeBasis": "V6表模逐表复原、子节边界与编号修正；商业场景保持不变",
+    "scopedMigration": "housing_conversion"
   },
   "structure": {
     "chapterCount": 13,
@@ -36,9 +37,9 @@
       "第十二章 项目风险分析及对策",
       "第十三章 项目研究结论及建议"
     ],
-    "ruleCount": 74,
+    "ruleCount": 78,
     "scenarioCounts": {
-      "housing_conversion": 64,
+      "housing_conversion": 68,
       "commercial_renovation": 67
     },
     "scenarioStructures": {
@@ -58,7 +59,7 @@
           "第十一章 项目风险分析及对策",
           "第十二章 项目研究结论及建议"
         ],
-        "frameworkVersion": "gaibao-housing-manager-v2-20260904"
+        "frameworkVersion": "housing-manager-v6-20260908"
       },
       "commercial_renovation": {
         "chapterCount": 13,
@@ -82,7 +83,7 @@
     }
   },
   "globalRequirements": {
-    "housing_conversion": "住房改造场景不得出现商业市场、商业业态、招商或配套商业等串场景内容；章节、小节和条目按1、1.1、1.1.1、1.1.1.1层级连续编号；删减套话和重复内容；项目专有事实只取当前项目材料或已确认测算，缺失即标待补；多点位统一综合分析、重要点位优先，不使用主项目/次项目；责任主体写单位全称，不用甲方/乙方。",
+    "housing_conversion": "采用简洁、准确的正式报告语言，删除套话、重复结论和重复章节标题。编号由当前章节和父级小节连续生成，不把1.1或1.1.1写死在正文，编号与标题之间不留多余空格。多房源项目按同一主题统一综合分析，必要差异在同一段或同一表中比较，不按主项目、次项目、核心点位、其余点位拆成两套分析，不使用POI数量、密度或代理职住比。责任主体使用单位全称。项目名称、面积、套数、时间、比例、价格和测算结果只取当前项目已确认材料，示例数据不得当作事实；不同材料口径冲突时列明差异并待确认，不自行解释为合理。表格紧随对应分析，列明单位、统计期、范围和来源，缺失字段标待补，不虚构图表。住房改造不混入商业招商和商业经营收入，但可以客观分析服务居住的周边生活配套。第一章以不超过10页为编排目标，压缩重复叙述；实际页数以正式排版检查为准，不能仅靠提示词声称达标。",
     "commercial_renovation": ""
   },
   "rules": [
@@ -214,9 +215,10 @@
           "pointTitle": "",
           "displayTitle": "1.1.1编制依据与编制说明",
           "requiredSources": "【通用依据】\n（1）国家及地方相关法律法规：《中华人民共和国城市房地产管理法》《中华人民共和国土地管理法》《中华人民共和国城乡规划法》等\n（2）项目可行性研究报告编制相关规范及标准\n\n【非居改保、居改居等（住房改造）专项政策】\n（1）国家层面：《关于加快发展保障性租赁住房的意见》（国办发〔2021〕22号）\n（2）深圳市层面：\n  • 《关于加快发展保障性租赁住房的实施意见》（2022年）——\"十四五\"建设筹集保租房不少于60万套（间）\n  • 《深圳市保障性租赁住房项目认定办法（试行）》（2022年）——认定标准、程序和管理要求\n  • 《关于既有非居住房屋改建保障性租赁住房的通知（试行）》（2022年）——非居改保具体路径和标准\n  • 《深圳市保障性租赁住房管理办法》（2023年）——供应、分配、运营、监督及租金管理\n  • 《深圳市社会主体出租保障性租赁住房租赁管理细则》（2024年）——租金定价及备案，租金不高于同期同区域同品质市场参考租金的90%\n  • 《关于既有非居住房屋改建保障性租赁住房的通知》（2025年）——放宽改建范围、简化审批流程、明确技术标准\n（3）土地及转让相关：《深圳市工业楼宇及配套用房转让管理办法》——工业配套宿舍受让人限制，人才住房专营机构属例外情形",
-          "writingLogic": "按国家、深圳市及项目属地层级逐条列示现行有效法律法规、政策文件和技术标准；每项单独成行并注明文件名称、文号、发布机关、效力状态和与本项目的关系。不得写成长段，不引用无法核验的政策。",
+          "writingLogic": "有效且已核验的编制依据优先复用，保留名称、文号、发布机关、效力与来源；只有缺失、过期或适用范围变化时重新查证，不每次重复检索同一文件。",
           "note": "",
-          "chapter": "第一章 项目总论"
+          "chapter": "第一章 项目总论",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "1.1项目背景",
@@ -269,9 +271,10 @@
           "pointTitle": "",
           "displayTitle": "1.2.1项目背景",
           "requiredSources": "项目历史档案、产权变更记录、竣工验收资料、历年运营数据【项目资料+知识库】",
-          "writingLogic": "控制篇幅为原稿约一半，只交代项目沿革、当前低效使用或改造契机、政策与业务背景；删除独立的“改造动机分析”，不得在本节提前展开合作条款、市场结论或财务结论。",
+          "writingLogic": "简述项目沿革、竣工备案及运营时间、改造契机，不提前重复市场和财务分析。",
           "note": "",
-          "chapter": "第一章 项目总论"
+          "chapter": "第一章 项目总论",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "1.1项目背景",
@@ -322,9 +325,10 @@
           "pointTitle": "",
           "displayTitle": "1.4.1合作模式及合作期限",
           "requiredSources": "建筑施工图、面积测绘报告、不动产权属证书、规划许可证【设计单位提供+项目资料】",
-          "writingLogic": "依据合作协议和项目材料写清整体合作模式、合作期限、投资责任、改造责任和运营责任。直接使用各方单位全称，不使用相关单位、相关单位等代称；资料未明确时逐项标注待确认。",
+          "writingLogic": "合作单位先用一段交代名称、法定代表人和实缴资本，再附企业信息表；合作方式与期限只写摘要，详细权责留在合作模式章，不重复长段协议条款。",
           "note": "",
-          "chapter": "第一章 项目总论"
+          "chapter": "第一章 项目总论",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "1.1项目背景",
@@ -380,9 +384,10 @@
           "pointTitle": "",
           "displayTitle": "1.3.2项目本体基本情况",
           "requiredSources": "①项目位置图；②四至边界；③周边交通/配套【网上搜索（文件、数据）、相关平台数据调用】、现场踏勘记录、现状照片、建筑结构安全鉴定报告、消防检测报告【实地调研+第三方检测】、拆除/改造/利旧/新增四类清单、造价咨询意见【手动填入+知识库】、非居改保政策文件、不动产权属证书、竣工验收文件、他项权益人同意书、共有人同意书【知识库+项目资料】、改建条件逐项核对表、政策符合性分析报告【手动填入+知识库】",
-          "writingLogic": "以一张项目基本情况表为主，字段严格依次为：项目地址、项目面积、楼层分布（写明XX层改造）、规划用途、现状用途、土地使用年限、竣工验收时间、交通配套。多点位项目先统一概括，再按重要点位排序补充差异；禁止主项目、次项目表述和非官方POI指数。",
+          "writingLogic": "先统述全部房源名称、总套数、面积和用途，再用同一张表列出各处房源、楼层、规划及现状用途、土地使用年限、竣工验收时间和交通配套；补充四至及周边配套，不写未经核实的示例投资规模和运营年限。",
           "note": "",
-          "chapter": "第一章 项目总论"
+          "chapter": "第一章 项目总论",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "1.2项目概况",
@@ -433,9 +438,10 @@
           "pointTitle": "",
           "displayTitle": "1.3.3改造前户型及物业现状",
           "requiredSources": "不动产权属证书、现场踏勘记录、现状照片、租赁合同、运营数据【项目资料+实地调研】",
-          "writingLogic": "用改造前户型/房源现状表表达：房型（单间、一房、两房、三房）、层高、套数、建筑面积、得房率；仅填项目材料能够核验的数据，缺项标待补。避免与项目基本情况重复。",
+          "writingLogic": "改造前户型及物业现状表紧随现状描述，列房型、层高、套数、建筑面积、得房率及合计；与改造后房源表采用可核对的口径。",
           "note": "",
-          "chapter": "第一章 项目总论"
+          "chapter": "第一章 项目总论",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "1.2项目概况",
@@ -488,9 +494,10 @@
           "pointTitle": "",
           "displayTitle": "1.5.1改造目标及改造后户型",
           "requiredSources": "项目策划方案、市场定位报告、客群画像分析【知识库+运营单位提供】",
-          "writingLogic": "先给出改造目标，再用改造后户型表表达房型（单间、一房、两房、三房）、层高、套数、建筑面积、得房率；不得出现商业业态、招商或配套商业表述。",
+          "writingLogic": "先简述改造目标，不重复房源现状。改造前户型及物业现状表紧随现状描述；改造后户型及房源表紧随改造目标。表头为房型、层高、套数、建筑面积、得房率，保留合计行，前后口径可核对。",
           "note": "",
-          "chapter": "第一章 项目总论"
+          "chapter": "第一章 项目总论",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "1.2项目概况",
@@ -543,9 +550,10 @@
           "pointTitle": "",
           "displayTitle": "1.3.4改造条件与政策符合性",
           "requiredSources": "改造方案、设计图纸、产品标准、改造工期计划【知识库+设计单位/代建单位提供】",
-          "writingLogic": "用“序号、法定改建条件、本项目符合情况”三列表逐条核验：权属及验收/用途、无查封争议违建且抵押权人同意、不在城市更新土地整备征收范围、独栋或独立楼层且规模原则上不少于1000平方米、共有权人同意、其他法定条件。项目事实必须来自材料，不得把范例结论照搬。",
+          "writingLogic": "采用序号、法定改建条件、本项目符合情况三列表。先区别非住宅改建与存量住宅纳保，再逐项核验对应有效条件；不适用项写明原因，无材料项待补，不能将非住宅条件直接套为住宅项目已符合。",
           "note": "",
-          "chapter": "第一章 项目总论"
+          "chapter": "第一章 项目总论",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "1.2项目概况",
@@ -599,9 +607,10 @@
           "pointTitle": "",
           "displayTitle": "1.5.2投资估算与经济效益",
           "requiredSources": "投资估算报告、造价咨询报告、测算规则引擎输出、集采价格库【知识库+造价咨询+测算引擎】",
-          "writingLogic": "先用投资估算表区分硬装、软装及总投资，再用经济效益表汇总运营成本、投资期限、IRR、净利润和财务净现值NPV。所有数值只引用已确认测算结果并保持单位口径一致；无法取得时保留字段并标待补。",
+          "writingLogic": "投资说明之后设置科目明细表，列序号、科目、成本（万元）、单方成本（元/平方米）、单房成本（元/套）、科目释义；区分设计、委托咨询、硬装、软装、机电、配套、不可预见费、代建费及合计。费率和计费基数取项目批准口径，软装纳入与否明确，不固化示例费率。经济效益仅引用已确认测算，面积和套数与房源表一致。",
           "note": "",
-          "chapter": "第一章 项目总论"
+          "chapter": "第一章 项目总论",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "1.2项目概况",
@@ -654,9 +663,10 @@
           "pointTitle": "",
           "displayTitle": "1.6.1可行性与必要性概述",
           "requiredSources": "各章节结论汇总【知识库】",
-          "writingLogic": "将政策、市场、工程条件、合作条件和财务测算压缩为结论级可行性与必要性概述，不重复后文章节，不写未经证实的区位指数。",
+          "writingLogic": "可行性概述和必要性概述各一段，合计以一页为编排目标，不继续拆分三级编号，不重复后文论证。",
           "note": "",
-          "chapter": "第一章 项目总论"
+          "chapter": "第一章 项目总论",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "1.3结论和建议",
@@ -930,14 +940,22 @@
       ],
       "scenarioVariants": {
         "housing_conversion": {
-          "section": "3.1人口、就业与租赁市场基础",
-          "subsection": "3.1.1区、街道及项目3公里人口就业基础",
+          "section": "3.2需求分析：人口、就业与租赁市场基础",
+          "subsection": "3.2.1 人口就业基础",
           "pointTitle": "",
-          "displayTitle": "3.1.1区、街道及项目3公里人口就业基础",
-          "requiredSources": "市统计局及相关网址GDP/产业/投资/消费/人口/收入数据【网上搜索（文件、数据）】",
-          "writingLogic": "按行政区、街道、项目3公里三个层级，在同一主题内比较常住人口、就业人口、产业与就业岗位基础；补充租赁市场发展情况，避免按地域重复整套供需分析。",
+          "displayTitle": "3.2.1 人口就业基础",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "比较行政区、街道和项目3公里内的常住人口、就业人口及租住需求基础，说明同一统计时点和区域口径。净流入变化由下一子节说明，不重复。需要表格：住房租赁供需分层分析表。",
           "note": "",
-          "chapter": "第三章 项目市场分析"
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
         },
         "commercial_renovation": {
           "section": "3.1经济环境及规划分析",
@@ -984,14 +1002,22 @@
       ],
       "scenarioVariants": {
         "housing_conversion": {
-          "section": "3.1人口、就业与租赁市场基础",
-          "subsection": "3.1.2租赁市场与人口净流入",
+          "section": "3.2需求分析：人口、就业与租赁市场基础",
+          "subsection": "3.2.2 人口净流入与租赁市场变化",
           "pointTitle": "",
-          "displayTitle": "3.1.2租赁市场与人口净流入",
-          "requiredSources": "人口统计数据、职住分析、客群调研、集中式公寓存量数据、历史租金数据【网上搜索+实地调研+中指/克尔瑞/贝壳研究院】",
-          "writingLogic": "补充近年人口净流入、租赁人口或可替代官方指标和住房租赁市场变化；优先统计公报和主管部门数据，时点与口径并列，证据不足不推断。",
+          "displayTitle": "3.2.2 人口净流入与租赁市场变化",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "只分析人口净流入和租赁需求的历年变化；引用上一子节人口基数，不重抄现状。常住人口增量不等于净流入，缺少细尺度数据明确待补。需要表格：引用前表，不重复制表。",
           "note": "",
-          "chapter": "第三章 项目市场分析"
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
         }
       },
       "projectSpecific": false,
@@ -1074,14 +1100,22 @@
       ],
       "scenarioVariants": {
         "housing_conversion": {
-          "section": "3.4住房租赁供给分析",
-          "subsection": "3.4.1区级住房租赁供给",
+          "section": "3.5供给分析：住房租赁供给分析",
+          "subsection": "3.5.1 住宅市场情况",
           "pointTitle": "",
-          "displayTitle": "3.4.1区级住房租赁供给",
-          "requiredSources": "住房租赁市场调研报告、历史租金成交数据、保租房规划文件【网上搜索+中指/克尔瑞/贝壳研究院+知识库】",
-          "writingLogic": "分析行政区层面的保障性租赁住房、商品房住宅及其他租赁住房供给、租金和出租情况，住房口径不得混入商业物业。",
+          "displayTitle": "3.5.1 住宅市场情况",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "仅分析住宅新房、二手房成交价格及趋势，比较项目所在区与3公里范围；不重复公寓租赁供给。需要表格：引用前表，不重复制表。",
           "note": "",
-          "chapter": "第三章 项目市场分析"
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
         }
       },
       "projectSpecific": false,
@@ -1165,14 +1199,22 @@
       ],
       "scenarioVariants": {
         "housing_conversion": {
-          "section": "3.3目标客群画像",
-          "subsection": "3.3.1区、街道及项目3公里客群画像",
+          "section": "3.4需求分析：目标客群画像",
+          "subsection": "3.4.1 需求分析：目标客群画像",
           "pointTitle": "",
-          "displayTitle": "3.3.1区、街道及项目3公里客群画像",
-          "requiredSources": "以上各小节分析结论汇总【知识库】",
-          "writingLogic": "按行政区、街道、项目3公里层级归纳目标客群来源、职业、年龄/家庭结构、支付能力和预计占比；画像结论须由人口就业、产业和竞品数据支撑。",
+          "displayTitle": "3.4.1 需求分析：目标客群画像",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "分别分析年龄与家庭结构、收入职业、教育消费；按核心、重要、补充客群说明来源；典型画像涵盖收入预算、通勤、生活偏好、租期。用来源数据说明需求规模、多元性和增长点，比例须有证据，不照抄示例画像。需要表格：客群来源表。",
           "note": "",
-          "chapter": "第三章 项目市场分析"
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
         },
         "commercial_renovation": {
           "section": "3.2龙华区住房市场分析（如为非居改保）\n3.2龙华区商业市场分析（如为自持）",
@@ -1219,14 +1261,22 @@
       ],
       "scenarioVariants": {
         "housing_conversion": {
-          "section": "3.2职住关系与租赁需求分析",
-          "subsection": "3.2.1区、街道及项目3公里职住关系",
+          "section": "3.3需求分析：职住关系与产业分析",
+          "subsection": "3.3.1 需求分析：职住关系与产业分析",
           "pointTitle": "",
-          "displayTitle": "3.2.1区、街道及项目3公里职住关系",
-          "requiredSources": "项目所在街道需求、供给情况（网上搜索+贝壳/链家/安居客/自如）【数据搜集】",
-          "writingLogic": "按行政区、街道、项目3公里层级分析就业岗位与居住人口匹配、通勤方向、租赁需求和缺口；使用职住关系而非泛化消费需求。",
+          "displayTitle": "3.3.1 需求分析：职住关系与产业分析",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "在区级背景之下，将街道和3公里范围分为两个层次展开职住和产业分析。真实人口口径一致时才计算职住比，并声明公式；以年龄、学历、收入数据绘制柱状图，数据不足保留待补。说明产业基础、就业人群、通勤联系及租赁需求，不用POI代替人口，不预设高收入或供不应求。需要表格：年龄学历收入分布表（有数据时配柱状图）。\n非居改保正文强制约束：全文（含标题、表名、表头、图注和小结）严禁出现POI、P.O.I.、兴趣点、点位密度、岗位类占比及以地图点位推算职住比的表达；不得仅把POI改名为公司数量或产业数量。仅在有可核验的具体公司、产业园或产业类别名称清单及来源时，按实际清单客观列举周边公司、产业园或产业类别；需要数量时必须说明统计范围、时间和去重口径，清单数量不外推为区域总量，不与就业人数、人口或租赁需求等同。没有具体名单或可靠依据时省略这部分分析及表格，不写待补占位，不复述本禁令。与旧规则或输入材料冲突时以本约束为准。",
           "note": "",
-          "chapter": "第三章 项目市场分析"
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
         }
       },
       "projectSpecific": false,
@@ -1308,14 +1358,22 @@
       ],
       "scenarioVariants": {
         "housing_conversion": {
-          "section": "3.4住房租赁供给分析",
-          "subsection": "3.4.2街道级住房租赁供给",
+          "section": "3.5供给分析：住房租赁供给分析",
+          "subsection": "3.5.2 项目周边租赁市场情况",
           "pointTitle": "",
-          "displayTitle": "3.4.2街道级住房租赁供给",
-          "requiredSources": "项目所在街道租赁规划、市场/租赁调研报告（网上搜索+中指/克尔瑞）【数据搜集】",
-          "writingLogic": "分析街道层面的保障性租赁住房、商品房住宅及其他租赁住房供给、租金、出租率和新增计划，口径与区级一致。",
+          "displayTitle": "3.5.2 项目周边租赁市场情况",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "汇总项目周边板块公寓项目数、房间数、出租率及租金，重叠范围去重，均值说明权重。3公里项目明细在下一子节展示。需要表格：项目周边房源情况表。",
           "note": "",
-          "chapter": "第三章 项目市场分析"
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
         }
       },
       "projectSpecific": false,
@@ -1398,14 +1456,22 @@
       ],
       "scenarioVariants": {
         "housing_conversion": {
-          "section": "3.6供需态势与市场结论",
-          "subsection": "3.6.1供需态势与市场结论",
+          "section": "3.7供需态势与市场结论",
+          "subsection": "3.7.1 供需态势与市场结论",
           "pointTitle": "",
-          "displayTitle": "3.6.1供需态势与市场结论",
-          "requiredSources": "以上各小节分析结论汇总【知识库】",
-          "writingLogic": "标题和正文统一使用“供需态势分析”；综合人口就业、职住关系、客群、供应、竞品和租金，形成定量加定性的简明结论，不使用“供需态势分析”。",
+          "displayTitle": "3.7.1 供需态势与市场结论",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "综合前述需求、供给、竞品与定价证据，说明市场机会、限制及待核实事项；不把未验证的测算假设当成市场支持的结论，不重复各房源分段分析。需要表格：引用前表，不重复制表。",
           "note": "",
-          "chapter": "第三章 项目市场分析"
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字"
         },
         "commercial_renovation": {
           "section": "3.3XX街道住房市场分析（如为非居改保）\n3.3XX街道商业市场分析（如为自持）",
@@ -1455,14 +1521,22 @@
       ],
       "scenarioVariants": {
         "housing_conversion": {
-          "section": "3.4住房租赁供给分析",
-          "subsection": "3.4.3项目3公里住房租赁供给",
+          "section": "3.5供给分析：住房租赁供给分析",
+          "subsection": "3.5.3 项目3公里内租赁市场情况",
           "pointTitle": "",
-          "displayTitle": "3.4.3项目3公里住房租赁供给",
-          "requiredSources": "项目周边3KM范围内租赁项目调研【实地调研+网上搜索+知识库】、LOFT公寓市场调研报告、竞品LOFT实地踩盘、层高实测数据【实地调研+网上搜索】、LOFT竞品对比分析表、租金溢价分析、客户访谈记录【手动填入+实地调研】、区域租赁住房市场调研报告、竞品实地踩盘数据、租房平台数据【网上搜索+实地调研+中指/克尔瑞/贝壳研究院】、竞品租金/管理费/网费/水电费调查表、全费用单价测算表【实地调研+手动填入】",
-          "writingLogic": "分析项目3公里内真实住房租赁供给，统一合并各点位情况，重要点位优先说明差异；删除主项目、次项目及无权威来源的POI指标。",
+          "displayTitle": "3.5.3 项目3公里内租赁市场情况",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "仅列项目3公里内房源明细、距离、房间数、开间租金、开业时间与出租率，并解释与周边板块的差异。需要表格：项目3公里内房源情况表。",
           "note": "",
-          "chapter": "第三章 项目市场分析"
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
         }
       },
       "projectSpecific": false,
@@ -1545,14 +1619,22 @@
       ],
       "scenarioVariants": {
         "housing_conversion": {
-          "section": "3.5竞品与租金水平分析",
-          "subsection": "3.5.1竞品比较与租金水平",
+          "section": "3.6供给分析：竞品与租金水平分析",
+          "subsection": "3.6.1 历史租金表现",
           "pointTitle": "",
-          "displayTitle": "3.5.1竞品比较与租金水平",
-          "requiredSources": "周边租赁项目租金调研、历史成交数据、保租房租金政策【知识库+网上搜索+贝壳/链家/安居客成交数据+政府招租公告】",
-          "writingLogic": "将竞品比较表放在本节，比较周边同类保障性租赁住房、商品房住宅等出租项目的距离、户型、面积、租金、管理费、装修、配套和出租率，据此形成竞争与租金定位依据。",
+          "displayTitle": "3.6.1 历史租金表现",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "仅分析历史租金表现：区分散租和集中式长租，各自比较市区与周边板块同口径成交租金、累计和年均变化。不在此重复竞品筛选或定价修正。需要表格：散租市区历史成交租金表、散租板块历史成交租金表、集中式长租市区历史成交租金表、集中式长租板块历史成交租金表。",
           "note": "",
-          "chapter": "第三章 项目市场分析"
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
         }
       },
       "projectSpecific": false,
@@ -1685,9 +1767,10 @@
           "pointTitle": "",
           "displayTitle": "4.1.1项目区位与交通条件",
           "requiredSources": "项目区位图、现场调研【知识库】",
-          "writingLogic": "描述法：项目位于所在街道、社区及道路交汇处→周边道路交通网络较为完善→可通过周边主干道衔接城市路网→项目所处片区属于区域发展格局中的功能核心节点→归属所在商务区规划范围→从具体位置来看，项目东北侧临近项目周边综合交通枢纽(如存在)→西侧临近城市主干道和圣莫丽斯小区→南侧临近周边优质学校→东侧临近新区大道→如周边存在铁路高架等阻隔因素则说明→实际与项目所在片区核心区域的空间连通性受到一定影响",
+          "writingLogic": "统一描述所有房源所在地的区位、四至、交通与通勤条件，重要差异在同一表或同一段比较，不按主次房源分段，不使用POI指标。\n非居改保正文强制约束：全文（含标题、表名、表头、图注和小结）严禁出现POI、P.O.I.、兴趣点、点位密度、岗位类占比及以地图点位推算职住比的表达；不得仅把POI改名为公司数量或产业数量。仅在有可核验的具体公司、产业园或产业类别名称清单及来源时，按实际清单客观列举周边公司、产业园或产业类别；需要数量时必须说明统计范围、时间和去重口径，清单数量不外推为区域总量，不与就业人数、人口或租赁需求等同。没有具体名单或可靠依据时省略这部分分析及表格，不写待补占位，不复述本禁令。与旧规则或输入材料冲突时以本约束为准。",
           "note": "",
-          "chapter": "第四章 项目条件和SWOT分析"
+          "chapter": "第四章 项目条件和SWOT分析",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "4.1项目选址",
@@ -1738,9 +1821,10 @@
           "pointTitle": "",
           "displayTitle": "4.1.2项目本体及建设条件",
           "requiredSources": "建筑施工图、面积测绘报告、不动产权属证书、配套面积统计【设计单位提供+项目资料】",
-          "writingLogic": "描述法：项目为项目配套→总建筑面积XX㎡→其中集中式集中XX㎡，共2层→社区底商XX㎡，均为1层→项目产权归属于XX→由XX负责运营管理→项目于XX年开业→至今已运营XX年",
+          "writingLogic": "汇总产权、建筑及出租面积、楼层、用途、竣工运营时间、现状设施和改造实施条件，项目事实取已核验材料；不混入商业底商或示例地名。",
           "note": "",
-          "chapter": "第四章 项目条件和SWOT分析"
+          "chapter": "第四章 项目条件和SWOT分析",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "4.1项目选址",
@@ -2120,9 +2204,10 @@
           "pointTitle": "",
           "displayTitle": "5.3.1租金与价格定位",
           "requiredSources": "周边租金调研、市场比较法测算【知识库】、保租房租金定价政策、区域竞品租金调研、项目档次评估报告【知识库+实地调研】、市场参考租金测算表、9折定价测算、户型差异化定价表【手动填入+测算引擎】",
-          "writingLogic": "结合竞品全费用租金、目标客群承受力、保障性租赁住房价格约束和财务测算提出价格区间；明确市场租金与政策折扣口径。",
+          "writingLogic": "采用第三章已确认的市场比较结果，结合客群承受力、适用价格政策和财务测算给出建议区间；市场参考租金、政策折扣和测算假设分别注明，不以财务目标倒推市场租金。",
           "note": "",
-          "chapter": "第五章 项目策划定位"
+          "chapter": "第五章 项目策划定位",
+          "changeReason": "V6经理批示转化为通用逻辑"
         },
         "commercial_renovation": {
           "section": "5.3价格定位",
@@ -4021,6 +4106,230 @@
         "expectedOutput": "文字",
         "severity": "medium"
       }
+    },
+    {
+      "id": "gaibao-v1-075",
+      "sourceNo": 75,
+      "legacySourceNo": "18",
+      "sourceRow": 0,
+      "projectType": "gaibao",
+      "chapter": "第三章 项目市场分析",
+      "section": "3.1宏观经济环境",
+      "subsection": "3.1.1 宏观经济环境",
+      "pointTitle": "",
+      "displayTitle": "3.1.1 宏观经济环境",
+      "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+      "sourceKinds": [
+        "knowledge_base",
+        "web_search",
+        "manual_upload"
+      ],
+      "writingLogic": "按全市和项目所在区分析GDP、财政预算、收入消费、常住人口及净流入，并说明规划定位、产业布局和空间发展方向；采用相同统计期比较，不能把常住人口增量直接当净迁入。需要表格：市区宏观经济与人口指标表。",
+      "importance": "★★一般",
+      "outputForm": "文字＋表格",
+      "note": "",
+      "scenarios": [
+        "housing_conversion"
+      ],
+      "scenarioVariants": {
+        "housing_conversion": {
+          "section": "3.1宏观经济环境",
+          "subsection": "3.1.1 宏观经济环境",
+          "pointTitle": "",
+          "displayTitle": "3.1.1 宏观经济环境",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "按全市和项目所在区分析GDP、财政预算、收入消费、常住人口及净流入，并说明规划定位、产业布局和空间发展方向；采用相同统计期比较，不能把常住人口增量直接当净迁入。需要表格：市区宏观经济与人口指标表。",
+          "note": "",
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
+        }
+      },
+      "projectSpecific": false,
+      "generationMode": "hybrid",
+      "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+      "auditProjection": {
+        "checkWhat": "3.1.1深圳市经济环境分析",
+        "basis": "市统计局及相关网址GDP/产业/投资/消费/人口/收入数据【网上搜索（文件、数据）】",
+        "rationale": "分析法：按照以下顺序进行数据分析\n（1）GDP：XX年全市实现地区生产总值XX亿元，同比增长XX%→增长速度XX 图3深圳XX—XX年GDP及增速\n（2）产业结构：三次产业占比为XX:XX:XX→XX产业成为经济增长核心动力→规上工业增加值增长/降低XX%\n（3）内需与外贸：社会消费品零售总额XX亿元，同比增长XX%→外贸进出口总额XX亿元，同比增长XX% 表6 XX年深圳重要经济数据\n（4）结论：深圳依托产业升级、内需扩容、外贸稳增三重支撑→在高基数下实现XX增长/稳定→为全市地产、城市配套类项目提供稳定的市场基础",
+        "expectedOutput": "文字+数据+表格",
+        "severity": "medium"
+      },
+      "changeReason": "V6经理批示转化为通用逻辑"
+    },
+    {
+      "id": "gaibao-v1-076",
+      "sourceNo": 76,
+      "legacySourceNo": "18",
+      "sourceRow": 0,
+      "projectType": "gaibao",
+      "chapter": "第三章 项目市场分析",
+      "section": "3.6供给分析：竞品与租金水平分析",
+      "subsection": "3.6.2 3公里范围内竞品分析",
+      "pointTitle": "",
+      "displayTitle": "3.6.2 3公里范围内竞品分析",
+      "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+      "sourceKinds": [
+        "knowledge_base",
+        "web_search",
+        "manual_upload"
+      ],
+      "writingLogic": "仅分析3公里范围内的竞争格局，说明可比项目选择依据、产品租金及竞争定位。历史趋势引用前节，修正计算留给定价子节。需要表格：住房租赁竞品比较表。",
+      "importance": "★★一般",
+      "outputForm": "文字＋表格",
+      "note": "",
+      "scenarios": [
+        "housing_conversion"
+      ],
+      "scenarioVariants": {
+        "housing_conversion": {
+          "section": "3.6供给分析：竞品与租金水平分析",
+          "subsection": "3.6.2 3公里范围内竞品分析",
+          "pointTitle": "",
+          "displayTitle": "3.6.2 3公里范围内竞品分析",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "仅分析3公里范围内的竞争格局，说明可比项目选择依据、产品租金及竞争定位。历史趋势引用前节，修正计算留给定价子节。需要表格：住房租赁竞品比较表。",
+          "note": "",
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
+        }
+      },
+      "projectSpecific": false,
+      "generationMode": "hybrid",
+      "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+      "auditProjection": {
+        "checkWhat": "3.1.1深圳市经济环境分析",
+        "basis": "市统计局及相关网址GDP/产业/投资/消费/人口/收入数据【网上搜索（文件、数据）】",
+        "rationale": "分析法：按照以下顺序进行数据分析\n（1）GDP：XX年全市实现地区生产总值XX亿元，同比增长XX%→增长速度XX 图3深圳XX—XX年GDP及增速\n（2）产业结构：三次产业占比为XX:XX:XX→XX产业成为经济增长核心动力→规上工业增加值增长/降低XX%\n（3）内需与外贸：社会消费品零售总额XX亿元，同比增长XX%→外贸进出口总额XX亿元，同比增长XX% 表6 XX年深圳重要经济数据\n（4）结论：深圳依托产业升级、内需扩容、外贸稳增三重支撑→在高基数下实现XX增长/稳定→为全市地产、城市配套类项目提供稳定的市场基础",
+        "expectedOutput": "文字+数据+表格",
+        "severity": "medium"
+      },
+      "changeReason": "V6经理批示转化为通用逻辑"
+    },
+    {
+      "id": "gaibao-v1-077",
+      "sourceNo": 77,
+      "legacySourceNo": "18",
+      "sourceRow": 0,
+      "projectType": "gaibao",
+      "chapter": "第三章 项目市场分析",
+      "section": "3.6供给分析：竞品与租金水平分析",
+      "subsection": "3.6.3 项目定价分析",
+      "pointTitle": "",
+      "displayTitle": "3.6.3 项目定价分析",
+      "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+      "sourceKinds": [
+        "knowledge_base",
+        "web_search",
+        "manual_upload"
+      ],
+      "writingLogic": "仅进行项目定价：保留比较案例、交通配套、外部环境、新旧程度、装修家私修正以及修正价格和比较权重；按各案例修正价格乘权重求和取整，保留汇总与结论行。系数须有依据、权重合计为一，缺失数据不计算。政策折扣单列依据，不套用示例价格或折扣。需要表格：所选案例租金汇总表。",
+      "importance": "★★一般",
+      "outputForm": "文字＋表格",
+      "note": "",
+      "scenarios": [
+        "housing_conversion"
+      ],
+      "scenarioVariants": {
+        "housing_conversion": {
+          "section": "3.6供给分析：竞品与租金水平分析",
+          "subsection": "3.6.3 项目定价分析",
+          "pointTitle": "",
+          "displayTitle": "3.6.3 项目定价分析",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "仅进行项目定价：保留比较案例、交通配套、外部环境、新旧程度、装修家私修正以及修正价格和比较权重；按各案例修正价格乘权重求和取整，保留汇总与结论行。系数须有依据、权重合计为一，缺失数据不计算。政策折扣单列依据，不套用示例价格或折扣。需要表格：所选案例租金汇总表。",
+          "note": "",
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
+        }
+      },
+      "projectSpecific": false,
+      "generationMode": "hybrid",
+      "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+      "auditProjection": {
+        "checkWhat": "3.1.1深圳市经济环境分析",
+        "basis": "市统计局及相关网址GDP/产业/投资/消费/人口/收入数据【网上搜索（文件、数据）】",
+        "rationale": "分析法：按照以下顺序进行数据分析\n（1）GDP：XX年全市实现地区生产总值XX亿元，同比增长XX%→增长速度XX 图3深圳XX—XX年GDP及增速\n（2）产业结构：三次产业占比为XX:XX:XX→XX产业成为经济增长核心动力→规上工业增加值增长/降低XX%\n（3）内需与外贸：社会消费品零售总额XX亿元，同比增长XX%→外贸进出口总额XX亿元，同比增长XX% 表6 XX年深圳重要经济数据\n（4）结论：深圳依托产业升级、内需扩容、外贸稳增三重支撑→在高基数下实现XX增长/稳定→为全市地产、城市配套类项目提供稳定的市场基础",
+        "expectedOutput": "文字+数据+表格",
+        "severity": "medium"
+      },
+      "changeReason": "V6经理批示转化为通用逻辑"
+    },
+    {
+      "id": "gaibao-v1-078",
+      "sourceNo": 78,
+      "legacySourceNo": "18",
+      "sourceRow": 0,
+      "projectType": "gaibao",
+      "chapter": "第三章 项目市场分析",
+      "section": "3.8产品定位分析",
+      "subsection": "3.8.1 产品定位分析",
+      "pointTitle": "",
+      "displayTitle": "3.8.1 产品定位分析",
+      "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+      "sourceKinds": [
+        "knowledge_base",
+        "web_search",
+        "manual_upload"
+      ],
+      "writingLogic": "以本项目和可比竞品对照交通、生活配套、环境、户型、装修、室内配置及公区；据证据判断档次和租赁模式，说明优劣势以及产品差异化、性价比、企业客户合作或公区运营策略，不预设中高端定位。与第五章实施定位衔接，避免重复。需要表格：产品定位表。",
+      "importance": "★★一般",
+      "outputForm": "文字＋表格",
+      "note": "",
+      "scenarios": [
+        "housing_conversion"
+      ],
+      "scenarioVariants": {
+        "housing_conversion": {
+          "section": "3.8产品定位分析",
+          "subsection": "3.8.1 产品定位分析",
+          "pointTitle": "",
+          "displayTitle": "3.8.1 产品定位分析",
+          "requiredSources": "政府统计公报、原始发布机构、已审核资料库及真实市场调研；注明统计期、地域范围、计量单位、样本与来源；项目内部事实取已确认材料。",
+          "writingLogic": "以本项目和可比竞品对照交通、生活配套、环境、户型、装修、室内配置及公区；据证据判断档次和租赁模式，说明优劣势以及产品差异化、性价比、企业客户合作或公区运营策略，不预设中高端定位。与第五章实施定位衔接，避免重复。需要表格：产品定位表。",
+          "note": "",
+          "chapter": "第三章 项目市场分析",
+          "changeReason": "V6经理批示转化为通用逻辑",
+          "sourceKinds": [
+            "knowledge_base",
+            "web_search",
+            "manual_upload"
+          ],
+          "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+          "outputForm": "文字＋表格"
+        }
+      },
+      "projectSpecific": false,
+      "generationMode": "hybrid",
+      "missingPolicy": "缺失或口径冲突标待补，不虚构人口、比例、租金、权重和修正系数；图表仅消费可核验数据。",
+      "auditProjection": {
+        "checkWhat": "3.1.1深圳市经济环境分析",
+        "basis": "市统计局及相关网址GDP/产业/投资/消费/人口/收入数据【网上搜索（文件、数据）】",
+        "rationale": "分析法：按照以下顺序进行数据分析\n（1）GDP：XX年全市实现地区生产总值XX亿元，同比增长XX%→增长速度XX 图3深圳XX—XX年GDP及增速\n（2）产业结构：三次产业占比为XX:XX:XX→XX产业成为经济增长核心动力→规上工业增加值增长/降低XX%\n（3）内需与外贸：社会消费品零售总额XX亿元，同比增长XX%→外贸进出口总额XX亿元，同比增长XX% 表6 XX年深圳重要经济数据\n（4）结论：深圳依托产业升级、内需扩容、外贸稳增三重支撑→在高基数下实现XX增长/稳定→为全市地产、城市配套类项目提供稳定的市场基础",
+        "expectedOutput": "文字+数据+表格",
+        "severity": "medium"
+      },
+      "changeReason": "V6经理批示转化为通用逻辑"
     }
   ],
   "baselineId": "gaibao-manager-reviewed-housing-v2-20260904"

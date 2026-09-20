@@ -1,0 +1,15 @@
+HTTP/1.1 206 Partial Content
+Date: Sun, 13 Sep 2026 01:29:30 GMT
+Server: Apache
+Last-Modified: Sat, 12 Sep 2026 23:37:07 GMT
+ETag: "a454218-65b51ade150ab"
+Accept-Ranges: bytes
+Cache-Control: max-age=63072000, public
+Content-Type: application/octet-stream
+Age: 107314
+Cache-Status: download-proxy12;hit;detail=match
+Via: 1.1 download-proxy12 (squid/6.14)
+Connection: keep-alive
+Content-Range: bytes 104484886-138397974/172311064
+Content-Length: 33913089
+

@@ -8,6 +8,7 @@ import "../../report-query-planner.js";
 import "../../report-feedback-learning.js";
 import {registerReportCase,startReportEvaluation,trustedReportEvaluations} from './_report-trusted-evaluation.js';
 import {resolveProjectAccess} from './_project-access.js';
+import {guardReportRoute} from './_report-route-access.js';
 
 const Context=globalThis.ProjectContextContract,Graph=globalThis.ReportTaskGraph,Planner=globalThis.ReportQueryPlanner,Learning=globalThis.ReportFeedbackLearning;
 function admin(env,user,request){const list=String(env.ADMIN_USERS||"").split(",").map(x=>x.trim()).filter(Boolean);return list.includes(user.username)||list.includes(String(user.userId)) ? (!env.ADMIN_PASS||request.headers.get("x-admin-pass")===env.ADMIN_PASS) : false;}
@@ -42,13 +43,22 @@ async function changeRulePublication(env,user,request,b,action){
 }
 
 export async function onRequestGet(context){const env=adaptEnv(context.env),user=await verifyAuth(context.request,env);if(!user)return json({ok:false,error:"未登录"},401);await ensureReportOrchestration(env);const u=new URL(context.request.url),type=u.searchParams.get("type")||"workflow",id=clean(u.searchParams.get("id"),120);
+  if(!await guardReportRoute(env,user.userId,Object.fromEntries(u.searchParams),true))return json({ok:false,error:'项目读取权限已失效'},403);
   if(type==="workflow"&&id){const row=await workflow(env,user.userId,id);return row?json({ok:true,item:{...row,graph:parseJson(row.graph_json,{})}}):json({ok:false,error:"工作流不存在"},404);}
   if(type==="queryPlan"&&id){const row=await env.DB.prepare("SELECT * FROM report_query_plans WHERE id=? AND user_id=?").bind(id,user.userId).first();return row?json({ok:true,item:{...row,plan:parseJson(row.plan_json,{})}}):json({ok:false,error:"查询计划不存在"},404);}
   if(type==="feedback"&&id){const row=await candidate(env,user.userId,id,admin(env,user,context.request));return row?json({ok:true,item:await loadCandidateEvaluations(env,row)}):json({ok:false,error:"反馈候选不存在"},404);}
   const projectId=clean(u.searchParams.get("projectId"),120);if(!projectId)return json({ok:false,error:"缺少projectId"},400);const rows=(await env.DB.prepare("SELECT * FROM report_workflows WHERE project_id=? AND user_id=? ORDER BY updated_at DESC LIMIT 30").bind(projectId,user.userId).all()).results||[];return json({ok:true,list:rows.map(x=>({...x,graph:parseJson(x.graph_json,{})}))});
 }
 
-export async function onRequestPost(context){const env=adaptEnv(context.env),request=context.request,user=await verifyAuth(request,env);if(!user)return json({ok:false,error:"未登录"},401);let b={};try{b=await request.json();}catch(_){return json({ok:false,error:"请求格式有误"},400);}await ensureReportOrchestration(env);const action=clean(b.action,40);
+export async function onRequestPost(context){
+  const env=adaptEnv(context.env);
+  if(!await verifyAuth(context.request,env))return json({ok:false,error:'未登录'},401);
+  if(!env.DB._transaction)return handlePost(context);
+  await ensureReportOrchestration(env);
+  return env.DB._transaction(DB=>handlePost({...context,env:{...env,DB}}));
+}
+async function handlePost(context){const env=adaptEnv(context.env),request=context.request,user=await verifyAuth(request,env);if(!user)return json({ok:false,error:"未登录"},401);let b={};try{b=await request.json();}catch(_){return json({ok:false,error:"请求格式有误"},400);}await ensureReportOrchestration(env);const action=clean(b.action,40);
+  if(!await guardReportRoute(env,user.userId,b))return json({ok:false,error:'项目编辑权限已失效'},403);
   if(action==='trustedCaseRegister'||action==='trustedEvaluationStart'){
     if(!admin(env,user,request))return json({ok:false,error:'受控样本及评测仅由管理员执行'},403);
     try{

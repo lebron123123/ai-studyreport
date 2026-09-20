@@ -13,7 +13,8 @@ test('预算价格和用量：未知不能冒充零，负数和小数拒绝',()=
   assert.equal(agentUsage({prompt_tokens:1.5,completion_tokens:2}),null);
   assert.deepEqual(agentUsage({prompt_tokens:0,completion_tokens:0}),{input:0,output:0});
 });
-const target=process.env.AGENT_TEST_DATABASE_URL;
+import {testDatabaseUrl} from '../scripts/require-test-database.mjs';
+const target=testDatabaseUrl();
 test('PostgreSQL原子预算：并发预留、重复结算、未知调用与子任务汇总',{skip:!target},async t=>{
   const url=new URL(target);assert.match(url.pathname,/^\/studyreport_restore_\d+$/);assert.ok(['localhost','127.0.0.1','[::1]'].includes(url.hostname));
   const DB=createD1Shim(target),env={DB,LLM_COSTS_JSON:JSON.stringify({p:{inputPerMillion:1,outputPerMillion:2}})};

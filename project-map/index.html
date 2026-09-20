@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>深圳项目地图</title><link rel="stylesheet" href="map.css"><link rel="stylesheet" href="research.css"><link rel="stylesheet" href="workspace-layout.css"></head>
+<body>
+<header><div><small>ANJU · PROJECT MAP</small><h1>深圳项目地图</h1></div><button id="close">关闭地图 ×</button></header>
+<nav aria-label="地图模式"><button id="city" aria-pressed="true">二维全市地图</button><button id="nearby" aria-pressed="false">三维城市 · 项目周边</button></nav>
+<main><aside id="search-panel" aria-label="地图搜索面板"><div class="panel-heading"><strong>项目 / 地点搜索</strong><button id="panel-toggle" aria-expanded="true" aria-controls="panel-body">收起 −</button></div><div id="panel-body">
+<h2 id="project-name">全市浏览</h2><p id="project-hint">尚未提供项目坐标，可以先浏览深圳。</p>
+<form id="search-form"><label for="query">项目、地址或地标</label><div class="row"><input id="query" maxlength="100" placeholder="输入项目名、地址或地标"><button id="search">搜索</button></div></form>
+<div id="results" aria-live="polite"></div>
+<label for="basemap-mode">二维底图来源</label><select id="basemap-mode" style="display:block;width:100%;font:inherit;padding:8px;margin:6px 0 12px;border:1px solid #b9d0e1;border-radius:8px;color:#245e89;background:white"><option value="online">在线详细底图 · 需要互联网</option><option value="offline">本地离线简版 · 不访问外网</option></select>
+<label><input id="coverage-toggle" type="checkbox" checked> 显示 3D覆盖区域</label><p style="font-size:12px">紫线：原作者场景边界；青线：补充区域边界。已合并内部网格，保留真实空缺。范围不代表逐栋完整或实测楼高。橙点为地点目录，仅放大至街区时显示，可点击查看。</p>
+<details><summary>深圳法定图则 · 官方核查</summary><p>普通建筑轮廓不是法定地块。本系统尚未取得可核验的全市地块图层，暂不自动匹配。</p><a href="https://pnr.sz.gov.cn/ywzy/fdtz/" target="_blank" rel="noopener noreferrer">打开官方法定图则／详细规划查询</a><p>需联网。请按地名或宗地号查询，核对已批准成果及后续调整；草案不能替代生效图则。查询信息最终以官方公布成果为准。</p></details>
+<div class="row"><button id="locate" hidden>回到项目</button><button id="reset">恢复视角</button></div>
+<details class="observation"><summary>三维观察与移动设置</summary><p><button id="baoan-enter">宝安 · 进入三维</button></p><section id="city-controls" hidden><div class="row"><button id="tour" aria-pressed="false">自动巡游</button><button id="orbit">环绕当前位置</button></div><div class="row"><button id="day">白天</button><button id="sunset">黄昏</button><button id="night">夜晚</button></div><div class="row"><button id="ground">地面观察</button><button id="aerial">高空观察</button></div><label for="speed">移动速度</label><select id="speed"><option value="1" selected>1倍 · 精细观察</option><option value="5">5倍 · 街区移动</option><option value="10">10倍 · 区域浏览</option><option value="20">20倍 · 快速巡航</option><option value="40">40倍 · 跨区移动</option></select><p>WASD 移动；QE 升降；方向键转头；Shift 加速；拖动环绕，滚轮缩放。</p></section>
+<section id="vertical-controls" hidden><div class="row"><button id="rise">升高 ↑</button><button id="descend">降低 ↓</button></div><div class="row"><button id="look-up">抬头看</button><button id="look-down">低头看</button></div><p>每次升降20米（场景单位）；需要快速返回时点击“恢复视角”。Q下降、E上升；高空时自动加快升降。</p></section>
+</details><section id="model-list"><h2>地点选择</h2><input id="landmark-query" hidden><p id="catalog-count">正在读取目录…</p><div id="landmarks" tabindex="0" aria-label="可滚动地点列表"></div></section>
+<p class="note">二维覆盖全市。三维保留原作者精细场景，接入宝安及福田、南山、罗湖补充数据，共用昼夜光照与附近加载预算。未知楼高默认平面显示，可手动开启估算楼高。OSM可能缺漏，非全区完整测绘成果，不作为日照或工程判断依据。</p>
+<a href="models/LANDMARK_ATTRIBUTION.md" target="_blank" rel="noopener">模型来源说明</a>
+</div><div id="panel-resize" role="separator" aria-label="调整搜索面板高度" aria-orientation="horizontal" tabindex="0"></div></aside><section class="viewport"><div id="map"></div><div id="status" role="status">正在加载地图…</div><button id="retry" hidden>重新加载当前视图</button><div class="help">三维：点击画面 → WASD移动 · QE升降 · 方向键转头 · 搜索面板中可调速度</div></section></main>
+<script type="module" src="search-panel.mjs"></script>
+<script type="module" src="map.js?v=baoan-unified-20260914"></script></body></html>

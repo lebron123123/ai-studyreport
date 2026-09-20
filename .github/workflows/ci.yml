@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -36,9 +36,11 @@ jobs:
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - name: 安装根项目与本地服务依赖
         run: npm ci
+      - name: 安装浏览器测试运行时
+        run: npx playwright install --with-deps chromium
       - name: JavaScript 语法检查
         run: npm run check:syntax
       - name: 规则、表格、API 与迁移一致性
@@ -47,5 +49,5 @@ jobs:
         run: npm run check:migrations -- --require-db
       - name: Golden Project 定向回归
         run: npm run test:golden
-      - name: 全仓自动化测试
-        run: npm test
+      - name: 全仓自动化测试（独立数据库，禁止跳过行为验证）
+        run: node scripts/run-postgres-tests.mjs

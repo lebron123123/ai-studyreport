@@ -31,8 +31,39 @@
     input=input||{};const factType=PB_FACT_TYPES[input.factType]?input.factType:"FACT";
     return {id:text(input.id,100)||pbId("fact"),factType,factKey:text(input.factKey||input.key,120),label:text(input.label||input.factKey||input.key,160),
       value:clone(input.value),unit:text(input.unit,30),sourceType:text(input.sourceType||"manual",40),sourceRef:text(input.sourceRef,300),
-      confidence:Math.max(0,Math.min(1,Number(input.confidence==null?1:input.confidence)||0)),status:["candidate","confirmed","superseded","rejected"].includes(input.status)?input.status:"candidate",
+      confidence:Math.max(0,Math.min(1,Number(input.confidence==null?1:input.confidence)||0)),status:["candidate","confirmed","conflict","not_applicable","superseded","rejected"].includes(input.status)?input.status:"candidate",
+      scopeId:text(input.scopeId,100),asOf:text(input.asOf,40),sourceLocator:text(input.sourceLocator,300),basis:text(input.basis,200),naReason:text(input.naReason,300),conflictValues:clone(arr(input.conflictValues)),confirmedBy:text(input.confirmedBy,100),confirmedAt:Number(input.confirmedAt)||0,
       validFrom:text(input.validFrom,30),validTo:text(input.validTo,30),version:Math.max(1,Number(input.version)||1)};
+  }
+  // A missing row is a gap, not evidence that a requirement is complete.
+  const PB_REQUIRED_FACTS=[
+    {factKey:"project.name",label:"项目名称",stages:[]},
+    {factKey:"project.type",label:"项目类型与资产场景",stages:[]},
+    {factKey:"project.location",label:"项目位置",stages:[]},
+    {factKey:"project.owner",label:"项目负责人",stages:[]},
+    {factKey:"asset.scope",label:"资产范围与点位清单",stages:["screening","initiation","feasibility","decision","implementation","post_investment","exit_review"]},
+    {factKey:"asset.ownership",label:"权属与使用限制",stages:["screening","initiation","feasibility","decision","implementation","post_investment","exit_review"]},
+    {factKey:"asset.area",label:"面积及面积口径",stages:["feasibility","decision","implementation","post_investment","exit_review"]},
+    {factKey:"project.targetUse",label:"目标用途与适用条件",stages:["feasibility","decision","implementation","post_investment","exit_review"]}
+  ];
+  function pbRequiredFacts(input){
+    input=input||{};const stageKey=input.stageKey||"discovery",facts=arr(input.facts),extra=arr(input.requirements),definitions=new Map();
+    PB_REQUIRED_FACTS.filter(x=>!x.stages.length||x.stages.includes(stageKey)).concat(extra).forEach(x=>{if(x&&x.factKey)definitions.set(text(x.scopeId,100)+"|"+text(x.factKey,120),{...x,requirement:x.requirement||"required"});});
+    const present=value=>value!==undefined&&value!==null&&(typeof value!=="string"||value.trim()!=="")&&(!Array.isArray(value)||value.length>0);
+    const items=[...definitions.values()].map(def=>{
+      const fact=facts.find(x=>x.factKey===def.factKey&&text(x.scopeId,100)===text(def.scopeId,100)),conditional=def.requirement==="conditional";
+      let status="missing";
+      if(def.requirement==="optional")status="optional";
+      else if(conditional&&def.conditionMet===false)status="not_required";
+      else if(conditional&&def.conditionMet!==true)status="condition_pending";
+      else if(fact&&(fact.validFrom&&fact.validFrom>new Date().toISOString().slice(0,10)||fact.validTo&&fact.validTo<new Date().toISOString().slice(0,10)))status="expired_or_not_effective";
+      else if(fact?.status==="not_applicable")status=fact.naReason?"not_applicable":"unverified";
+      else if(fact?.status==="conflict"||arr(fact?.conflictValues).length>1)status="conflict";
+      else if(fact&&present(fact.value))status=fact.status==="confirmed"?(fact.factType==="FACT"?"confirmed":"assumption"):"unverified";
+      return {factKey:def.factKey,label:text(def.label||def.factKey,160),scopeId:text(def.scopeId,100),requirement:def.requirement,status,factId:fact?.id||null,naReason:fact?.naReason||"",sourceRef:fact?.sourceRef||""};
+    });
+    const required=items.filter(x=>!["optional","not_required"].includes(x.status)),satisfied=required.filter(x=>["confirmed","not_applicable"].includes(x.status)).length;
+    return {schemaVersion:1,source:extra.length?"project_requirements_with_baseline":"baseline_checklist",stageKey,items,requiredCount:required.length,satisfiedCount:satisfied,missingCount:required.length-satisfied,score:required.length?Math.round(satisfied/required.length*100):null,status:required.length?required.length===satisfied?"complete":"attention":"not_configured"};
   }
   function pbLegacyFacts(data){
     const p=data&&data.project||{},out=[];
@@ -57,12 +88,12 @@
   function pbBuildContext(input){
     input=input||{};const data=input.data||{},project=data.project||{},stageKey=input.stageKey||pbLegacyStage(data),stage=pbStage(stageKey);
     const chapters=arr(data.chapters),sections=chapters.flatMap(c=>arr(c.sections)),workflow=data.workflow||{};
-    const facts=[...pbLegacyFacts(data),...arr(input.facts)].reduce((m,x)=>{const f=pbFact(x),old=m.get(f.factKey);if(!old||Number(f.version)>=Number(old.version))m.set(f.factKey,f);return m;},new Map());
+    const facts=[...pbLegacyFacts(data),...arr(input.facts)].reduce((m,x)=>{const f=pbFact(x),key=f.scopeId+"|"+f.factKey,old=m.get(key);if(!old||Number(f.version)>=Number(old.version))m.set(key,f);return m;},new Map());
     const metrics=[...pbLegacyMetrics(data),...arr(input.metrics)].reduce((m,x)=>{const k=x.metricKey||x.id,old=m.get(k);if(!old||Number(x.version||1)>=Number(old.version||1))m.set(k,x);return m;},new Map()),artifacts=[...pbLegacyArtifacts(data),...arr(input.artifacts)].reduce((m,x)=>{m.set(x.id||x.moduleRef+":"+x.artifactType,x);return m;},new Map()),decisions=arr(input.decisions),events=arr(input.events),changes=arr(input.changes);
-    const missingFacts=[...facts.values()].filter(x=>x.status!=="confirmed").length;
+    const checklist=pbRequiredFacts({facts:[...facts.values()],stageKey,requirements:input.requirements||workflow.factRequirements}),unconfirmed=[...facts.values()].filter(x=>x.status!=="confirmed"&&!(x.status==="not_applicable"&&x.naReason)).length,missingFacts=checklist.missingCount;
     return {schemaVersion:1,project:{id:text(input.projectId,100),name:text(input.name||project.name||"未命名项目",160),type:text(project.type,50),location:text(project.location,200),owner:text(project.owner,100)},
       lifecycle:{current:stageKey,label:stage.label,progress:stage.progress,stages:clone(PB_STAGES)},
-      summary:{facts:facts.size,confirmedFacts:facts.size-missingFacts,missingFacts,metrics:metrics.size,artifacts:artifacts.size,decisions:decisions.length,openDecisions:decisions.filter(x=>x.status!=="adopted"&&x.status!=="closed").length,events:events.length,changes:changes.length,chapters:chapters.length,sections:sections.length,generatedSections:sections.filter(s=>text(s.editedHtml||s.content,10)).length,calcVersions:arr(workflow.calcSnapshots).length,reportVersions:arr(workflow.reportVersions).length,materials:arr(data.kb).length},
+      summary:{facts:facts.size,confirmedFacts:[...facts.values()].filter(x=>x.status==="confirmed").length,missingFacts,unconfirmedFacts:unconfirmed,requiredFacts:checklist.requiredCount,metrics:metrics.size,artifacts:artifacts.size,decisions:decisions.length,openDecisions:decisions.filter(x=>x.status!=="adopted"&&x.status!=="closed").length,events:events.length,changes:changes.length,chapters:chapters.length,sections:sections.length,generatedSections:sections.filter(s=>text(s.editedHtml||s.content,10)).length,calcVersions:arr(workflow.calcSnapshots).length,reportVersions:arr(workflow.reportVersions).length,materials:arr(data.kb).length},requirements:checklist,
       facts:[...facts.values()],metrics:[...metrics.values()],artifacts:[...artifacts.values()],decisions,events,changes,updatedAt:Number(input.updatedAt)||0};
   }
   function pbPreviewChange(input){
@@ -72,7 +103,7 @@
     const metricIds=new Set(edges.filter(e=>changedParamIds.has(e.from)).map(e=>e.to)),sectionIds=new Set(edges.filter(e=>metricIds.has(e.from)||changedParamIds.has(e.from)).map(e=>e.to));
     return {schemaVersion:1,changedKeys:keys,changedValues:keys.map(key=>({key,before:before[key],after:after[key]})),affectedMetrics:metrics.filter(x=>metricIds.has(x.id)),affectedSections:sections.filter(x=>sectionIds.has(x.id)),requiresApproval:keys.length>0};
   }
-  const api={FACT_TYPES:PB_FACT_TYPES,STAGES:PB_STAGES,stage:pbStage,legacyStage:pbLegacyStage,normalizeFact:pbFact,legacyFacts:pbLegacyFacts,legacyMetrics:pbLegacyMetrics,legacyArtifacts:pbLegacyArtifacts,buildContext:pbBuildContext,previewChange:pbPreviewChange,id:pbId,json:pbJson};
+  const api={FACT_TYPES:PB_FACT_TYPES,STAGES:PB_STAGES,stage:pbStage,legacyStage:pbLegacyStage,normalizeFact:pbFact,requiredFacts:pbRequiredFacts,legacyFacts:pbLegacyFacts,legacyMetrics:pbLegacyMetrics,legacyArtifacts:pbLegacyArtifacts,buildContext:pbBuildContext,previewChange:pbPreviewChange,id:pbId,json:pbJson};
   root.ProjectBrain=api;
   if(typeof module==="object"&&module.exports)module.exports=api;
 })(typeof window!=="undefined"?window:globalThis);

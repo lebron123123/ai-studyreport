@@ -1,0 +1,13 @@
+/* Research lifecycle actions share the existing AI report control area. */
+.research-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;width:100%;padding:8px 0;margin:0;border:0;background:transparent}
+.research-actions .research-current{font-size:13px;font-weight:500;color:var(--text-muted,#63788c);margin-right:auto;overflow-wrap:anywhere}
+.research-actions .btn{margin:0!important;font-size:13px;min-height:32px}
+.research-actions .research-danger{color:#a62d2d;border-color:#dfb8b8;background:#fff}
+.research-actions .research-danger:hover{background:#fff4f4}
+.research-actions .research-status{flex-basis:100%;font-size:12px;color:var(--seal-red,#b42318)}
+.research-actions .research-status:empty{display:none}
+.research-dialog button{font:inherit;border:1px solid #b8cfe4;border-radius:7px;background:#fff;color:#245b83;padding:7px 12px;cursor:pointer}
+.research-dialog button:disabled{opacity:.55;cursor:wait}
+.research-dialog input,.research-dialog select{font:inherit;border:1px solid #b8cfe4;border-radius:7px;padding:9px 12px;max-width:100%;box-sizing:border-box}
+.air-restart-row:has(.research-actions){display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+@media(max-width:640px){.research-actions .research-current{flex-basis:100%}.research-actions .btn{flex:0 1 auto}}

@@ -10,7 +10,7 @@ function loadSaveState(options={}){
   const saveState={textContent:"",title:"",dataset:{},style:{}};
   const context=vm.createContext({
     document:{getElementById:id=>id==="saveState"?saveState:null},
-    window:{},localStorage:{getItem:key=>key==="fs_token"?(options.token||null):null,setItem(){},removeItem(){}},
+    window:options.research?{ResearchUI:{active:()=>true,save(){}}}:{},localStorage:{getItem:key=>key==="fs_token"?(options.token||null):null,setItem(){},removeItem(){}},
     fetch:options.fetch||(()=>Promise.reject(new Error("offline"))),
     setTimeout,clearTimeout,Promise,AbortSignal,crypto:{randomUUID:()=>"test-id"}
   });
@@ -25,6 +25,7 @@ test("本地草稿成功后以本机保存为主状态",()=>{
   assert.equal(saveState.dataset.state,"local");
   assert.match(saveState.title,/安全保存在此浏览器/);
 });
+test('研究保存不套用旧项目持久化标记或误报空间不足',()=>{const {saveState,setSaveState}=loadSaveState({research:true});setSaveState('ok');assert.equal(saveState.textContent,'研究已保存');assert.doesNotMatch(saveState.textContent,/项目库|空间不足/);setSaveState('offline');assert.match(saveState.textContent,/暂未同步/);assert.doesNotMatch(saveState.textContent,/已保存到本机/);});
 
 test("云端不可用时不再误报为红色保存失败",()=>{
   const {saveState,setSaveState}=loadSaveState();

@@ -11,7 +11,8 @@ import {changeProjectMember} from '../functions/api/_project-members.js';
 import {createAgentRun} from '../functions/api/_agent-runtime.js';
 import {enqueueAgentJob,reauthorizeAgentJob} from '../functions/api/_agent-enterprise.js';
 
-const target=process.env.AGENT_TEST_DATABASE_URL;
+import {testDatabaseUrl} from '../scripts/require-test-database.mjs';
+const target=testDatabaseUrl();
 test('项目三角色：真实数据库权限、撤权、并发保存', {skip:!target}, async t=>{
   const url=new URL(target);assert.match(url.pathname,/^\/studyreport_restore_\d+$/);assert.ok(['localhost','127.0.0.1','[::1]'].includes(url.hostname));
   const DB=createD1Shim(target),env={DB,SESSION_SECRET:crypto.randomUUID(),DEPLOY_MODE:'local'},pid=crypto.randomUUID(),created=[];

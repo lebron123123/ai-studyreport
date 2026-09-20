@@ -6,6 +6,9 @@
 // DELETE                                               清空对话进度
 import { verifyAuth, json } from "./_auth.js";
 import { adaptEnv } from "./_adapters.js";
+import {authorizeResearchTask,ResearchError} from './_research-store.js';
+import {resolveProjectAccess} from './_project-access.js';
+import {legacyResearchLifecycle} from './_legacy-research-lifecycle.js';
 import { catalogFor, ROLE_OPTIONS, VOLATILITY_OPTIONS, CONFIRM_OPTIONS, SOURCE_POLICY_OPTIONS } from "./_paramcatalog.js";
 
 const TYPE_CN = { rent:"出租类", sale:"出售类", gaibao:"中资产（非居改保/商业改造等）" };
@@ -187,6 +190,20 @@ export async function onRequestPost(context){
   if(!user) return json({ok:false, error:"未登录或登录已过期"}, 401);
   let body;
   try{ body = await request.json(); }catch(e){ return json({ok:false, error:"请求格式有误"}, 400); }
+  if(!body||typeof body!=='object'||Array.isArray(body))return json({ok:false,error:'请求格式有误'},400);
+  if(body.research){
+    if(!['extract','suggest','parseLegacyDoc'].includes(body.action))return json({ok:false,error:'研究进度必须通过研究轮次接口保存，不能使用旧会话操作'},400);
+    if(env.RESEARCH_IDENTITY_ENABLED!=='1'||typeof env.DB?._transaction!=='function')return json({ok:false,error:'研究轮次功能尚未启用'},503);
+    try{
+      const scope=JSON.parse(JSON.stringify(body.research));
+      await env.DB._transaction(db=>authorizeResearchTask(db,user.userId,scope));
+      const result=await (body.action==='extract'?doExtract(context,body):body.action==='suggest'?doSuggest(context,body):doParseLegacyDoc(context,body));
+      // No transaction is held during model/OCR work. Recheck the authority and
+      // epoch before returning, while harmless autosaves may increase version.
+      await env.DB._transaction(db=>authorizeResearchTask(db,user.userId,scope,{checkVersion:false}));
+      return result;
+    }catch(error){return json({ok:false,error:error instanceof ResearchError?error.message:'研究任务未完成，请保留当前内容后重试'},error instanceof ResearchError?error.status:500);}
+  }
 
   if(body.action === "extract") return doExtract(context, body);
   if(body.action === "parseLegacyDoc") return doParseLegacyDoc(context, body);
@@ -227,16 +244,26 @@ async function doSaveState(context, body, user){
   try{
     if(projectId){
       if(!/^[A-Za-z0-9-]{8,64}$/.test(projectId)) return json({ok:false,error:"项目ID非法"},400);
+      const saveScoped=async db=>{
+      if(typeof env.DB._transaction==='function')await db.prepare('UPDATE projects SET updated_at=updated_at WHERE id=?').bind(projectId).run();
+      const access=await resolveProjectAccess({...env,DB:db},user.userId,projectId);
+      if(!access?.permissions.edit)return json({ok:false,error:'没有此项目的编辑权限，对话仍保留本地'},403);
+      const lifecycle=legacyResearchLifecycle(typeof access.row.data==='string'?JSON.parse(access.row.data):access.row.data);
+      if(lifecycle.legacyResearchAbandoned)return json({ok:false,error:'此可研已废止，未同步对话；本地内容保留，请恢复后继续',conflict:true},409);
+      if(lifecycle.legacyResearchEpoch>0&&Number(body.legacyResearchEpoch)!==lifecycle.legacyResearchEpoch)return json({ok:false,error:'可研生命周期已变化，旧对话未写入；本地内容保留，请重新打开',conflict:true},409);
       const id="airs-"+user.userId+"-"+projectId;
-      const exist=await env.DB.prepare("SELECT id, data FROM aireport_project_sessions WHERE user_id=? AND project_id=?").bind(user.userId,projectId).first();
+      const exist=await db.prepare("SELECT id, data FROM aireport_project_sessions WHERE user_id=? AND project_id=?").bind(user.userId,projectId).first();
       if(exist){
         let previous=null;try{previous=JSON.parse(exist.data||"null");}catch(e){}
         const incoming=body.state||{},older=Number(incoming.stateRevision||0)<Number(previous&&previous.stateRevision||0)||(Number(incoming.stateRevision||0)===Number(previous&&previous.stateRevision||0)&&Number(incoming.savedAt||0)<Number(previous&&previous.savedAt||0));
         if(older)return json({ok:true,projectId,staleIgnored:true});
-        await env.DB.prepare("UPDATE aireport_project_sessions SET data=?, updated_at=? WHERE user_id=? AND project_id=?").bind(dataStr,now,user.userId,projectId).run();
+        await db.prepare("UPDATE aireport_project_sessions SET data=?, updated_at=? WHERE user_id=? AND project_id=?").bind(dataStr,now,user.userId,projectId).run();
       }
-      else await env.DB.prepare("INSERT INTO aireport_project_sessions(id,user_id,project_id,data,updated_at) VALUES(?,?,?,?,?)").bind(id,user.userId,projectId,dataStr,now).run();
+      else await db.prepare("INSERT INTO aireport_project_sessions(id,user_id,project_id,data,updated_at) VALUES(?,?,?,?,?)").bind(id,user.userId,projectId,dataStr,now).run();
       return json({ok:true,projectId});
+      };
+      // Same project-row lock as lifecycle transitions; late tasks cannot cross it.
+      return typeof env.DB._transaction==='function'?await env.DB._transaction(saveScoped):await saveScoped(env.DB);
     }
     const exist = await env.DB.prepare("SELECT user_id FROM aireport_sessions WHERE user_id=?").bind(user.userId).first();
     if(exist){

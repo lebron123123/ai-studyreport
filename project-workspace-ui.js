@@ -1,16 +1,90 @@
 /* Investment OS Phase 2.5 企业项目门户：高密度视图渲染与独立路由。 */
 (function(root){
   "use strict";
-  const PW_VIEWS={overview:"项目总览",data:"数据注册表",files:"文件智能",decisions:"决策影响",spatial:"市场空间",members:"成员权限"};
+  const PW_VIEWS={overview:"项目总览",stages:"阶段与里程碑",facts:"项目事实与证据",data:"数据注册表",files:"文件智能",spatial:"市场空间",decisions:"决策影响",actions:"行动与风险",scenarios:"方案与决策包",versions:"成果版本",members:"成员权限",acceptance:"验收与优化",contracts:"合同协议",evaluations:"后评价",lessons:"经验总结",plans:"后评价计划",baseline:"正式事实与批准基线",handoffs:"责任交接",meetings:"会议与决议"};
+  const PW_NAV_GROUPS=[
+    {key:"overview",label:"项目总览",views:["overview"]},
+    {key:"stages",label:"阶段工作",views:["stages","spatial"]},
+    {key:"actions",label:"待办与风险",views:["actions","baseline","handoffs","meetings"]},
+    {key:"scenarios",label:"投资与测算",views:["scenarios","decisions"]},
+    {key:"files",label:"资料与协议",views:["files","contracts","facts","data"]},
+    {key:"versions",label:"报告与后评价",views:["versions","evaluations","lessons","plans"]},
+    {key:"members",label:"项目设置",views:["members","acceptance"],settings:true}
+  ];
+  const PW_TAB_LABELS={stages:"阶段工作",spatial:"市场与周边分析",actions:"待办与风险",scenarios:"情景与决策方案",decisions:"变更影响",files:"资料",facts:"事实与证据",data:"数据与来源",versions:"成果与版本",members:"成员权限",acceptance:"系统验收与改进"};
   const esc=v=>String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
   const text=v=>v==null||v===""?"—":typeof v==="object"?JSON.stringify(v):String(v);
-  function parseRoute(hash){const m=String(hash||"").match(/^#project\/([A-Za-z0-9_-]{8,100})\/(overview|data|files|decisions|spatial|members)$/);return m?{projectId:m[1],view:m[2]}:null;}
-  function route(projectId,view){return "#project/"+encodeURIComponent(projectId)+"/"+(PW_VIEWS[view]?view:"overview");}
-  function nav(projectId,view){return '<nav class="pm-workspace-tabs" aria-label="项目工作区">'+Object.entries(PW_VIEWS).map(([k,v])=>'<button type="button" class="'+(k===view?'active':'')+'" data-pw-view="'+k+'" data-project-id="'+esc(projectId)+'">'+esc(v)+'</button>').join('')+'</nav>';}
+  const PW_STAGES=[
+    {key:"discovery",label:"项目寻找",focus:"线索、机会来源、联系人与初始资产范围",tools:["files","facts"]},
+    {key:"screening",label:"初步研判",focus:"基本条件、区位需求、限制与初步测算依据",tools:["facts","spatial","data"]},
+    {key:"initiation",label:"立项",focus:"研究任务书、责任分工、立项材料与工作计划",tools:["files","stages","members"]},
+    {key:"feasibility",label:"可研与尽调",focus:"事实核实、测算、报告与待处理复核意见",tools:["facts","data","versions"]},
+    {key:"decision",label:"投资决策",focus:"方案比较、决策包、条件与审议意见",tools:["scenarios","decisions","actions"]},
+    {key:"implementation",label:"项目实施",focus:"里程碑计划、变更、验收与移交资料",tools:["stages","decisions","files"]},
+    {key:"post_investment",label:"投后管理",focus:"经营资料、期间口径、预算比较依据与风险措施",tools:["data","actions","files"]},
+    {key:"exit_review",label:"退出与复盘",focus:"持有与退出依据、复盘资料和历史成果",tools:["files","versions","actions"]}
+  ];
+  function stage(key){return PW_STAGES.find(x=>x.key===key)||null;}
+  // Only navigation identifiers belong in the URL; never serialize business data or external return URLs.
+  function routeContext(value){
+    if(!value||typeof value!=="object")return {};
+    const result={};
+    if(stage(value.stageKey))result.stageKey=value.stageKey;
+    if(PW_VIEWS[value.returnView])result.returnView=value.returnView;
+    if(typeof value.entityId==="string"&&/^[A-Za-z0-9_:-]{1,160}$/.test(value.entityId)&&["gate","milestone","deliverable","task","risk","fact","artifact","decision"].includes(value.entityType)){result.entityType=value.entityType;result.entityId=value.entityId;}
+    return result;
+  }
+  function parseRoute(hash){if(hash==="#investment/projects")return{projectId:null,view:"library"};const [path,query="",extra]=String(hash||"").split("?");if(extra!==undefined)return null;const m=path.match(/^#project\/([A-Za-z0-9_-]{8,100})\/([a-z]+)(?:\/([a-z_]+))?$/);if(!m||!PW_VIEWS[m[2]]||(m[3]&&(m[2]!=="stages"||!stage(m[3]))))return null;const context=routeContext(Object.fromEntries(new URLSearchParams(query)));return {projectId:m[1],view:m[2],...(m[3]?{viewStageKey:m[3]}:{}),...(Object.keys(context).length?{context}:{})};}
+  function route(projectId,view,viewStageKey,context){const query=new URLSearchParams(routeContext(context)).toString();return "#project/"+encodeURIComponent(projectId)+"/"+(PW_VIEWS[view]?view:"overview")+(view==="stages"&&stage(viewStageKey)?"/"+viewStageKey:"")+(query?"?"+query:"");}
+  function viewPreferenceKey(userId,projectId){return userId&&projectId?"investment-view-v1:"+encodeURIComponent(userId)+":"+encodeURIComponent(projectId):null;}
+  function readViewPreference(storage,userId,projectId){const key=viewPreferenceKey(userId,projectId);if(!key||!storage)return null;try{const value=JSON.parse(storage.getItem(key));if(!value||!PW_VIEWS[value.view]||(value.viewStageKey&&(value.view!=="stages"||!stage(value.viewStageKey))))return null;return {view:value.view,...(value.viewStageKey?{viewStageKey:value.viewStageKey}:{})};}catch(_){return null;}}
+  function writeViewPreference(storage,userId,projectId,value){const key=viewPreferenceKey(userId,projectId);if(!key||!storage||!PW_VIEWS[value?.view]||(value.viewStageKey&&(value.view!=="stages"||!stage(value.viewStageKey))))return false;try{storage.setItem(key,JSON.stringify({view:value.view,...(value.viewStageKey?{viewStageKey:value.viewStageKey}:{})}));return true;}catch(_){return false;}}
+  function stageNavigation(viewStageKey,workStageKey){return '<nav class="pm-stage-nav" aria-label="按阶段浏览">'+PW_STAGES.map(x=>'<button type="button" data-pm-stage-view="'+x.key+'" '+(x.key===viewStageKey?'class="active" aria-current="page"':'')+'>'+esc(x.label)+(x.key===workStageKey?'<small>项目工作阶段</small>':'')+'</button>').join('')+'</nav>';}
+  function workStage(project,brain,intelligence){const key=intelligence?.stage?intelligence.stage.key:brain?.lifecycle?brain.lifecycle.current:project?.investmentStage;return stage(key)?{key,label:stage(key).label}:{key:null,label:"待确认"};}
+  function primaryAction(view,key,project,permissions){
+    const edit=!!permissions?.edit,report=Number(project?.generated||0)>0;
+    if(view==="stages"&&stage(key)){
+      const actions={discovery:["files",edit?"登记线索资料":"查看线索资料"],screening:["facts","查看初判依据"],initiation:["files",edit?"补充立项资料":"查看立项资料"],decision:["scenarios",edit?"准备决策包":"查看决策包"],implementation:["stages","查看任务与计划"],post_investment:["data","查看经营数据与来源"],exit_review:["files",edit?"补充复盘资料":"查看复盘资料"]};
+      if(key==="feasibility")return edit?{kind:"report",label:report?"继续报告与候选稿":"进入可研工作区"}:{kind:"view",view:"versions",label:"查看报告版本"};
+      return {kind:"view",view:actions[key][0],label:actions[key][1]};
+    }
+    if(view==="versions"&&edit)return {kind:"report",label:report?"继续报告与候选稿":"进入可研工作区"};
+    return {kind:"stage",stageKey:stage(key)?key:"discovery",label:"查看当前阶段工作"};
+  }
+  function stageModel(key,brain,intelligence,ops){
+    brain=brain||{};intelligence=intelligence||{};ops=ops||{};
+    const all=[...[...(intelligence.gates||[]),...(intelligence.gate?[intelligence.gate]:[])].map(x=>({...x,kind:"阶段门",view:"stages"})),...(intelligence.milestones||[]).map(x=>({...x,kind:"里程碑",view:"stages"})),...(intelligence.deliverables||[]).map(x=>({...x,kind:"成果",view:"stages"})),...(ops.tasks||[]).map(x=>({...x,kind:"任务",view:"actions"})),...(ops.risks||[]).map(x=>({...x,kind:"风险",view:"actions"})),...(brain.facts||[]).map(x=>({...x,kind:"事实",view:"facts"})),...(brain.artifacts||[]).map(x=>({...x,kind:"资料",view:"files"})),...(brain.decisions||[]).map(x=>({...x,kind:"决策",view:"decisions"}))];
+    const stageById=new Map(all.filter(x=>x.id&&(x.stageKey||x.stage_key)).map(x=>[x.id,x.stageKey||x.stage_key]));
+    for(let pass=0;pass<3;pass++)for(const x of all){const inherited=stageById.get(x.gateId||x.gate_id)||stageById.get(x.milestoneId||x.milestone_id);if(x.id&&!stageById.has(x.id)&&inherited)stageById.set(x.id,inherited);}
+    const seen=new Set(),items=all.filter(x=>{const id=x.kind+":"+(x.id||JSON.stringify(x));if(seen.has(id))return false;seen.add(id);return true;});
+    const resolved=x=>x.stageKey||x.stage_key||stageById.get(x.gateId||x.gate_id)||stageById.get(x.milestoneId||x.milestone_id);
+    return {stage:stage(key),items:items.filter(x=>resolved(x)===key),shared:items.filter(x=>!stage(resolved(x)))};
+  }
+  function stageWorkspace(key,input){
+    input=input||{};const model=stageModel(key,input.brain,input.intelligence,input.ops),s=model.stage;if(!s)return error("未识别的阶段，请重新选择。");
+    const status={open:"待处理",candidate:"待确认",confirmed:"已确认",not_started:"待开始",in_progress:"进行中",blocked:"受阻",done:"已完成",accepted:"已验收",passed:"已通过",waived:"已豁免",closed:"已关闭",draft:"草稿"};
+    const entityTypes={"阶段门":"gate","里程碑":"milestone","成果":"deliverable","任务":"task","风险":"risk","事实":"fact","资料":"artifact","决策":"decision"};
+    const list=items=>items.map(x=>'<li><span><small>'+esc(x.kind)+'</small><b>'+esc(x.name||x.title||x.label||x.topic||x.factKey||x.artifactType||"未命名记录")+'</b><em>'+esc(status[x.status]||x.status||"状态待确认")+(x.owner?' · '+esc(x.owner):'')+(x.dueDate||x.plannedDate?' · '+esc(x.dueDate||x.plannedDate):'')+'</em></span><button type="button" data-pw-view="'+x.view+'" data-pw-stage="'+s.key+'" data-pw-return-view="stages"'+(x.id?' data-pw-entity-id="'+esc(x.id)+'" data-pw-entity-type="'+entityTypes[x.kind]+'"':'')+'>查看详情</button></li>').join('');
+    const sources=[["brain","事实与资料",input.brain,input.brainError],["intelligence","阶段计划与成果",input.intelligence,input.intelligenceError],["ops","行动与风险",input.ops,input.opsError]];
+    return '<section class="pm-stage-workspace"><header><span>正在查看</span><h3>'+esc(s.label)+'</h3><p>'+esc(s.focus)+'</p><p class="pm-hint">浏览此阶段不会改变工作阶段或审批记录。阶段页只汇总已有记录，未登记不代表已完成。</p></header>'+sources.map(([kind,label,data,failure])=>failure?'<div class="pm-workspace-error"><b>'+label+'加载失败</b><p>'+esc(failure)+'</p><button type="button" data-pm-retry-source="'+kind+'">重试'+label+'</button></div>':!data?'<div class="pm-workspace-loading" role="status">正在读取'+label+'…</div>':'').join('')+'<div class="pm-stage-tools">'+s.tools.map(v=>'<button type="button" data-pw-view="'+v+'" data-pw-stage="'+s.key+'" data-pw-return-view="stages">'+esc(PW_VIEWS[v])+' <small>全部阶段</small></button>').join('')+'</div><section class="pm-detail-section"><h4>本阶段已登记工作</h4>'+(model.items.length?'<ul class="pm-stage-records">'+list(model.items)+'</ul>':'<p class="pm-hint">'+(sources.some(x=>!x[2])?'当前可用记录中，暂无本阶段记录。待其他数据加载后继续显示。':'暂无明确关联本阶段的记录；可从上方入口查看或补充项目资料。')+'</p>')+'</section><details class="pm-stage-shared"><summary>项目共用 / 待归类（当前已加载 '+model.shared.length+' 条）</summary><p>历史记录没有阶段归属时保留在此处；详情入口查看全项目数据。</p>'+(model.shared.length?'<ul class="pm-stage-records">'+list(model.shared)+'</ul>':'<p>当前已加载数据中暂无共用记录。</p>')+'</details></section>';
+  }
+  function navigationGroup(view){return PW_NAV_GROUPS.find(x=>x.views.includes(view))||PW_NAV_GROUPS[0];}
+  function nav(projectId,view){const selected=navigationGroup(view);return '<nav class="pm-workspace-tabs" aria-label="投资全周期子功能">'+PW_NAV_GROUPS.map(x=>'<div class="pm-nav-group'+(x.settings?' pm-nav-settings':'')+'"><button type="button" class="'+(x===selected?'active':'')+'" '+(x===selected?'aria-current="page" ':'')+'data-pw-view="'+x.key+'" data-project-id="'+esc(projectId)+'">'+esc(x.label)+'</button></div>').join('')+'</nav>';}
+  function subnav(view,options){options=options||{};const group=navigationGroup(view),views=group.views.filter(v=>v!=="acceptance"||options.manage);if(views.length<2)return "";return '<nav class="pm-workspace-subtabs" aria-label="'+esc(group.label)+'子页">'+views.map(v=>'<button type="button" data-pw-view="'+v+'"'+(v===view?' class="active" aria-current="page"':'')+'>'+esc(PW_TAB_LABELS[v]||PW_VIEWS[v])+'</button>').join('')+'</nav>';}
   function loading(label){return '<div class="pm-workspace-loading"><b>'+esc(label||"正在加载项目工作区")+'</b><span>正在汇总项目事实、来源和权限边界…</span></div>';}
   function error(message){return '<div class="pm-workspace-error"><b>当前视图加载失败</b><span>'+esc(message||"未知错误")+'</span><button type="button" class="ub-btn ghost" data-pw-retry="1">重试</button></div>';}
   function kpis(items){return '<div class="pm-ws-kpis">'+items.map(x=>'<div><b>'+esc(x.value)+'</b><span>'+esc(x.label)+'</span></div>').join('')+'</div>';}
   function ledgerNote(items){return '<div class="pm-ledger-note">'+items.map(x=>'<span><b>'+esc(x.label)+'</b>'+esc(x.value)+'</span>').join('')+'</div>';}
+  function requirements(input,compact=false){
+    input=input||{};const brain=input.brain||{},intelligence=input.intelligence||{},checklist=brain.requirements,rows=Array.isArray(intelligence.dataHealth?.requirements)?intelligence.dataHealth.requirements:Array.isArray(checklist?.items)?checklist.items:null;
+    const status={missing:'缺失',unverified:'待核实',conflict:'冲突',not_applicable:'不适用',condition_pending:'适用条件待确认',optional:'选填',not_required:'当前条件无需提供',confirmed:'已确认事实',assumption:'假设 / 非事实，仍需核实'},kind={required:'必需',conditional:'条件必需',optional:'选填'},factTypes={FACT:'事实',ASSUMPTION:'假设',CALCULATION:'计算结果',AI_JUDGEMENT:'AI判断'};
+    const stageKey=intelligence.stage?intelligence.stage.key:checklist?.stageKey||brain.lifecycle?.current,stageLabel=stage(stageKey)?.label||'待确认';
+    const heading='<h3>资料需求清单</h3><p class="pm-hint">当前工作阶段：'+esc(stageLabel)+'。清单来自后台既有需求规则，不随浏览阶段改变；未录入项仍会列出，假设及AI判断不等于已确认事实。</p>';
+    if(!rows)return '<section class="pm-detail-section pm-requirements">'+heading+'<p role="status">'+(input.brainError&&input.intelligenceError?'资料需求暂不可读取，请重试页面数据。':!input.brain||!input.intelligence?'正在读取资料需求…':'后台尚未提供需求清单；没有清单不代表资料齐全。')+'</p></section>';
+    const count=key=>rows.filter(x=>x.status===key).length,body=heading+kpis([{value:count('missing'),label:'缺失'},{value:count('unverified')+count('condition_pending'),label:'待核实 / 条件待定'},{value:count('assumption'),label:'假设 / 非事实'},{value:count('conflict'),label:'冲突'},{value:count('not_applicable'),label:'不适用'}])
+      +(rows.length?rows.map(x=>{const fact=(brain.facts||[]).find(f=>x.factId?f.id===x.factId:f.factKey===x.factKey&&String(f.scopeId||'')===String(x.scopeId||'')),pairs=[['事实键',x.factKey],['范围',x.scopeId||'项目整体'],['信息类型',factTypes[fact?.factType]||fact?.factType||'尚无对应事实记录'],['当前值',fact?text(fact.value)+(fact.unit?' '+fact.unit:''):'尚未录入'],['数据时点',fact?.asOf],['口径依据',fact?.basis],['来源引用',x.sourceRef||fact?.sourceRef||'未登记'],['来源位置',fact?.sourceLocator],['不适用理由',x.naReason||fact?.naReason],['冲突候选',fact?.conflictValues?.length?text(fact.conflictValues):'']];return '<details class="pm-requirement-row" data-requirement-status="'+esc(x.status)+'"><summary><b>'+esc(x.label||x.factKey)+'</b><span>'+esc(kind[x.requirement]||x.requirement||'要求待确认')+' · '+esc(x.scopeId||'项目整体')+'</span><i>'+esc(status[x.status]||x.status||'状态待确认')+'</i></summary><dl>'+pairs.filter(([,v])=>v!==undefined&&v!==null&&v!=='').map(([label,value])=>'<dt>'+esc(label)+'</dt><dd>'+esc(value)+'</dd>').join('')+'</dl></details>';}).join(''):'<p>后台清单当前为零项，不代表资料自动通过专业复核。</p>')+'<button type="button" class="ub-btn ghost" data-pw-view="data">查看数据注册与溯源</button>';
+    return '<section class="pm-detail-section pm-requirements">'+(compact?'<details><summary>当前工作阶段资料需求 · '+rows.length+' 项（展开核对）</summary>'+body+'</details>':body)+'</section>';
+  }
   function dataRegistry(model){const d=model&&model.data||{},s=d.summary||{},rows=d.rows||[],conflicts=d.conflicts||[],missing=d.missing||[];return '<section class="pm-workspace-view"><header><div><span>PROJECT DATA REGISTRY</span><h3>项目数据注册表</h3><p>统一查看事实、参数、白箱指标和证据。点击一行即可看到来源、版本和溯源位置。</p></div><i>Read Model · '+esc(model?.context?.role||"VIEWER")+'</i></header>'
     +kpis([{value:s.total||0,label:"全部数据项"},{value:s.confirmed||0,label:"已确认"},{value:s.candidate||0,label:"待审核"},{value:s.conflicts||0,label:"冲突"},{value:s.missing||0,label:"缺失"}])
     +(conflicts.length?'<div class="pm-ws-alert bad"><b>发现 '+conflicts.length+' 组口径冲突</b><span>同一数据键存在多个不同值，请在正式决策前完成核对。</span></div>':'')
@@ -41,5 +115,5 @@
     +'<div class="pm-member-list"><div class="pm-member-head"><span>成员账号</span><span>项目角色</span><span>操作</span></div>'+members.map(x=>'<div><span><b>用户 #'+esc(x.userId)+'</b><small>'+esc(x.status)+'</small></span><i>'+esc(x.role)+'</i>'+(manage&&x.role!=="OWNER"?'<button class="ub-btn danger-lite" data-pw-member-remove="'+esc(x.userId)+'">移除</button>':'<span>—</span>')+'</div>').join('')+'</div>'+(manage?'<details class="pm-profile-edit"><summary>项目组织与保密边界</summary><div><input id="pwOrgId" value="'+esc(p.organizationId||'')+'" placeholder="组织ID"><input id="pwDeptId" value="'+esc(p.departmentId||'')+'" placeholder="部门ID"><select id="pwVisibility"><option value="private" '+(p.visibility==='private'?'selected':'')+'>仅项目</option><option value="department" '+(p.visibility==='department'?'selected':'')+'>部门</option><option value="organization" '+(p.visibility==='organization'?'selected':'')+'>组织</option></select><select id="pwConf"><option value="internal">内部</option><option value="confidential" '+(p.confidentialityLevel==='confidential'?'selected':'')+'>机密</option><option value="restricted" '+(p.confidentialityLevel==='restricted'?'selected':'')+'>严格受限</option></select><button class="ub-btn ghost" data-pw-profile-save="1">保存边界</button></div></details>':'')+'</section>';
   }
   function render(view,model){if(!model)return loading("正在加载"+PW_VIEWS[view]);if(model.error)return error(model.error);if(view==="data")return dataRegistry(model);if(view==="files")return files(model);if(view==="decisions")return decisions(model);if(view==="spatial")return spatial(model);if(view==="members")return members(model);return "";}
-  const api={VIEWS:PW_VIEWS,parseRoute,route,nav,render,loading,error,dataRegistry,files,decisions,spatial,members};root.ProjectWorkspaceUI=api;if(typeof module==="object"&&module.exports)module.exports=api;
+  const api={VIEWS:PW_VIEWS,NAV_GROUPS:PW_NAV_GROUPS,STAGES:PW_STAGES,stage,parseRoute,route,routeContext,navigationGroup,nav,subnav,render,loading,error,dataRegistry,files,decisions,spatial,members,requirements,viewPreferenceKey,readViewPreference,writeViewPreference,stageNavigation,workStage,primaryAction,stageModel,stageWorkspace};root.ProjectWorkspaceUI=api;if(typeof module==="object"&&module.exports)module.exports=api;
 })(typeof window!=="undefined"?window:globalThis);

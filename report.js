@@ -14,20 +14,44 @@ let reportLocalPersistedRevision = -1;
 let reportCloudPersistedRevision = -1;
 let reportLocalSavePending = Promise.resolve(false);
 let reportLocalSaveQueue = Promise.resolve();
+const reportDraftHashCache = new Map();
+let reportDraftTimer=null,reportDraftFirstPending=0,reportDraftScheduled=null;
 // 大报告/多版本超过 localStorage 配额时，完整保存在 IndexedDB，不裁剪用户版本。
 function reportDraftStoreKey(){return (typeof getUser==="function"?getUser()||"guest":"guest")+"/"+(typeof currentProjectId!=="undefined"&&currentProjectId||"draft");}
-function reportDraftStore(mode,key,value){
+async function reportDraftStore(mode,key,value){
+  const codec=await import('./research-state-codec.mjs');
+  const packed=mode==='put'?await codec.packState(value,reportDraftHashCache):null;
   return new Promise((resolve,reject)=>{
     if(typeof indexedDB==="undefined")return reject(new Error("浏览器不支持大草稿存储"));
-    const request=indexedDB.open("ai-studyreport-drafts",1);
-    let expired=false;const timer=setTimeout(()=>{expired=true;reject(new Error("本机存储超时"));},8000);
-    request.onupgradeneeded=()=>request.result.createObjectStore("drafts");
+    const request=indexedDB.open("ai-studyreport-drafts",2);
+    let expired=false,activeTx=null;const timer=setTimeout(()=>{expired=true;try{activeTx?.abort();}catch{}reject(new Error("本机存储超时"));},8000);
+    request.onupgradeneeded=()=>{for(const name of ['drafts','objects'])if(!request.result.objectStoreNames.contains(name))request.result.createObjectStore(name);};
+    request.onblocked=()=>{clearTimeout(timer);expired=true;reject(new Error('请关闭旧版页面后重试，本机原草稿保留'));};
     request.onerror=()=>{clearTimeout(timer);reject(request.error);};
     request.onsuccess=()=>{
       const db=request.result;if(expired){db.close();return;}
-      const tx=db.transaction("drafts",mode==="get"?"readonly":"readwrite"),store=tx.objectStore("drafts");
-      const op=mode==="get"?store.get(key):mode==="delete"?store.delete(key):store.put(value,key);
-      tx.oncomplete=()=>{clearTimeout(timer);db.close();resolve(mode==="get"?op.result:true);};
+      const tx=db.transaction(['drafts','objects'],mode==="get"?"readonly":"readwrite"),store=tx.objectStore("drafts"),objects=tx.objectStore('objects');
+      activeTx=tx;
+      let result=true;
+      if(mode==='get'){
+        const op=store.get(key);op.onsuccess=()=>{
+          const row=op.result;if(row?.storageFormat!=='draft-parts-v1'){result=row;return;}
+          const ids=[...codec.referencedObjects(row.manifest)],found=new Map();let left=ids.length;
+          const finish=()=>{try{result=codec.unpackState(row.manifest,found);}catch{tx.abort();}};
+          if(!left)finish();
+          for(const id of ids){const r=objects.get(key+'/'+id);r.onsuccess=()=>{if(typeof r.result==='string')found.set(id,r.result);if(--left===0)finish();};}
+        };
+      }else{
+        // A current draft replaces only its own predecessor atomically; conflict
+        // backups and other accounts/projects are in different records.
+        const previous=store.get(key);previous.onsuccess=()=>{
+          if(previous.result?.storageFormat==='draft-parts-v1')for(const id of codec.referencedObjects(previous.result.manifest))if(!packed?.objects.has(id))objects.delete(key+'/'+id);
+          if(mode==='delete'){store.delete(key);return;}
+          for(const [id,text] of packed.objects){const r=objects.getKey(key+'/'+id);r.onsuccess=()=>{if(r.result===undefined)objects.add(text,key+'/'+id);};}
+          store.put({storageFormat:'draft-parts-v1',manifest:packed.manifest},key);
+        };
+      }
+      tx.oncomplete=()=>{clearTimeout(timer);db.close();resolve(result);};
       tx.onabort=tx.onerror=()=>{clearTimeout(timer);db.close();reject(tx.error||new Error("本机存储失败"));};
     };
   });
@@ -35,16 +59,35 @@ function reportDraftStore(mode,key,value){
 async function loadDurableDraft(){
   const local=loadDraft();let large=null;
   try{large=await reportDraftStore("get",reportDraftStoreKey());}catch(_){}
+  // Migrate only the current project's old draft. Archive + exact readback
+  // precede removal, and a concurrent edit leaves the old entry untouched.
+  if(local&&large&&Number(large.ts)>=Number(local.ts)&&typeof indexedDB!=='undefined')try{await reportMigrateLegacyDraft(local);}catch(_){}
   if(!large)return local;
   return window.ProjectWorkflow?.selectProjectDraft?ProjectWorkflow.selectProjectDraft(large,local,large.projectId):large;
+}
+async function reportMigrateLegacyDraft(local){
+  if((local.projectId||null)!==(typeof currentProjectId!=='undefined'?currentProjectId||null:null))return false;
+  const currentKey=reportDraftStoreKey();
+  const raw=localStorage.getItem(DRAFT_KEY);if(!raw)return false;
+  const codec=await import('./research-state-codec.mjs');
+  const source=await codec.packState(local),digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw));
+  if(JSON.stringify(source.manifest)!==JSON.stringify((await codec.packState(JSON.parse(raw))).manifest))return false;
+  const id=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('');
+  const archive=currentKey+'/legacy-recovery/'+id;
+  await reportDraftStore('put',archive,local);
+  const restored=await reportDraftStore('get',archive),verified=await codec.packState(restored);
+  if(JSON.stringify(source.manifest)!==JSON.stringify(verified.manifest))throw Error('旧草稿回读校验失败');
+  if(reportDraftStoreKey()!==currentKey||localStorage.getItem(DRAFT_KEY)!==raw)return false;
+  localStorage.removeItem(DRAFT_KEY);return true;
 }
 function reportHasUnsavedChanges(){return reportDocumentRevision>0&&reportDocumentRevision>Math.max(reportLocalPersistedRevision,reportCloudPersistedRevision);}
 if(window.addEventListener)window.addEventListener("beforeunload",event=>{
   if(reportDocumentRevision>0&&reportHasUnsavedChanges()){event.preventDefault();event.returnValue="";}
 });
 async function persistReportDraft(){
+  if(window.ResearchUI?.active()){const ok=await ResearchUI.save();return {ok,local:false,remote:ok};}
   if(typeof projectCanEdit==='function'&&!projectCanEdit()){setSaveState('readonly');return {ok:false,local:false,remote:false,readonly:true};}
-  saveDraft();
+  saveDraft(true);
   const local=await reportLocalSavePending;
   const remote=typeof flushCloudSave==="function"?await flushCloudSave():false;
   return {ok:!!(local||remote),local:!!local,remote:!!remote};
@@ -60,20 +103,45 @@ function buildDraftData(){
     chapters: chapters.map(c=>({cn:c.cn, name:c.name, checked:c.checked,
       sections:c.sections.map(s=>({t:s.t, numeric:s.numeric, content:s.content, editedHtml:s.editedHtml||null,
         locked:!!s.locked,syncStatus:s.syncStatus||"current",staleReason:s.staleReason||"",staleKeys:s.staleKeys||[],staleKind:s.staleKind||"",
-        pendingRevision:s.pendingRevision||null,undoStack:s.undoStack||[],prov:s.prov||null,logicSnapshot:s.logicSnapshot||null,executionTask:s.executionTask||null,
+        pendingRevision:s.pendingRevision||null,undoStack:s.undoStack||[],prov:s.prov||null,logicSnapshot:s.logicSnapshot||null,executionTask:s.executionTask||null,outputPolicyVersion:s.outputPolicyVersion||null,
         structureMigrated:!!s.structureMigrated,migrationSource:s.migrationSource||""}))}))
   };
 }
-function saveDraft(){
+function saveDraft(immediate=false){
+  if(window.ResearchUI?.active()){if(ResearchUI.editable()){reportDocumentRevision++;ResearchUI.schedule();}return;}
   if(typeof projectCanEdit==='function'&&!projectCanEdit())return;
   reportDocumentRevision++;
-  const snapshot=JSON.parse(JSON.stringify(buildDraftData())),revision=reportDocumentRevision,key=reportDraftStoreKey();
+  // Older/headless environments keep the synchronous compatibility path.
+  if(typeof indexedDB==='undefined')return reportPersistDraftNow();
+  const key=reportDraftStoreKey();
+  if(reportDraftScheduled&&reportDraftScheduled.key!==key){
+    clearTimeout(reportDraftTimer);reportDraftScheduled.resolve(false);reportDraftScheduled=null;
+  }
+  if(!reportDraftScheduled){
+    let resolve;const promise=new Promise(r=>resolve=r);reportDraftScheduled={key,promise,resolve};reportDraftFirstPending=Date.now();
+  }
+  clearTimeout(reportDraftTimer);
+  const scheduled=reportDraftScheduled;
+  const flush=()=>{
+    reportDraftTimer=null;reportDraftScheduled=null;reportDraftFirstPending=0;
+    if(scheduled.key!==reportDraftStoreKey()){scheduled.resolve(false);return;}
+    Promise.resolve(reportPersistDraftNow()).then(scheduled.resolve,()=>scheduled.resolve(false));
+  };
+  reportLocalSavePending=scheduled.promise;
+  if(typeof setSaveState==='function')setSaveState('saving');
+  if(immediate)flush();else reportDraftTimer=setTimeout(flush,Math.max(0,Math.min(1000,5000-(Date.now()-reportDraftFirstPending))));
+  return scheduled.promise;
+}
+function reportPersistDraftNow(){
+  const draft=buildDraftData(),snapshot=typeof structuredClone==='function'?structuredClone(draft):JSON.parse(JSON.stringify(draft)),revision=reportDocumentRevision,key=reportDraftStoreKey();
   let savedLocally=false;
-  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(snapshot)); savedLocally=true;reportLocalPersistedRevision=revision; }catch(e){}
+  // Modern browsers use the asynchronous draft store first. Never repeatedly
+  // stringify a long report just to discover that localStorage is still full.
+  if(typeof indexedDB==='undefined')try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(snapshot)); savedLocally=true;reportLocalPersistedRevision=revision; }catch(e){}
   reportLocalSavePending=savedLocally?Promise.resolve(true):(reportLocalSaveQueue=reportLocalSaveQueue.catch(()=>false).then(()=>reportDraftStore("put",key,snapshot)).then(()=>{
     if(key===reportDraftStoreKey())reportLocalPersistedRevision=Math.max(reportLocalPersistedRevision,revision);
-    if(revision===reportDocumentRevision&&typeof setSaveState==="function")setSaveState("local");return true;
-  }).catch(()=>{if(revision===reportDocumentRevision&&typeof setSaveState==="function")setSaveState("offline");return false;}));
+    if(key===reportDraftStoreKey()&&revision===reportDocumentRevision&&typeof setSaveState==="function")setSaveState("local");return true;
+  }).catch(()=>{if(key===reportDraftStoreKey()&&revision===reportDocumentRevision&&typeof setSaveState==="function")setSaveState("offline");return false;}));
   if(typeof setSaveState==="function")setSaveState(savedLocally?"local":"saving");
   scheduleCloudSave();
   return reportLocalSavePending;
@@ -81,14 +149,19 @@ function saveDraft(){
 function loadDraft(){
   try{ const raw = localStorage.getItem(DRAFT_KEY); return raw? JSON.parse(raw): null; }catch(e){ return null; }
 }
-function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} reportDraftStore("delete",reportDraftStoreKey()).catch(()=>{}); }
+function clearDraft(){
+  const key=reportDraftStoreKey();
+  if(reportDraftScheduled?.key===key){clearTimeout(reportDraftTimer);reportDraftScheduled.resolve(false);reportDraftScheduled=null;reportDraftFirstPending=0;}
+  try{localStorage.removeItem(DRAFT_KEY);}catch(e){}
+  reportLocalSaveQueue=reportLocalSaveQueue.catch(()=>false).then(()=>reportDraftStore('delete',key)).catch(()=>false);
+}
 function restoreDraft(d, options){
   options=options||{};
   // 浏览器刷新时只恢复项目数据，不替用户决定要进入哪个功能模块。
   // “我的项目→打开”及草稿栏的人工恢复仍沿用原模式，保持完整工作现场恢复能力。
   appMode = options.openHome ? null
     : (window.ProjectWorkflow?ProjectWorkflow.resumeAppMode(d.appMode,!!d.aiReportSession):(d.aiReportSession?"aireport":"report"));
-  domainKey = d.domainKey; signed = !!d.signed; docNo = d.docNo||null;
+  domainKey = d.domainKey; signed = false; docNo = d.docNo||null; // Legacy flags never confer formal approval on a working draft.
   reportDocumentRevision=Math.max(reportDocumentRevision,Number(d.documentRevision)||0);
   reportLocalPersistedRevision=reportDocumentRevision;reportCloudPersistedRevision=-1;
   Object.assign(project, d.project||{});
@@ -112,7 +185,7 @@ function restoreDraft(d, options){
     }catch(e){calcResult=null;}
   }
   currentStep = Math.min(d.currentStep||0, STEPS.length-1);
-  renderTOC(); renderSheet();
+  if(!options.deferRender){renderTOC(); renderSheet();}
 }
 function draftBarHtml(d){
   const t = new Date(d.ts);
@@ -234,7 +307,8 @@ function stepProjectInfo(){
     +'<div id="aiPosBox"></div>'
     +'<div style="display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap;">'
     +'<input id="poiKw" type="text" placeholder="项目/小区全名，可加城市，如：深圳 安居华越龙苑" value="'+escapeHtml(project.poiKw || project.name || "")+'" style="flex:1; min-width:240px; font-size:12.5px; padding:6px 10px;">'
-    +'<button type="button" class="btn ghost" id="poiBtn" style="padding:5px 14px;font-size:12px;">📍 搜索位置并抓取周边</button></div>'
+    +'<button type="button" class="btn ghost" id="poiBtn" style="padding:5px 14px;font-size:12px;">📍 搜索位置并抓取周边</button>'
+    +'<button type="button" class="btn ghost" id="projectCityMapBtn" onclick="openProjectCityMap()" style="padding:5px 14px;font-size:12px;">🗺 二维地图 / 三维周边</button></div>'
     +'<div id="poiStatus" style="font-size:12px; color:var(--ink-soft); margin-top:6px;"></div>'
     +'<div><label style="margin-top:10px;">周边配套（自动抓取自地图，可手动增删修改，将注入区位与市场章节）</label><textarea id="f_poiDesc" style="min-height:72px;" placeholder="点上方按钮自动抓取，或手动填写">'+escapeHtml(project.poiDesc||"")+'</textarea></div>'
     +'<div class="step-desc" style="margin:6px 0 0;">竞品数据须来自真实调研——AI只负责把这些真实数据组织成市场分析论述，不会自行编造周边情况。</div>'
@@ -345,7 +419,7 @@ function stepGenerate(){
   const active = chapters.filter(c=>c.checked);
   const totalSec = active.reduce((n,c)=>n+c.sections.length,0);
   let inner = active.map(c=>'<div class="chapter-block" id="block_'+c.cn+'"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
-    + c.sections.map((s,si)=>{const ready=!!(s.content||s.editedHtml);return '<div class="section-block '+(ready?'':'pending')+'" id="sec_'+c.cn+'_'+si+'"><h4>'+s.t+(s.numeric?' ⚠数据':'')+(ready?'<span class="done-stamp">已拟</span>':'')+'</h4>'+(ready?renderSectionLogicHtml(c,s):'')+'<div class="body">'+(ready?renderSectionContent(c,s,true):'<span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:88%"></span><span class="skel" style="width:56%"></span>')+'</div></div>';}).join("")
+    + c.sections.map((s,si)=>{const ready=reportHasVisibleBody(s);return '<div class="section-block '+(ready?'':'pending')+'" id="sec_'+c.cn+'_'+si+'"><h4>'+s.t+(s.numeric?' ⚠数据':'')+(ready?'<span class="done-stamp">已拟</span>':'')+'</h4>'+(ready?renderSectionLogicHtml(c,s):'')+'<div class="body">'+(ready?renderSectionContent(c,s,true):'<span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:88%"></span><span class="skel" style="width:56%"></span>')+'</div></div>';}).join("")
     +'</div>').join("");
   return '<div class="doc-eyebrow">STEP 04 · 逐章生成</div>'
     +'<h1 class="doc-title">起草中：'+(project.name||"（未命名项目）")+'</h1>'
@@ -372,10 +446,18 @@ function runWorkerPool(queue, workerFn, concurrency, shouldContinue){
 }
 // 一篇报告的生成以远端模型调用为主，4路能比原3路缩短约一成至两成墙钟时间，
 // 同时保留全局覆盖口供本地/服务器按模型限流能力调低或调高（安全范围2~6）。
+function reportHasVisibleBody(section){
+  if(window.ProjectWorkflow?.hasReportBody)return ProjectWorkflow.hasReportBody(section);
+  return !!String(section?.editedHtml||section?.content||'').replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/gi,' ').replace(/[\u200b-\u200f\u2060\ufeff]/g,'').trim();
+}
 function reportGenerationConcurrency(total){
   const configured=Number((typeof window!=="undefined"&&window.REPORT_GENERATION_CONCURRENCY)||4);
   const safe=Number.isFinite(configured)?Math.max(2,Math.min(6,Math.round(configured))):4;
   return Math.max(1,Math.min(Number(total)||1,safe));
+}
+function runReportGenerationPool(tasks,worker,concurrency,shouldContinue){
+  if(!window.ReportArgument?.runInDependencyOrder)throw new Error('论证任务模块未加载，请刷新后重试');
+  return ReportArgument.runInDependencyOrder(tasks,worker,runWorkerPool,concurrency,shouldContinue);
 }
 async function runGeneration(){
   await ensureReportTableTemplates();
@@ -385,7 +467,7 @@ async function runGeneration(){
   const progressEl = document.getElementById("progressLine");
   genUsage = {inTok:0, outTok:0};
   const tasks = [];
-  active.forEach(c=>c.sections.forEach((s,si)=>{if(!s.content&&!s.editedHtml)tasks.push({c,s,si});}));
+  active.forEach(c=>c.sections.forEach((s,si)=>{if(!reportHasVisibleBody(s))tasks.push({c,s,si});}));
   const total = tasks.length;
   let done = 0, failed = 0;
 
@@ -395,6 +477,8 @@ async function runGeneration(){
     secEl.classList.add("gen");
     try{
       const text = await generateSection(c, s);
+      if(!reportHasVisibleBody({content:text}))throw new Error("模型未返回正文，本节没有计入完成");
+      if(s.editedHtml&&!reportHasVisibleBody({editedHtml:s.editedHtml}))s.editedHtml=null;
       s.content = text;
       secEl.classList.remove("pending"); secEl.classList.remove("gen");
       secEl.querySelector(".body").innerHTML = renderSectionContent(c,s,false);
@@ -410,7 +494,7 @@ async function runGeneration(){
     done++;
     progressEl.textContent = reportGenerationConcurrency(total)+'路并行撰写中… 已完成 '+done+'/'+total + (failed? '（失败 '+failed+'）':'');
   }
-  await runWorkerPool(tasks, handleOne, reportGenerationConcurrency(total));
+  await runReportGenerationPool(tasks, handleOne, reportGenerationConcurrency(total));
 
   const cost = (genUsage.inTok*PRICE_IN_PER_M + genUsage.outTok*PRICE_OUT_PER_M)/1000000;
   let tail = '已完成 '+(total-failed)+'/'+total+' 个子标题的初稿起草' + (failed? '（'+failed+' 个失败，可在下方点击重试）':'。');
@@ -425,7 +509,7 @@ async function runGeneration(){
   }
   genBtn.style.display = "none";
   document.getElementById("toStep5r").style.display = "inline-block";
-  if(window.ProjectWorkflow)window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("完成初稿生成"));
+  if(!failed&&active.every(c=>c.sections.every(reportHasVisibleBody))&&window.ProjectWorkflow)window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("完成初稿生成"));
   saveDraft();
   bindEvents();
 }
@@ -442,8 +526,9 @@ async function updateStaleSections(){
 // 界面渲染：统一走 md.js（支持标题/列表/表格/引用/分隔线/行内样式，并兼容旧的[[TABLE]]语法）
 // 保留降级分支：万一 md.js 未加载，仍能按老逻辑显示，不至于整页空白
 function renderContent(text){
+  text=window.ReportOutputPolicy?ReportOutputPolicy.normalize(text):text;
   if(window.MD && typeof window.MD.renderHtml === "function"){
-    return window.MD.renderHtml(text).replace(/【待补：([^】]+)】/g,'<span class="rpt-missing-placeholder">【待补：$1】</span>');
+    return window.MD.renderHtml(text).replace(/【待补\s*(?:：|:)?[^】]*】/g,'<span class="rpt-missing-placeholder">$&</span>');
   }
   const tableRe = /\[\[TABLE\]\]([\s\S]*?)\[\[\/TABLE\]\]/g;
   let html = text.replace(tableRe, function(m, inner){
@@ -479,6 +564,12 @@ function sectionFormalTemplates(c,s){
 }
 function renderSectionContent(c,s,useEdited){
   const base=useEdited&&s.editedHtml?s.editedHtml:renderContent(s.content||"");
+  if(window.ReportSectionLayout?.composeDocument&&reportTableProjectType()==='gaibao-housing'){
+    const entries=chapters.flatMap(ch=>ch.sections.map(sec=>({html:sec===s?base:(sec.editedHtml||renderContent(sec.content||'')),context:{type:reportTableProjectType(),chapter:ch.name,section:sec.t,number:(chapters.indexOf(ch)+1)+'.'+(ch.sections.indexOf(sec)+1)},section:sec}))).filter(e=>e.html.trim());
+    const index=entries.findIndex(e=>e.section===s);
+    if(index>=0)return window.ReportSectionLayout.composeDocument(entries,window.ReportTableTemplates)[index];
+  }
+  if(window.ReportSectionLayout)return window.ReportSectionLayout.compose(base,{type:reportTableProjectType(),chapter:c.name,section:s.t,number:(chapters.indexOf(c)+1)+'.'+(c.sections.indexOf(s)+1)},window.ReportTableTemplates);
   if(/data-template-id=/.test(base))return base;
   const type=reportTableProjectType();
   const tables=type&&window.ReportTableTemplates?window.ReportTableTemplates.renderSection(type,c.name,s.t):"";
@@ -487,13 +578,14 @@ function renderSectionContent(c,s,useEdited){
 function reportSiteWritingPlan(){
   if(!window.ProjectWorkflow?.siteWritingPlan)return null;
   const plan=ProjectWorkflow.siteWritingPlan(project.analysisSites||[]);
+  if(plan.isBatch&&rlProjectType()==='gaibao'&&rlBusinessScenario()==='housing_conversion')return Object.assign({},plan,{strategy:'全部房源按同一主题统一综合分析，实质差异在同一段或同一张表中对照；不按主次点位分别论述，不逐点重复模板。'});
   return plan.isBatch?plan:null;
 }
 function reportGlobalRequirementsHtml(){
   const type=rlProjectType(),scenario=rlBusinessScenario(),set=window.ReportLogicCore?.current(type);
   const text=window.ReportLogicCore?.globalRequirements?.(type,{businessScenario:scenario})||"",plan=reportSiteWritingPlan();
   const version=set?.data?.logicVersions?.[type==="gaibao"?scenario:type];
-  return '<section class="rpt-logic-note rpt-global-requirements"><div class="rpt-logic-head"><b>全篇要求'+(version?' · 逻辑版本 '+escapeHtml(version):'')+'</b><button type="button" onclick="reportEditGlobalRequirements()">编辑全篇要求</button></div><p>以下要求统一适用于全篇；各小节只展示自身业务逻辑。后台发布后用于后续生成，已有正文仍通过候选稿确认更新。</p><div>'+escapeHtml(text||(set?'暂未设置场景专属全篇要求。':'全篇要求尚未加载，请稍后重试。')).replace(/\n/g,'<br>')+'</div>'+(plan?'<p><b>当前项目多点位写作策略：</b>'+escapeHtml(plan.strategy)+'</p>':'')+'</section>';
+  return '<section class="rpt-logic-note rpt-global-requirements"><div class="rpt-logic-head"><b>全篇要求'+(version?' · 逻辑版本 '+escapeHtml(version):'')+'</b><button type="button" class="rpt-logic-edit" onclick="reportEditGlobalRequirements()">编辑全篇要求</button></div><p>以下要求统一适用于全篇；各小节只展示自身业务逻辑。后台发布后用于后续生成，已有正文仍通过候选稿确认更新。</p><div>'+escapeHtml(text||(set?'暂未设置场景专属全篇要求。':'全篇要求尚未加载，请稍后重试。')).replace(/\n/g,'<br>')+'</div>'+(plan?'<p><b>当前项目多点位写作策略：</b>'+escapeHtml(plan.strategy)+'</p>':'')+'</section>';
 }
 async function reportEditGlobalRequirements(){
   if(document.getElementById("reportGlobalEditor"))return;
@@ -642,8 +734,8 @@ let ragAvailable = null;
 
 // 溯源徽章：小节标题后显示置信度，点击展开依据详情
 function provBadgeHtml(cn, si, prov){
-  if(!prov || !prov.confidence) return "";
-  const cf = prov.confidence;
+  if(!prov) return "";
+  const cf = provConfidence(prov);
   return '<span class="prov-badge" data-prov="'+cn+'_'+si+'" title="点击查看本节生成依据" '
     +'style="cursor:pointer; font-family:var(--mono); font-size:9.5px; letter-spacing:.5px; padding:1px 7px; '
     +'border:1px solid '+cf.color+'; color:'+cf.color+'; border-radius:2px; margin-left:6px;">依据 '+cf.label+'</span>'
@@ -652,10 +744,10 @@ function provBadgeHtml(cn, si, prov){
     + provDetailHtml(prov) + '</div>';
 }
 function provDetailHtml(p){
-  const cf = p.confidence || {};
-  let h = '<div style="color:'+(cf.color||"#666")+'; font-weight:600; margin-bottom:6px;">本节生成依据（置信度 '+(cf.label||"")+'，'+Math.round((cf.score||0)*100)+'分）</div>';
+  const cf = provConfidence(p);
+  let h = '<div style="color:'+(cf.color||"#666")+'; font-weight:600; margin-bottom:6px;">本节来源记录 · '+escapeHtml(cf.label)+'（不代表事实准确率）</div>';
   h += '<div style="margin-bottom:6px;">' + (cf.basis||[]).map(b=>"· "+escapeHtml(b)).join("<br>") + '</div>';
-  if(p.hasCalcData) h += '<div>📊 <b>财务数据来源</b>：本项目内置公式实时测算结果（非AI生成，可在财务测算页复算核对）</div>';
+  if(p.hasCalcData) h += '<div>📊 <b>测算上下文</b>：已向生成任务提供测算摘要；仍须核对正文数值、单位及所用版本。</div>';
   if((p.kbDocs||[]).length) h += '<div>📎 <b>引用资料</b>：' + p.kbDocs.map(d=>escapeHtml(d.title)).join("、") + '</div>';
   if((p.rag||[]).length){
     h += '<div>📚 <b>知识库检索命中</b>：<br>' + p.rag.map(r=>{
@@ -664,7 +756,7 @@ function provDetailHtml(p){
     }).join("<br>") + '</div>';
   }
   if((p.examples||[]).length) h += '<div>✍ <b>参照范例</b>：' + p.examples.map(e=>escapeHtml(e.title)).join("、") + '</div>';
-  if((p.projectFields||[]).length) h += '<div>📁 <b>使用的项目信息</b>：' + p.projectFields.join("、") + '</div>';
+  if((p.projectFields||[]).length) h += '<div>📁 <b>使用的项目信息</b>：' + p.projectFields.map(x=>escapeHtml(typeof x==='string'?x:x.label||x.title||'项目字段')).join("、") + '</div>';
   h += '<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--line); font-size:10.5px;">'
     + '🤖 生成模型：' + escapeHtml(p.model||"-") + '　⏱ 生成时间：' + (p.generatedAt ? new Date(p.generatedAt).toLocaleString("zh-CN") : "-") + '</div>';
   return h;
@@ -673,10 +765,11 @@ function provDetailHtml(p){
 function currentReportVersionMeta(reason){
   const provs=[];(chapters||[]).forEach(c=>(c.sections||[]).forEach(s=>{if(s.prov)provs.push(s.prov);}));
   const models=[...new Set(provs.map(p=>p.model).filter(Boolean))];
-  return {reason:reason||"报告保存",projectData:project,parameterSet:calcParams||null,calcEngineVersion:"whitebox-2026-08",
-    knowledgeSnapshot:{localFiles:(kbEntries||[]).map(x=>({title:x.title,length:String(x.content||"").length})),rag:provs.flatMap(p=>p.rag||[]).map(x=>({title:x.title,section:x.section,score:x.score,lifecycle:x.lifecycle}))},
+  const calc=(projectWorkflow?.calcSnapshots||[]).find(x=>x.id===projectWorkflow?.currentCalcSnapshotId);
+  return {reason:reason||"报告保存",projectData:project,parameterSet:calcParams||null,calcEngineVersion:calc?.engineVersion||null,
+    knowledgeSnapshot:{localFiles:(kbEntries||[]).map(x=>({title:x.title,contentHash:window.ReportTrust?.hash(x.content||'')||null})),rag:provs.flatMap(p=>p.rag||[]).map(x=>({title:x.title,section:x.section,version:x.version,score:x.score,lifecycle:x.lifecycle}))},
     evidenceSnapshot:provs.map((p,i)=>({section:i,excel:p.excelSources||[],web:p.webEvidence||p.web||[],projectFields:p.projectFields||[]})),
-    workflowVersion:"ai-studyreport-workflow-2026-08-28",promptVersion:"report-generation-2026-08-28",model:models.join(",")||null,
+    workflowVersion:projectWorkflow?.workflowVersion||null,promptVersion:[...new Set(provs.map(p=>p.promptVersion).filter(Boolean))].join(',')||null,model:models.join(",")||null,
     reviewSnapshot:projectWorkflow&&projectWorkflow.reviewSnapshot||null};
 }
 
@@ -716,25 +809,8 @@ function provStart(){ return { rag:[], examples:[], kbDocs:[], excelSources:[], 
 
 // 置信度：有真实测算数据 > 有高匹配知识库依据 > 仅项目信息 > 纯AI发挥
 function provConfidence(p){
-  if(!p) return { score:0.5, label:"一般", color:"#8A6D1B", basis:["无溯源记录"] };
-  const basis = [];
-  let score = 0.55;   // 基线：仅凭项目信息与模型常识生成
-  if(p.hasCalcData){ score = Math.max(score, 0.95); basis.push("引用了内置公式计算的真实测算数据"); }
-  if((p.excelSources||[]).length){ score = Math.max(score, 0.92); basis.push("引用了"+(p.excelSources||[]).length+"项可定位到单元格的 Excel 数据"); }
-  const hiRag = p.rag.filter(r=>r.score >= 0.85);
-  const midRag = p.rag.filter(r=>r.score >= 0.70 && r.score < 0.85);
-  if(hiRag.length){ score = Math.max(score, 0.85); basis.push("有"+hiRag.length+"条高匹配知识库依据"); }
-  else if(midRag.length){ score = Math.max(score, 0.72); basis.push("有"+midRag.length+"条中匹配知识库依据"); }
-  else if(p.rag.length){ basis.push("仅有低匹配知识库参考"); }
-  if(p.kbDocs.length){ score = Math.max(score, 0.80); basis.push("引用了"+p.kbDocs.length+"份人工上传的项目资料"); }
-  if(p.examples.length) basis.push("参照了"+p.examples.length+"篇黄金范例的结构");
-  // 有过期资料则扣分并提示
-  const expired = p.rag.filter(r=>r.lifecycle && r.lifecycle !== "valid");
-  if(expired.length){ score = Math.max(0.5, score - 0.1); basis.push("⚠含"+expired.length+"条时效异常资料，需人工核实"); }
-  if(!basis.length) basis.push("主要依据项目信息与模型通用知识，无外部资料支撑");
-  const label = score >= 0.9 ? "高" : score >= 0.75 ? "较高" : score >= 0.6 ? "中" : "偏低";
-  const color = score >= 0.9 ? "#3E7A53" : score >= 0.75 ? "#1F7A3D" : score >= 0.6 ? "#8A6D1B" : "#C24A42";
-  return { score: Math.round(score*100)/100, label, color, basis };
+  const profile=window.ReportTrust?.buildSectionProfile({prov:p||{}});
+  return {score:null,label:profile?.grade||'待核验',color:'#8A6D1B',basis:profile?.reasons||['来源核查模块未就绪，不能判断准确率']};
 }
 
 // 相似度分层策略（参考行业实践：不同匹配度的资料，可信程度不同，应区别使用）
@@ -781,10 +857,11 @@ async function ragRetrieve(chapterName, secTitle, collector){
     hits.forEach(m=>{
       if(budget<=200) return;
       const tier = ragTierOf(m.score);
-      if(collector) collector.rag.push({ title:m.title||"历史报告", section:m.section||m.chapter||"",
-        score:m.score, tier:tier.label, lifecycle:m.lifecycle||"valid", lifecycleNote:m.lifecycleNote||"",
-        docNo:m.docNo||"", issuer:m.issuer||"", sourceRef:m.sourceRef||"", exact:!!m.exact, exactReason:m.exactReason||"" });
       const c = String(m.text).slice(0, Math.min(1400, budget));
+      if(collector) collector.rag.push({id:m.id||m.chunkId||null,title:m.title||"历史报告",section:m.section||m.chapter||"",
+        score:m.score,tier:tier.label,lifecycle:m.lifecycle||"unknown",lifecycleNote:m.lifecycleNote||"",excerpt:c,
+        version:m.version||m.updatedAt||(window.ReportTrust?'content:'+ReportTrust.hash(c):null),
+        docNo:m.docNo||"",issuer:m.issuer||"",url:m.url||"",sourceRef:m.sourceRef||m.id||m.chunkId||"",exact:!!m.exact,exactReason:m.exactReason||""});
       budget -= c.length;
       const lifeTag = (m.lifecycle && m.lifecycle !== "valid") ? "⚠该文件"+(m.lifecycleNote||"时效异常")+"，不得作为现行依据引用；" : "";
       const precise = (m.docNo?"文号："+m.docNo+"；":"")+(m.issuer?"发布机关："+m.issuer+"；":"")+(m.sourceRef?"原始定位："+m.sourceRef+"；":"")+(m.exact?"“"+(m.exactReason||"精确命中")+"”；":"");
@@ -915,8 +992,8 @@ function kbRetrieve(chapterName, secTitle, collector){
   let budget = 2600;
   scored.forEach(({e})=>{
     if(budget<=100) return;
-    if(collector) collector.kbDocs.push({ title: e.title||"未命名资料" });
     const c = String(e.content||"").slice(0, Math.min(1500, budget));
+    if(collector) collector.kbDocs.push({title:e.title||"未命名资料",id:e.id||null,sourceRef:e.sourceRef||'project-material:'+String(e.id||e.title||''),version:e.version||(window.ReportTrust?'content:'+ReportTrust.hash(e.content||''):null),excerpt:c});
     budget -= c.length;
     out += "《"+(e.title||"未命名资料")+"》：\n"+c+"\n\n";
   });
@@ -960,7 +1037,7 @@ async function reviseSection(c, s, instruction, onChunk){
     + rlRetrieve(c.name,s.t)
     + reportLocalLogicPrompt(s)
     + kbRetrieve(c.name, s.t);
-  return reportDurableSectionCall(c,s,sys,user,onChunk);
+  return reportDurableSectionCall(c,s,sys+(window.ReportOutputPolicy?ReportOutputPolicy.prompt:''),user,onChunk);
 }
 
 // 仅改写用户在预览正文中拖选的片段；返回“替换片段”，完整小节的安全拼接由 ProjectWorkflow 完成。
@@ -981,16 +1058,24 @@ async function reviseSectionExcerpt(c,s,selected,instruction,onChunk){
 }
 
 async function generateSection(c, s, onChunk){
+  if(!window.ReportArgument)throw new Error('论证任务模块未加载，请刷新后重试');
+  const summaryContext=ReportArgument.summaryContext(chapters,c.name,s.t);
   const collector=provStart();   // 每个并发任务独享，避免不同小节的溯源相互串写
   if(window.ReportLogicCore){try{await ReportLogicCore.load(rlProjectType());}catch(e){}}
   await ensureReportTableTemplates();
   const formalTemplates=sectionFormalTemplates(c,s);
-  const sitePlan=reportSiteWritingPlan(),siteInstruction=sitePlan?'\n6. 本报告含多个分析点位。'+sitePlan.strategy+'凡本节涉及区位、市场、建设条件、实施影响或风险时，按重要程度先后形成整体判断，再用一个压缩段落概括其余点位的实质差异；正文不得出现“主项目”“次项目”标签，与本节无关时不要机械罗列点位，也不得逐点复制同一套模板。':'';
+  const sitePlan=reportSiteWritingPlan(),siteInstruction=sitePlan?'\n6. 本报告含多个分析点位。'+sitePlan.strategy+'正文不得出现“主项目”“次项目”标签，与本节无关时不要机械罗列点位，也不得逐点复制同一套模板。':'';
   const digest = s.numeric ? buildCalcDigest() : null;
-  if(digest) collector.hasCalcData = true;
+  if(digest){
+    collector.hasCalcData = true;
+    const snapshot=(projectWorkflow?.calcSnapshots||[]).find(x=>x.id===projectWorkflow.currentCalcSnapshotId);
+    if(snapshot&&JSON.stringify(snapshot.params)===JSON.stringify(calcParams)&&JSON.stringify(snapshot.summary)===JSON.stringify(calcResult?.summary)){
+      collector.calcSnapshotId=snapshot.id;collector.calcVersion=snapshot.version;collector.calcEngineVersion=snapshot.engineVersion||null;
+    }
+  }
   let tableHint = "";
   if(formalTemplates.length){
-    tableHint='\n本节已由系统按公司出租类标准报告自动插入以下固定表格：'+formalTemplates.map(t=>'《'+t.title+'》').join('、')+'。正文只负责解释口径、分析结论和表格前后衔接，不得自行重画表格、重复罗列表头或改变表格结构；项目专属数值由资料与测算引擎后续填充。'+(digest?'\n\n【真实财务测算结果】\n'+digest:'');
+    tableHint='\n本节使用后台标准表格。以下每个模板只输出一次 [[TABLE]] 数据表，表头必须逐字保持一致，系统会把数据填入原模板，不再保留另一套AI表格。只填资料中有明确依据的值，没有数据的单元格留空；不得虚构数字或擅自调整表头、单位、固定行标签。模板：'+formalTemplates.map(t=>'《'+t.title+'》'+t.segments.map(g=>'\n'+g.rows[0].cells.map(x=>x.text).join('|')).join('')).join('\n')+(digest?'\n\n【真实财务测算结果】\n'+digest:'');
   } else if(s.numeric && digest){
     tableHint = '\n本子标题涉及财务数字。下面提供了本项目由内置公式实际计算出的真实测算结果，请：①严格依据这些真实数字撰写分析（数字直接引用，不得改动、不得另行编造）；②在正文中生成1-2个数据表格支撑论述，表格用如下格式包裹（表头行在第一行，单元格用竖线|分隔）：\n[[TABLE]]\n列1|列2|列3\n行1|数值|数值\n[[/TABLE]]\n表格数据从测算结果中选取，允许按年份归并或取关键年份，但数值必须与测算结果一致。\n\n'+digest;
   } else if(s.numeric){
@@ -1007,7 +1092,9 @@ async function generateSection(c, s, onChunk){
   if(!s.logicSnapshot?.localOverride)s.logicSnapshot=reportSectionLogicSnapshot(c,s,logicRules);
   const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +(sitePlan?'\n【本节必须执行的多点位写作逻辑】\n'+sitePlan.strategy+'\n':'')+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + reportLocalLogicPrompt(s) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t, collector) + kbRetrieve(c.name, s.t, collector) + webEvidenceRetrieve(c.name,s.t,collector) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t, collector);
 
-  let text = await reportDurableSectionCall(c,s,sys,user,onChunk);
+  const argumentPrompt=ReportArgument.prompt(c.name,s.t,{hasCalculation:!!digest})+(window.ReportOutputPolicy?ReportOutputPolicy.prompt:'');
+  const sectionNumber=(chapters.indexOf(c)+1)+'.'+(c.sections.indexOf(s)+1);
+  let text = await reportDurableSectionCall(c,s,sys.replace('篇幅约500-800字。','篇幅服从本节论证任务与材料。')+argumentPrompt+'\n当前小节编号为'+sectionNumber+'。不重复章标题或本小节标题；下级标题从'+sectionNumber+'.1、'+sectionNumber+'.2连续编号，更下级使用'+sectionNumber+'.1.1。禁止沿用示例中的1.1编号。',user+summaryContext,onChunk);
   if(!text || text === "（未返回内容）" || reportBodyContainsInternalLogic(text)){
     text = window.ReportLogicCore?.fallbackDraft
       ? ReportLogicCore.fallbackDraft(rlProjectType(),c.name,s.t,{projectText:rlProjectText(),numeric:!!s.numeric,context:typeof airMaterialContext==="function"?airMaterialContext():{hasCalculation:!!(calcParams&&calcResult)}})
@@ -1021,7 +1108,9 @@ async function generateSection(c, s, onChunk){
   // 生成完成：把溯源档案挂到该小节上（含模型与时间，即L3模型溯源）
   const prov = collector;
   if(prov){
-    prov.model = "deepseek-v4-flash";
+    prov.model = s.executionTask?.model||null;
+    prov.provider = s.executionTask?.provider||null;
+    prov.promptVersion = window.ReportArgument?.VERSION||null;
     prov.generatedAt = new Date().toISOString();
     if(projectWorkflow&&projectWorkflow.currentAnalysisSnapshotId){prov.analysisSnapshotId=projectWorkflow.currentAnalysisSnapshotId;prov.analysisSnapshotVersion=projectWorkflow.currentAnalysisSnapshotVersion||null;}
     prov.confidence = provConfidence(prov);
@@ -1035,24 +1124,30 @@ async function generateSection(c, s, onChunk){
 // 报告逐节生成与逐节AI评审属于"批量"负载（一篇报告约40次调用），
 // 走独立的 batch 额度，不占用日常AI问答的额度
 async function reportDurableSectionCall(c,s,sys,user,onChunk){
+  let research=null;if(window.ResearchUI?.active()){await ResearchUI.flush();research=ResearchUI.capture('report');}
   const projectId=typeof currentProjectId==='string'?currentProjectId:'';
-  if(!projectId)throw new Error('请先保存项目，再启动可恢复的小节生成');
+  const acceptsResult=()=>research?!!window.ResearchUI?.accepts(research):!window.ResearchUI?.active()&&currentProjectId===projectId;
+  if(!projectId&&!research)throw new Error('请先保存项目，再启动可恢复的小节生成');
   if(!window.ReportOrchestrationClient?.generateSection)throw new Error('报告任务模块未加载，请刷新后重试');
-  const result=await ReportOrchestrationClient.generateSection({projectId,sectionKey:c.name+' / '+s.t,projectType:rlProjectType(),logicVersion:window.ReportLogicCore?.current(rlProjectType())?.version,system:sys,user},task=>{
-    if(currentProjectId!==projectId)return;
+  const result=await ReportOrchestrationClient.generateSection({projectId,research,legacyResearchEpoch:Number(projectWorkflow?.management?.legacyResearchEpoch)||0,sectionKey:c.name+' / '+s.t,projectType:rlProjectType(),logicVersion:window.ReportLogicCore?.current(rlProjectType())?.version,system:sys,user},task=>{
+    if(!acceptsResult())return;
     const changed=s.executionTask?.id!==task.id||s.executionTask?.status!==(task.status||'queued');
     s.executionTask={id:task.id,runId:task.runId,status:task.status||'queued',graph:task.graph};
     if(changed)saveDraft();
   });
-  if(currentProjectId!==projectId)throw new Error('已切换项目，后台结果已保留，未写入其他项目');
+  if(!acceptsResult())throw new Error('已切换项目或研究轮次，后台结果已保留，未写入其他项目');
+  if(research)await ResearchUI.guard(research);
+  if(!acceptsResult())throw new Error('已切换项目或研究轮次，后台结果已保留，未写入其他项目');
+  s.executionTask=Object.assign({},s.executionTask,{model:result.model||null,provider:result.provider||null});
   if(onChunk)onChunk(result.text);
   return result.text;
 }
 async function callGen(sys, user, onChunk){
+  const research=window.ResearchUI?.active()?ResearchUI.capture('report'):null;
   const resp = await fetch("/api/generate", {
     method:"POST",
     headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
-    body: JSON.stringify({ system: sys, messages:[{role:"user", content:user}], stream: !!onChunk, kind:"batch" })
+    body: JSON.stringify({ research,system: sys, messages:[{role:"user", content:user}], stream: !!onChunk&&!research, kind:"batch" })
   });
   if(resp.status===401){ clearAuth(); showLoginModal("登录已过期，请重新登录后继续生成"); throw new Error("登录已过期"); }
 
@@ -1085,9 +1180,11 @@ async function callGen(sys, user, onChunk){
 
   // 非流式回退
   const data = await resp.json();
+  if(research)await ResearchUI.guard(research);
   if(data.error) throw new Error(data.error);
   if(data.usage){ genUsage.inTok += data.usage.prompt_tokens||0; genUsage.outTok += data.usage.completion_tokens||0; }
   const text = (data.content||[]).map(b=>b.text||"").join("").trim();
+  if(research&&onChunk)onChunk(text);
   return text || "（未返回内容）";
 }
 

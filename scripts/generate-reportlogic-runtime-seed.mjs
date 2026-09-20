@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const sets=[
   {name:"出租",canonical:"data/report-logic-rent-v1.json",runtime:"functions/api/_reportlogic-seed.js",rules:137,chapters:14},
-  {name:"改造",canonical:"data/report-logic-gaibao-v1.json",runtime:"functions/api/_reportlogic-gaibao-seed.js",rules:74,chapters:13}
+  {name:"改造",canonical:"data/report-logic-gaibao-v1.json",runtime:"functions/api/_reportlogic-gaibao-seed.js",rules:78,chapters:13}
 ];
 
 for(const set of sets){

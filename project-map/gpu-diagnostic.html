@@ -1,0 +1,4 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>三维资源分阶段诊断</title>
+<style>body{margin:0;background:#eef3f7;font:14px sans-serif}header{padding:12px}button{margin:4px;padding:8px}canvas{width:100%;height:70vh;display:block}pre{white-space:pre-wrap}</style>
+<header>隔离诊断：不会修改项目数据。<button id="terrain">1 地面</button><button id="landmarks">2 地标</button><button id="overview">3 四区概览</button><button id="original">4 原城区流式</button><button id="near">5 补充近景</button><button id="facade">6 立面</button><button id="cinematic">7 光照</button><pre id="log"></pre></header><canvas id="view"></canvas>
+<script src="vendor/babylon.js"></script><script src="vendor/babylonjs.loaders.min.js"></script><script type="module" src="gpu-diagnostic.mjs"></script></html>

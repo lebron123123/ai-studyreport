@@ -9,7 +9,8 @@ import {signToken} from '../functions/api/_auth.js';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 
-const target=process.env.AGENT_TEST_DATABASE_URL;
+import {testDatabaseUrl} from '../scripts/require-test-database.mjs';
+const target=testDatabaseUrl();
 test('真实PostgreSQL：接管、取消、事务回滚、迟到结果、重复入队', {skip:!target},async t=>{
   const u=new URL(target);assert.match(u.pathname,/^\/studyreport_restore_\d+$/,'只允许独立恢复测试库');
   assert.ok(['localhost','127.0.0.1','[::1]'].includes(u.hostname));

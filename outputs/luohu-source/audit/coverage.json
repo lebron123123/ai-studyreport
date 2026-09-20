@@ -1,0 +1,23 @@
+{
+  "source": "guangdong-260912.osm.pbf",
+  "md5": "19f568d32fb9dc34398aa13bae52f56b",
+  "boundaryRelation": 5664194,
+  "features": 4875,
+  "tiles": 80,
+  "heightStatus": {
+    "unknown": 3779,
+    "levels_only_unverified": 1011,
+    "height_tag_unverified": 85
+  },
+  "sourceWideGeometryFailures": {
+    "geometry_error": 23
+  },
+  "completeDistrictClaim": false,
+  "modelPublished": false,
+  "limitations": [
+    "OSM coverage completeness is unknown without an independent authoritative inventory.",
+    "Counts include building parts; not a count of unique physical buildings.",
+    "Height tags are not verified survey heights; unknowns are retained.",
+    "Buildings intersecting the boundary retain their full geometry."
+  ]
+}

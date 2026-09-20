@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {onRequestPost,onRequestGet} from '../functions/api/reportorchestration.js';
 import {signToken} from '../functions/api/_auth.js';
 test('前端伪造通过、项目和holdout不能写入评测',async()=>{
-  const writes=[],env={SESSION_SECRET:crypto.randomUUID(),DB:{prepare(sql){return {bind(){return this;},async run(){writes.push(sql);return {meta:{changes:1}};}};}}};
+  const writes=[],env={SESSION_SECRET:crypto.randomUUID(),DB:{prepare(sql){return {bind(){return this;},async first(){return null;},async run(){writes.push(sql);return {meta:{changes:1}};}};}}};
   const token=await signToken(env,7,'reviewer');
   const response=await onRequestPost({env,request:new Request('http://test/api/reportorchestration',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({action:'feedbackEvaluate',candidateId:'c',evaluation:{passed:true,projectId:'fake',datasetRole:'holdout',score:100}})})});
   assert.equal(response.status,409);assert.equal((await response.json()).code,'TRUSTED_EVALUATION_REQUIRED');assert.equal(writes.filter(x=>/INSERT INTO report_feedback_evaluations/i.test(x)).length,0);

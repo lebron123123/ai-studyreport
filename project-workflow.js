@@ -148,8 +148,19 @@
     if(prev&&prev.hash===ver.hash&&prev.calcSnapshotId===ver.calcSnapshotId&&prev.analysisSnapshotId===ver.analysisSnapshotId&&(!lineage||prev.lineage&&prev.lineage.hash===lineage.hash))return prev;
     state.reportVersions.push(ver);if(state.reportVersions.length>50)state.reportVersions.splice(0,state.reportVersions.length-50);state.currentReportVersionId=ver.id; return ver;
   }
+  function reportBodyText(value){
+    return String(value??'').replace(/<!--[\s\S]*?-->/g,'').replace(/<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,'').replace(/<[^>]*>/g,' ')
+      .replace(/&#(x[0-9a-f]+|\d+);?/gi,(entity,code)=>{const n=code[0].toLowerCase()==='x'?parseInt(code.slice(1),16):Number(code);return n>0&&n<=0x10ffff?String.fromCodePoint(n):entity;})
+      .replace(/&(?:nbsp|ensp|emsp|thinsp|hairsp|ZeroWidthSpace|NoBreak|zwnj|zwj|lrm|rlm|shy|Tab|NewLine);/gi,' ')
+      .replace(/[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]/g,'').replace(/\s+/g,' ').trim();
+  }
+  function hasReportBody(section){
+    // Match the renderer: a nonempty editedHtml overrides content, even when visually blank.
+    // Legacy editedHtml:'' still falls back to content; stale text is retained for explicit review.
+    return !!reportBodyText(section&&((typeof section.editedHtml==='string'&&section.editedHtml)||section.content));
+  }
   function reportGenerationStatus(chapters){
-    const sections=(chapters||[]).filter(c=>c&&c.checked!==false).flatMap(c=>Array.isArray(c.sections)?c.sections:[]),generated=sections.filter(s=>String(s&&((s.editedHtml&&typeof s.editedHtml==="string"?s.editedHtml:"")||s.content)||"").trim()).length;
+    const sections=(chapters||[]).filter(c=>c&&c.checked!==false).flatMap(c=>Array.isArray(c.sections)?c.sections:[]),generated=sections.filter(hasReportBody).length;
     return {total:sections.length,generated,remaining:Math.max(0,sections.length-generated),complete:sections.length>0&&generated===sections.length};
   }
   function nextReportVersionNumber(state){
@@ -262,13 +273,15 @@
     meta=meta||{};
     const candidate={id:uid("patch"),createdAt:new Date().toISOString(),instruction:String(instruction||""),before:currentText(section),after:String(newText||""),logicRevision:clone(meta.logicRevision||null)};
     if(meta.allowLogicAdoption!==undefined)candidate.allowLogicAdoption=!!meta.allowLogicAdoption;
+    if(meta.outputPolicyVersion)candidate.outputPolicyVersion=meta.outputPolicyVersion;
     section.pendingRevision=candidate; return candidate;
   }
   function acceptCandidate(section){
     if(!section||!section.pendingRevision)return null;
     section.undoStack=Array.isArray(section.undoStack)?section.undoStack:[];
     section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null,logicSnapshot:clone(section.logicSnapshot||null),syncState:{syncStatus:section.syncStatus||"current",staleReason:section.staleReason||"",staleKeys:clone(section.staleKeys||[]),staleKind:section.staleKind||""}});
-    const c=section.pendingRevision; section.content=c.after; section.editedHtml=null;if(c.logicRevision)section.logicSnapshot=clone(c.logicRevision); section.pendingRevision=null; clearSectionStale(section); return c;
+    section.undoStack[section.undoStack.length-1].outputPolicyVersion=section.outputPolicyVersion||null;
+    const c=section.pendingRevision; section.content=c.after; section.editedHtml=null;if(c.logicRevision)section.logicSnapshot=clone(c.logicRevision);if(c.outputPolicyVersion)section.outputPolicyVersion=c.outputPolicyVersion; section.pendingRevision=null; clearSectionStale(section); return c;
   }
   function keepOriginalLogic(section){
     if(!section||section.locked||section.pendingRevision||!(section.content||section.editedHtml)||section.staleKind!=="logic"||section.syncStatus!=="stale")return false;
@@ -289,6 +302,7 @@
     if(!section||!Array.isArray(section.undoStack)||!section.undoStack.length)return false;
     const prev=section.undoStack.pop(); section.content=prev.content; section.editedHtml=prev.editedHtml;section.logicSnapshot=clone(prev.logicSnapshot||null);
     if(prev.syncState)Object.assign(section,clone(prev.syncState));
+    if(Object.prototype.hasOwnProperty.call(prev,'outputPolicyVersion'))section.outputPolicyVersion=prev.outputPolicyVersion;
     return true;
   }
   function escapeHtml(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
@@ -436,7 +450,7 @@
   }
 
   const api={keepOriginalLogic,clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,logicSnapshotCore,logicSnapshotDiff,markLogicImpacted,
-    createCalcSnapshot,createReportVersion,reportGenerationStatus,logicImpactedTasks,logicRevisionInProgress,historicalProgressDuringLogicRevision,nextReportVersionNumber,mergeReportDraft,recoverCompletedReport,selectProjectDraft,claimReportGeneration,releaseReportGeneration,persistedGenerationProgress,reconcileGenerationProgress,latestCompleteReportVersion,setCandidate,acceptCandidate,acceptAllCandidates,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
+    createCalcSnapshot,createReportVersion,reportBodyText,hasReportBody,reportGenerationStatus,logicImpactedTasks,logicRevisionInProgress,historicalProgressDuringLogicRevision,nextReportVersionNumber,mergeReportDraft,recoverCompletedReport,selectProjectDraft,claimReportGeneration,releaseReportGeneration,persistedGenerationProgress,reconcileGenerationProgress,latestCompleteReportVersion,setCandidate,acceptCandidate,acceptAllCandidates,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
     aiReportStage,aiReportStageRank,previousAiReportStage,locationTokens,rankLocationCandidates,normalizeAnalysisSites,siteWritingPlan,aiReportProjectSeed,aiReportShouldSeedProject,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
     impactedAnalysisSections,markAnalysisImpacted,METRIC_LABELS,ANALYSIS_DOMAIN_WORDS};
   root.ProjectWorkflow=api;

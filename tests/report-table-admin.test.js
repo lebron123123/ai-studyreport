@@ -13,10 +13,15 @@ test("后台把出租、非居改保和商业改造作为三个同级表格库�
   assert.equal(LABELS["gaibao-commercial"],"商业改造（自持改造）");
 });
 
+test('表格章节按数字排序而不是模板追加顺序',()=>{
+ const groups=chapterGroups(['第十一章 风险','第七章 合作','第三章 市场'].map(chapter=>({chapter})),false);
+ assert.deepEqual(groups.map(g=>g.name),['第三章 市场','第七章 合作','第十一章 风险']);
+});
+
 test("非居和商业表格按各自Word章节归组且数量完整",()=>{
   const housing=JSON.parse(fs.readFileSync(path.join(root,"data","report-table-templates-gaibao-housing-v1.json"),"utf8"));
   const commercial=JSON.parse(fs.readFileSync(path.join(root,"data","report-table-templates-gaibao-commercial-v1.json"),"utf8"));
-  assert.equal(chapterGroups(housing.templates,false).flatMap(group=>group.items).length,14);
+  assert.equal(chapterGroups(housing.templates,false).flatMap(group=>group.items).length,26);
   assert.equal(chapterGroups(commercial.templates,false).flatMap(group=>group.items).length,22);
 });
 

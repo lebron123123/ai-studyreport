@@ -1,0 +1,10 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const src=fs.readFileSync('aireport.js','utf8');
+function setup(){
+ const a={t:'依据',content:'旧文'},b={t:'市场',content:'旧市场'},ctx={chapters:[{checked:true,sections:[a,b]}],aiReportBusy:false,aiReportImpactedProgress:null,airAcceptCandidatesBusy:false,document:{querySelector:()=>null},confirm:()=>true,alert:()=>{},airBuildDocPane:()=>{},saveDraft:()=>{},airSaveState:()=>{},airReportLogicImpactSummary:()=>({locked:0}),reportLogicRevision:()=>({}),reportHasVisibleBody:s=>!!s.content?.trim(),reviseSection:async(c,s,i)=>'新稿'+i,generateSection:async()=> '新稿',runWorkerPool:async(ts,fn)=>{for(const t of ts)await fn(t);}};
+ ctx.airRefreshSection=()=>{};ctx.window=ctx;ctx.ProjectWorkflow={setCandidate:(s,text)=>{s.pendingRevision={after:text};},logicImpactedTasks:()=>[]};
+ vm.runInNewContext(src.slice(src.indexOf('async function airGenerateImpactedCandidates('),src.indexOf('\nfunction airSectionMaterialState')),ctx);return {ctx,a,b};
+}
+test('未标记受影响也能全篇生成，原文不变，候选保存',async()=>{const {ctx,a,b}=setup();await ctx.airGenerateImpactedCandidates(true);assert.equal(a.content,'旧文');assert.equal(b.content,'旧市场');assert.match(a.pendingRevision.after,/依据章节只列文件清单/);assert.equal(ctx.aiReportImpactedProgress.done,2);});
+test('已有候选、锁定、忙碌、取消不会覆盖或生成',async()=>{for(const mode of ['pending','locked','busy','cancel']){const {ctx,a,b}=setup();if(mode==='pending')a.pendingRevision={after:'待确认'};if(mode==='locked')a.locked=true;if(mode==='busy')ctx.aiReportBusy=true;if(mode==='cancel')ctx.confirm=()=>false;await ctx.airGenerateImpactedCandidates(true);assert.equal(b.pendingRevision,undefined);assert.equal(a.content,'旧文');}});
+test('单节失败不阻断其他候选，空返回记失败',async()=>{const {ctx,a,b}=setup();ctx.reviseSection=async(c,s)=>s===a?'':'有效';await ctx.airGenerateImpactedCandidates(true);assert.equal(a.pendingRevision,undefined);assert.equal(b.pendingRevision.after,'有效');assert.equal(ctx.aiReportImpactedProgress.failed,1);});

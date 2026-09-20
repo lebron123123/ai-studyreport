@@ -9,12 +9,21 @@
   else { root.buildDocxDocument = factory; }
 })(typeof self!=="undefined"? self : this, function(docx, payload){
   const D = docx;
+  const outputPolicy=typeof module!=="undefined"&&module.exports?require('./report-output-policy.js'):window.ReportOutputPolicy;
   const FONT = { ascii:"SimSun", eastAsia:"SimSun", hAnsi:"SimSun", cs:"SimSun" };
   const LINE13 = { line: 312, lineRule: D.LineRuleType.AUTO }; // 1.3倍行距
+  const PAGE_WIDTH=11906, PAGE_HEIGHT=16838, TEXT_WIDTH=PAGE_WIDTH-3400;
+  function tableWidths(weights){
+    const total=weights.reduce((sum,w)=>sum+w,0)||weights.length;
+    const widths=weights.map(w=>Math.floor(w/total*TEXT_WIDTH));
+    if(widths.length)widths[widths.length-1]+=TEXT_WIDTH-widths.reduce((sum,w)=>sum+w,0);
+    return widths;
+  }
 
-  function run(text, opt){ return new D.TextRun(Object.assign({text:text, font:FONT}, opt||{})); }
+  // 报告成稿统一黑字；保留待补标记和加粗，不沿用编辑态强调色。
+  function run(text, opt){ return new D.TextRun(Object.assign({text:text, font:FONT}, opt||{}, {color:/^【待补\s*(?:：|:)?[^】]*】$/.test(String(text))?"C62828":"000000"})); }
   function cleanWordText(text){
-    return String(text==null?"":text).replace(/\u00a0/g," ").replace(/[\t ]+/g," ").replace(/\s+([，。；：！？、）】])/g,"$1").replace(/([（【])\s+/g,"$1").trim();
+    return outputPolicy.cleanText(text).replace(/\u00a0/g," ").replace(/[\t ]+/g," ").replace(/\s+([，。；：！？、）】])/g,"$1").replace(/([（【])\s+/g,"$1").trim();
   }
   function textRuns(text,opt){
     const value=cleanWordText(text),parts=value.split(/(【待补\s*(?:：|:)?[^】]*】)/g).filter(Boolean);
@@ -27,18 +36,21 @@
       indent:{firstLine:480},
     });
   }
-  function makeTable(rows){
+  function makeTable(rows,weights,fontSize){
     const border = {style:D.BorderStyle.SINGLE, size:4, color:"000000"};
+    const count=Math.max(...rows.map(r=>r.length)),widths=tableWidths(weights||Array(count).fill(1));
     return new D.Table({
       alignment: D.AlignmentType.CENTER,
-      width:{size:96, type:D.WidthType.PERCENTAGE},
+      width:{size:TEXT_WIDTH, type:D.WidthType.DXA},columnWidths:widths,layout:D.TableLayoutType.FIXED,
       borders:{top:border,bottom:border,left:border,right:border,insideHorizontal:border,insideVertical:border},
       rows: rows.map((cells,ri)=> new D.TableRow({
-        children: cells.map(c=> new D.TableCell({
-          shading: ri===0? {fill:"EEEEEE"} : undefined,
+        tableHeader:ri===0,
+        children: Array.from({length:count},(_,ci)=> new D.TableCell({
+          width:{size:widths[ci],type:D.WidthType.DXA},
+          shading: ri===0? {fill:"EEEEEE",type:D.ShadingType.CLEAR} : undefined,
           margins:{top:60,bottom:60,left:110,right:110},
           children:[ new D.Paragraph({
-            children:textRuns(String(c),{size:21, bold:ri===0}),
+            children:textRuns(String(cells[ci]??""),{size:fontSize||21, bold:ri===0}),
             spacing:{line:280, lineRule:D.LineRuleType.AUTO},
           })],
         })),
@@ -62,9 +74,8 @@
   function makeTemplateTable(template,segment){
     const border={style:D.BorderStyle.SINGLE,size:4,color:"666666"};
     const sourceWidths=(segment.gridWidths||[]).map(Number);
-    const sourceTotal=sourceWidths.reduce((a,b)=>a+b,0)||1;
-    const tableWidth=9026;
-    const widths=sourceWidths.length?sourceWidths.map(w=>Math.max(260,Math.round(w/sourceTotal*tableWidth))):[];
+    const tableWidth=TEXT_WIDTH;
+    const widths=sourceWidths.length?tableWidths(sourceWidths.map(w=>Number.isFinite(w)&&w>0?w:1)):[];
     const rows=preparedTemplateRows(segment);
     return new D.Table({
       alignment:D.AlignmentType.CENTER,
@@ -101,6 +112,7 @@
       out.push(new D.Paragraph({
         children:textRuns(index?template.title+"（续表"+index+"）":template.title,{size:22,bold:true}),
         alignment:D.AlignmentType.CENTER,
+        keepNext:true,
         pageBreakBefore:!!(template.longPeriod&&index>0),
         spacing:{before:index?0:180,after:100},
       }));
@@ -109,6 +121,10 @@
     return out;
   }
   function blockToElems(b){
+    if(b.type==="tableCaption" && b.text) return [new D.Paragraph({
+      children:textRuns(b.text,{size:24,bold:true}),alignment:D.AlignmentType.CENTER,
+      keepNext:true,spacing:{before:120,after:80}
+    })];
     if(b.type==="table" && b.rows && b.rows.length) return [makeTable(b.rows)];
     if(b.type==="templateTable" && b.template) return templateTableElems(b.template);
     if(b.type==="logic" && b.text) return [new D.Paragraph({
@@ -118,6 +134,7 @@
     })];
     // 小标题：正文里的 ## 三级标题，加粗略大，与正文拉开层次
     if(b.type==="h" && b.text) return [new D.Paragraph({
+      heading:D.HeadingLevel['HEADING_'+Math.min(6,Math.max(3,Number(b.level)||3))],keepNext:true,
       children:textRuns(b.text,{size:24, bold:true}),
       spacing:{before:160, after:80, line:360, lineRule:D.LineRuleType.AUTO},
     })];
@@ -132,7 +149,7 @@
     alignment:D.AlignmentType.CENTER, spacing:{before:4800, after:600, line:360, lineRule:D.LineRuleType.AUTO},
   }));
   children.push(new D.Paragraph({
-    children:[run("可 行 性 研 究 报 告",{size:44,bold:true})],
+    children:[run(payload.documentTitle||"可 行 性 研 究 报 告",{size:44,bold:true})],
     alignment:D.AlignmentType.CENTER, spacing:{after:2400},
   }));
   const meta = [
@@ -142,8 +159,9 @@
     payload.project.scale? "投资规模："+payload.project.scale+"万元" : "",
   ].filter(Boolean);
   meta.forEach(m=> children.push(new D.Paragraph({children:[run(m,{size:24})], alignment:D.AlignmentType.CENTER, spacing:{after:120}})));
-  children.push(new D.Paragraph({children:[run(new Date().toLocaleDateString("zh-CN"),{size:24})], alignment:D.AlignmentType.CENTER}));
+  children.push(new D.Paragraph({children:[run(payload.documentDate||new Date().toLocaleDateString("zh-CN"),{size:24})], alignment:D.AlignmentType.CENTER}));
   if(payload.docNo) children.push(new D.Paragraph({children:[run("文档编号："+payload.docNo,{size:21,color:"666666"})], alignment:D.AlignmentType.CENTER, spacing:{before:200}}));
+  if(payload.versionNote)children.push(new D.Paragraph({children:[run(payload.versionNote,{size:20,color:"666666"})],alignment:D.AlignmentType.CENTER,spacing:{before:120}}));
 
   /* ---------- 目录页（可更新域，打开时Word提示更新即出页码） ---------- */
   children.push(new D.Paragraph({
@@ -166,7 +184,7 @@
     c.sections.forEach((s,si)=>{
       children.push(new D.Paragraph({
         tabStops:tocTab, indent:{left:420}, spacing:{after:40, line:300, lineRule:D.LineRuleType.AUTO},
-        children:[ ...textRuns((c.num||ci+1)+"."+(si+1)+"　"+(s.title||""),{size:24}), run("\t"),
+        children:[ ...textRuns((c.num||ci+1)+"."+(s.num||si+1)+"　"+(s.title||""),{size:24}), run("\t"),
           new D.SimpleField("PAGEREF _tc"+ci+"_"+si+" \\h") ],
       }));
     });
@@ -186,15 +204,15 @@
     c.sections.forEach((s,si)=>{
       children.push(new D.Paragraph({
         heading: D.HeadingLevel.HEADING_2,
-        children:[ new D.Bookmark({id:"_tc"+ci+"_"+si, children:textRuns((c.num||ci+1)+"."+(si+1)+"　"+s.title,{size:28,bold:true})}) ],
+        children:[ new D.Bookmark({id:"_tc"+ci+"_"+si, children:textRuns((c.num||ci+1)+"."+(s.num||si+1)+"　"+s.title,{size:28,bold:true})}) ],
         spacing: Object.assign({before:280, after:160}, LINE13),
       }));
-      (s.blocks||[]).forEach(b=> blockToElems(b).forEach(e=>children.push(e)));
+      outputPolicy.repairBlocks(s.blocks).forEach(b=> blockToElems(b).forEach(e=>children.push(e)));
     });
   });
 
   /* ---------- 附表 ---------- */
-  if(payload.appendix){
+  if(payload.includeAppendices===true && payload.appendix){
     children.push(new D.Paragraph({
       heading: D.HeadingLevel.HEADING_1,
       children:[run("附表　财务测算明细（单位：万元）",{size:44,bold:true})],
@@ -208,7 +226,7 @@
       children.push(makeTable(payload.appendix.sensRows));
     }
   }
-  if(payload.tableAppendix&&payload.tableAppendix.length){
+  if(payload.includeAppendices===true && payload.tableAppendix&&payload.tableAppendix.length){
     children.push(new D.Paragraph({
       heading:D.HeadingLevel.HEADING_1,
       children:[run("出租类标准财务附表",{size:44,bold:true})],
@@ -223,30 +241,20 @@
 
   /* ---------- 签发说明 ---------- */
   const signNote = payload.signed
-    ? "本报告已经人工复核确认签发，签发日期："+new Date().toLocaleDateString("zh-CN")
-    : "本报告为AI生成初稿，尚未经过人工复核签发，其中标注\u201c待填\u201d的数据须补充真实测算结果，正式使用前须完成审核。";
+    ? "本报告已经人工复核确认签发，签发日期："+(payload.approvalDate||payload.documentDate||"见冻结版本复核记录")
+    : (payload.unsignedNote||"本报告为AI生成初稿，尚未经过人工复核签发，其中标注\u201c待填\u201d的数据须补充真实测算结果，正式使用前须完成审核。");
   // ===== 附图（图表PNG） =====
   // ===== 溯源附录：逐节生成依据与置信度（可追溯审计） =====
-  if(payload.provenance && payload.provenance.rows && payload.provenance.rows.length > 1){
+  if(payload.includeAppendices===true && payload.provenance && payload.provenance.rows && payload.provenance.rows.length > 1){
     children.push(new D.Paragraph({ children:[run("附：内容溯源与依据说明",{size:28,bold:true})],
       heading:D.HeadingLevel.HEADING_1, alignment:D.AlignmentType.CENTER,
       spacing:{before:400, after:200}, pageBreakBefore:true }));
     children.push(new D.Paragraph({ children:[run(payload.provenance.note,{size:20,color:"666666"})],
       spacing:{after:200} }));
-    const rows = payload.provenance.rows;
-    const table = new D.Table({
-      width:{ size:100, type:D.WidthType.PERCENTAGE },
-      rows: rows.map((r, ri)=> new D.TableRow({
-        children: r.map(cell=> new D.TableCell({
-          children:[ new D.Paragraph({ children:textRuns(String(cell==null?"":cell), { size: ri===0?19:18, bold: ri===0 }),spacing:{before:0,after:0} }) ],
-          shading: ri===0 ? { fill:"E8EEF5" } : undefined,
-        })),
-      })),
-    });
-    children.push(table);
+    children.push(makeTable(payload.provenance.rows,[15,18,17,50],18));
   }
 
-  if(payload.images && payload.images.length){
+  if(payload.includeAppendices===true && payload.images && payload.images.length){
     children.push(new D.Paragraph({ children:[run("附　图",{size:28,bold:true})],
       heading:D.HeadingLevel.HEADING_1, alignment:D.AlignmentType.CENTER,
       spacing:{before:400, after:200}, pageBreakBefore:true }));
@@ -271,18 +279,21 @@
   return new D.Document({
     features:{ updateFields:true },
     styles:{
-      default:{ document:{ run:{ font:FONT, size:24 },paragraph:{spacing:Object.assign({before:0,after:0},LINE13)} } },
+      default:{ document:{ run:{ font:FONT, size:24, color:"000000" },paragraph:{spacing:Object.assign({before:0,after:0},LINE13)} },
+        heading1:{run:{color:"000000"}},heading2:{run:{color:"000000"}},heading3:{run:{color:"000000"}},
+        heading4:{run:{color:"000000"}},heading5:{run:{color:"000000"}},heading6:{run:{color:"000000"}},
+        hyperlink:{run:{color:"000000"}} },
       paragraphStyles:[
         { id:"Heading1", name:"Heading 1", basedOn:"Normal", next:"Normal", quickFormat:true,
-          run:{ size:44, bold:true, font:FONT },
+          run:{ size:44, bold:true, font:FONT, color:"000000" },
           paragraph:{ alignment:D.AlignmentType.CENTER, spacing:{before:0, after:360} } },
         { id:"Heading2", name:"Heading 2", basedOn:"Normal", next:"Normal", quickFormat:true,
-          run:{ size:28, bold:true, font:FONT },
+          run:{ size:28, bold:true, font:FONT, color:"000000" },
           paragraph:{ spacing:{before:280, after:160} } },
       ],
     },
     sections:[{
-      properties:{ page:{ margin:{ top:1440, bottom:1440, left:1700, right:1700 } } },
+      properties:{ page:{size:{width:PAGE_WIDTH,height:PAGE_HEIGHT}, margin:{ top:1440, bottom:1440, left:1700, right:1700 } } },
       headers:{ default: new D.Header({ children:[ new D.Paragraph({
         children:[run(payload.project.name||"可行性研究报告",{size:18,color:"666666"})],
         alignment:D.AlignmentType.CENTER,
@@ -291,7 +302,7 @@
       footers:{ default: new D.Footer({ children:[ new D.Paragraph({
         alignment:D.AlignmentType.CENTER,
         children:[ run("— ",{size:18,color:"666666"}),
-          new D.TextRun({children:[D.PageNumber.CURRENT], size:18, color:"666666", font:FONT}),
+          new D.TextRun({children:[D.PageNumber.CURRENT], size:18, color:"000000", font:FONT}),
           run(" —",{size:18,color:"666666"}) ],
       })]})},
       children: children,

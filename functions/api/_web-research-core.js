@@ -1,4 +1,5 @@
 /* 联网研究公共核心：零 Node 依赖，Cloudflare Pages 与本地 Hono 共用。 */
+import {deepseekMessagesSearch} from './_deepseek-search.js';
 
 const WR_STOP_WORDS = new Set(["项目","分析","情况","有关","相关","研究","报告","建设","深圳市","住房"]);
 
@@ -39,6 +40,7 @@ export function wrProviderCatalog(env={}){
     {id:"tavily",name:"Tavily",configured:!!env.TAVILY_API_KEY,kind:"search",priority:4},
     {id:"mcp",name:"MCP 联网检索桥",configured:!!env.WEB_RESEARCH_MCP_URL,kind:"mcp",priority:5},
     {id:"licensed",name:"专业数据 Provider",configured:!!env.PRO_DATA_API_URL,kind:"licensed",priority:6},
+    {id:"bing",name:"Bing 公网降级",configured:env.WEB_SEARCH_BING_DISABLED!=="1",kind:"search",priority:8,experimental:true},
     {id:"duckduckgo",name:"DuckDuckGo 公网降级",configured:env.WEB_SEARCH_DDG_DISABLED!=="1",kind:"search",priority:9,experimental:true}
   ];
   return rows.sort((a,b)=>a.priority-b.priority);
@@ -97,6 +99,18 @@ export function wrNormalizeDeepSeekSearchResponse(payload,provider="deepseek-web
     }
   }
   return rows;
+}
+
+export function wrNormalizeBingRss(xml){
+  const field=(block,name)=>wrDecodeHtml((block.match(new RegExp('<'+name+'(?:\\s[^>]*)?>([\\s\\S]*?)</'+name+'>','i'))||[])[1]||'').replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/,'$1');
+  return [...String(xml||'').matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)].map(([,block])=>({title:wrStripHtml(field(block,'title')),url:field(block,'link').trim(),snippet:wrStripHtml(field(block,'description'))})).filter(x=>x.title&&wrCanonicalUrl(x.url));
+}
+
+export function wrSearchError(error){
+  const code=error?.cause?.code||error?.code||'';
+  if(error?.name==='AbortError'||error?.name==='TimeoutError'||/timeout/i.test(code))return '搜索服务超时，请稍后重试或切换搜索通道';
+  if(/fetch failed/i.test(error?.message||''))return '搜索服务连接失败'+(code?'（'+code+'）':'')+'，请检查服务进程网络、代理或防火墙';
+  return wrText(error?.message||String(error),180);
 }
 
 function wrHousingLabel(type){return type==="sale"?"配售型保障性住房":type==="gaibao"?"非居住存量房屋改建保障性租赁住房":"保障性租赁住房";}
@@ -183,11 +197,22 @@ export async function wrSearchProvider(env,provider,query,options={}){
   const started=Date.now(),limit=Math.max(1,Math.min(Number(options.limit)||10,20));let response,payload;
   if(provider==="deepseek-web"){
     const apiKey=wrFirstEnv(env,["DEEPSEEK_API_KEY","LLM_API_KEY"]);if(!apiKey)throw new Error("未配置 DEEPSEEK_API_KEY 或 LLM_API_KEY");
+    // Preserve explicitly configured compatible gateways; migrate only the official endpoint.
+    if(new URL(wrDeepSeekResponsesUrl(env)).hostname==='api.deepseek.com'){
+      const rows=await deepseekMessagesSearch(env,query,options);
+      return {provider,latencyMs:Date.now()-started,results:wrNormalizeSearchPayload(rows,provider).slice(0,limit)};
+    }
     const model=wrFirstEnv(env,["DEEPSEEK_WEB_SEARCH_MODEL","DEEPSEEK_MODEL","LLM_MODEL"])||"deepseek-v4-flash";
-    const outputBudget=Math.max(500,Math.min(1000,Number(options.maxOutputTokens)||900));
-    response=await wrFetchWithTimeout(wrDeepSeekResponsesUrl(env),{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+apiKey},body:JSON.stringify({model,input:"请联网搜索以下精确数据需求。只返回能直接回答检索词的政府官网、统计部门或原始发布页；最多返回"+limit+"条，不扩展到无关背景材料，并给出标题、发布时间和原始网址。\n\n精确检索词："+query,tools:[{type:"web_search"}],tool_choice:{type:"web_search"},reasoning:{effort:"low"},max_output_tokens:outputBudget})},Number(env.DEEPSEEK_WEB_SEARCH_TIMEOUT_MS)||30000);
+    const outputBudget=Math.max(500,Math.min(options.domain==='rental'?4000:1000,Number(options.maxOutputTokens)||900));
+    const searchScope=options.domain==='rental'?(options.market==='sale'?'公开房源网站的出售挂牌页和小区参考售价页；必须匹配具体物业和城市，给出售价、面积及原文链接，不推测价格，不以城区均价替代':'公开房源网站、出租方原始挂牌页；必须匹配检索中的具体物业和城市，给出挂牌租金、面积、整租或合租及对应原文链接，不推测价格，不以城区均价代替项目房源'):'政府官网、统计部门或原始发布页';
+    response=await wrFetchWithTimeout(wrDeepSeekResponsesUrl(env),{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+apiKey},body:JSON.stringify({model,input:"请联网搜索以下精确数据需求。只返回能直接回答检索词的"+searchScope+"；最多返回"+limit+"条，不扩展到无关背景材料，并给出标题、发布时间和原始网址。\n\n精确检索词："+query,tools:[{type:"web_search"}],tool_choice:{type:"web_search"},reasoning:{effort:"low"},max_output_tokens:outputBudget})},Number(env.DEEPSEEK_WEB_SEARCH_TIMEOUT_MS)||30000);
     payload=await response.json();
     if(!response.ok)throw new Error(wrText(payload?.error?.message||payload?.message||("HTTP "+response.status),240));
+    if(payload?.status==='incomplete')throw new Error('搜索响应未完成（'+wrText(payload.incomplete_details?.reason||'unknown',60)+'），不能视为检索无结果');
+    if(payload?.error||payload?.status==='failed')throw new Error('搜索服务执行失败，请切换搜索通道');
+    const hasSearch=(payload?.output||[]).some(x=>x.type==='web_search_call'&&x.status==='completed');
+    const hasCitations=(payload?.output||[]).some(x=>(x.content||[]).some(c=>(c.annotations||[]).some(a=>a.url||a.url_citation?.url)));
+    if(!hasSearch&&!hasCitations)throw new Error('搜索服务未执行联网工具，不能将普通模型回答作为网页证据');
     const results=wrNormalizeDeepSeekSearchResponse(payload,provider).slice(0,limit);
     return {provider,latencyMs:Date.now()-started,results:wrNormalizeSearchPayload(results,provider)};
   }else if(provider==="custom"){
@@ -203,6 +228,9 @@ export async function wrSearchProvider(env,provider,query,options={}){
   }else if(provider==="mcp"||provider==="licensed"){
     const url=provider==="mcp"?env.WEB_RESEARCH_MCP_URL:env.PRO_DATA_API_URL,key=provider==="mcp"?env.WEB_RESEARCH_MCP_KEY:env.PRO_DATA_API_KEY;if(!url)throw new Error("未配置 "+(provider==="mcp"?"WEB_RESEARCH_MCP_URL":"PRO_DATA_API_URL"));
     response=await wrFetchWithTimeout(url,{method:"POST",headers:{"content-type":"application/json",...(key?{"authorization":"Bearer "+key}: {})},body:JSON.stringify({action:"search",query,limit,domain:"affordable_housing"})},18000);payload=await response.json();
+  }else if(provider==="bing"){
+    response=await wrFetchWithTimeout("https://www.bing.com/search?format=rss&q="+encodeURIComponent(query),{headers:{"accept":"application/rss+xml,application/xml,text/xml"}},12000);
+    payload=wrNormalizeBingRss(await response.text()).slice(0,limit);
   }else if(provider==="duckduckgo"){
     response=await wrFetchWithTimeout("https://html.duckduckgo.com/html/?q="+encodeURIComponent(query),{headers:{"accept":"text/html","user-agent":"Mozilla/5.0 compatible ResearchBot/1.0"}},12000);payload=wrDdgHtml(await response.text());
   }else throw new Error("未知检索 Provider");
@@ -214,7 +242,7 @@ export async function wrSearch(env,query,options={}){
   const catalog=wrProviderCatalog(env),wanted=options.providers?.length?options.providers:catalog.filter(x=>x.configured).map(x=>x.id),errors=[];
   for(const provider of wanted){
     try{const out=await wrSearchProvider(env,provider,query,options);if(out.results.length)return {...out,errors};errors.push({provider,error:"未返回结果"});}
-    catch(e){errors.push({provider,error:wrText(e.message,180)});}
+    catch(e){errors.push({provider,error:wrSearchError(e)});}
   }
   return {provider:"",latencyMs:0,results:[],errors};
 }

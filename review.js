@@ -376,24 +376,42 @@ function runAudit(){
   }
   // Claim—Evidence签发审计：数字结论无来源、正文绑定旧版本属于硬阻断；普通判断缺证据只提醒，不把框架稿全部卡死。
   if(appMode!=="review"&&window.ReportEvidenceGraph){
-    const evidenceAudit=window.ReportEvidenceGraph.preSubmitAudit(active);
+    const evidenceAudit=preSubmitAuditForCurrentReport(active);
     evidenceAudit.issues.forEach(x=>issues.push({sev:x.severity==="blocker"?"err":x.severity==="warning"?"warn":"info",cn:x.cn==null?"—":x.cn,si:x.si==null?null:x.si,secTitle:x.title||"",chName:x.chapter||"证据图谱",msg:"["+x.code+"] "+x.message}));
   }
   return issues;
 }
 
-function preSubmitAuditForCurrentReport(){
-  if(!window.ReportEvidenceGraph)return {ready:true,blockerCount:0,warningCount:0,claimCoverage:0,graph:{claims:[],evidence:[],sources:[]},issues:[]};
-  return window.ReportEvidenceGraph.preSubmitAudit(chapters.filter(c=>c.checked));
+function currentReportNumericAudit(active){
+  if(!window.ReportNumericAudit)return {findings:[{severity:'error',message:'数值核对模块未加载，请刷新后重试'}],checked:[]};
+  const text=active.flatMap(c=>(c.sections||[]).map(s=>s.editedHtml||s.content||'')).join('\n');
+  const snapshot=(projectWorkflow?.calcSnapshots||[]).find(x=>x.id===projectWorkflow.currentCalcSnapshotId);
+  if(!snapshot||!['rent','sale','gaibao'].includes(snapshot.calcType))return {findings:[{severity:'warning',message:'没有可核对的当前测算快照；未将缺失数值当作0'}],checked:[]};
+  if(JSON.stringify(snapshot.params)!==JSON.stringify(calcParams)||JSON.stringify(snapshot.summary)!==JSON.stringify(calcResult?.summary))return {findings:[{severity:'error',message:'当前测算与快照不一致，请先保存测算版本再核对正文'}],checked:[]};
+  // These three engines define the following cumulative summary values in CNY 万元.
+  // Do not compare annual values or ambiguous pre-/post-tax IRR against these totals.
+  const fields=[['totalNpv','累计净现值',[]],['totalIncome','累计总收入',['总收入']],['totalCost','累计总成本',[]],['totalNetProfit','累计净利润',[]],['totalTax','累计税费',[]]];
+  const expected=fields.filter(([,label,aliases])=>[label,...aliases].some(x=>text.includes(x))).map(([key,label,aliases])=>({key,label,aliases,value:snapshot.summary?.[key],unit:'万元',tolerance:0.01,sourceRef:snapshot.id,version:snapshot.version}));
+  if(!expected.length)return {findings:[{severity:'warning',message:'未找到与累计测算口径明确对应的正文指标；年度数据、IRR口径和其他数字仍需单独核对'}],checked:[]};
+  return ReportNumericAudit.audit({text,expected});
+}
+function preSubmitAuditForCurrentReport(active){
+  if(!window.ReportEvidenceGraph)return {ready:false,blockerCount:1,warningCount:0,claimCoverage:0,graph:{claims:[],evidence:[],sources:[]},issues:[{severity:'blocker',message:'证据核查模块未加载，请刷新重试；不能视为已通过'}]};
+  active=active||chapters.filter(c=>c.checked);
+  const audit=ReportEvidenceGraph.preSubmitAudit(active),numeric=currentReportNumericAudit(active);
+  audit.numeric=numeric;
+  for(const finding of numeric.findings||[])audit.issues.push({severity:finding.severity==='error'?'blocker':'warning',code:'NUMERIC_'+(finding.kind||'CONTEXT'),message:(finding.label?finding.label+'：':'')+finding.message});
+  audit.blockerCount=audit.issues.filter(x=>x.severity==='blocker').length;audit.warningCount=audit.issues.filter(x=>x.severity==='warning').length;audit.ready=audit.ready&&!audit.blockerCount;
+  return audit;
 }
 function trustworthyReportCardHtml(){
   const audit=preSubmitAuditForCurrentReport(),dep=window.ReportDependency?window.ReportDependency.buildGraph({calcType:calcType,paramKeys:Object.keys(calcParams||{}),chapters:chapters.filter(c=>c.checked)}):null;
   const blockers=audit.blockerCount||0,color=blockers?"var(--seal-red)":"var(--ok-green)";
   const issueRows=(audit.issues||[]).slice(0,30).map(x=>'<div class="audit-row" style="display:flex;gap:8px;"><b style="color:'+(x.severity==="blocker"?'var(--seal-red)':'#C99A2E')+';">'+(x.severity==="blocker"?'阻断':'提醒')+'</b><span>'+escapeHtml((x.chapter?x.chapter+' · ':'')+(x.title||''))+'</span><span>'+escapeHtml(x.message||'')+'</span></div>').join('');
-  return '<details class="cf-chart" style="margin:0 0 16px;"><summary class="cf-head" style="cursor:pointer;"><span>可信可研图谱与提交前审计</span><span style="color:'+color+';">'+(blockers?'存在 '+blockers+' 项签发阻断':'硬阻断已通过')+'</span></summary>'
-    +'<div style="display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:8px;padding:12px 0;"><div class="ac-cell"><span class="ac-l">参数依赖</span><b>'+(dep?dep.parameters:0)+' 项</b></div><div class="ac-cell"><span class="ac-l">联动指标</span><b>'+(dep?dep.metrics:0)+' 项</b></div><div class="ac-cell"><span class="ac-l">结论Claim</span><b>'+audit.graph.claims.length+' 条</b></div><div class="ac-cell"><span class="ac-l">证据覆盖率</span><b>'+audit.claimCoverage+'%</b></div></div>'
+  return '<details class="cf-chart" style="margin:0 0 16px;"><summary class="cf-head" style="cursor:pointer;"><span>来源定位与提交前核查</span><span style="color:'+color+';">'+(blockers?'存在 '+blockers+' 项待核查':'自动检查未发现阻断，仍需独立复核')+'</span></summary>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:12px 0;"><div class="ac-cell"><span class="ac-l">参数依赖</span><b>'+(dep?dep.parameters:0)+' 项</b></div><div class="ac-cell"><span class="ac-l">联动指标</span><b>'+(dep?dep.metrics:0)+' 项</b></div><div class="ac-cell"><span class="ac-l">正文片段</span><b>'+audit.graph.claims.length+' 条</b></div><div class="ac-cell"><span class="ac-l">原文逐句定位（非准确率）</span><b>'+audit.claimCoverage+'%</b></div></div>'
     +'<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">路径：参数 → 白箱指标 → 受影响章节；结论 → 证据 → 原始文件/网页/单元格/测算快照。展开后可在签发前集中处理。</div>'
-    +(issueRows?'<div style="max-height:230px;overflow:auto;">'+issueRows+'</div>':'<div style="color:var(--ok-green);">✓ 所有数字结论均已绑定可追溯依据，正文未发现旧版本残留。</div>')+'</details>';
+    +(issueRows?'<div style="max-height:230px;overflow:auto;">'+issueRows+'</div>'+((audit.issues||[]).length>30?'<p>上方展示前30项，其余请在逐句依据中核对；核查覆盖全部正文。</p>':''):'<div style="color:var(--ok-green);">✓ 当前自动检查未发现缺项。原文定位不证明真实性、政策效力或适用性，仍须独立复核。</div>')+(window.ReportEvidenceGraph?.detailsHtml?ReportEvidenceGraph.detailsHtml(audit.graph):'')+'</details>';
 }
 async function saveCurrentAsGoldenCandidate(){
   if(!window.ReportGolden)throw new Error("黄金评测模块未加载");
@@ -404,7 +422,7 @@ function auditPanelHtml(issues){
   const err = issues.filter(x=>x.sev==="err"), warn = issues.filter(x=>x.sev==="warn"), info = issues.filter(x=>x.sev==="info");
   const dot = s=> s==="err"? "var(--seal-red)" : s==="warn"? "#C99A2E" : "var(--ink-soft)";
   let head;
-  if(!issues.length) head = '<div style="color:var(--ok-green); font-weight:700;">✓ 全部检查通过（完整性 / 规范性 / 数据一致性），可进入签发。</div>';
+  if(!issues.length) head = '<div style="color:var(--ok-green); font-weight:700;">✓ 自动检查未发现问题；不代替独立复核、政策适用性核验或正式审批。</div>';
   else head = '<div style="font-weight:700;">检查完成：<span style="color:var(--seal-red);">'+err.length+' 项错误</span> ｜ <span style="color:#C99A2E;">'+warn.length+' 项警告</span> ｜ '+info.length+' 项提示</div>';
   const rows = issues.map(x=>
     '<div class="audit-row" '+(x.si!==null&&x.si!==undefined?'data-goto="'+x.cn+'_'+x.si+'" style="cursor:pointer;"':'')+'>'

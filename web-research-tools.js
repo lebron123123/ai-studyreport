@@ -14,8 +14,9 @@
     return {region:"深圳市",regionLevel:"city",regionPath:["深圳市"]};
   }
   function projectContext(extra){
-    const p=global.project||{},workflow=global.projectWorkflow||{};
-    return Object.assign({projectId:String(workflow.projectId||p.id||p.name||"current-project").slice(0,120),projectName:p.name||"",location:p.location||"",projectType:global.calcType||(global.calcResult&&global.calcResult.__ctype)||global.rptCtype||"rent",businessScenario:p.businessScenario||(global.aiReportExtracted&&global.aiReportExtracted.businessScenario)||""},extra||{});
+    const p=typeof project!=='undefined'?project:(global.project||{}),workflow=typeof projectWorkflow!=='undefined'?projectWorkflow:(global.projectWorkflow||{});
+    const activeId=typeof currentProjectId!=='undefined'?currentProjectId:global.currentProjectId;
+    return Object.assign({projectId:String(activeId||workflow.projectId||p.id||p.name||"current-project").slice(0,120),projectName:p.name||"",location:p.location||"",projectType:global.calcType||(global.calcResult&&global.calcResult.__ctype)||global.rptCtype||"rent",businessScenario:p.businessScenario||(global.aiReportExtracted&&global.aiReportExtracted.businessScenario)||""},extra||{});
   }
   async function api(body){
     const response=await fetch("/api/webresearch",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},typeof global.authHeaders==="function"?global.authHeaders():{}),body:JSON.stringify(body)});
@@ -33,7 +34,7 @@
   function sectionRows(chapter,section){return approved().filter(x=>(!chapter||x.chapter===chapter)&&(!section||x.section===section));}
   function contextForSection(chapter,section,collector){
     const rows=sectionRows(chapter,section).slice(0,8);if(!rows.length)return "";
-    if(collector)collector.webEvidence=rows.map(x=>({id:x.id,title:x.title,url:x.url,publisher:x.publisher,authority:x.authority_level,confidence:x.confidence,verification:x.verification_status,fetchedAt:x.fetched_at||""}));
+    if(collector)collector.webEvidence=rows.map(x=>({id:x.id,title:x.title,url:x.url,publisher:x.publisher,authority:x.authority_level,confidence:x.confidence,verification:x.verification_status,fetchedAt:x.fetched_at||"",version:x.version||x.fetched_at||null,excerpt:String(x.content_text||x.excerpt||'').slice(0,900)}));
     return "\n\n【已人工采用的联网证据】\n仅使用下列证据支持可核验事实；不得把网页摘要扩写成未出现的数字。正文涉及事实时注明来源机构和统计期；不同来源冲突时说明差异。\n"+rows.map((x,i)=>(i+1)+". "+x.title+"｜"+(x.publisher||"来源机构待识别")+"｜权威度"+(x.authority_level||"D")+"｜"+(x.published_at||"未标明发布日期")+"\n网址："+x.url+"\n摘要："+String(x.content_text||x.excerpt||"").slice(0,900)).join("\n\n");
   }
   function injectStyle(){
@@ -75,6 +76,38 @@
   }
   async function depositHighValue(job,levels,options){
     options=options||{};const entries=highValueEntries(job,levels),results=await runLimited(entries,Math.min(4,Number(options.concurrency)||3),async entry=>{try{const data=await submitKnowledgeReview(entry.row,entry.target,{fetchFullText:options.fetchFullText===true}),pipelineStatus=data.status||"pending";entry.occurrences.forEach(x=>{x.row.knowledgeDeposit={status:data.existing?"existing":"submitted",pipelineStatus,targetModule:data.target_module||"",targetRef:data.target_ref||"",id:data.id||"",auto:!!options.auto,at:Date.now()};});return {ok:true,existing:!!data.existing,status:pipelineStatus};}catch(error){entry.occurrences.forEach(x=>{x.row.knowledgeDeposit={status:"failed",error:error.message||String(error),auto:!!options.auto,at:Date.now()};});return {ok:false,error:error.message||String(error)};}});if(options.persist!==false)persistBatchJob(job);return {total:entries.length,submitted:results.filter(x=>x&&x.ok&&!x.existing).length,existing:results.filter(x=>x&&x.ok&&x.existing).length,pending:results.filter(x=>x&&x.ok&&x.status==="pending").length,approved:results.filter(x=>x&&x.ok&&x.status==="approved").length,failed:results.filter(x=>x&&!x.ok).length};
+  }
+  // An archive is detached from the live job: review must never resume search or alter report state.
+  function savedEvidenceArchive(projectId,job,evidence){
+    const outputs=job&&job.projectId===projectId?JSON.parse(JSON.stringify(job.outputs||[])).filter(Boolean):[];
+    (evidence||[]).forEach(row=>{
+      if(row.project_id&&row.project_id!==projectId)return;
+      const bindings=row.bindings?.length?row.bindings:[{chapter:row.chapter||'',section:row.section||''}];
+      bindings.forEach(binding=>outputs.push({target:binding,results:[{...row,authorityLevel:row.authorityLevel||row.authority_level,snippet:row.snippet||row.excerpt}]}));
+    });
+    outputs.forEach(output=>{output.results=(output.results||[]).filter(row=>/^https?:\/\//i.test(String(row.url||'')));});
+    return {projectId,targets:[],outputs};
+  }
+  async function openSavedEvidence(legacy){
+    document.getElementById('wrSavedEvidence')?.remove();
+    const overlay=document.createElement('div');overlay.id='wrSavedEvidence';overlay.className='air-modal-overlay';
+    overlay.innerHTML='<div class="air-modal-card" style="max-height:85vh;overflow:auto;overscroll-behavior:contain"><div class="air-modal-head"><b>已保存检索来源 · 只读</b><button data-close>关闭</button></div><p>此处不会重新检索、采用依据或生成报告。检索候选不等于正文已引用；可单独提交后台知识库审核。</p><div data-status role="status">正在读取已保存来源…</div><div data-sources></div><button class="btn" data-submit disabled>提交 A/B 级来源到后台审核</button></div>';
+    document.body.appendChild(overlay);overlay.querySelector('[data-close]').onclick=()=>overlay.remove();
+    const ctx=projectContext(),sourceProjectId=legacy?'current-project':ctx.projectId,status=overlay.querySelector('[data-status]'),button=overlay.querySelector('[data-submit]');
+    const legacyButton=document.createElement('button');legacyButton.className='btn ghost';legacyButton.textContent=legacy?'返回本项目来源':'查看旧版未归属来源（不可视为本项目已引用）';legacyButton.onclick=()=>openSavedEvidence(!legacy);overlay.querySelector('.air-modal-card').appendChild(legacyButton);
+    let evidence=[],loadError='';
+    try{evidence=(await api({action:'listEvidence',projectId:sourceProjectId})).evidence||[];}catch(error){loadError='后台来源读取失败：'+error.message+'。以下仅显示本机缓存；可关闭后重试。';}
+    const archive=savedEvidenceArchive(sourceProjectId,restoreBatchJob(),evidence),entries=highValueEntries(archive,['A','B','C','D']);
+    status.textContent=loadError||((legacy?'旧版未记录项目归属，以下不可认定为本项目来源。':'')+'共 '+entries.length+' 个已保存来源；提交后仍需管理员审核。');
+    overlay.querySelector('[data-sources]').innerHTML=entries.length?entries.map(({row,target})=>'<details><summary>'+esc(row.title||row.url)+' · '+esc(row.status||'检索候选')+'</summary><p>'+esc(target.bindings.map(x=>[x.chapter,x.section].filter(Boolean).join(' / ')).filter((x,i,a)=>a.indexOf(x)===i).join('；'))+'</p><a target="_blank" rel="noopener noreferrer" href="'+esc(row.url)+'">查看原始来源</a><p>'+esc(row.snippet||row.excerpt||'暂无摘要')+'</p></details>').join(''):'<p>没有可读取的已保存来源。不自动补搜，也不会更改正文。</p>';
+    button.disabled=!highValueEntries(archive,['A','B']).length;
+    button.onclick=async()=>{
+      if(projectContext().projectId!==ctx.projectId){status.textContent='项目已切换，请关闭后重新打开。';return;}
+      button.disabled=true;status.textContent='正在提交审核，不修改报告…';
+      try{const result=await depositHighValue(archive,['A','B'],{persist:false,fetchFullText:false});status.textContent='新增 '+result.submitted+'，已有 '+result.existing+'，待审核 '+result.pending+'，失败 '+result.failed+'。仅保存已有正文/摘要及网址，不代表已抓取附件全文。';}
+      catch(error){status.textContent='提交失败：'+error.message;}
+      finally{button.disabled=false;}
+    };
   }
   function base64Buffer(value){const binary=atob(value||""),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);return bytes.buffer;}
   async function extractFullText(row,button){
@@ -145,6 +178,7 @@
     const priority=Math.max(0,Number(target&&target.decisionPriority)||0),level=priority>=90?"核心":priority>=75?"重要":"支撑";
     return level+" · "+priority+"分"+(target&&target.bindings&&target.bindings.length>1?" · 已复用到"+target.bindings.length+"个小节":"");
   }
+  function batchFailure(output){if(!output||output.results?.length)return '';return output.error||(output.errors||[]).map(x=>x.provider+'：'+x.error).join('；');}
   async function runLimited(list,limit,worker,onProgress){
     let cursor=0,done=0;const output=new Array(list.length),count=Math.max(1,Math.min(Number(limit)||2,4));
     await Promise.all(Array.from({length:Math.min(count,list.length)},async()=>{while(cursor<list.length){const index=cursor++,item=list[index];try{output[index]=await worker(item,index);}catch(error){output[index]={target:item,error:error.message||String(error),results:[]};}done++;if(onProgress)onProgress(done,list.length,output[index]);}}));
@@ -175,7 +209,7 @@
   function startBatchJob(job){
     if(job.runPromise||job.status!=="running"||job.done>=job.targets.length)return job.runPromise;
     state.batchBusy=true;const worker=async()=>{while(job.status==="running"){
-      const index=job.nextIndex++;if(index>=job.targets.length)break;persistBatchJob(job);
+      const index=job.nextIndex++;if(index>=job.targets.length)break;if(job.outputs[index])continue;persistBatchJob(job);
       try{job.outputs[index]=await searchBatchTarget(job,job.targets[index]);try{await depositHighValue({outputs:[job.outputs[index]],targets:[job.targets[index]]},["A"],{auto:true,fetchFullText:false,concurrency:3,persist:false});}catch(depositError){}}catch(error){job.outputs[index]={target:job.targets[index],error:error.message||String(error),results:[]};}
       job.done=job.outputs.filter(Boolean).length;notifyBatch(job);
     }};
@@ -197,13 +231,17 @@
       let success=0;outputs.forEach(output=>{if(output.results&&output.results.length)success++;(output.results||[]).forEach(row=>allRows.push({...row,batchTarget:output.target}));});
       if(!Number.isInteger(job.viewIndex)||job.viewIndex<0||job.viewIndex>=total)job.viewIndex=Math.min(job.done,total-1);
       const viewIndex=Math.max(0,job.viewIndex),viewTarget=job.targets[viewIndex]||{},viewOutput=job.outputs[viewIndex],viewRows=viewOutput&&viewOutput.results||[];
-      const taskStatus=index=>job.outputs[index]?(job.outputs[index].results&&job.outputs[index].results.length?{text:"已返回 "+job.outputs[index].results.length+" 条",cls:"done"}:{text:"暂无结果",cls:"empty"}):(index<job.nextIndex?{text:paused?"请求收尾中":"正在检索",cls:"running"}:{text:paused?"已暂停":"等待中",cls:"waiting"});
+      const taskStatus=index=>job.outputs[index]?(job.outputs[index].results&&job.outputs[index].results.length?{text:"已返回 "+job.outputs[index].results.length+" 条",cls:"done"}:{text:batchFailure(job.outputs[index])?'检索失败':'暂无结果',cls:"empty"}):(index<job.nextIndex?{text:paused?"请求收尾中":"正在检索",cls:"running"}:{text:paused?"已暂停":"等待中",cls:"waiting"});
       const ledgerRows=job.targets.map((target,index)=>{const status=taskStatus(index);return '<tr class="wr-ledger-row '+(index===viewIndex?'active':'')+'" data-index="'+index+'"><td>'+(index+1)+'</td><td><b>'+esc(target.chapter)+'</b><br>'+esc(target.section)+'</td><td><span class="wr-pill">'+esc(batchDecisionLabel(target))+'</span><br>'+esc(target.requirement||target.titles.join("；")||"公开依据")+'</td><td><span class="wr-ledger-status '+status.cls+'">'+status.text+'</span></td></tr>';}).join("");
       const detailSources=viewRows.length?viewRows.map((row,index)=>{const dep=row.knowledgeDeposit||{},depText=dep.status==="submitted"?" · ✓ 已自动存入待审台账":dep.status==="existing"?" · ✓ 后台已有":dep.status==="failed"?" · 自动保存失败，可批量重试":"";return '<article class="wr-detail-source"><b>'+(index+1)+'. '+esc(row.title)+'</b><div class="wr-meta"><span class="wr-pill">权威度 '+esc(row.authorityLevel||"D")+'</span> '+esc(row.publisher||"来源机构待识别")+' '+esc(row.publishedAt||"")+esc(depText)+'</div><p>'+esc(row.snippet||"暂无摘要")+'</p><a href="'+esc(row.url)+'" target="_blank" rel="noopener">查看原网页 ↗</a></article>';}).join(""):'<div class="wr-batch-empty">'+(viewOutput?'该任务暂未返回真实候选，将保留材料缺口。':taskStatus(viewIndex).text+'，返回后会在这里显示标题、摘要和原网页。')+'</div>';
       const liveLedger='<div class="wr-live-ledger"><section class="wr-ledger-pane"><div class="wr-pane-title">① 全部 '+total+' 个数据检索任务（按核心度排序，点击行查看）</div><div class="wr-ledger-scroll"><table class="wr-ledger-table"><thead><tr><th>#</th><th>章节 / 小节</th><th>为什么查、查什么</th><th>任务状态</th></tr></thead><tbody>'+ledgerRows+'</tbody></table></div></section><section class="wr-detail-pane"><div class="wr-pane-title">② 当前数据需求的具体内容（'+viewRows.length+' 条候选）</div><div class="wr-detail-body"><b>'+esc((viewTarget.chapter||"")+'｜'+(viewTarget.section||""))+'</b><div class="wr-detail-query"><b>核心度：</b> '+esc(batchDecisionLabel(viewTarget))+'<br><b>判断理由：</b> '+esc((viewTarget.decisionReasons||[]).join("；")||"用于补齐本节公开依据")+'<br><b>实际检索词：</b> '+esc(batchSearchQuery(viewTarget))+'<br><b>需要查找：</b> '+esc(viewTarget.requirement||viewTarget.titles&&viewTarget.titles.join("；")||"公开依据")+'<br><b>关联逻辑项：</b> '+esc((viewTarget.sourceNos||[]).join("、")||"—")+'</div>'+detailSources+'</div></section></div>';
       const selectedIds=new Set(job.selectedEvidenceIds||[]),resultHtml=complete?'<details class="wr-batch-group" open><summary><b>③ 集中审核并采用检索依据</b><span>'+allRows.length+' 条候选</span></summary>'+job.targets.map((target,targetIndex)=>{const output=job.outputs[targetIndex]||{target,results:[]},rows=output.results||[];return '<details class="wr-batch-group" '+(rows.length?'open':'')+'><summary><b>'+esc(target.chapter+'｜'+target.section)+'</b><span>'+(rows.length?rows.length+'条候选':'暂无结果')+'</span></summary><div class="wr-batch-need">检索需求：'+esc(target.requirement||target.titles.join("；")||"本节公开依据")+'</div>'+(rows.length?rows.map(row=>'<label class="wr-result wr-batch-result"><input type="checkbox" class="wr-batch-check" data-evidence-id="'+esc(row.evidenceId)+'" data-target-index="'+targetIndex+'" data-authority="'+esc(row.authorityLevel||"D")+'" '+(selectedIds.has(row.evidenceId)?'checked':'')+'><span><b>'+esc(row.title)+'</b><span class="wr-meta"><i class="wr-pill">权威度 '+esc(row.authorityLevel||"D")+'</i> '+esc(row.publisher||"")+' '+esc(row.publishedAt||"")+'</span><span>'+esc(row.snippet||"暂无摘要")+'</span><a href="'+esc(row.url)+'" target="_blank" rel="noopener">打开原网页</a></span></label>').join(""):'<div class="wr-batch-empty">本节未检索到真实候选，将保留缺口标记，不会编造来源。</div>')+'</details>';}).join("")+'</details>':'';
       const depositRows=highValueEntries(job,["A","B"]),autoA=allRows.filter(row=>/^A$/.test(row.authorityLevel||row.authority_level||"")&&/^(submitted|existing)$/.test(row.knowledgeDeposit&&row.knowledgeDeposit.status||"")).length;
       overlay.innerHTML='<section class="wr-modal wr-batch-modal"><div class="wr-head"><div><h3>生成前 · 批量联网补齐</h3><div class="wr-meta">任务与弹窗已分离；左侧查看“查了什么”，右侧查看实际检索词、网页摘要和原始链接。</div></div><button class="wr-close">×</button></div><div class="wr-batch-progress"><b>'+(complete?'全部检索完成':paused?'已暂停，当前请求收尾后停止':'正在并行检索公开依据…')+'</b><span>'+job.done+' / '+total+' 个小节任务</span><div><i style="width:'+pct+'%"></i></div></div><div class="wr-batch-summary"><b>'+(complete?'检索完成：':'实时统计：')+'</b>已完成 '+job.done+' / '+total+' 个小节任务；全部已完成任务累计返回 '+allRows.length+' 条网页候选；当前选中小节为 '+viewRows.length+' 条。A级官方来源已自动沉淀 '+autoA+' 条；A/B级高价值来源（按网址去重）共 '+depositRows.length+' 条。'+(complete?'请集中审核后采用；沉淀内容先进入后台待审台账，管理员发布后才进入RAG。':'每个小节分别检索，点击左侧任一行查看对应内容。')+'</div>'+liveLedger+'<div class="wr-batch-results">'+resultHtml+'</div><div class="wr-batch-footer">'+(!complete?'<button class="btn sm ghost wr-batch-toggle">'+(paused?'▶ 继续检索':'⏸ 暂停检索')+'</button>':'')+'<button class="btn sm ghost wr-batch-deposit" '+(depositRows.length?'':'disabled')+'>💾 保存已检索高价值来源（A/B）</button>'+(complete?'<button class="btn sm ghost wr-batch-official">勾选 A/B 级来源</button><button class="btn sm ghost wr-batch-all">全选</button><button class="btn sm ghost wr-batch-none">清空</button><span class="wr-batch-selected">已选 '+selectedIds.size+' 条</span><button class="btn sm wr-batch-approve" '+(selectedIds.size?'':'disabled')+'>采用所选依据</button><button class="btn sm ghost wr-batch-knowledge" '+(selectedIds.size?'':'disabled')+'>采用并提交知识库审核</button>':'<span class="wr-batch-selected">关闭窗口后仍可继续其他操作</span>')+(job.runtime&&job.runtime.continueAfter&&!job.continued?'<button class="btn sm wr-batch-continue">后台继续并进入下一步 →</button>':'')+'<button class="btn sm ghost wr-batch-close">关闭窗口'+(!paused&&!complete?'（后台继续）':'')+'</button></div></section>';
+      const failed=outputs.filter(batchFailure).length;
+      if(complete){overlay.querySelector('.wr-batch-progress b').textContent=failed?'检索结束，'+failed+' 个任务失败':allRows.length?'检索完成，请核对候选':'检索结束，未找到候选';overlay.querySelector('.wr-batch-summary b').textContent=failed?'检索存在失败：':'检索结果：';}
+      if(batchFailure(viewOutput)){const warning=document.createElement('p');warning.className='wr-batch-empty';warning.textContent='失败原因：'+batchFailure(viewOutput);overlay.querySelector('.wr-detail-body').append(warning);}
+      if(complete&&failed){const retry=document.createElement('button');retry.className='btn sm ghost';retry.textContent='重试失败任务';retry.onclick=()=>{job.outputs=job.outputs.map(x=>batchFailure(x)?null:x);job.done=job.outputs.filter(Boolean).length;job.nextIndex=0;job.status='running';notifyBatch(job);startBatchJob(job);};overlay.querySelector('.wr-batch-footer').prepend(retry);}
       overlay.querySelector(".wr-close").onclick=close;overlay.querySelector(".wr-batch-close").onclick=close;overlay.onclick=event=>{if(event.target===overlay)close();};
       overlay.querySelectorAll(".wr-ledger-row").forEach(row=>row.onclick=()=>{job.viewIndex=Number(row.dataset.index)||0;render();});
       const toggle=overlay.querySelector(".wr-batch-toggle");if(toggle)toggle.onclick=()=>{if(job.status==="paused")resumeBatchSearch();else pauseBatchSearch();};
@@ -227,7 +265,7 @@
     global.AgentCore.registerTool("search_affordable_housing_web",{risk:"external",toolset:"knowledge",timeoutMs:60000,schema:{type:"function",function:{name:"search_affordable_housing_web",description:"仅在精确数据需求允许联网时执行一次低预算检索；返回真实候选及质量评分，候选未经人工采用不能视为正式依据。",parameters:{type:"object",properties:{chapter:{type:"string"},section:{type:"string"},query:{type:"string"},requirementSchema:{type:"object"}},required:["query"]}}},label:a=>"🌐 精确检索："+String(a.query||"").slice(0,28),run:async a=>JSON.stringify(await searchSection(Object.assign({},a,{review:false,maxQueries:1,maxResults:5})))});
     global.AgentCore.registerTool("list_web_evidence",{toolset:"knowledge",schema:{type:"function",function:{name:"list_web_evidence",description:"列出当前项目已经人工采用的联网证据及其权威度、网址和对应章节。",parameters:{type:"object",properties:{chapter:{type:"string"},section:{type:"string"}}}}},run:async a=>{await loadEvidence();return JSON.stringify(sectionRows(a.chapter,a.section));}});
   }
-  global.WebResearch={api,loadEvidence,materialContext,contextForSection,searchSection,searchFromButton,openRequirementRefinement,batchSearchGaps,buildBatchTargets,batchSearchQuery,batchDecisionLabel,batchStatus,pauseBatchSearch,resumeBatchSearch,setStatus,classifyWebEvidence,knowledgeContributionItem,highValueEntries,depositHighValue,state,registerAgentTools};
+  global.WebResearch={api,loadEvidence,materialContext,contextForSection,searchSection,searchFromButton,openRequirementRefinement,batchSearchGaps,buildBatchTargets,batchSearchQuery,batchDecisionLabel,batchStatus,pauseBatchSearch,resumeBatchSearch,setStatus,classifyWebEvidence,knowledgeContributionItem,highValueEntries,depositHighValue,savedEvidenceArchive,openSavedEvidence,state,registerAgentTools};
   function boot(){registerAgentTools();loadEvidence().catch(()=>{});const job=restoreBatchJob();if(job&&job.status==="running")startBatchJob(job);}
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot);else boot();
 })(window);

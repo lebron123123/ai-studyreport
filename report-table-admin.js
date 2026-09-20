@@ -39,7 +39,7 @@
   function toolbarHtml(config){
     const stats=global.ReportTableTemplates.stats(activeType);
     return '<div class="rta-library-tabs" role="tablist" aria-label="标准表格库类型">'+TYPES.map(type=>'<button type="button" role="tab" data-rta-type="'+type+'" aria-selected="'+(type===activeType)+'" class="'+(type===activeType?'active':'')+'">'+escHtml(LABELS[type])+'</button>').join('')+'</div>'
-      +'<div class="rta-toolbar"><div><b>'+escHtml(LABELS[activeType])+'标准表格库</b><span>'+stats.templates+'套逻辑表 · '+stats.physicalTables+'张源Word物理表 · 当前 v'+Number(config.version||1)+'</span></div><div class="rta-actions">'
+      +'<div class="rta-toolbar"><div><b>'+escHtml(LABELS[activeType])+'标准表格库</b><span>'+stats.templates+'套逻辑表 · '+stats.physicalTables+'张来源表 · 表模基线 v'+Number(global.ReportTableTemplates.baseline(activeType)?.version||1)+' · '+(config.status==='baseline'?'无后台覆盖版本':'后台发布 v'+Number(config.version||1))+'（与生成逻辑版本分别管理）</span></div><div class="rta-actions">'
       +'<button class="btn sm ghost" id="rtaExport">📄 导出表格Word版</button>'
       +(!editing?'<button class="btn sm ghost" id="rtaHistory">↩ 版本记录与恢复</button>':'')
       +(editing?'<button class="btn sm ghost" id="rtaAdd">＋新增表格</button><button class="btn sm" id="rtaPublish">保存并同步到前台</button><button class="btn sm ghost" id="rtaCancel">取消修改</button>':'<button class="btn sm" id="rtaEdit">🔓 修改表格模板</button>')+'</div></div>';
@@ -53,12 +53,13 @@
       if(!group){group={name,items:[]};byName.set(name,group);groups.push(group);}
       group.items.push({template,index});
     });
-    return groups;
+    const rank=name=>{const m=name.match(/^第([一二三四五六七八九十百\d]+)章/);if(!m)return 999;const s=m[1],digits='零一二三四五六七八九';if(/^\d+$/.test(s))return Number(s);if(s.includes('十')){const [a,b]=s.split('十');return (a?digits.indexOf(a):1)*10+(b?digits.indexOf(b):0);}return digits.indexOf(s);};
+    return groups.sort((a,b)=>rank(a.name)-rank(b.name));
   }
   function tableCardHtml(item){
     const t=item.template;
     return '<details class="rta-card" data-rta-index="'+item.index+'"><summary><b>'+escHtml(t.title)+'</b><span>源表 '
-      +escHtml((t.sourceTableNumbers||[]).join('、'))+(t.longPeriod?' · 含续表':'')+'</span></summary><div class="rta-lazy"></div></details>';
+      +escHtml((t.sourceTableNumbers||[]).join('、')||'无实体表：按文字要求补充设计')+(t.longPeriod?' · 含续表':'')+'</span></summary><div class="rta-lazy"></div></details>';
   }
   function chapterHtml(group){
     return '<details class="rta-chapter"><summary><span><b>'+escHtml(group.name)+'</b><small>'+group.items.length+'套表格</small></span><em>展开查看</em></summary>'
@@ -67,7 +68,7 @@
   function render(){
     if(!mountedRoot)return;const config=global.ReportTableTemplates.config(activeType),templates=workingSet?.templates||[];
     mountedRoot.innerHTML='<style>.rta-wrap{margin-top:20px;border-top:2px solid var(--bp);padding-top:16px}.rta-library-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.rta-library-tabs button{border:1px solid var(--line);background:#fff;color:var(--bp-deep);padding:9px 17px;border-radius:20px;cursor:pointer}.rta-library-tabs button.active{background:var(--bp);border-color:var(--bp);color:#fff}.rta-toolbar{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:10px}.rta-toolbar>div:first-child{display:flex;flex-direction:column}.rta-toolbar span{font-size:11px;color:var(--soft);margin-top:3px}.rta-actions{display:flex;gap:7px;flex-wrap:wrap}.rta-help{background:#F3F8FC;border:1px solid var(--line);padding:10px 13px;border-radius:8px;color:var(--soft);font-size:12px;line-height:1.7}.rta-group{margin-top:14px}.rta-group>h3{font-size:14px;color:var(--bp-deep);margin:0 0 8px}.rta-chapter{border:1px solid #C9DBEA;border-radius:10px;background:#fff;margin:9px 0;overflow:hidden}.rta-chapter>summary{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:13px 16px;cursor:pointer;background:#EDF5FB;color:var(--bp-deep)}.rta-chapter>summary span{display:flex;align-items:baseline;gap:10px}.rta-chapter>summary b{font-size:14px}.rta-chapter>summary small,.rta-chapter>summary em{font-size:11px;color:var(--soft);font-style:normal;font-weight:400}.rta-chapter[open]>summary{border-bottom:1px solid #C9DBEA}.rta-chapter-body{padding:7px 11px 11px;background:#FAFCFE}.rta-card{border:1px solid var(--line);border-radius:8px;background:#fff;margin:7px 0;overflow:hidden}.rta-card>summary{display:flex;justify-content:space-between;gap:14px;padding:10px 13px;cursor:pointer;background:#fff}.rta-card[open]>summary{background:#F7FAFD;border-bottom:1px solid var(--line)}.rta-card>summary span{font-size:11px;color:var(--soft)}.rta-lazy{padding:12px;overflow:auto}.rta-title-edit{display:grid;grid-template-columns:90px minmax(260px,1fr);align-items:center;gap:8px;margin-bottom:10px}.rta-title-edit label{margin:0}.rta-title-edit input[readonly]{background:#F7FAFD;color:var(--ink)}.rta-edit-note{font-size:11px;color:#276796;background:#EDF6FC;padding:7px 10px;margin-bottom:9px}.rta-wrap .rpt-template-card{margin:0;border:0}.rta-wrap .rpt-template-card figcaption{display:none}.rta-wrap .rpt-template-scroll{overflow:auto;max-height:520px}.rta-wrap .rpt-fixed-template{border-collapse:collapse;table-layout:fixed;width:100%;min-width:720px}.rta-wrap .rpt-fixed-template th,.rta-wrap .rpt-fixed-template td{border:1px solid #9FAFBE;padding:4px 5px;font-size:11px;line-height:1.35;vertical-align:middle}.rta-wrap .rpt-fixed-template th{background:#E8F0F7}.rta-wrap [contenteditable=true]{outline:1px dashed #77A9D3;background:#F4FAFF;color:#174E79}.rta-wrap [data-role=value]{background:#F5F6F7;color:#999}.rta-wrap .rpt-template-segment-title{text-align:center;font-weight:700;margin:8px 0}.rta-wrap .rpt-template-period{margin:8px 0}.rta-wrap .rpt-template-period>summary{cursor:pointer;color:var(--bp-deep);font-size:12px}@media(max-width:850px){.rta-toolbar{align-items:flex-start;flex-direction:column}.rta-title-edit{grid-template-columns:1fr}.rta-chapter>summary span{align-items:flex-start;flex-direction:column;gap:2px}}</style>'
-      +'<section class="rta-wrap">'+toolbarHtml(config)+'<div class="rta-help">逐表点击即可查看完整行列。管理员修改只保存与原Word的差异，原始1:1结构始终可恢复；发布后，前台生成、复核预览和Word导出会同时采用新版本。</div>'
+      +'<section class="rta-wrap">'+toolbarHtml(config)+'<div class="rta-help">逐表点击查看完整行列。来源表保留Word表头、合并单元格与固定行；按文字要求新增的表会单独标注。管理员修改保存为基线差异；发布后，前台生成、复核预览和Word导出采用同一表模版本。</div>'
       +[['正文表格',false],['财务附表',true]].map(([label,appendix])=>'<div class="rta-group"><h3>'+label+'（'+templates.filter(t=>!!t.appendix===appendix).length+'套）</h3>'+chapterGroups(templates,appendix).map(chapterHtml).join('')+'</div>').join('')+'</section>';
     lazyBind();document.getElementById("rtaExport").onclick=exportWord;const history=document.getElementById("rtaHistory");if(history)history.onclick=showHistory;mountedRoot.querySelectorAll("[data-rta-type]").forEach(button=>button.onclick=async()=>{const type=button.dataset.rtaType;if(type===activeType)return;activeType=type;editing=false;await ensureLoaded(false);render();});
     if(editing){document.getElementById("rtaAdd").onclick=addTemplate;document.getElementById("rtaPublish").onclick=publish;document.getElementById("rtaCancel").onclick=cancel;}else document.getElementById("rtaEdit").onclick=beginEdit;
@@ -92,7 +93,7 @@
       const response=await fetch("/api/reporttables?action=history&projectType="+encodeURIComponent(activeType),{headers:authHeaders()}),result=await response.json();
       if(!response.ok||!result.ok)throw new Error(result.error||"版本记录读取失败");
       const rows=result.history||[];
-      if(!rows.length){alert("当前还没有已发布的后台修改版本，正在使用原始 v1 基线。");return;}
+      if(!rows.length){alert("当前没有后台覆盖版本，正在使用表模基线 v"+Number(global.ReportTableTemplates.baseline(activeType)?.version||1)+"。生成逻辑版本单独管理。");return;}
       const current=rows.find(row=>row.status==="published"),lines=rows.map(row=>"V"+row.version+"｜"+(row.status==="published"?"当前正式版":"历史版")+"｜"+(row.createdBy||"未知操作人")+"｜"+new Date(row.createdAt).toLocaleString()+"｜"+(row.reason||"无备注"));
       const value=prompt("版本记录：\n\n"+lines.join("\n")+"\n\n如需恢复，请输入目标历史版本号；取消则只查看记录。","");
       if(value==null||!String(value).trim())return;

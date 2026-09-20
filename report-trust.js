@@ -14,11 +14,11 @@
       projectData:compactRef(first(meta.projectDataId,state.projectDataId),first(meta.projectDataVersion,state.projectDataVersion),first(meta.projectData,state.projectData)),
       parameterSet:compactRef(first(meta.parameterSetId,state.parameterSetId),first(meta.parameterSetVersion,state.parameterSetVersion),first(meta.parameterSet,calc&&calc.params)),
       calculation:compactRef(first(meta.calcSnapshotId,state.currentCalcSnapshotId),first(meta.calcSnapshotVersion,calc&&calc.version),first(meta.calculation,calc)),
-      calcEngineVersion:first(meta.calcEngineVersion,state.calcEngineVersion,calc&&calc.engineVersion,"whitebox-v1"),
+      calcEngineVersion:first(meta.calcEngineVersion,state.calcEngineVersion,calc&&calc.engineVersion),
       analysis:compactRef(first(meta.analysisSnapshotId,state.currentAnalysisSnapshotId),first(meta.analysisSnapshotVersion,analysis&&analysis.version),first(meta.analysis,analysis)),
       knowledge:compactRef(first(meta.knowledgeSnapshotId,state.knowledgeSnapshotId),first(meta.knowledgeSnapshotVersion,state.knowledgeSnapshotVersion),first(meta.knowledgeSnapshot,state.knowledgeSnapshot)),
       evidence:compactRef(first(meta.evidenceSnapshotId,state.evidenceSnapshotId),first(meta.evidenceSnapshotVersion,state.evidenceSnapshotVersion),first(meta.evidenceSnapshot,state.evidenceSnapshot)),
-      workflowVersion:first(meta.workflowVersion,state.workflowVersion,"report-workflow-v1"),promptVersion:first(meta.promptVersion,state.promptVersion,"report-prompt-v1"),model:first(meta.model,state.model),
+      workflowVersion:first(meta.workflowVersion,state.workflowVersion),promptVersion:first(meta.promptVersion,state.promptVersion),model:first(meta.model,state.model),
       review:compactRef(first(meta.reviewSnapshotId,state.reviewSnapshotId),first(meta.reviewSnapshotVersion,state.reviewSnapshotVersion),first(meta.reviewSnapshot,state.reviewSnapshot))};
     lineage.hash=hash(lineage);return lineage;
   }
@@ -30,14 +30,15 @@
     if((prov.rag||[]).length||(prov.kbDocs||[]).length||(prov.webEvidence||prov.web||[]).length||(prov.projectFields||[]).length)types.push(TYPES.FACT);
     if(hasMissing||section.syncStatus==="stale"||section.syncStatus==="locked-stale")types.push(TYPES.ASSUMPTION);
     if(prov.model||!types.length)types.push(TYPES.AI_JUDGEMENT);
-    const uniq=[...new Set(types)];let score=Number(prov.confidence&&prov.confidence.score),reasons=[];
-    if(!Number.isFinite(score)){score=0.52;if(prov.hasCalcData)score=Math.max(score,0.94);if((prov.excelSources||[]).length)score=Math.max(score,0.91);if((prov.kbDocs||[]).length)score=Math.max(score,0.80);if((prov.rag||[]).some(x=>Number(x.score)>=0.85))score=Math.max(score,0.85);if((prov.webEvidence||prov.web||[]).some(x=>String(x.authority||"").toUpperCase()==="A"))score=Math.max(score,0.86);}
-    if(prov.hasCalcData)reasons.push("含白箱测算结果");if((prov.excelSources||[]).length)reasons.push("含单元格级数据来源");if(evidenceCount(prov))reasons.push("已绑定"+evidenceCount(prov)+"项资料/证据");
-    if(hasMissing){score-=0.15;reasons.push("仍有待补或待核内容");}if(section.syncStatus==="stale"||section.syncStatus==="locked-stale"){score-=0.12;reasons.push("正文与当前数据版本待同步");}if(section.pendingRevision){score-=0.05;reasons.push("存在尚未接受的候选修改");}
-    score=Math.max(0.2,Math.min(0.99,score));const value=Math.round(score*100),grade=value>=85?"高":value>=70?"中":value>=55?"一般":"低";
+    const uniq=[...new Set(types)],reasons=[],stale=['stale','locked-stale'].includes(section.syncStatus);
+    if(prov.hasCalcData)reasons.push('已提供测算上下文，正文数字仍需勾稽');if((prov.excelSources||[]).length)reasons.push('含单元格来源，仍需核对数值口径');if(evidenceCount(prov))reasons.push('检索/资料来源 '+evidenceCount(prov)+' 项，不代表逐句已核验');
+    if(hasMissing)reasons.push('仍有待补或待核内容');if(stale)reasons.push('正文与当前数据版本待同步');if(section.pendingRevision)reasons.push('存在尚未接受的候选修改');
+    const status=stale?'stale':hasMissing?'missing':section.pendingRevision?'pending':evidenceCount(prov)||prov.hasCalcData?'sources_available':'unverified';
+    const grade={stale:'待同步',missing:'待补核',pending:'待确认',sources_available:'有来源·待核对',unverified:'待核验'}[status];
+    reasons.push('不根据素材种类计算准确率；正式结论需独立复核');
     const primary=uniq.includes(TYPES.CALCULATION)?TYPES.CALCULATION:uniq.includes(TYPES.FACT)?TYPES.FACT:uniq.includes(TYPES.ASSUMPTION)?TYPES.ASSUMPTION:TYPES.AI_JUDGEMENT;
-    return {schemaVersion:1,types:uniq,primaryType:primary,score:value,grade,reasons,hasMissing,evidenceCount:evidenceCount(prov)};
+    return {schemaVersion:2,types:uniq,primaryType:primary,score:null,status,grade,reasons,hasMissing,evidenceCount:evidenceCount(prov),independentReviewRequired:true};
   }
-  function buildReportSummary(chapters,ctx){const items=[];(chapters||[]).forEach(c=>(c.sections||[]).forEach((s,si)=>items.push({cn:c.cn,si,title:s.t,profile:buildSectionProfile(s,ctx)})));const avg=items.length?Math.round(items.reduce((n,x)=>n+x.profile.score,0)/items.length):0;const typeCounts=Object.fromEntries(Object.values(TYPES).map(t=>[t,items.filter(x=>x.profile.types.includes(t)).length]));return {schemaVersion:1,total:items.length,averageScore:avg,high:items.filter(x=>x.profile.score>=85).length,low:items.filter(x=>x.profile.score<55).length,typeCounts,attention:items.filter(x=>x.profile.score<70||x.profile.hasMissing).slice(0,30)};}
+  function buildReportSummary(chapters,ctx){const items=[];(chapters||[]).forEach(c=>(c.sections||[]).forEach((s,si)=>items.push({cn:c.cn,si,title:s.t,profile:buildSectionProfile(s,ctx)})));const typeCounts=Object.fromEntries(Object.values(TYPES).map(t=>[t,items.filter(x=>x.profile.types.includes(t)).length]));return {schemaVersion:2,total:items.length,averageScore:null,high:0,low:0,typeCounts,statusCounts:Object.fromEntries(['stale','missing','pending','sources_available','unverified'].map(k=>[k,items.filter(x=>x.profile.status===k).length])),attention:items,independentReviewRequired:true};}
   const api={TYPES,TYPE_LABELS,hash,buildLineage,buildSectionProfile,buildReportSummary};root.ReportTrust=api;if(typeof module==="object"&&module.exports)module.exports=api;
 })(typeof window!=="undefined"?window:globalThis);

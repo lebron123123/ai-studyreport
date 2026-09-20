@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>配套自动刷新验收（模拟数据）</title>
+<style>body{margin:0;font:14px system-ui}iframe{width:100%;height:90vh;border:0}</style>
+<div>[系统测试] 模拟数据，不是真实配套。<button id="empty">下次空结果</button><button id="fail">下次失败</button><output id="log"></output></div>
+<iframe title="地图验收" src="index.html"></iframe>
+<script type="module">
+const frame=document.querySelector('iframe'),log=document.querySelector('#log');let state='ready',calls=0;
+document.querySelector('#empty').onclick=()=>state='empty';document.querySelector('#fail').onclick=()=>state='failed';
+frame.onload=()=>frame.contentWindow.postMessage({type:'init',version:1,key:'qa-only',facilities:true,project:{name:'[系统测试] 配套地图',location:[114.03,22.65],crs:'GCJ02'}},location.origin);
+window.addEventListener('message',e=>{const d=e.data;if(e.source!==frame.contentWindow||e.origin!==location.origin||d?.type!=='map-request'||d.key!=='qa-only')return;
+ calls++;log.textContent='请求 '+calls+' 次；最近半径 '+d.radius+' 米';const mode=state;
+ // Slow 500m responses intentionally arrive after a newer selection.
+ setTimeout(()=>frame.contentWindow.postMessage({type:'map-response',version:1,key:'qa-only',id:d.id,...(mode==='failed'?{error:'[系统测试] 上游暂不可用，请重试'}:{data:{category:d.category,queriedAt:new Date().toISOString(),source:'模拟',total:mode==='empty'?0:1,items:mode==='empty'?[]:[{name:'[模拟] '+d.radius+'米 '+d.category,location:d.location}]}})},location.origin),d.radius===500?1800:20);
+});
+</script>
