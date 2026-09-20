@@ -59,7 +59,7 @@ test('working draft canonical tables and contextual headings are lossless and id
     const xml=await zip.file('word/document.xml').async('string');
     assert.equal((xml.match(/<w:tbl>/g)||[]).length,1);
     assert.doesNotMatch(xml,/原表补充资料|原表第/);
-    assert.match(xml,/来源：原始立项请示/);
+    assert.doesNotMatch(xml,/来源：原始立项请示/);
     assert.match(xml,/584.76/);assert.match(xml,/1.7.1/);assert.doesNotMatch(xml,/1.1.1/);
     assert.match(xml,/1.7　问题、建议与结论/);
   }finally{await browser.close();}

@@ -1,5 +1,6 @@
 // /api/poi  周边配套抓取（高德Web服务：地理编码+周边搜索） 
 import { verifyAuth, json } from "./_auth.js";
+import {mapAround} from './_map-around.js';
 
 const CATS = [
   ["地铁站", "轨道交通"],
@@ -67,6 +68,7 @@ export async function onRequestPost(context){
   if(!env.AMAP_KEY) return json({ok:false, error:"未配置 AMAP_KEY 环境变量"}, 500);
   let body;
   try{ body = await request.json(); }catch(e){ return json({ok:false, error:"格式有误"}, 400); }
+  if(body.action==='mapAround'){const r=await mapAround(body,env.AMAP_KEY);return json(r.data,r.status);}
   // ===== 第一步:候选搜索(POI名称精确匹配,人工确认后再抓周边) =====
   if(body.action === "search"){
     const address = String(body.address||"").trim().slice(0, 100);

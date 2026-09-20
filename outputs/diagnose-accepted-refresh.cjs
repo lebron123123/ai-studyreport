@@ -1,0 +1,15 @@
+const pg=require('../local-server/node_modules/pg');
+const vm=require('node:vm'),fs=require('node:fs');
+(async()=>{const client=new pg.Client({connectionString:process.env.DATABASE_URL});await client.connect();
+try{const {rows}=await client.query("SELECT data FROM projects WHERE id=$1",['1bb24013-18ce-4819-9588-09fe98e5e0c0']);
+const d=typeof rows[0]?.data==='string'?JSON.parse(rows[0].data):rows[0]?.data;if(!d)throw Error('Project missing');
+console.log(JSON.stringify({storedChars:JSON.stringify(d).length,storedBytes:Buffer.byteLength(JSON.stringify(d))}));
+const versions=d.workflow?.reportVersions||[];const summary=cs=>{const ss=(cs||[]).flatMap(c=>c.sections||[]);return {sections:ss.length,content:ss.filter(s=>s.content||s.editedHtml).length,pending:ss.filter(s=>s.pendingRevision).length,stale:ss.filter(s=>s.syncStatus==='stale').length}};
+console.log(JSON.stringify({current:summary(d.chapters),versions:versions.slice(-4).map(v=>({version:v.version,reason:v.reason,...summary(v.chapters)}))}));
+const ctx={window:{}};vm.runInNewContext(fs.readFileSync('outlines.js','utf8'),ctx);
+const template=ctx.window.OUTLINES.baozhang_gaibao.chapters;
+const out=await client.query("SELECT chapters FROM outlines WHERE key=$1",['baozhang_gaibao']);
+const remote=typeof out.rows[0]?.chapters==='string'?JSON.parse(out.rows[0].chapters):out.rows[0]?.chapters;
+if(remote)console.log(JSON.stringify({databaseOutline:summary(remote),matchedCurrent:d.chapters.flatMap(c=>c.sections.filter(s=>remote.some(t=>t.name===c.name&&t.sections.some(x=>x.t===s.t)))).length}));
+console.log(JSON.stringify({unmatchedSaved:d.chapters.flatMap(c=>(c.sections||[]).filter(s=>!template.some(t=>t.name===c.name&&t.sections.some(x=>x.t===s.t))).map(s=>({chapter:c.name,title:s.t,content:!!s.content}))),sample:d.chapters.flatMap(c=>c.sections).slice(0,2).map(s=>({title:s.t,status:s.syncStatus,reason:s.staleReason,logic:s.logicSnapshot?.rules?.length}))}));
+}finally{await client.end();}})().catch(e=>{console.error(e.message);process.exitCode=1});

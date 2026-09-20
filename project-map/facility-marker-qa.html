@@ -1,0 +1,10 @@
+<!doctype html><meta charset="utf-8"><title>配套标记隔离验收（模拟数据）</title>
+<link rel="stylesheet" href="/project-map/vendor/maplibre-gl.css"><style>body{margin:0;font:14px system-ui}#map{height:70vh}#legend{padding:15px}</style>
+<div id="map"></div><div id="legend">[系统测试] 六类模拟点，仅验证样式，不是真实配套数据。</div>
+<script src="/project-map/vendor/maplibre-gl.js"></script><script type="module">
+import {facilityStyles,installFacilityLayer} from '/project-map/facility-markers.mjs';
+import {createMapNames} from '/project-map/map-names.mjs';
+const names=createMapNames();const select=document.createElement('select');select.setAttribute('aria-label','地图名称');for(const [value,text] of [['all','全部名称'],['important','只看重要名称'],['none','隐藏全部名称']]){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}document.body.prepend(select);select.onchange=()=>names.setMode(select.value);
+const map=new maplibregl.Map({container:'map',center:[114,22.55],zoom:14,style:{version:8,sources:{},layers:[{id:'bg',type:'background',paint:{'background-color':'#e9eef1'}}]}});
+map.on('load',()=>{map.addSource('research',{type:'geojson',data:{type:'FeatureCollection',features:Object.keys(facilityStyles).map((category,i)=>({type:'Feature',properties:{kind:'facility',category,name:'测试'+category},geometry:{type:'Point',coordinates:[113.992+i*.0032,22.55]}}))}});installFacilityLayer(map);names.attach(map);names.update(map.getSource('research')._data.features);for(const [category,s] of Object.entries(facilityStyles)){const p=document.createElement('span');p.textContent=s.legend+' '+category+'　';p.style.color=s.color;document.getElementById('legend').append(p);}document.getElementById('legend').append(' 已加载6个分类图标');});
+</script>

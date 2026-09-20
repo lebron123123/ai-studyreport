@@ -130,9 +130,21 @@ export async function reauthorizeAgentJob(env,job){
     catch{return {ok:false,error:'评测来源的访问权限或独立审签已失效'};}
   }
   const level=Math.max(1,Number(payload.securityLevel)||1);if(level>(Number(user.clearance)||1))return {ok:false,error:"任务密级已超过用户当前权限"};
+  if(payload.research){
+    if(env.RESEARCH_IDENTITY_ENABLED!=='1')return {ok:false,error:'研究功能已停用，任务未执行'};
+    try{
+      const {authorizeResearchReportTask}=await import('./reportexecution.js');
+      await authorizeResearchReportTask(env,Number(job.user_id),payload.research,payload.researchDependencies);
+    }catch{return {ok:false,error:'研究轮次、输入版本或编辑权限已失效，任务结果未应用'};}
+  }
   if(!projectId)return {ok:true};
   const access=await resolveProjectAccess(env,job.user_id,projectId);
   if(!access?.permissions.edit)return {ok:false,error:"任务执行前复核发现项目编辑权限已失效"};
+  if(payload.reportSectionTaskId){
+    const {legacyResearchLifecycle}=await import('./_legacy-research-lifecycle.js');
+    const state=legacyResearchLifecycle(typeof access.row.data==='object'?access.row.data:parseAgentJson(access.row.data,{}));
+    if(state.legacyResearchAbandoned||Number(payload.legacyResearchEpoch||0)!==state.legacyResearchEpoch)return {ok:false,error:'可研已废止或生命周期已变化，旧任务结果未应用'};
+  }
   if(access.role==='OWNER')return {ok:true};
   const grant=await env.DB.prepare("SELECT * FROM agent_project_access WHERE user_id=? AND project_id=?").bind(job.user_id,projectId).first();
   if(!grant)return {ok:true};

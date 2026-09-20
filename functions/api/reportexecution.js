@@ -8,12 +8,27 @@ import {reportEvidenceHash} from './_report-trusted-evaluation.js';
 import {ensureAgentRuntime,createAgentRun} from './_agent-runtime.js';
 import {ensureAgentEnterprise,upsertRunGovernance,enqueueAgentJob} from './_agent-enterprise.js';
 import {ensureAgentBudget} from './_agent-budget.js';
+import {authorizeResearchTask} from './_research-store.js';
+import {legacyResearchLifecycle} from './_legacy-research-lifecycle.js';
+export function researchReportDraft(state){return state?.draft||state?.legacySnapshot||state||{};}
+export async function researchReportSources(state){
+  const saved=researchReportDraft(state);
+  return {project:await reportEvidenceHash(saved.project||{}),calculations:await reportEvidenceHash(saved.workflow?.calcSnapshots||saved.calcParams||{}),materials:await reportEvidenceHash(saved.kb||[])};
+}
+export async function authorizeResearchReportTask(env,userId,research,dependencies){
+  if(env.RESEARCH_IDENTITY_ENABLED!=='1')throw new Error('研究功能尚未启用');
+  const access=await authorizeResearchTask(env.DB,Number(userId),research,{checkVersion:!dependencies});
+  const formalId=access.study.formal_project_id||'';
+  if(formalId&&!(await resolveProjectAccess(env,userId,formalId))?.permissions.view)throw new Error('关联项目资料访问权限已失效');
+  if(dependencies){const current=await researchReportSources(access.run.state);for(const k of Object.keys(current))if(current[k]!==dependencies[k])throw new Error('研究源数据已变更，请重新生成该小节');}
+  return access;
+}
 export async function ensureReportExecution(env){
   await ensureReportOrchestration(env);await ensureAgentRuntime(env);await ensureAgentEnterprise(env);await ensureAgentBudget(env);
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS report_section_tasks(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,section_key TEXT NOT NULL,input_hash TEXT NOT NULL,rules_hash TEXT NOT NULL,input_json TEXT NOT NULL,run_id TEXT NOT NULL,created_at BIGINT NOT NULL)').run();
 }
-export async function effectiveReportRules(env,projectId,projectType=''){
-  const project=await env.DB.prepare('SELECT data FROM projects WHERE id=?').bind(projectId).first(),data=parseJson(project?.data,{});
+export async function effectiveReportRules(env,projectId,projectType='',researchData=null){
+  const project=researchData?null:await env.DB.prepare('SELECT data FROM projects WHERE id=?').bind(projectId).first(),data=researchData||parseJson(project?.data,{});
   // Scope is derived from saved project data, never from the generation request.
   const declared=data.project?.businessScenario||data.aiReportExtracted?.businessScenario;
   const scenario=['commercial_renovation','housing_conversion'].includes(declared)?declared:((data.calcType||data.rptCtype)==='gaibao'?'housing_conversion':'');
@@ -31,31 +46,44 @@ export async function startReportSection(env,userId,b){
   if(!env.DB._transaction)throw new Error('持久化报告生成需要事务数据库；请启动本地 PostgreSQL 服务');
   await ensureReportExecution(env);
   const projectId=String(b.projectId||''),sectionKey=String(b.sectionKey||'');
-  if(!projectId||!sectionKey||sectionKey.length>500||typeof b.system!=='string'||typeof b.user!=='string'||!b.user.trim())throw new Error('缺少项目、小节或生成输入');
+  if((!projectId&&!b.research)||!sectionKey||sectionKey.length>500||typeof b.system!=='string'||typeof b.user!=='string'||!b.user.trim())throw new Error('缺少项目、小节或生成输入');
   if(JSON.stringify(b).length>500000)throw new Error('小节上下文过大，请减少无关材料后重试');
   return env.DB._transaction(async DB=>{
-    const scoped={...env,DB};await DB.prepare('SELECT id FROM projects WHERE id=? FOR UPDATE').bind(projectId).first();
-    const access=await resolveProjectAccess(scoped,userId,projectId);if(!access?.permissions.edit)throw new Error('项目编辑权限已失效');
+    const scoped={...env,DB};
+    const researchAccess=b.research?await authorizeResearchReportTask(scoped,userId,b.research):null;
+    const scopeProjectId=researchAccess?String(researchAccess.study.formal_project_id||''):projectId;
+    if(!researchAccess){await DB.prepare('SELECT id FROM projects WHERE id=? FOR UPDATE').bind(projectId).first();const access=await resolveProjectAccess(scoped,userId,projectId);if(!access?.permissions.edit)throw new Error('项目编辑权限已失效');}
     const projectType=['rent','gaibao','sale'].includes(b.projectType)?b.projectType:'';
-    const rules=await effectiveReportRules(scoped,projectId,projectType),applicable=rules.filter(r=>!r.target||sectionKey.includes(r.target)),rulesHash=await reportEvidenceHash(applicable);
+    const saved=researchAccess?researchReportDraft(researchAccess.run.state):parseJson((await DB.prepare('SELECT data FROM projects WHERE id=?').bind(projectId).first())?.data,{});
+    const lifecycle=legacyResearchLifecycle(saved);
+    if(!researchAccess&&(lifecycle.legacyResearchAbandoned||(lifecycle.legacyResearchEpoch>0&&Number(b.legacyResearchEpoch)!==lifecycle.legacyResearchEpoch)))throw new Error('可研已废止或状态已变化，请重新打开后生成');
+    const rules=await effectiveReportRules(scoped,scopeProjectId,projectType,researchAccess?saved:null),applicable=rules.filter(r=>!r.target||sectionKey.includes(r.target)),rulesHash=await reportEvidenceHash(applicable);
     const base=rules.find(r=>r.baseLogic);if(base&&Number(b.logicVersion)!==base.version)throw new Error('前台逻辑版本落后于后台，请刷新逻辑后重试；未发送模型请求');
-    const saved=parseJson((await DB.prepare('SELECT data FROM projects WHERE id=?').bind(projectId).first())?.data,{});
     // Freeze relevant source versions, not volatile report/UI state. Existing tasks remain readable.
     const dependencies={project:await reportEvidenceHash(saved.project||{}),calculations:await reportEvidenceHash(saved.workflow?.calcSnapshots||saved.calcParams||{}),materials:await reportEvidenceHash(saved.kb||[]),prompt:await reportEvidenceHash([b.system,b.user]),logicVersion:base?.version||null};
-    const snapshot={system:b.system,user:b.user,sectionKey,projectType,rules:applicable,dependencies},inputHash=await reportEvidenceHash(snapshot),id='rsec_'+await reportEvidenceHash([userId,projectId,inputHash]);
+    const research=researchAccess?{researchId:researchAccess.study.id,runId:researchAccess.run.runId,epoch:researchAccess.run.epoch,expectedVersion:researchAccess.run.version}:null;
+    const snapshot={system:b.system,user:b.user,sectionKey,projectType,rules:applicable,dependencies,...(research?{research}:lifecycle.legacyResearchEpoch?{legacyResearchEpoch:lifecycle.legacyResearchEpoch}: {})};
+    // Preserve the exact legacy hash: introducing a null research field would
+    // re-enqueue already completed formal-project tasks after this deployment.
+    const hashSnapshot=research?{...snapshot,research:{researchId:research.researchId,runId:research.runId,epoch:research.epoch}}:snapshot;
+    const inputHash=await reportEvidenceHash(hashSnapshot),id='rsec_'+await reportEvidenceHash([userId,scopeProjectId,inputHash]);
     const old=await DB.prepare('SELECT * FROM report_section_tasks WHERE id=?').bind(id).first();if(old)return {id,reused:true,runId:old.run_id};
-    const {run}=await createAgentRun(scoped,userId,{agentType:'report_section',projectId,query:sectionKey,idempotencyKey:id});
+    const {run}=await createAgentRun(scoped,userId,{agentType:'report_section',projectId:research?'':projectId,query:sectionKey,idempotencyKey:id});
     await upsertRunGovernance(scoped,userId,run.id,{executionMode:'server',budgetInputTokens:2000000,budgetOutputTokens:4000});
-    await enqueueAgentJob(scoped,userId,run.id,{kind:'llm_task',maxAttempts:2,payload:{projectId,reportSectionTaskId:id,system:b.system+(applicable.some(r=>r.rule)?'\n【已发布项目规则】\n'+applicable.filter(r=>r.rule).map(r=>r.rule).join('\n'):''),query:b.user,maxTokens:4000}});
-    await DB.prepare('INSERT INTO report_section_tasks(id,project_id,user_id,section_key,input_hash,rules_hash,input_json,run_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)').bind(id,projectId,userId,sectionKey,inputHash,rulesHash,JSON.stringify(snapshot),run.id,Date.now()).run();
+    await enqueueAgentJob(scoped,userId,run.id,{kind:'llm_task',maxAttempts:2,payload:{projectId:research?'':projectId,...(research?{research,researchDependencies:dependencies}:{legacyResearchEpoch:lifecycle.legacyResearchEpoch}),reportSectionTaskId:id,system:b.system+(applicable.some(r=>r.rule)?'\n【已发布项目规则】\n'+applicable.filter(r=>r.rule).map(r=>r.rule).join('\n'):''),query:b.user,maxTokens:4000}});
+    await DB.prepare('INSERT INTO report_section_tasks(id,project_id,user_id,section_key,input_hash,rules_hash,input_json,run_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)').bind(id,scopeProjectId,userId,sectionKey,inputHash,rulesHash,JSON.stringify(snapshot),run.id,Date.now()).run();
     return {id,reused:false,runId:run.id};
   });
 }
 export async function readReportSection(env,userId,id){
   await ensureReportExecution(env);
-  const row=await env.DB.prepare('SELECT * FROM report_section_tasks WHERE id=? AND user_id=?').bind(id,userId).first();if(!row||!(await resolveProjectAccess(env,userId,row.project_id))?.permissions.view)throw new Error('任务不存在或项目权限已失效');
+  const row=await env.DB.prepare('SELECT * FROM report_section_tasks WHERE id=? AND user_id=?').bind(id,userId).first();if(!row)throw new Error('任务不存在或项目权限已失效');
+  const snapshot=parseJson(row.input_json,{});
+  let researchAccess=null;
+  if(snapshot.research)researchAccess=await authorizeResearchReportTask(env,userId,snapshot.research,snapshot.dependencies);
+  else if(!(await resolveProjectAccess(env,userId,row.project_id))?.permissions.view)throw new Error('任务不存在或项目权限已失效');
   const job=await env.DB.prepare('SELECT id,status,error_text FROM agent_jobs WHERE run_id=?').bind(row.run_id).first(),ledger=await env.DB.prepare('SELECT response_json,status,provider,model,actual_input,actual_output,actual_cost FROM agent_call_ledger WHERE run_id=?').bind(row.run_id).first();
-  const rules=(await effectiveReportRules(env,row.project_id,parseJson(row.input_json,{}).projectType)).filter(r=>!r.target||row.section_key.includes(r.target));
+  const rules=(await effectiveReportRules(env,row.project_id,snapshot.projectType,researchAccess?researchReportDraft(researchAccess.run.state):null)).filter(r=>!r.target||row.section_key.includes(r.target));
   const stale=(await reportEvidenceHash(rules))!==row.rules_hash,status=job?.status||'missing';
   return {id:row.id,runId:row.run_id,jobId:job?.id,status,model:ledger?.model||null,provider:ledger?.provider||null,rulesChanged:stale,warning:stale?'后台规则已更新；本任务保留启动时的逻辑与成果，可另行生成新版对比':'',snapshot:parseJson(row.input_json,{}).dependencies||{},error:job?.error_text,text:status==='completed'?parseJson(ledger?.response_json,{}).text||'':'',graph:[{key:'context_snapshot',status:'completed',hash:row.input_hash},{key:'effective_rules',dependsOn:['context_snapshot'],status:'completed',hash:row.rules_hash},{key:'content_generate',dependsOn:['effective_rules'],status},{key:'candidate_review',dependsOn:['content_generate'],status:status==='completed'?'ready':'pending'}],usage:ledger?{status:ledger.status,input:ledger.actual_input,output:ledger.actual_output,costMicros:ledger.actual_cost}:null};
 }

@@ -27,13 +27,26 @@
   root.ReportDeliveryUI={open};
   let activeRequestScope=null;
   function element(tag,text,parent){const el=document.createElement(tag);if(text)el.textContent=text;if(parent)parent.append(el);return el;}
+  function deliveryProjectId(){
+    if(typeof currentProjectId!=='undefined'&&currentProjectId)return currentProjectId;
+    const study=root.ResearchUI?.active?.()&&root.ResearchUI.current?.()?.study;
+    return study?.formalProjectId||study?.formal_project_id||null;
+  }
+  function openResearchReviewNotice(){
+    document.getElementById('reportDeliveryDialog')?.remove();
+    const dialog=element('dialog');dialog.id='reportDeliveryDialog';dialog.style.cssText='width:min(620px,90vw);border:1px solid #aac7dd;border-radius:12px;padding:24px';
+    document.body.append(dialog);element('h2','验收与运行保障',dialog);element('p','当前是未关联正式项目的独立AI可研，不能建立正式项目冻结验收版本。你仍可先进入本研究的“复核与签发”，检查正文、数字和待补项；需要正式冻结验收时，再把可研关联到正式项目。',dialog);
+    const review=element('button','进入研究复核与签发',dialog);review.className='delivery-primary';review.onclick=()=>{dialog.close();if(typeof root.airDeliverAction==='function')void root.airDeliverAction('review');};
+    const close=element('button','关闭',dialog);close.onclick=()=>dialog.close();dialog.addEventListener('close',()=>dialog.remove());dialog.showModal();
+  }
   async function open(){
-    if(typeof currentProjectId==='undefined'||!currentProjectId)return alert('请先保存并打开一个项目');
-    const pid=currentProjectId,actor=typeof getUser==='function'?getUser():null;activeRequestScope?.abort();const requestScope=new AbortController();activeRequestScope=requestScope;document.getElementById('reportDeliveryDialog')?.remove();
+    const pid=deliveryProjectId();
+    if(!pid){if(root.ResearchUI?.active?.())return openResearchReviewNotice();return alert('请先保存并打开一个正式项目');}
+    const actor=typeof getUser==='function'?getUser():null;activeRequestScope?.abort();const requestScope=new AbortController();activeRequestScope=requestScope;document.getElementById('reportDeliveryDialog')?.remove();
     const dialog=element('dialog');dialog.id='reportDeliveryDialog';dialog.style.cssText='width:min(900px,90vw);max-height:85vh;overflow:auto;border:1px solid #aac7dd;border-radius:12px;padding:24px;overscroll-behavior:contain';
     document.body.append(dialog);element('h2','项目验收与运行保障',dialog);element('p','使用后台已保存的正文冻结版本，不覆盖工作稿。自动检查通过不等于正式签发；请由另一位项目成员复核。',dialog);
     const close=element('button','关闭',dialog);close.onclick=()=>dialog.close();dialog.addEventListener('close',()=>{requestScope.abort();dialog.remove();});
-    const isCurrent=()=>!requestScope.signal.aborted&&dialog.isConnected&&currentProjectId===pid&&(typeof getUser!=='function'||getUser()===actor);
+    const isCurrent=()=>!requestScope.signal.aborted&&dialog.isConnected&&deliveryProjectId()===pid&&(typeof getUser!=='function'||getUser()===actor);
     let busy=false,currentHash=null,currentUpdatedAt=null,needsProjectReload=false,versionRead=0,fileRead=0,currentRole=null,reviewControls=[];
     const reload=element('button','重新读取后台版本',dialog);reload.onclick=()=>action(reload,refresh);
     const status=element('p','正在读取…',dialog);status.setAttribute('role','status');

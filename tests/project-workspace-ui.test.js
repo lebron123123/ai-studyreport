@@ -2,6 +2,42 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import UI from "../project-workspace-ui.js";
 
+test("六个常用入口和底部设置覆盖旧视图，普通导航不显示技术验收",()=>{
+  assert.deepEqual(UI.NAV_GROUPS.filter(x=>!x.settings).map(x=>x.label),["项目总览","阶段工作","待办与风险","投资与测算","资料与协议","报告与后评价"]);
+  for(const view of Object.keys(UI.VIEWS)){
+    const html=UI.nav("project-123",view),group=UI.navigationGroup(view);
+    assert.equal((html.match(/data-pw-view=/g)||[]).length,7);
+    assert.equal((html.match(/aria-current="page"/g)||[]).length,1);
+    assert.match(html,new RegExp('aria-current="page" data-pw-view="'+group.key+'"'));
+    assert.doesNotMatch(html,/验收与优化|数据中心|决策中心/);
+  }
+  assert.match(UI.nav('project-123','members'),/pm-nav-settings/);
+  assert.match(UI.subnav('files'),/data-pw-view="facts"/);assert.match(UI.subnav('files'),/数据与来源/);
+  assert.match(UI.subnav('decisions'),/data-pw-view="scenarios"/);
+  assert.match(UI.subnav('stages'),/市场与周边分析/);
+  assert.doesNotMatch(UI.subnav('members'),/acceptance/);
+  assert.match(UI.subnav('members',{manage:true}),/系统验收与改进/);
+});
+
+test("阶段对象深链接保留返回来源，拒绝外部返回地址及任意业务字段",()=>{
+  const context={stageKey:'decision',entityType:'risk',entityId:'risk-1',returnView:'stages'};
+  const hash=UI.route('project-123','actions',null,context);
+  assert.deepEqual(UI.parseRoute(hash),{projectId:'project-123',view:'actions',context});
+  assert.deepEqual(UI.parseRoute(UI.route('project-123','stages','decision',context)),{projectId:'project-123',view:'stages',viewStageKey:'decision',context});
+  assert.deepEqual(UI.routeContext({stageKey:'bad',returnView:'https://example.com',entityType:'risk',entityId:'<script>',privateText:'secret'}),{});
+  assert.deepEqual(UI.routeContext({entityType:'risk',entityId:'risk:1',permission:'admin'}),{entityType:'risk',entityId:'risk:1'});
+  assert.equal(UI.parseRoute('#project/project-123/actions?a=b?c=d'),null);
+  assert.deepEqual(UI.parseRoute('#project/project-123/facts?returnTo=https://example.com&token=secret'),{projectId:'project-123',view:'facts'});
+});
+
+test("阶段记录详情携带真实实体及来源阶段，全项目工具不伪称阶段筛选",()=>{
+  const html=UI.stageWorkspace('decision',{brain:{facts:[{id:'fact-1',label:'审议依据',stageKey:'decision'}]},intelligence:{},ops:{risks:[{id:'risk-1',title:'会议跟进',stageKey:'decision'}]}});
+  assert.match(html,/data-pw-view="facts" data-pw-stage="decision" data-pw-return-view="stages" data-pw-entity-id="fact-1" data-pw-entity-type="fact"/);
+  assert.match(html,/data-pw-entity-id="risk-1" data-pw-entity-type="risk"/);
+  assert.match(html,/data-pw-view="scenarios" data-pw-stage="decision" data-pw-return-view="stages"/);
+  assert.match(html,/全部阶段/);assert.doesNotMatch(html,/data-pm-item=/);
+});
+
 test("独立项目门户路由可解析并拒绝未知视图",()=>{
   assert.deepEqual(UI.parseRoute("#project/project-123/data"),{projectId:"project-123",view:"data"});
   assert.equal(UI.parseRoute("#project/project-123/unknown"),null);
@@ -26,7 +62,16 @@ test("八阶段链接可刷新定位且兼容旧阶段入口，未知阶段不�
   assert.deepEqual(UI.parseRoute("#project/project-123/stages"),{projectId:"project-123",view:"stages"});
   assert.equal(UI.parseRoute("#project/project-123/stages/unknown"),null);
   assert.equal(UI.parseRoute("#project/project-123/facts/decision"),null);
-  assert.equal(Object.keys(UI.VIEWS).length,12);
+  for(const view of ['overview','stages','facts','data','files','spatial','decisions','actions','scenarios','versions','members','acceptance'])assert.ok(UI.VIEWS[view]);
+});
+
+test("独立协议评价和风险办理页归入固定六入口并兼容刷新深链接",()=>{
+  const groups={contracts:'files',evaluations:'versions',lessons:'versions',plans:'versions',baseline:'actions',handoffs:'actions',meetings:'actions'};
+  for(const [view,group] of Object.entries(groups)){
+    assert.equal(UI.navigationGroup(view).key,group);
+    assert.deepEqual(UI.parseRoute(UI.route('project-123',view)),{projectId:'project-123',view});
+    assert.match(UI.subnav(view),new RegExp('data-pw-view="'+view+'" class="active" aria-current="page"'));
+  }
 });
 
 test("浏览偏好按用户及项目隔离，只保存有效导航值且容忍存储不可用",()=>{

@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import {mergeHousingRevision} from '../functions/api/_reportlogic-scoped-migration.js';
 import {validateSet,bumpLogicVersion,needsAuthoritativeBaseline} from '../functions/api/reportlogic.js';
 const target=JSON.parse(fs.readFileSync('data/report-logic-gaibao-v1.json','utf8'));
-const previous=JSON.parse(execFileSync('git',['show','HEAD:data/report-logic-gaibao-v1.json'],{encoding:'utf8'}));
+// 固定升级前版本，不随 HEAD 提交移动而改变测试语义。
+const previous=structuredClone(target);
+previous.logicVersions={...previous.logicVersions,housing_conversion:'2.0'};
 const commercial=d=>d.rules.filter(r=>r.scenarios.includes('commercial_renovation')).map(r=>({...r,...r.scenarioVariants.commercial_renovation,scenarioVariants:undefined}));
 test('V6只升级住房场景，商业场景与未涉及的自定义规则不变',()=>{
  assert.deepEqual(commercial(target),commercial(previous));

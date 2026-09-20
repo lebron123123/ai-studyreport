@@ -25,11 +25,11 @@ function project(overrides={}){
   return Object.assign({id:"project-123",name:"测试项目",type:"rent",location:"龙华区",owner:"负责人",role:"OWNER",permissions:{edit:true,manage:true,delete:true,duplicate:true},investmentStage:"feasibility",status:"collecting",stage:"资料准备",generated:3,sections:10,materials:2,calcVersions:1,reportVersions:2,activity:[]},overrides);
 }
 
-test("项目标题区按当前页面提供主要动作并将归档删除收纳项目管理",()=>{
+test("项目标题区按当前页面提供主要动作并直接展示项目管理按钮",()=>{
   const html=PM.renderDetail(project(),null,null,null,null,null,null,null,"overview",null);
   assert.doesNotMatch(html,/data-pm-ai="project-123"/);
   assert.match(html,/查看当前阶段工作/);
-  assert.match(html,/pm-project-management/);
+  assert.match(html,/pm-row-actions/);
   assert.match(html,/data-pm-archive="project-123" data-value="1"/);
   assert.match(html,/data-pm-purge="project-123"/);
 });
@@ -37,7 +37,7 @@ test("项目标题区按当前页面提供主要动作并将归档删除收纳�
 test("归档项目在标题区可恢复也可彻底删除",()=>{
   const html=PM.renderDetail(project({archived:true}),null,null,null,null,null,null,null,"overview",null);
   assert.match(html,/data-pm-archive="project-123" data-value="0"/);
-  assert.match(html,/>恢复<\/button>/);
+  assert.match(html,/>恢复项目<\/button>/);
   assert.match(html,/删除项目/);
 });
 
@@ -52,7 +52,7 @@ test("总览不再堆放版本、会议、事实和阶段表单",()=>{
   assert.match(html,/data-pw-view="versions"/);
 });
 test("行动、方案、验收分别只挂载自己的业务表单",()=>{
-  const markers={actions:'pmMeetingText',scenarios:'pmScenarioKind',acceptance:'pmOptTitle'};
+  const markers={meetings:'pmMeetingText',scenarios:'pmScenarioKind',acceptance:'pmOptTitle'};
   for(const [view,marker] of Object.entries(markers)){
     const html=PM.renderDetail(project(),null,{},null,{},null,{},null,view,null);
     assert.ok(html.includes(marker),view);
@@ -62,7 +62,8 @@ test("行动、方案、验收分别只挂载自己的业务表单",()=>{
 test("事实页保留只读阶段导航但不混入修改阶段和新建决策",()=>{
   const html=PM.renderDetail(project(),null,{facts:[{label:'建筑面积',factType:'FACT',status:'confirmed'}]},null,{},null,{},null,'facts',null);
   assert.match(html,/建筑面积/);assert.doesNotMatch(html,/data-pm-stage=|pmDecisionTopic/);
-  assert.match(html,/data-pm-stage-view="discovery"/);
+  assert.match(html,/data-pm-stage-view="feasibility"/);
+  assert.doesNotMatch(html,/data-pm-stage-view="discovery"/);
 });
 
 test("八阶段内容与实际工作阶段标识相互独立，VIEWER无管理入口",()=>{
@@ -80,7 +81,8 @@ test("实施与投后仅挂载各自投资组件，沿用既有八阶段和十�
   }
   const html=PM.renderDetail(project(),null,{},null,{},null,{},null,'stages',null,'decision');
   assert.doesNotMatch(html,/data-pm-lifecycle-host/);
-  assert.equal(Object.keys(UI.VIEWS).length,12);
+  for(const view of ['overview','stages','members','facts','data','files','spatial','decisions','actions','scenarios','versions','acceptance'])assert.ok(UI.VIEWS[view]);
+  assert.equal(Object.keys(UI.VIEWS).length,19);
 });
 
 test("阶段导航保护器等待保存，失败不跳转，较旧异步请求不能覆盖新导航",async()=>{

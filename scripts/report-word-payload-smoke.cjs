@@ -45,9 +45,9 @@ function getDocNo(){return 'FIXTURE-WORD-ONLY';}
   assert.equal(p.provenance.rows.length,4);assert.equal(p.provenance.rows[0][2],'核验状态');assert.equal(p.provenance.rows[1][2],'有来源·待核对');assert.equal(p.provenance.rows[2][2],'待核验');assert.equal(p.provenance.rows[3][2],'待同步');
   for(const value of ['https://source.example.test/政策?ver=2','来源V2','资料V2','fixture-material#page-3','fixture.xlsx#投资估算!C9','表V4','fixture-calc-v2','引擎 fixture-engine-v1','效力待核：需核对替代版本','新增无来源小节','尚未绑定可追溯来源'])assert.ok(prov.includes(value),value);
   assert.doesNotMatch(prov,/99\.8|100分|0分|最高|很高|置信度|"score"|"confidence"/);assert.match(p.provenance.note,/不按素材种类计算准确率/);
-  assert.equal(p.versionNote,'关联报告版本 V3 · 工作稿修订 7');assert.equal(p.signed,false);assert.equal(p.docNo,'FIXTURE-WORD-ONLY');assert.equal(p.appendix,null);assert.deepEqual(p.tableAppendix,[]);
+  assert.equal(p.versionNote,'关联报告版本 V3 · 工作稿修订 7 · 未签发工作稿');assert.equal(p.signed,false);assert.equal(p.docNo,'FIXTURE-WORD-ONLY');assert.equal(p.appendix,null);assert.deepEqual(p.tableAppendix,[]);
   // Legacy workflow without version metadata remains an explicitly current working draft.
-  const legacy=await page.evaluate(()=>{projectWorkflow={reportVersions:[]};return buildExportPayload();});assert.equal(legacy.versionNote,'工作稿修订 7');assert.equal(legacy.provenance.rows.length,4);
+  const legacy=await page.evaluate(()=>{projectWorkflow={reportVersions:[]};return buildExportPayload();});assert.equal(legacy.versionNote,'工作稿修订 7 · 未签发工作稿');assert.equal(legacy.provenance.rows.length,4);
   assert.deepEqual(errors,[]);assert.equal(apiRequests,0);
   console.log(JSON.stringify({ok:true,sections:3,provenanceRows:3,apiRequests,consoleErrors:errors,states:['native-DOMParser','body-only','Chinese-paragraphs-tables','edited-state-fallback','sources-URL-version-validity','missing-source-in-appendix','no-legacy-confidence','working-version-note','read-only-repeat','legacy-version'],boundary:'Payload only; no DOCX rendering, Word layout acceptance, external model or real report.'}));
  }finally{await browser.close();}

@@ -36,6 +36,26 @@ async function call(env,method,body,url="http://test/api/reporttables"){
   return {status:response.status,data:await response.json()};
 }
 
+test("中文 PostgreSQL 重复字段按 SQLSTATE 幂等，重复读取不改变已发布模板",async()=>{
+  const DB=mockDb(),prepare=DB.prepare.bind(DB);
+  DB.rows.push({id:'existing',project_type:'gaibao-housing',version:7,status:'published',overrides:JSON.stringify({templates:{sample:{title:'核准表头'}}})});
+  DB.prepare=sql=>sql.startsWith('ALTER TABLE')?{async run(){throw Object.assign(new Error('关系的属性已经存在'),{code:'42701'});}}:prepare(sql);
+  const env={DB,SESSION_SECRET:'tables-test',DEPLOY_MODE:'local'},before=JSON.stringify(DB.rows);
+  for(let i=0;i<2;i++){
+    const result=await call(env,'GET',undefined,'http://test/api/reporttables?projectType=gaibao-housing');
+    assert.equal(result.status,200);assert.equal(result.data.config.version,7);
+    assert.equal(result.data.config.overrides.templates.sample.title,'核准表头');
+  }
+  assert.equal(JSON.stringify(DB.rows),before);
+});
+
+test("初始化权限错误不能作为重复字段忽略",async()=>{
+  const DB=mockDb(),prepare=DB.prepare.bind(DB);
+  DB.prepare=sql=>sql.startsWith('ALTER TABLE')?{async run(){throw Object.assign(new Error('权限不足'),{code:'42501'});}}:prepare(sql);
+  const result=await call({DB,SESSION_SECRET:'tables-test',DEPLOY_MODE:'local'},'GET');
+  assert.equal(result.status,500);assert.match(result.data.error,/权限不足/);
+});
+
 test("表格模板可把历史V3复制为新V6并保留完整审计链",async()=>{
   const DB=mockDb(),env={DB,SESSION_SECRET:"tables-test",DEPLOY_MODE:"local",ADMIN_USERS:"admin",ADMIN_PASS:"pass"};
   for(let version=1;version<=5;version++)DB.rows.push({id:"v"+version,project_type:"rent",version,status:version===5?"published":"archived",overrides:JSON.stringify({projectType:"rent",templates:{sample:{title:"版本"+version}}}),created_at:version,created_by:"admin",reason:"发布 V"+version,restored_from_version:null});

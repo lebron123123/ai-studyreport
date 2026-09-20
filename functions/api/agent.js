@@ -21,6 +21,7 @@ export async function onRequestPost(context){
 
   // 记录一次Agent调用链路(前端问答循环结束后调用,fire-and-forget)
   if(body.action === "trace"){
+    if(body.research)return json({ok:false,error:'研究轨迹必须写入绑定研究轮次的运行台账'},400);
     try{
       await env.DB.prepare("INSERT INTO agent_traces(user_id, query, rounds, tool_calls, final_answer, duration_ms, created_at) VALUES(?,?,?,?,?,?,?)")
         .bind(user.userId, String(body.query||"").slice(0,300), parseInt(body.rounds)||0,

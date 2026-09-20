@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const D=require('../docx.umd.js');
 const build=require('../docxgen.js');
-test('Word report runs are black while pending warnings and content remain',async()=>{
+test('Word正文黑字，待补标记红色，删除来源说明',async()=>{
  const document=build(D,{project:{name:'黑色文字核验'},chapters:[{cn:'一',name:'市场分析',sections:[{title:'3.1 宏观环境',blocks:[{type:'h',text:'3.1.1 小结',level:3},{type:'p',text:'正文【待补：来源】'},{type:'table',rows:[['指标','数值'],['金额','待补']]},{type:'p',text:'来源：测试'}]}]}]});
  const files=await D.Packer.toBuffer(document);
  assert.ok(files.length>1000);
@@ -20,6 +20,8 @@ test('Word report runs are black while pending warnings and content remain',asyn
  const encoded=parts.join('\n');
  const colors=[...encoded.matchAll(/<w:color\b[^>]*w:val="([^"]+)"/g)].map(m=>m[1]);
  assert.ok(colors.length>10);
- assert.ok(colors.every(c=>c==='000000'),JSON.stringify([...new Set(colors)]));
+ assert.ok(colors.every(c=>['000000','C62828'].includes(c)),JSON.stringify([...new Set(colors)]));
+ assert.ok(colors.includes('C62828'));
+ assert.doesNotMatch(encoded,/来源：测试/);
  assert.match(encoded,/待补/);
 });

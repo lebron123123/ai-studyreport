@@ -3,10 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import {Readable} from 'node:stream';
 
-export function ragObjectStorageKey(hash) {
+export function ragObjectStorageKey(hash, namespace = '') {
   const value = String(hash || "").toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(value)) throw new Error("原件哈希格式无效");
-  return path.posix.join("sha256", value.slice(0, 2), value);
+  if(namespace && !/^research\/[1-9][0-9]*\/[a-zA-Z0-9_-]{8,100}\/[a-zA-Z0-9_-]{8,100}$/.test(namespace))throw new Error('原件命名空间无效');
+  return path.posix.join(namespace, "sha256", value.slice(0, 2), value);
 }
 
 export function resolveRagObjectPath(root, storageKey) {
@@ -34,10 +35,10 @@ export function createRagObjectStore(root) {
         return {contentHash,storageKey,sizeBytes:size,fileName:String(fileName).slice(0,240),mimeType:String(mimeType).slice(0,120),deduplicated};
       }finally{if(handle)await handle.close();await fs.promises.rm(temp,{force:true});}
     },
-    async put({ bytes, fileName = "", mimeType = "application/octet-stream" }) {
+    async put({ bytes, fileName = "", mimeType = "application/octet-stream", namespace = '' }) {
       const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
       const hash = crypto.createHash("sha256").update(buffer).digest("hex");
-      const storageKey = ragObjectStorageKey(hash);
+      const storageKey = ragObjectStorageKey(hash, namespace);
       const target = resolveRagObjectPath(base, storageKey);
       await fs.promises.mkdir(path.dirname(target), { recursive: true });
       let deduplicated = false;

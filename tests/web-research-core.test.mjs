@@ -1,5 +1,12 @@
 import test from "node:test";
+import {wrNormalizeBingRss,wrSearch,wrSearchProvider,wrSearchError} from '../functions/api/_web-research-core.js';
 import assert from "node:assert/strict";
+
+test('搜索截断和未执行工具不冒充空结果，备用通道独立返回真实RSS链接',async()=>{
+ const original=globalThis.fetch;let mode='incomplete';const calls=[];
+ globalThis.fetch=async url=>{calls.push(String(url));return new Response(String(url).includes('bing.com')?'<rss><channel><item><title>政府统计 &amp; 公报</title><link>https://www.sz.gov.cn/stat</link><description>原始发布</description></item></channel></rss>':JSON.stringify(mode==='incomplete'?{status:'incomplete',incomplete_details:{reason:'max_output_tokens'},output:[]}:{status:'completed',output:[{type:'message',content:[{type:'output_text',text:'猜测网址 https://example.com/fake'}]}]}),{status:200});};
+ try{const env={DEEPSEEK_API_KEY:'fixture',DEEPSEEK_API_URL:'https://example.com/v1'};await assert.rejects(wrSearchProvider(env,'deepseek-web','统计'),/未完成/);mode='no_tool';await assert.rejects(wrSearchProvider(env,'deepseek-web','统计'),/未执行联网工具/);const result=await wrSearch(env,'统计',{providers:['deepseek-web','bing']});assert.equal(result.provider,'bing');assert.equal(result.results.length,1);assert.equal(result.results[0].url,'https://www.sz.gov.cn/stat');assert.match(result.errors[0].error,/未执行联网工具/);assert.equal(wrNormalizeBingRss('<html>验证码</html>').length,0);assert.ok(calls.some(x=>x.includes('format=rss')));assert.match(wrSearchError(new TypeError('fetch failed',{cause:{code:'EACCES'}})),/EACCES/);}finally{globalThis.fetch=original;}
+});
 import { buildHousingSearchPlan, wrAssertPublicUrl, wrProviderCatalog, wrNormalizeSearchPayload, wrNormalizeDeepSeekSearchResponse, wrDeepSeekResponsesUrl, wrDeduplicate, wrCrossVerify, wrAuthority } from "../functions/api/_web-research-core.js";
 
 test("保障房垂直查询规划覆盖政策、统计、市场、规划和小节",()=>{

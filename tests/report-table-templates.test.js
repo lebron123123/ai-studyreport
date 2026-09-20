@@ -68,9 +68,9 @@ test("Word构建器可输出含合并单元格和续表的真实docx",async()=>{
   assert.equal(buffer.subarray(0,2).toString(),"PK");
 });
 
-test("Word各类报告内容的待补标记保留加粗黑字且正文段前段后为0磅",async()=>{
+test("Word各类报告内容的待补标记加粗红字且正文段前段后为0磅",async()=>{
   const docx=require("../docx.umd.js"),build=require("../docxgen.js"),JSZip=require("../local-server/node_modules/jszip");
-  const markers=["【待补：章节依据】","【待补：标题依据】","【待补：竞品租金及出租率实地调研数据】","【待补：小标题依据】","【待补：表格依据】","【待补：附表依据】"];
+  const markers=["【待补：章节依据】","【待补：标题依据】","【待补：竞品租金及出租率实地调研数据】","【待补：小标题依据】","【待补：表格依据】"];
   const doc=build(docx,{project:{name:"[系统测试]Word格式"},signed:false,docNo:"",chapters:[{cn:"一",name:"总论",num:1,sections:[{title:"项目概况",blocks:[{type:"p",text:"竞品情况  【待补：竞品租金及出租率实地调研数据】  。"},{type:"p",text:"   "}]}]}],appendix:null,tableAppendix:[],provenance:null});
   const coverageDoc=build(docx,{project:{name:"[系统测试]Word格式"},signed:false,docNo:"",chapters:[{cn:"一",name:"总论【待补：章节依据】",num:1,sections:[{title:"项目概况【待补：标题依据】",blocks:[{type:"p",text:"竞品情况  【待补：竞品租金及出租率实地调研数据】  。"},{type:"h",text:"调查说明【待补：小标题依据】"},{type:"table",rows:[["事项","依据"],["竞品","【待补：表格依据】"]]},{type:"p",text:"   "}]}]}],appendix:{summaryLine:"测算说明【待补：附表依据】",mainRows:null,sensRows:null},tableAppendix:[],provenance:null});
   const buffer=await docx.Packer.toBuffer(coverageDoc),zip=await JSZip.loadAsync(buffer),xml=await zip.file("word/document.xml").async("string");
@@ -79,7 +79,7 @@ test("Word各类报告内容的待补标记保留加粗黑字且正文段前段�
   markers.forEach(marker=>{
     const at=xml.indexOf(marker),runStart=xml.lastIndexOf("<w:r>",at),runEnd=xml.indexOf("</w:r>",at),markerRun=xml.slice(runStart,runEnd+6);
     assert.ok(at>0,marker+" 应写入Word");
-    assert.match(markerRun,/w:color w:val="000000"/,marker+" 应为黑色");
+    assert.match(markerRun,/w:color w:val="C62828"/,marker+" 应为红色");
     assert.match(markerRun,/w:b\/>/,marker+" 应加粗");
   });
   assert.match(paragraph,/w:color w:val="000000"/);
@@ -92,7 +92,7 @@ test("Word各类报告内容的待补标记保留加粗黑字且正文段前段�
 test("七套出租类财务附表可一次性打包，70年续表不会使Word构建失败",async()=>{
   const docx=require("../docx.umd.js");
   const build=require("../docxgen.js");
-  const doc=build(docx,{project:{name:"[系统测试]七套财务附表"},signed:false,docNo:"",chapters:[],appendix:null,tableAppendix:templateSet.templates.filter(t=>t.appendix),provenance:null});
+  const doc=build(docx,{includeAppendices:true,project:{name:"[系统测试]七套财务附表"},signed:false,docNo:"",chapters:[],appendix:null,tableAppendix:templateSet.templates.filter(t=>t.appendix),provenance:null});
   const buffer=await docx.Packer.toBuffer(doc);
   assert.ok(buffer.length>20000);
   assert.equal(buffer.subarray(0,2).toString(),"PK");

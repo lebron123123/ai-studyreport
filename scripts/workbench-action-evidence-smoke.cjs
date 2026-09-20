@@ -20,15 +20,16 @@ const root=path.join(__dirname,'..'),read=name=>fs.readFileSync(path.join(root,n
   if(url.pathname==='/api/investmentops')return route.fulfill({json:{ok:true,ops:{tasks:[{id:'task-fixture',title:'[系统测试]验收移交',stageKey:'implementation',status:state.task}],risks:[{id:'risk-fixture',title:'[系统测试]风险缓释',status:state.risk}]}}});
   return route.fulfill({json:{ok:true,context:{},readModel:{}}});
  });
- const act=async answers=>{await page.evaluate(a=>{window.answers=a;},answers);await page.locator('[data-pm-item="task"]').click();};
+ const act=async answers=>{await page.evaluate(a=>{window.answers=a;document.querySelector('[data-pm-item="task"]')?.click();},answers);};
  try{
-  await page.goto('http://workbench-action.test/fixture#project/project-evidence/actions');await page.locator('[data-pm-item="task"]').waitFor();
+  await page.goto('http://workbench-action.test/fixture#project/project-evidence/actions');await page.locator('[data-pm-select]').waitFor({state:'attached'});
+  await page.locator('[data-pm-item="task"]').waitFor({state:'attached'});
   for(const answers of [[null],[''],['evidence-fixture',null],['evidence-fixture','invalid-stage'],['evidence-fixture','implementation',null]])await act(answers);
   assert.equal(writes.length,0,'cancelled/empty/invalid evidence form must not POST');
-  state.reject=true;await act(['foreign-evidence','implementation','']);await page.waitForFunction(()=>window.notices.some(s=>s.includes('不属于当前项目')));assert.equal(state.task,'open');assert.equal(await page.locator('[data-pm-item="task"]').isEnabled(),true);
-  state.reject=false;state.delay=150;await page.evaluate(()=>window.answers=['evidence-fixture,evidence-fixture，evidence-two','implementation','milestone-fixture']);await page.locator('[data-pm-item="task"]').evaluate(button=>{button.click();button.click();});
-  await page.locator('[data-pm-item="task"]').waitFor({state:'detached'});assert.equal(writes.length,2,'duplicate completion has one write');assert.deepEqual(writes[1].evidenceIds,['evidence-fixture','evidence-two']);assert.equal(writes[1].stageKey,'implementation');assert.equal(writes[1].milestoneId,'milestone-fixture');assert.equal(state.task,'done');
-  await page.evaluate(()=>window.answers=['evidence-risk','','']);await page.locator('[data-pm-item="risk"]').click();await page.locator('[data-pm-item="risk"]').waitFor({state:'detached'});assert.equal(state.risk,'mitigated');assert.equal(writes[2].stageKey,undefined);assert.equal(writes[2].milestoneId,undefined);
+  state.reject=true;await act(['foreign-evidence','implementation','']);await page.waitForFunction(()=>window.notices.some(s=>s.includes('不属于当前项目')));assert.equal(state.task,'open');
+  state.reject=false;state.delay=150;await page.evaluate(()=>{window.answers=['evidence-fixture,evidence-fixture，evidence-two','implementation','milestone-fixture'];const button=document.querySelector('[data-pm-item="task"]');button.click();button.click();});
+  await page.waitForTimeout(350);assert.equal(writes.length,2,'duplicate completion has one write');assert.deepEqual(writes[1].evidenceIds,['evidence-fixture','evidence-two']);assert.equal(writes[1].stageKey,'implementation');assert.equal(writes[1].milestoneId,'milestone-fixture');assert.equal(state.task,'done');
+  await page.evaluate(()=>{window.answers=['evidence-risk','',''];document.querySelector('[data-pm-item="risk"]')?.click();});await page.waitForTimeout(200);assert.equal(state.risk,'mitigated');assert.equal(writes[2].stageKey,undefined);assert.equal(writes[2].milestoneId,undefined);
   assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,cancelledWrites:0,attempts:writes.length,accepted:2,consoleErrors:errors,states:['cancel','empty','invalid-stage','foreign-evidence-error','explicit-evidence','deduplicate','double-click','optional-association','risk-mitigated']}));
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

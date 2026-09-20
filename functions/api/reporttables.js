@@ -14,7 +14,10 @@ async function ensureSchema(env){
     "ALTER TABLE report_table_template_versions ADD COLUMN reason TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE report_table_template_versions ADD COLUMN restored_from_version INTEGER"
   ]){
-    try{await env.DB.prepare(sql).run();}catch(error){if(!/already exists|duplicate column/i.test(String(error?.message||error)))throw error;}
+    try{await env.DB.prepare(sql).run();}catch(error){
+      // PostgreSQL SQLSTATE is locale-independent; D1 reports duplicate columns in text.
+      if(error?.code!=="42701"&&!/already exists|duplicate column/i.test(String(error?.message||error)))throw error;
+    }
   }
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_report_table_versions_type ON report_table_template_versions(project_type,status,version DESC)").run();
 }

@@ -9,6 +9,7 @@
   else { root.buildDocxDocument = factory; }
 })(typeof self!=="undefined"? self : this, function(docx, payload){
   const D = docx;
+  const outputPolicy=typeof module!=="undefined"&&module.exports?require('./report-output-policy.js'):window.ReportOutputPolicy;
   const FONT = { ascii:"SimSun", eastAsia:"SimSun", hAnsi:"SimSun", cs:"SimSun" };
   const LINE13 = { line: 312, lineRule: D.LineRuleType.AUTO }; // 1.3倍行距
   const PAGE_WIDTH=11906, PAGE_HEIGHT=16838, TEXT_WIDTH=PAGE_WIDTH-3400;
@@ -20,9 +21,9 @@
   }
 
   // 报告成稿统一黑字；保留待补标记和加粗，不沿用编辑态强调色。
-  function run(text, opt){ return new D.TextRun(Object.assign({text:text, font:FONT}, opt||{}, {color:"000000"})); }
+  function run(text, opt){ return new D.TextRun(Object.assign({text:text, font:FONT}, opt||{}, {color:/^【待补\s*(?:：|:)?[^】]*】$/.test(String(text))?"C62828":"000000"})); }
   function cleanWordText(text){
-    return String(text==null?"":text).replace(/\u00a0/g," ").replace(/[\t ]+/g," ").replace(/\s+([，。；：！？、）】])/g,"$1").replace(/([（【])\s+/g,"$1").trim();
+    return outputPolicy.cleanText(text).replace(/\u00a0/g," ").replace(/[\t ]+/g," ").replace(/\s+([，。；：！？、）】])/g,"$1").replace(/([（【])\s+/g,"$1").trim();
   }
   function textRuns(text,opt){
     const value=cleanWordText(text),parts=value.split(/(【待补\s*(?:：|:)?[^】]*】)/g).filter(Boolean);
@@ -206,12 +207,12 @@
         children:[ new D.Bookmark({id:"_tc"+ci+"_"+si, children:textRuns((c.num||ci+1)+"."+(s.num||si+1)+"　"+s.title,{size:28,bold:true})}) ],
         spacing: Object.assign({before:280, after:160}, LINE13),
       }));
-      (s.blocks||[]).forEach(b=> blockToElems(b).forEach(e=>children.push(e)));
+      outputPolicy.repairBlocks(s.blocks).forEach(b=> blockToElems(b).forEach(e=>children.push(e)));
     });
   });
 
   /* ---------- 附表 ---------- */
-  if(payload.appendix){
+  if(payload.includeAppendices===true && payload.appendix){
     children.push(new D.Paragraph({
       heading: D.HeadingLevel.HEADING_1,
       children:[run("附表　财务测算明细（单位：万元）",{size:44,bold:true})],
@@ -225,7 +226,7 @@
       children.push(makeTable(payload.appendix.sensRows));
     }
   }
-  if(payload.tableAppendix&&payload.tableAppendix.length){
+  if(payload.includeAppendices===true && payload.tableAppendix&&payload.tableAppendix.length){
     children.push(new D.Paragraph({
       heading:D.HeadingLevel.HEADING_1,
       children:[run("出租类标准财务附表",{size:44,bold:true})],
@@ -244,7 +245,7 @@
     : (payload.unsignedNote||"本报告为AI生成初稿，尚未经过人工复核签发，其中标注\u201c待填\u201d的数据须补充真实测算结果，正式使用前须完成审核。");
   // ===== 附图（图表PNG） =====
   // ===== 溯源附录：逐节生成依据与置信度（可追溯审计） =====
-  if(payload.provenance && payload.provenance.rows && payload.provenance.rows.length > 1){
+  if(payload.includeAppendices===true && payload.provenance && payload.provenance.rows && payload.provenance.rows.length > 1){
     children.push(new D.Paragraph({ children:[run("附：内容溯源与依据说明",{size:28,bold:true})],
       heading:D.HeadingLevel.HEADING_1, alignment:D.AlignmentType.CENTER,
       spacing:{before:400, after:200}, pageBreakBefore:true }));
@@ -253,7 +254,7 @@
     children.push(makeTable(payload.provenance.rows,[15,18,17,50],18));
   }
 
-  if(payload.images && payload.images.length){
+  if(payload.includeAppendices===true && payload.images && payload.images.length){
     children.push(new D.Paragraph({ children:[run("附　图",{size:28,bold:true})],
       heading:D.HeadingLevel.HEADING_1, alignment:D.AlignmentType.CENTER,
       spacing:{before:400, after:200}, pageBreakBefore:true }));

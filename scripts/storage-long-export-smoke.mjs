@@ -1,0 +1,12 @@
+import {createRequire} from 'node:module';
+import assert from 'node:assert/strict';
+import {packState,unpackState} from '../research-state-codec.mjs';
+import {paginateReport} from '../local-server/report-pagination.js';
+const require=createRequire(import.meta.url),D=require('../docx.umd.js'),build=require('../docxgen.js'),JSZip=require('../local-server/node_modules/jszip');
+const state={project:{name:'[系统测试]长报告存储导出'},signed:false,chapters:Array.from({length:43},(_,i)=>({cn:String(i+1),num:i+1,name:'章节'+(i+1),sections:[{title:'完整正文'+i,blocks:Array.from({length:8},(_,j)=>({type:'p',text:('这是隔离测试材料，不代表真实项目结论。').repeat(25)+'段尾校验'+i+'-'+j}))}]}))};
+const packed=await packState(state),restored=unpackState(packed.manifest,packed.objects);assert.deepEqual(restored,state);
+const started=Date.now(),buffer=await D.Packer.toBuffer(build(D,restored));
+const zip=await JSZip.loadAsync(buffer),xml=await zip.file('word/document.xml').async('string');
+for(let i=0;i<43;i++)for(let j=0;j<8;j++)assert.ok(xml.includes('段尾校验'+i+'-'+j));
+const layout=await paginateReport(buffer);
+console.log(JSON.stringify({sections:43,paragraphs:344,allParagraphTailsPresent:true,docxBytes:buffer.length,pages:layout.pages,pageLimitPassed:layout.ok,totalMs:Date.now()-started,scope:'synthetic long report, actual DOCX and local layout engine'}));

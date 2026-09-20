@@ -72,9 +72,9 @@
     }
   },
   "migrations": {
-    "count": 33,
-    "latest": "0033_investment_step4.sql",
-    "orderedListSha256": "5f0f8b82c7843c8553353606d700aed85ce6715aeac62f9f722bc2b6a814843e"
+    "count": 37,
+    "latest": "0037_calc_experience_library.sql",
+    "orderedListSha256": "4d6872a0e9ce7fc6793ed3ef511fca28691bf5ef65f6003bee629336b63ddafa"
   },
   "capabilities": {
     "evidenceSigningGate": {

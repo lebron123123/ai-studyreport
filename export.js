@@ -164,7 +164,7 @@ function loadScript(src){
 async function ensureDocxLib(){
   if(window.docx && window.buildDocxDocument) return;
   if(!docxLibLoading){
-    docxLibLoading = Promise.all([loadScript("docx.umd.js"), loadScript("docxgen.js?v=20260909.1")]);
+    docxLibLoading = Promise.all([loadScript("docx.umd.js"), loadScript("report-output-policy.js?v=20260909.1"), loadScript("docxgen.js?v=20260909.2")]);
   }
   await docxLibLoading;
 }
@@ -268,8 +268,9 @@ async function exportFrozenDeliveryWord(projectId,deliveryId){
   payload.approvalDate=record.approval.reviewedAt?new Date(Number(record.approval.reviewedAt)).toLocaleDateString('zh-CN'):'未批准';
   payload.chapters.forEach((c,i)=>{c.cn=c.cn||i+1;});
   payload.provenance={note:'以下是冻结时保存的来源记录，不代表原文已经人工核实。',rows:[['章节','记录类别','版本','冻结来源记录'],...snapshot.chapters.flatMap(c=>c.sections.filter(s=>s.prov).map(s=>[c.name+' / '+s.title,'来源快照',record.contentHash.slice(0,12),JSON.stringify(s.prov)]))]};
-  if(!snapshot.references?.evidenceSnapshot?.reportId)payload.chapters.push({cn:'附',name:'冻结测算与引用快照',sections:[{title:'测算快照（历史封存，不重新计算）',blocks:[{type:'p',text:JSON.stringify({calculations:snapshot.calculations,exportContext:snapshot.exportContext,references:snapshot.references},null,2)}]}]});
-  const blob=await window.docx.Packer.toBlob(window.buildDocxDocument(window.docx,payload)),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=(snapshot.project.name||'可行性研究报告')+(approved?'_正式版_':'_冻结待复核_')+record.contentHash.slice(0,12)+'.docx';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  const blob=await window.docx.Packer.toBlob(window.buildDocxDocument(window.docx,payload));
+  await verifyReportPageLimit(blob);
+  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=(snapshot.project.name||'可行性研究报告')+(approved?'_正式版_':'_冻结待复核_')+record.contentHash.slice(0,12)+'.docx';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
 function buildExportPayload(){
   const active = chapters.filter(c=>c.checked);
@@ -367,19 +368,22 @@ function svgToPng(svgStr, w, h){
 async function collectReportImages(){
   const imgs = [];
   try{
+    // Capture every source synchronously; no later await may read another run.
+    const snapshots=[];
     // 附图1:现金流走势
     if(calcResult){
       const htmlStr = cashflowChartHtml();
       const m = htmlStr.match(/<svg[\s\S]*?<\/svg>/);
-      if(m) imgs.push({title:"附图一　全周期现金流量走势图", b64: await svgToPng(m[0], 700, 200), w:620, h:177});
+      if(m) snapshots.push({title:"附图一　全周期现金流量走势图",svg:m[0],rasterW:700,rasterH:200,w:620,h:177});
     }
     // 附图2/3:竞品对比
     const cps = (project.competitors||[]).filter(c=>c.name);
     const rentItems = cps.filter(c=>parseFloat(c.rent)).map(c=>({name:c.name, val:parseFloat(c.rent)}));
     if(calcParams && parseFloat(calcParams.rent)) rentItems.push({name:"本项目", val:parseFloat(calcParams.rent), hl:1});
     const occItems = cps.filter(c=>parseFloat(c.occ)).map(c=>({name:c.name, val:parseFloat(c.occ)}));
-    if(rentItems.length >= 2) imgs.push({title:"附图二　周边竞品租金对比（元/㎡/月）", b64: await svgToPng(cpBarSvg(rentItems,"","#1E3A5C"), 520, 210), w:520, h:210});
-    if(occItems.length >= 2) imgs.push({title:"附图"+(imgs.length>=2?"三":"二")+"　周边竞品出租率对比（%）", b64: await svgToPng(cpBarSvg(occItems,"%","#C99A2E"), 520, 210), w:520, h:210});
+    if(rentItems.length >= 2) snapshots.push({title:"附图二　周边竞品租金对比（元/㎡/月）",svg:cpBarSvg(rentItems,"","#1E3A5C"),rasterW:520,rasterH:210,w:520,h:210});
+    if(occItems.length >= 2) snapshots.push({title:"附图"+(snapshots.length>=2?"三":"二")+"　周边竞品出租率对比（%）",svg:cpBarSvg(occItems,"%","#C99A2E"),rasterW:520,rasterH:210,w:520,h:210});
+    for(const item of snapshots)imgs.push({title:item.title,b64:await svgToPng(item.svg,item.rasterW,item.rasterH),w:item.w,h:item.h});
   }catch(e){ console.warn("图表导出失败,跳过:", e.message); }
   return imgs;
 }
@@ -388,23 +392,46 @@ async function exportWord(){
   const btn = document.getElementById("exportWordBtn")||document.getElementById("exportWordDraftBtn");
   if(btn){ btn.disabled = true; btn.textContent = "正在生成 .docx…"; }
   try{
+    const researchToken=window.ResearchUI?.active()?window.ResearchUI.capture('export'):null;
+    const legacyProjectId=typeof currentProjectId!=='undefined'?currentProjectId:null;
+    const guardExport=async()=>{if(researchToken)await window.ResearchUI.guard(researchToken);else if(legacyProjectId!==(typeof currentProjectId!=='undefined'?currentProjectId:null))throw new Error('项目已切换，请在目标项目重新下载');};
+    await guardExport();
     await ensureDocxLib();
     if(typeof ensureReportTableTemplates==="function")await ensureReportTableTemplates();
-    const payload = buildExportPayload();
+    await guardExport();
+    const payload = JSON.parse(JSON.stringify(buildExportPayload()));
+    const versions=projectWorkflow&&Array.isArray(projectWorkflow.reportVersions)?projectWorkflow.reportVersions:[],current=versions.find(v=>v.id===projectWorkflow.currentReportVersionId)||versions[versions.length-1];
+    const filename=(payload.project.name||"可行性研究报告")+"_未签发工作稿"+(current?"V"+current.version:"")+(researchToken?'_研究轮次_'+researchToken.runId.slice(0,8):'')+".docx";
+    if(researchToken){payload.signed=false;payload.versionNote+=' · 研究 '+researchToken.researchId+' · 轮次 '+researchToken.runId;}
     if(!payload.chapters.length)throw new Error("当前还没有已生成的小节可供导出");
-    payload.images = await collectReportImages();
+    payload.images = [];
     const doc = window.buildDocxDocument(window.docx, payload);
     const blob = await window.docx.Packer.toBlob(doc);
+    if(btn)btn.textContent='正在核验实际页数…';
+    await verifyReportPageLimit(blob);
+    await guardExport();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    const versions=projectWorkflow&&Array.isArray(projectWorkflow.reportVersions)?projectWorkflow.reportVersions:[],current=versions.find(v=>v.id===projectWorkflow.currentReportVersionId)||versions[versions.length-1];
-    a.href = url; a.download = (project.name||"可行性研究报告")+"_未签发工作稿"+(current?"V"+current.version:"")+".docx";
+    a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }catch(e){
     alert("导出失败："+e.message);
   }
   if(btn){ btn.disabled = false; btn.textContent = btn.id==="exportWordDraftBtn"?"下载当前阶段 Word":"导出 Word"; }
+}
+
+async function verifyReportPageLimit(blob){
+  let response;
+  try{response=await fetch('/api/report-pagination',{method:'POST',headers:{...authHeaders(),'Content-Type':'application/vnd.openxmlformats-officedocument.wordprocessingml.document'},body:blob,signal:AbortSignal.timeout(75000)});}
+  catch(e){throw Error('页数核验服务暂不可用，请稍后重试；原报告未修改。');}
+  const data=await response.json().catch(()=>({}));
+  if(response.status===422&&data.ok===false&&Number.isInteger(data.pages)&&data.pages>120&&data.maxPages===120){
+    if(!confirm('报告共'+data.pages+'页，超过120页目标。\n\n是否仍然下载完整报告？\n点击“确定”仍然下载，点击“取消”返回。正文不会删减。'))throw Error('已取消下载，原报告未修改。');
+    return {...data,overLimitAccepted:true};
+  }
+  if(!response.ok||!data.ok||!Number.isInteger(data.pages)||data.pages>120)throw Error(data.error||'未能确认报告在120页以内，暂不下载，请检查排版服务。');
+  return data;
 }
 
 /* ================= 测算说明书 Word 导出 =================

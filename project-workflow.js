@@ -273,13 +273,15 @@
     meta=meta||{};
     const candidate={id:uid("patch"),createdAt:new Date().toISOString(),instruction:String(instruction||""),before:currentText(section),after:String(newText||""),logicRevision:clone(meta.logicRevision||null)};
     if(meta.allowLogicAdoption!==undefined)candidate.allowLogicAdoption=!!meta.allowLogicAdoption;
+    if(meta.outputPolicyVersion)candidate.outputPolicyVersion=meta.outputPolicyVersion;
     section.pendingRevision=candidate; return candidate;
   }
   function acceptCandidate(section){
     if(!section||!section.pendingRevision)return null;
     section.undoStack=Array.isArray(section.undoStack)?section.undoStack:[];
     section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null,logicSnapshot:clone(section.logicSnapshot||null),syncState:{syncStatus:section.syncStatus||"current",staleReason:section.staleReason||"",staleKeys:clone(section.staleKeys||[]),staleKind:section.staleKind||""}});
-    const c=section.pendingRevision; section.content=c.after; section.editedHtml=null;if(c.logicRevision)section.logicSnapshot=clone(c.logicRevision); section.pendingRevision=null; clearSectionStale(section); return c;
+    section.undoStack[section.undoStack.length-1].outputPolicyVersion=section.outputPolicyVersion||null;
+    const c=section.pendingRevision; section.content=c.after; section.editedHtml=null;if(c.logicRevision)section.logicSnapshot=clone(c.logicRevision);if(c.outputPolicyVersion)section.outputPolicyVersion=c.outputPolicyVersion; section.pendingRevision=null; clearSectionStale(section); return c;
   }
   function keepOriginalLogic(section){
     if(!section||section.locked||section.pendingRevision||!(section.content||section.editedHtml)||section.staleKind!=="logic"||section.syncStatus!=="stale")return false;
@@ -300,6 +302,7 @@
     if(!section||!Array.isArray(section.undoStack)||!section.undoStack.length)return false;
     const prev=section.undoStack.pop(); section.content=prev.content; section.editedHtml=prev.editedHtml;section.logicSnapshot=clone(prev.logicSnapshot||null);
     if(prev.syncState)Object.assign(section,clone(prev.syncState));
+    if(Object.prototype.hasOwnProperty.call(prev,'outputPolicyVersion'))section.outputPolicyVersion=prev.outputPolicyVersion;
     return true;
   }
   function escapeHtml(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}

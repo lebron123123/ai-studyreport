@@ -66,3 +66,6 @@ outputs/pet-live2d-source/**/*.png
 outputs/pet-video-source/**/*.mp4
 outputs/pet-video-source/**/*.png
 outputs/pet-video-source/**/*.json
+
+# 可重新下载的超大地图原始数据不进入 Git（GitHub 单文件上限 100 MiB）
+outputs/baoan-source/*.osm.pbf

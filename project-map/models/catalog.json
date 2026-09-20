@@ -1,0 +1,343 @@
+{
+  "assets": [
+    {
+      "file": "landmarks.glb",
+      "bytes": 2266028,
+      "sha256": "d3b577efe46500fbfd82b5564fbc545b0ed90f11267843e0fa6d2338da7ed7d9"
+    },
+    {
+      "file": "landmark-detail.glb",
+      "bytes": 2163100,
+      "sha256": "c5778c4b4ec9c24917d75d32e3a55999a400676e2076f3860c485dbbc6c6db22"
+    },
+    {
+      "file": "landmark-detail.json",
+      "bytes": 33019,
+      "sha256": "bfe6907f82731d00621d378a65f04c33dd4fbd70d2bc35fc0d2c175c1c51852b"
+    },
+    {
+      "file": "terrain-detail.json",
+      "bytes": 381323,
+      "sha256": "41feabf8ed35fde255a14e94bd15b08324cca4088f42a2d2caccf58a8156b4c0"
+    },
+    {
+      "file": "LANDMARK_ATTRIBUTION.md",
+      "bytes": 1779,
+      "sha256": "905165edd0860dabe6a9df4d1ab0f59b18b9077d20f0a510ddd4667941ff56b5"
+    }
+  ],
+  "source": "linranff/GTA_SZ d61d243; user supplied exploration archive",
+  "schemaVersion": 1,
+  "modelIds": ["bamboo", "civic", "diwang", "fortune-plaza", "kk100", "lianhua", "mixc-world", "pingan", "qijie-gongguan", "tencent"],
+  "origin": [
+    114.025,
+    22.536
+  ],
+  "landmarks": [
+    {
+      "id": "bamboo",
+      "name": "中国华润大厦 · 春笋",
+      "lon": 113.94161,
+      "lat": 22.517785,
+      "x": -5146.0,
+      "z": -1216.62,
+      "height": 235.2,
+      "area": "南山 · 后海",
+      "excludeRadius": 42.0,
+      "arrival": [
+        -5178.65,
+        -927.87
+      ],
+      "yaw": 3.1576809739058174,
+      "arrivalRoad": "科苑南路"
+    },
+    {
+      "id": "baypark",
+      "name": "深圳湾公园",
+      "lon": 113.988,
+      "lat": 22.5241,
+      "x": -2283.27,
+      "z": -794.82,
+      "height": 0.0,
+      "area": "南山 · 深圳湾",
+      "excludeRadius": 0.0,
+      "arrival": [
+        -2272.3,
+        -713.03
+      ],
+      "yaw": 2.9929484729427385,
+      "arrivalRoad": "海园二路"
+    },
+    {
+      "id": "civic",
+      "name": "深圳市民中心",
+      "lon": 114.05452,
+      "lat": 22.54637,
+      "x": 1821.68,
+      "z": 692.63,
+      "height": 50.82,
+      "area": "福田 · 市民中心",
+      "excludeRadius": 0,
+      "arrival": [
+        1820.55,
+        402.54
+      ],
+      "yaw": 4.7518302685576534,
+      "arrivalRoad": "深南大道",
+      "detailCollision": true,
+      "photoDistance": 360,
+      "photoTargetHeight": 22,
+      "photoElevation": 0.26,
+      "photoAngle": 0,
+      "sourceStatus": "Mapped component footprints; roof surface, facade details and lighting fitted to two user photographs",
+      "limitations": [
+        "Roof depth 154m is secondary-source corroborated, not confirmed from accessible primary text.",
+        "OSM tower height 91.5m conflicts with documented total 84.7m and is not used.",
+        "Roof section, facade panel spacing, sloping tower tops and stairs are exterior photo estimates.",
+        "No interiors or photographic textures; service roads below the canopy remain passable."
+      ]
+    },
+    {
+      "id": "diwang",
+      "name": "地王大厦",
+      "lon": 114.105523,
+      "lat": 22.545342,
+      "x": 4969.07,
+      "z": 623.97,
+      "height": 230.39999999999998,
+      "area": "罗湖 · 蔡屋围",
+      "excludeRadius": 42.0,
+      "arrival": [
+        5216.78,
+        621.55
+      ],
+      "yaw": -1.7448938963036644,
+      "arrivalRoad": "深南东路"
+    },
+    {
+      "id": "fortune-plaza",
+      "name": "财富广场",
+      "x": -218.0973332999777,
+      "z": 291.4382090400059,
+      "lon": 114.02146577,
+      "lat": 22.54036337,
+      "height": 56.879999999999995,
+      "area": "福田 · 竹子林",
+      "excludeRadius": 0,
+      "detailCollision": true,
+      "sourceStatus": "photo_guided_model_estimated_height",
+      "arrival": [
+        -252.6,
+        310.2
+      ],
+      "yaw": -0.3470616035394945,
+      "arrivalRoad": "周边连通道路",
+      "photoDistance": 150,
+      "photoTargetHeight": 22.08,
+      "photoElevation": 0.22,
+      "photoAngle": 0,
+      "sourceIds": [
+        "fortune-amap",
+        "fortune-owner",
+        "fortune-photo-entry",
+        "fortune-photo-overall",
+        "fortune-photos",
+        "osm-local"
+      ],
+      "limitations": [
+        "总高度与分栋层数未可靠核实，A92m/B84m为建模估计",
+        "OSM A轮廓为少量折线，曲率不能宣称实测",
+        "入口位置未配准，当前不精细重建入口",
+        "A座内外弧面为照片引导的拟合解释，与原OSM折线最大相差约2.49m；两端4.5m白墙宽度与位置为估计，入口圆柱和悬挑尚未配准。"
+      ]
+    },
+    {
+      "id": "kk100",
+      "name": "京基100",
+      "lon": 114.101581,
+      "lat": 22.545734,
+      "x": 4725.81,
+      "z": 650.15,
+      "height": 265.08,
+      "area": "罗湖 · 蔡屋围",
+      "excludeRadius": 39.0,
+      "arrival": [
+        4785.63,
+        267.6
+      ],
+      "yaw": 6.261154429984309,
+      "arrivalRoad": "金塘街"
+    },
+    {
+      "id": "lianhua",
+      "name": "莲花山公园",
+      "lon": 114.05322070977152,
+      "lat": 22.556683614804168,
+      "x": 1741.5,
+      "z": 1381.5,
+      "height": 0,
+      "area": "福田 · 莲花山",
+      "excludeRadius": 0,
+      "arrival": [
+        1498.74,
+        1013.1
+      ],
+      "yaw": 1.4774978042799622,
+      "arrivalRoad": "红荔路",
+      "photoDistance": 1430,
+      "photoTargetHeight": 18,
+      "photoElevation": 0.35,
+      "sourceStatus": "30m DSM; local datum and flat-city edges adapted"
+    },
+    {
+      "id": "mixc-world",
+      "name": "万象天地",
+      "x": -4581.520102500645,
+      "z": 588.5797869599352,
+      "lon": 113.95075725,
+      "lat": 22.54481213,
+      "height": 134.928,
+      "area": "南山 · 华润城",
+      "excludeRadius": 0,
+      "detailCollision": true,
+      "sourceStatus": "stepped_tower_massing_only",
+      "arrival": [
+        -4568.3,
+        526
+      ],
+      "yaw": 3.119666343490993,
+      "arrivalRoad": "周边连通道路",
+      "photoDistance": 430,
+      "photoTargetHeight": 53.760000000000005,
+      "photoElevation": 0.22,
+      "sourceIds": [
+        "capol-mixc",
+        "capol-streets",
+        "cr-mixc-remodel",
+        "osm-local"
+      ],
+      "limitations": [
+        "OSM高度有标签但未被设计方尺寸复核",
+        "三栋楼塔改善不等于万象天地整体高精模",
+        "缺少近期四面照片/商场平面定位，暂不自动制作店招、装置或街区精细外观"
+      ]
+    },
+    {
+      "id": "pingan",
+      "name": "平安金融中心",
+      "lon": 114.050355,
+      "lat": 22.53664,
+      "x": 1564.66,
+      "z": 42.75,
+      "height": 359.46,
+      "area": "福田 · CBD",
+      "excludeRadius": 46.8,
+      "arrival": [
+        1623.94,
+        -393.36
+      ],
+      "yaw": 6.2690554556274485,
+      "arrivalRoad": "益田路"
+    },
+    {
+      "id": "qijie-gongguan",
+      "name": "七街公馆 / 哈尔滨大厦",
+      "x": 155.43391379928394,
+      "z": 1635.0514619998382,
+      "lon": 114.02751878,
+      "lat": 22.56047975,
+      "height": 61.559999999999995,
+      "area": "福田 · 香蜜湖",
+      "excludeRadius": 0,
+      "detailCollision": true,
+      "sourceStatus": "photo_guided_model_estimated_height",
+      "arrival": [
+        139.7,
+        1614.9
+      ],
+      "yaw": 2.6451699001849134,
+      "arrivalRoad": "周边连通道路",
+      "photoDistance": 165,
+      "photoTargetHeight": 24.48,
+      "photoElevation": 0.22,
+      "sourceIds": [
+        "osm-local",
+        "qijie-amap",
+        "qijie-floorplans",
+        "qijie-photo-entry",
+        "qijie-photo-overall",
+        "qijie-photos",
+        "qijie-aerial-720yun"
+      ],
+      "limitations": [
+        "无竣工测绘高度；当前102m为建模估计",
+        "照片无相机位姿，不能做测量级照片重建",
+        "OSM只有单一轮廓，A/B分区不能硬分成两栋"
+      ]
+    },
+    {
+      "id": "talent",
+      "name": "深圳人才公园",
+      "lon": 113.94417,
+      "lat": 22.51366,
+      "x": -4988.02,
+      "z": -1492.13,
+      "height": 0.0,
+      "area": "南山 · 后海",
+      "excludeRadius": 0.0,
+      "arrival": [
+        -5166.58,
+        -1377.01
+      ],
+      "yaw": 3.4076783521416933,
+      "arrivalRoad": "登良路隧道"
+    },
+    {
+      "id": "tencent",
+      "name": "腾讯滨海大厦",
+      "lon": 113.9303974748015,
+      "lat": 22.52580080024554,
+      "x": -5837.92183,
+      "z": -681.2249499999999,
+      "height": 148.79999999999998,
+      "area": "南山 · 科技园",
+      "excludeRadius": 60,
+      "arrival": [
+        -5468.4,
+        -684.4
+      ],
+      "yaw": -1.5516014768614803,
+      "arrivalRoad": "海天二路",
+      "detailCollision": true,
+      "photoDistance": 270,
+      "photoTargetHeight": 67,
+      "photoElevation": 0.2,
+      "photoAngle": 1.7,
+      "sourceStatus": "source_grounded_exterior_v1"
+    },
+    {
+      "id": "xiangmi",
+      "name": "香蜜湖",
+      "lon": 114.02683,
+      "lat": 22.55057,
+      "x": 112.93,
+      "z": 973.16,
+      "height": 0.0,
+      "area": "福田 · 香蜜湖",
+      "excludeRadius": 0.0,
+      "arrival": [
+        -264.58,
+        803.47
+      ],
+      "yaw": 2.566082409010779,
+      "arrivalRoad": "香蜜湖路"
+    }
+  ],
+  "importedAt": "2026-09-13",
+  "replacedMeshPrefixes": [
+    "landmark_tencent_",
+    "landmark_lianhua_",
+    "landmark_civic_"
+  ],
+  "scale": 0.6
+}

@@ -3,6 +3,9 @@ import { verifyAuth, json } from "./_auth.js";
 
 import { adaptEnv } from "./_adapters.js";
 import { callConfiguredLlm, providerStatus } from "./_llm-providers.js";
+import {requireResearchAgentScope,researchScopeFromRun} from './_research-agent-scope.js';
+import {findOwnedRun} from './_agent-runtime.js';
+import {ResearchError} from './_research-store.js';
 /* ===== 限额设计 =====
    为什么分池：Agent回答"一个问题"要调用本接口2~5次（作答/调工具/自我核查/收尾），
    而生成一篇完整可研报告要调用约40次。若共用一个池子，用户生成两三篇报告
@@ -50,6 +53,26 @@ export async function onRequestPost(context) {
 
   let body;
   try { body = await request.json(); } catch (e) { return json({ error: "请求格式有误" }, 400); }
+  if(body?.research&&!context.researchValidated){
+    if(typeof env.DB?._transaction!=='function')return json({error:'研究轮次需要事务存储'},503);
+    try{
+      await env.DB._transaction(async db=>{
+        let continuing=false;
+        if(body.researchRuntime){
+          const runtime=await findOwnedRun({...env,DB:db},user.userId,String(body.researchRuntime));
+          if(runtime?.status!=='running')throw new ResearchError(409,'研究运行已停止或不存在');
+          const saved=researchScopeFromRun(runtime);
+          if(!saved||saved.researchId!==body.research.researchId||saved.runId!==body.research.runId||saved.epoch!==body.research.epoch)throw new ResearchError(409,'研究运行与当前轮次不一致');
+          continuing=true;
+        }
+        return requireResearchAgentScope({...env,DB:db},user.userId,body.research,{checkVersion:!continuing});
+      });
+      // Buffered response is necessary: obsolete epochs must not leak streamed text.
+      const response=await onRequestPost({...context,researchValidated:true,request:new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({...body,stream:false})})});
+      await env.DB._transaction(db=>requireResearchAgentScope({...env,DB:db},user.userId,body.research));
+      return response;
+    }catch(error){return json({error:error instanceof ResearchError?error.message:'研究生成失败，请重试'},error instanceof ResearchError?error.status:500);}
+  }
 
   const kind = (body.kind === "batch") ? "batch" : "chat";
   const today = new Date().toISOString().slice(0, 10);

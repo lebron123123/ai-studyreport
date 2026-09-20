@@ -1,0 +1,31 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>深安居总部重建核查（未验收）</title>
+<style>body{margin:0;font:14px system-ui;background:#dae6ef}header{padding:14px;background:white}p{margin:6px 0}canvas{width:100vw;height:75vh;display:block;touch-action:none}#status{white-space:pre-wrap}button{padding:8px;margin-right:8px}</style>
+<header><strong>总部照片参考模型 — 独立外观核查，非竣工测绘模型</strong><p>A/B 座高度来自完工资料；轮廓及连桥来自 OSM；幕墙为照片参考重建。LOGO 为用户要求的展示标识，不代表现状实装。</p><button id="start">加载总部核查模型</button><button id="dispose">释放模型与图形设备</button><p id="status">请先退出城区三维，再加载此独立核查页，避免两个三维场景同时占用资源。</p></header><canvas id="view"></canvas>
+<script src="./vendor/babylon.js"></script><script type="module">
+import {createHQModel} from './anju-hq-model.mjs';
+let engine,scene,model,loading=false,generation=0;const status=document.querySelector('#status'),canvas=document.querySelector('#view');
+function release(){generation++;loading=false;model?.dispose();scene?.dispose();engine?.dispose();model=scene=engine=null;status.textContent='已释放独立场景。';}
+document.querySelector('#dispose').onclick=release;
+document.querySelector('#start').onclick=async()=>{
+ if(engine||loading)return;
+ loading=true;const ticket=++generation;
+ try{
+  status.textContent='加载中';
+  const response=await fetch('./models/catalog.json',{signal:AbortSignal.timeout(15000)});
+  if(!response.ok)throw Error('目录不可用');
+  const catalog=await response.json(),B=window.BABYLON;
+  if(ticket!==generation)return;
+  engine=new B.Engine(canvas,true,{preserveDrawingBuffer:false,stencil:false});
+  engine.setHardwareScalingLevel(Math.max(1,devicePixelRatio));scene=new B.Scene(engine);
+  scene.clearColor=new B.Color4(.77,.84,.89,1);model=createHQModel(B,scene,catalog);
+  const target=new B.Vector3(model.data.anchor.x+15,80,model.data.anchor.z+10),camera=new B.ArcRotateCamera('inspection',-Math.PI/2.4,Math.PI/2.8,330,target,scene);
+  camera.lowerRadiusLimit=30;camera.upperRadiusLimit=650;camera.minZ=2;camera.maxZ=2500;camera.attachControl(canvas,true);
+  const daylight=new B.HemisphericLight('day',new B.Vector3(.4,1,.3),scene);
+  daylight.groundColor=new B.Color3(.55,.60,.65);daylight.intensity=1.2;
+  engine.runRenderLoop(()=>scene?.render());
+  status.textContent='照片参考模型已加载；拖动旋转、滚轮缩放。地图中搜索“深安居总部”查看同一模型。图片未显示的部位为近似重建，非测绘精模。';
+ }catch(e){if(ticket===generation){release();status.textContent='未通过：'+e.message;}}
+ finally{if(ticket===generation)loading=false;}
+};
+window.addEventListener('resize',()=>engine?.resize());window.addEventListener('pagehide',release);
+</script></html>

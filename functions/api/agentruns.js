@@ -5,8 +5,12 @@ import { ensureAgentEnterprise,upsertRunGovernance,recordAgentUsage,checkAgentBu
 import { resolveAgentPrincipal,authorizeAgentAction } from "./_agent-policy.js";
 import { resolveProjectAccess } from './_project-access.js';
 import {ensureAgentBudget} from './_agent-budget.js';
+import {researchScopeFromRun,requireResearchAgentScope} from './_research-agent-scope.js';
+import {ResearchError} from './_research-store.js';
 
 async function visibleRun(env,userId,run){
+  const scope=researchScopeFromRun(run);
+  if(scope){try{await requireResearchAgentScope(env,userId,scope);}catch{return false;}}
   return !!run && (!run.project_id || !!await resolveProjectAccess(env,userId,run.project_id));
 }
 
@@ -49,24 +53,39 @@ export async function onRequestPost(context){
   if(!user) return json({ok:false,error:"未登录"},401);
   let b={}; try{ b=await context.request.json(); }catch(e){ return json({ok:false,error:"格式有误"},400); }
   await ensureAgentRuntime(env);await ensureAgentEnterprise(env);
+  const scope=b.action==='create'?(b.research||b.input?.research):researchScopeFromRun(await findOwnedRun(env,user.userId,String(b.runId||'')));
+  if(scope){
+    if(typeof env.DB._transaction!=='function')return json({ok:false,error:'研究轮次需要事务存储'},503);
+    try{return await env.DB._transaction(async db=>{
+      const scopedEnv={...env,DB:db};
+      await requireResearchAgentScope(scopedEnv,user.userId,scope,{checkVersion:b.action==='create'});
+      if(b.action==='create')b={...b,projectId:'',input:{...b.input,research:scope}};
+      return postAction(scopedEnv,user,b,context.request);
+    });}catch(error){return json({ok:false,error:error instanceof ResearchError?error.message:'研究运行记录未完成'},error instanceof ResearchError?error.status:500);}
+  }
+  return postAction(env,user,b,context.request);
+}
+
+async function postAction(env,user,b,request){
   if(b.action==="create"){
     const principal=await resolveAgentPrincipal(env,user);
     const decision=await authorizeAgentAction(env,principal,{projectId:b.projectId,securityLevel:b.securityLevel,action:'write'});
     if(!decision.ok)return json({ok:false,error:decision.reason},403);
     const created=await createAgentRun(env,user.userId,b);
+    if(JSON.stringify(researchScopeFromRun(created.run))!==JSON.stringify(b.input?.research||null))return json({ok:false,error:'幂等键已用于其他研究轮次'},409);
     if(String(created.run.project_id||'')!==String(b.projectId||''))return json({ok:false,error:'幂等键已用于其他项目'},409);
     await upsertRunGovernance(env,user.userId,created.run.id,{department:principal.department,securityLevel:b.securityLevel,executionMode:b.executionMode,parentRunId:b.parentRunId,rootRunId:b.rootRunId,budgetInputTokens:b.budgetInputTokens,budgetOutputTokens:b.budgetOutputTokens,budgetCostMicros:b.budgetCostMicros});
     return json({ok:true,...created});
   }
   if(b.action==="accessGrant"){
-    if(!admin(env,user,context.request))return json({ok:false,error:"仅管理员可配置项目权限"},403);
+    if(!admin(env,user,request))return json({ok:false,error:"仅管理员可配置项目权限"},403);
     const targetUserId=Number(b.targetUserId),projectId=String(b.projectId||"");if(!targetUserId||!projectId)return json({ok:false,error:"用户和项目不能为空"},400);
     const permission=["read","write","approve","admin"].includes(b.permission)?b.permission:"read";
     await env.DB.prepare("INSERT INTO agent_project_access(user_id,project_id,department,permission,max_security_level,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,project_id) DO UPDATE SET department=excluded.department,permission=excluded.permission,max_security_level=excluded.max_security_level,updated_at=excluded.updated_at")
       .bind(targetUserId,projectId,String(b.department||""),permission,Math.max(1,Number(b.maxSecurityLevel)||1),Date.now()).run();return json({ok:true,permission});
   }
   if(b.action==="accessRevoke"){
-    if(!admin(env,user,context.request))return json({ok:false,error:"仅管理员可撤销项目权限"},403);
+    if(!admin(env,user,request))return json({ok:false,error:"仅管理员可撤销项目权限"},403);
     await env.DB.prepare("DELETE FROM agent_project_access WHERE user_id=? AND project_id=?").bind(Number(b.targetUserId),String(b.projectId||"")).run();return json({ok:true});
   }
   const runId=String(b.runId||"");

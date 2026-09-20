@@ -14,20 +14,44 @@ let reportLocalPersistedRevision = -1;
 let reportCloudPersistedRevision = -1;
 let reportLocalSavePending = Promise.resolve(false);
 let reportLocalSaveQueue = Promise.resolve();
+const reportDraftHashCache = new Map();
+let reportDraftTimer=null,reportDraftFirstPending=0,reportDraftScheduled=null;
 // 大报告/多版本超过 localStorage 配额时，完整保存在 IndexedDB，不裁剪用户版本。
 function reportDraftStoreKey(){return (typeof getUser==="function"?getUser()||"guest":"guest")+"/"+(typeof currentProjectId!=="undefined"&&currentProjectId||"draft");}
-function reportDraftStore(mode,key,value){
+async function reportDraftStore(mode,key,value){
+  const codec=await import('./research-state-codec.mjs');
+  const packed=mode==='put'?await codec.packState(value,reportDraftHashCache):null;
   return new Promise((resolve,reject)=>{
     if(typeof indexedDB==="undefined")return reject(new Error("浏览器不支持大草稿存储"));
-    const request=indexedDB.open("ai-studyreport-drafts",1);
-    let expired=false;const timer=setTimeout(()=>{expired=true;reject(new Error("本机存储超时"));},8000);
-    request.onupgradeneeded=()=>request.result.createObjectStore("drafts");
+    const request=indexedDB.open("ai-studyreport-drafts",2);
+    let expired=false,activeTx=null;const timer=setTimeout(()=>{expired=true;try{activeTx?.abort();}catch{}reject(new Error("本机存储超时"));},8000);
+    request.onupgradeneeded=()=>{for(const name of ['drafts','objects'])if(!request.result.objectStoreNames.contains(name))request.result.createObjectStore(name);};
+    request.onblocked=()=>{clearTimeout(timer);expired=true;reject(new Error('请关闭旧版页面后重试，本机原草稿保留'));};
     request.onerror=()=>{clearTimeout(timer);reject(request.error);};
     request.onsuccess=()=>{
       const db=request.result;if(expired){db.close();return;}
-      const tx=db.transaction("drafts",mode==="get"?"readonly":"readwrite"),store=tx.objectStore("drafts");
-      const op=mode==="get"?store.get(key):mode==="delete"?store.delete(key):store.put(value,key);
-      tx.oncomplete=()=>{clearTimeout(timer);db.close();resolve(mode==="get"?op.result:true);};
+      const tx=db.transaction(['drafts','objects'],mode==="get"?"readonly":"readwrite"),store=tx.objectStore("drafts"),objects=tx.objectStore('objects');
+      activeTx=tx;
+      let result=true;
+      if(mode==='get'){
+        const op=store.get(key);op.onsuccess=()=>{
+          const row=op.result;if(row?.storageFormat!=='draft-parts-v1'){result=row;return;}
+          const ids=[...codec.referencedObjects(row.manifest)],found=new Map();let left=ids.length;
+          const finish=()=>{try{result=codec.unpackState(row.manifest,found);}catch{tx.abort();}};
+          if(!left)finish();
+          for(const id of ids){const r=objects.get(key+'/'+id);r.onsuccess=()=>{if(typeof r.result==='string')found.set(id,r.result);if(--left===0)finish();};}
+        };
+      }else{
+        // A current draft replaces only its own predecessor atomically; conflict
+        // backups and other accounts/projects are in different records.
+        const previous=store.get(key);previous.onsuccess=()=>{
+          if(previous.result?.storageFormat==='draft-parts-v1')for(const id of codec.referencedObjects(previous.result.manifest))if(!packed?.objects.has(id))objects.delete(key+'/'+id);
+          if(mode==='delete'){store.delete(key);return;}
+          for(const [id,text] of packed.objects){const r=objects.getKey(key+'/'+id);r.onsuccess=()=>{if(r.result===undefined)objects.add(text,key+'/'+id);};}
+          store.put({storageFormat:'draft-parts-v1',manifest:packed.manifest},key);
+        };
+      }
+      tx.oncomplete=()=>{clearTimeout(timer);db.close();resolve(result);};
       tx.onabort=tx.onerror=()=>{clearTimeout(timer);db.close();reject(tx.error||new Error("本机存储失败"));};
     };
   });
@@ -35,16 +59,35 @@ function reportDraftStore(mode,key,value){
 async function loadDurableDraft(){
   const local=loadDraft();let large=null;
   try{large=await reportDraftStore("get",reportDraftStoreKey());}catch(_){}
+  // Migrate only the current project's old draft. Archive + exact readback
+  // precede removal, and a concurrent edit leaves the old entry untouched.
+  if(local&&large&&Number(large.ts)>=Number(local.ts)&&typeof indexedDB!=='undefined')try{await reportMigrateLegacyDraft(local);}catch(_){}
   if(!large)return local;
   return window.ProjectWorkflow?.selectProjectDraft?ProjectWorkflow.selectProjectDraft(large,local,large.projectId):large;
+}
+async function reportMigrateLegacyDraft(local){
+  if((local.projectId||null)!==(typeof currentProjectId!=='undefined'?currentProjectId||null:null))return false;
+  const currentKey=reportDraftStoreKey();
+  const raw=localStorage.getItem(DRAFT_KEY);if(!raw)return false;
+  const codec=await import('./research-state-codec.mjs');
+  const source=await codec.packState(local),digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw));
+  if(JSON.stringify(source.manifest)!==JSON.stringify((await codec.packState(JSON.parse(raw))).manifest))return false;
+  const id=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('');
+  const archive=currentKey+'/legacy-recovery/'+id;
+  await reportDraftStore('put',archive,local);
+  const restored=await reportDraftStore('get',archive),verified=await codec.packState(restored);
+  if(JSON.stringify(source.manifest)!==JSON.stringify(verified.manifest))throw Error('旧草稿回读校验失败');
+  if(reportDraftStoreKey()!==currentKey||localStorage.getItem(DRAFT_KEY)!==raw)return false;
+  localStorage.removeItem(DRAFT_KEY);return true;
 }
 function reportHasUnsavedChanges(){return reportDocumentRevision>0&&reportDocumentRevision>Math.max(reportLocalPersistedRevision,reportCloudPersistedRevision);}
 if(window.addEventListener)window.addEventListener("beforeunload",event=>{
   if(reportDocumentRevision>0&&reportHasUnsavedChanges()){event.preventDefault();event.returnValue="";}
 });
 async function persistReportDraft(){
+  if(window.ResearchUI?.active()){const ok=await ResearchUI.save();return {ok,local:false,remote:ok};}
   if(typeof projectCanEdit==='function'&&!projectCanEdit()){setSaveState('readonly');return {ok:false,local:false,remote:false,readonly:true};}
-  saveDraft();
+  saveDraft(true);
   const local=await reportLocalSavePending;
   const remote=typeof flushCloudSave==="function"?await flushCloudSave():false;
   return {ok:!!(local||remote),local:!!local,remote:!!remote};
@@ -60,20 +103,45 @@ function buildDraftData(){
     chapters: chapters.map(c=>({cn:c.cn, name:c.name, checked:c.checked,
       sections:c.sections.map(s=>({t:s.t, numeric:s.numeric, content:s.content, editedHtml:s.editedHtml||null,
         locked:!!s.locked,syncStatus:s.syncStatus||"current",staleReason:s.staleReason||"",staleKeys:s.staleKeys||[],staleKind:s.staleKind||"",
-        pendingRevision:s.pendingRevision||null,undoStack:s.undoStack||[],prov:s.prov||null,logicSnapshot:s.logicSnapshot||null,executionTask:s.executionTask||null,
+        pendingRevision:s.pendingRevision||null,undoStack:s.undoStack||[],prov:s.prov||null,logicSnapshot:s.logicSnapshot||null,executionTask:s.executionTask||null,outputPolicyVersion:s.outputPolicyVersion||null,
         structureMigrated:!!s.structureMigrated,migrationSource:s.migrationSource||""}))}))
   };
 }
-function saveDraft(){
+function saveDraft(immediate=false){
+  if(window.ResearchUI?.active()){if(ResearchUI.editable()){reportDocumentRevision++;ResearchUI.schedule();}return;}
   if(typeof projectCanEdit==='function'&&!projectCanEdit())return;
   reportDocumentRevision++;
-  const snapshot=JSON.parse(JSON.stringify(buildDraftData())),revision=reportDocumentRevision,key=reportDraftStoreKey();
+  // Older/headless environments keep the synchronous compatibility path.
+  if(typeof indexedDB==='undefined')return reportPersistDraftNow();
+  const key=reportDraftStoreKey();
+  if(reportDraftScheduled&&reportDraftScheduled.key!==key){
+    clearTimeout(reportDraftTimer);reportDraftScheduled.resolve(false);reportDraftScheduled=null;
+  }
+  if(!reportDraftScheduled){
+    let resolve;const promise=new Promise(r=>resolve=r);reportDraftScheduled={key,promise,resolve};reportDraftFirstPending=Date.now();
+  }
+  clearTimeout(reportDraftTimer);
+  const scheduled=reportDraftScheduled;
+  const flush=()=>{
+    reportDraftTimer=null;reportDraftScheduled=null;reportDraftFirstPending=0;
+    if(scheduled.key!==reportDraftStoreKey()){scheduled.resolve(false);return;}
+    Promise.resolve(reportPersistDraftNow()).then(scheduled.resolve,()=>scheduled.resolve(false));
+  };
+  reportLocalSavePending=scheduled.promise;
+  if(typeof setSaveState==='function')setSaveState('saving');
+  if(immediate)flush();else reportDraftTimer=setTimeout(flush,Math.max(0,Math.min(1000,5000-(Date.now()-reportDraftFirstPending))));
+  return scheduled.promise;
+}
+function reportPersistDraftNow(){
+  const draft=buildDraftData(),snapshot=typeof structuredClone==='function'?structuredClone(draft):JSON.parse(JSON.stringify(draft)),revision=reportDocumentRevision,key=reportDraftStoreKey();
   let savedLocally=false;
-  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(snapshot)); savedLocally=true;reportLocalPersistedRevision=revision; }catch(e){}
+  // Modern browsers use the asynchronous draft store first. Never repeatedly
+  // stringify a long report just to discover that localStorage is still full.
+  if(typeof indexedDB==='undefined')try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(snapshot)); savedLocally=true;reportLocalPersistedRevision=revision; }catch(e){}
   reportLocalSavePending=savedLocally?Promise.resolve(true):(reportLocalSaveQueue=reportLocalSaveQueue.catch(()=>false).then(()=>reportDraftStore("put",key,snapshot)).then(()=>{
     if(key===reportDraftStoreKey())reportLocalPersistedRevision=Math.max(reportLocalPersistedRevision,revision);
-    if(revision===reportDocumentRevision&&typeof setSaveState==="function")setSaveState("local");return true;
-  }).catch(()=>{if(revision===reportDocumentRevision&&typeof setSaveState==="function")setSaveState("offline");return false;}));
+    if(key===reportDraftStoreKey()&&revision===reportDocumentRevision&&typeof setSaveState==="function")setSaveState("local");return true;
+  }).catch(()=>{if(key===reportDraftStoreKey()&&revision===reportDocumentRevision&&typeof setSaveState==="function")setSaveState("offline");return false;}));
   if(typeof setSaveState==="function")setSaveState(savedLocally?"local":"saving");
   scheduleCloudSave();
   return reportLocalSavePending;
@@ -81,7 +149,12 @@ function saveDraft(){
 function loadDraft(){
   try{ const raw = localStorage.getItem(DRAFT_KEY); return raw? JSON.parse(raw): null; }catch(e){ return null; }
 }
-function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} reportDraftStore("delete",reportDraftStoreKey()).catch(()=>{}); }
+function clearDraft(){
+  const key=reportDraftStoreKey();
+  if(reportDraftScheduled?.key===key){clearTimeout(reportDraftTimer);reportDraftScheduled.resolve(false);reportDraftScheduled=null;reportDraftFirstPending=0;}
+  try{localStorage.removeItem(DRAFT_KEY);}catch(e){}
+  reportLocalSaveQueue=reportLocalSaveQueue.catch(()=>false).then(()=>reportDraftStore('delete',key)).catch(()=>false);
+}
 function restoreDraft(d, options){
   options=options||{};
   // 浏览器刷新时只恢复项目数据，不替用户决定要进入哪个功能模块。
@@ -112,7 +185,7 @@ function restoreDraft(d, options){
     }catch(e){calcResult=null;}
   }
   currentStep = Math.min(d.currentStep||0, STEPS.length-1);
-  renderTOC(); renderSheet();
+  if(!options.deferRender){renderTOC(); renderSheet();}
 }
 function draftBarHtml(d){
   const t = new Date(d.ts);
@@ -234,7 +307,8 @@ function stepProjectInfo(){
     +'<div id="aiPosBox"></div>'
     +'<div style="display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap;">'
     +'<input id="poiKw" type="text" placeholder="项目/小区全名，可加城市，如：深圳 安居华越龙苑" value="'+escapeHtml(project.poiKw || project.name || "")+'" style="flex:1; min-width:240px; font-size:12.5px; padding:6px 10px;">'
-    +'<button type="button" class="btn ghost" id="poiBtn" style="padding:5px 14px;font-size:12px;">📍 搜索位置并抓取周边</button></div>'
+    +'<button type="button" class="btn ghost" id="poiBtn" style="padding:5px 14px;font-size:12px;">📍 搜索位置并抓取周边</button>'
+    +'<button type="button" class="btn ghost" id="projectCityMapBtn" onclick="openProjectCityMap()" style="padding:5px 14px;font-size:12px;">🗺 二维地图 / 三维周边</button></div>'
     +'<div id="poiStatus" style="font-size:12px; color:var(--ink-soft); margin-top:6px;"></div>'
     +'<div><label style="margin-top:10px;">周边配套（自动抓取自地图，可手动增删修改，将注入区位与市场章节）</label><textarea id="f_poiDesc" style="min-height:72px;" placeholder="点上方按钮自动抓取，或手动填写">'+escapeHtml(project.poiDesc||"")+'</textarea></div>'
     +'<div class="step-desc" style="margin:6px 0 0;">竞品数据须来自真实调研——AI只负责把这些真实数据组织成市场分析论述，不会自行编造周边情况。</div>'
@@ -452,8 +526,9 @@ async function updateStaleSections(){
 // 界面渲染：统一走 md.js（支持标题/列表/表格/引用/分隔线/行内样式，并兼容旧的[[TABLE]]语法）
 // 保留降级分支：万一 md.js 未加载，仍能按老逻辑显示，不至于整页空白
 function renderContent(text){
+  text=window.ReportOutputPolicy?ReportOutputPolicy.normalize(text):text;
   if(window.MD && typeof window.MD.renderHtml === "function"){
-    return window.MD.renderHtml(text).replace(/【待补：([^】]+)】/g,'<span class="rpt-missing-placeholder">【待补：$1】</span>');
+    return window.MD.renderHtml(text).replace(/【待补\s*(?:：|:)?[^】]*】/g,'<span class="rpt-missing-placeholder">$&</span>');
   }
   const tableRe = /\[\[TABLE\]\]([\s\S]*?)\[\[\/TABLE\]\]/g;
   let html = text.replace(tableRe, function(m, inner){
@@ -962,7 +1037,7 @@ async function reviseSection(c, s, instruction, onChunk){
     + rlRetrieve(c.name,s.t)
     + reportLocalLogicPrompt(s)
     + kbRetrieve(c.name, s.t);
-  return reportDurableSectionCall(c,s,sys,user,onChunk);
+  return reportDurableSectionCall(c,s,sys+(window.ReportOutputPolicy?ReportOutputPolicy.prompt:''),user,onChunk);
 }
 
 // 仅改写用户在预览正文中拖选的片段；返回“替换片段”，完整小节的安全拼接由 ProjectWorkflow 完成。
@@ -1017,7 +1092,7 @@ async function generateSection(c, s, onChunk){
   if(!s.logicSnapshot?.localOverride)s.logicSnapshot=reportSectionLogicSnapshot(c,s,logicRules);
   const user = '【项目信息】\n项目名称：'+(project.name||"（未填写）")+'\n建设/委托单位：'+(project.owner||"（未填写）")+'\n报告领域：'+project.industry+'\n项目类型：'+(project.type||"（未填写）")+'\n建设地点：'+(project.location||"（未填写）")+'\n投资规模：'+(project.scale?project.scale+"万元":"（未填写）")+'\n项目概况：'+(project.desc||"（未填写）")+ surveyBrief() +(sitePlan?'\n【本节必须执行的多点位写作逻辑】\n'+sitePlan.strategy+'\n':'')+'\n\n【当前撰写位置】\n报告章节：'+c.cn+'、'+c.name+'\n本子标题：'+s.t+'\n\n请撰写"'+s.t+'"这一子标题下的正文。' + rlRetrieve(c.name,s.t) + reportLocalLogicPrompt(s) + stdRetrieve(c.name, s.t, s.numeric) + exampleRetrieve(c.name, s.t, collector) + kbRetrieve(c.name, s.t, collector) + webEvidenceRetrieve(c.name,s.t,collector) + excelContext + (typeof analysisReportContext==="function"?analysisReportContext(c.name,s.t):"") + await ragRetrieve(c.name, s.t, collector);
 
-  const argumentPrompt=ReportArgument.prompt(c.name,s.t,{hasCalculation:!!digest});
+  const argumentPrompt=ReportArgument.prompt(c.name,s.t,{hasCalculation:!!digest})+(window.ReportOutputPolicy?ReportOutputPolicy.prompt:'');
   const sectionNumber=(chapters.indexOf(c)+1)+'.'+(c.sections.indexOf(s)+1);
   let text = await reportDurableSectionCall(c,s,sys.replace('篇幅约500-800字。','篇幅服从本节论证任务与材料。')+argumentPrompt+'\n当前小节编号为'+sectionNumber+'。不重复章标题或本小节标题；下级标题从'+sectionNumber+'.1、'+sectionNumber+'.2连续编号，更下级使用'+sectionNumber+'.1.1。禁止沿用示例中的1.1编号。',user+summaryContext,onChunk);
   if(!text || text === "（未返回内容）" || reportBodyContainsInternalLogic(text)){
@@ -1049,25 +1124,30 @@ async function generateSection(c, s, onChunk){
 // 报告逐节生成与逐节AI评审属于"批量"负载（一篇报告约40次调用），
 // 走独立的 batch 额度，不占用日常AI问答的额度
 async function reportDurableSectionCall(c,s,sys,user,onChunk){
+  let research=null;if(window.ResearchUI?.active()){await ResearchUI.flush();research=ResearchUI.capture('report');}
   const projectId=typeof currentProjectId==='string'?currentProjectId:'';
-  if(!projectId)throw new Error('请先保存项目，再启动可恢复的小节生成');
+  const acceptsResult=()=>research?!!window.ResearchUI?.accepts(research):!window.ResearchUI?.active()&&currentProjectId===projectId;
+  if(!projectId&&!research)throw new Error('请先保存项目，再启动可恢复的小节生成');
   if(!window.ReportOrchestrationClient?.generateSection)throw new Error('报告任务模块未加载，请刷新后重试');
-  const result=await ReportOrchestrationClient.generateSection({projectId,sectionKey:c.name+' / '+s.t,projectType:rlProjectType(),logicVersion:window.ReportLogicCore?.current(rlProjectType())?.version,system:sys,user},task=>{
-    if(currentProjectId!==projectId)return;
+  const result=await ReportOrchestrationClient.generateSection({projectId,research,legacyResearchEpoch:Number(projectWorkflow?.management?.legacyResearchEpoch)||0,sectionKey:c.name+' / '+s.t,projectType:rlProjectType(),logicVersion:window.ReportLogicCore?.current(rlProjectType())?.version,system:sys,user},task=>{
+    if(!acceptsResult())return;
     const changed=s.executionTask?.id!==task.id||s.executionTask?.status!==(task.status||'queued');
     s.executionTask={id:task.id,runId:task.runId,status:task.status||'queued',graph:task.graph};
     if(changed)saveDraft();
   });
-  if(currentProjectId!==projectId)throw new Error('已切换项目，后台结果已保留，未写入其他项目');
+  if(!acceptsResult())throw new Error('已切换项目或研究轮次，后台结果已保留，未写入其他项目');
+  if(research)await ResearchUI.guard(research);
+  if(!acceptsResult())throw new Error('已切换项目或研究轮次，后台结果已保留，未写入其他项目');
   s.executionTask=Object.assign({},s.executionTask,{model:result.model||null,provider:result.provider||null});
   if(onChunk)onChunk(result.text);
   return result.text;
 }
 async function callGen(sys, user, onChunk){
+  const research=window.ResearchUI?.active()?ResearchUI.capture('report'):null;
   const resp = await fetch("/api/generate", {
     method:"POST",
     headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
-    body: JSON.stringify({ system: sys, messages:[{role:"user", content:user}], stream: !!onChunk, kind:"batch" })
+    body: JSON.stringify({ research,system: sys, messages:[{role:"user", content:user}], stream: !!onChunk&&!research, kind:"batch" })
   });
   if(resp.status===401){ clearAuth(); showLoginModal("登录已过期，请重新登录后继续生成"); throw new Error("登录已过期"); }
 
@@ -1100,9 +1180,11 @@ async function callGen(sys, user, onChunk){
 
   // 非流式回退
   const data = await resp.json();
+  if(research)await ResearchUI.guard(research);
   if(data.error) throw new Error(data.error);
   if(data.usage){ genUsage.inTok += data.usage.prompt_tokens||0; genUsage.outTok += data.usage.completion_tokens||0; }
   const text = (data.content||[]).map(b=>b.text||"").join("").trim();
+  if(research&&onChunk)onChunk(text);
   return text || "（未返回内容）";
 }
 

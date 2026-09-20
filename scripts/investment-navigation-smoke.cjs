@@ -33,35 +33,40 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
    assert.equal(new URL(page.url()).hash,'#investment/projects');
    assert.equal(await page.locator('#pmDetail').isVisible(),false);
    await page.screenshot({path:'outputs/0907-investment-library.png'});
-   await page.locator('[data-pm-select]').click();await page.locator('.pm-stage-workspace h3').filter({hasText:'项目寻找'}).waitFor();
-   assert.ok(page.url().endsWith('/stages/discovery'));
-   await page.locator('#pmSidebar [data-pw-view="overview"]').click();await page.locator('.pm-page-heading h3').filter({hasText:'项目总览'}).waitFor();
+   await page.locator('[data-pm-select]').click();
+   try{await page.locator('#pmDetail .pm-page-heading').waitFor();}catch(error){
+     const diagnostic=await page.evaluate(()=>({url:location.href,detail:document.querySelector('#pmDetail')?.innerText||'',alerts:window.alerts||[]}));
+     throw new Error('打开项目后未显示阶段页：'+JSON.stringify(diagnostic),{cause:error});
+   }
+   assert.ok(page.url().endsWith('/overview'));
+   const openView=async(view,selector)=>{
+     const group=await page.evaluate(v=>ProjectWorkspaceUI.navigationGroup(v).key,view);
+     await page.locator('#pmSidebar [data-pw-view="'+group+'"]').click();
+     if(view!==group)await page.locator('#pmDetail .pm-workspace-subtabs [data-pw-view="'+view+'"]').click();
+     await page.locator('#pmDetail').locator(selector).first().waitFor();
+     assert.ok(page.url().endsWith('/'+view));
+   };
+   await openView('overview','.pm-page-heading h3');await page.locator('.pm-page-heading h3').filter({hasText:'项目总览'}).waitFor();
    assert.equal(await page.locator('#pmList').isVisible(),false);
    assert.equal(await page.locator('#pmMeetingText').count(),0);
    await page.screenshot({path:'outputs/0907-investment-overview.png'});
-   for(const [view,selector] of [['stages','[data-pi-milestone]'],['facts','.pm-fact-row, .pm-detail-empty'],['actions','#pmMeetingText'],['scenarios','#pmScenarioKind'],['acceptance','#pmOptTitle'],['versions','[data-pm-preview-version]'],['members','.pm-workspace-view']]){
-     await page.locator('#pmSidebar [data-pw-view="'+view+'"]').click();
-     await page.locator('#pmDetail').locator(selector).first().waitFor();
-     assert.ok(page.url().endsWith('/'+view));
-   }
+   for(const [view,selector] of [['stages','[data-pi-milestone]'],['facts','.pm-fact-row, .pm-detail-empty'],['actions','.pm-detail-section'],['meetings','#pmMeetingText'],['scenarios','#pmScenarioKind'],['acceptance','#pmOptTitle'],['versions','[data-pm-preview-version]'],['members','.pm-workspace-view']])await openView(view,selector);
    await page.reload();await page.locator('#pmDetail .pm-workspace-view').waitFor();assert.ok(page.url().endsWith('/members'));
-   await page.locator('#pmSidebar [data-pw-view="actions"]').click();await page.locator('#pmMeetingText').waitFor();
-   await page.locator('[data-investment-handoffs] [data-ho-new]').waitFor();
-   await page.locator('[data-investment-step4] [data-s4-form=contractCandidate]').waitFor({state:'attached'});
-   await page.goBack();await page.locator('#pmDetail .pm-workspace-view').waitFor();assert.ok(page.url().endsWith('/members'));
+   await openView('meetings','#pmMeetingText');
+   await page.goBack();await page.locator('#pmDetail .pm-detail-section').waitFor();assert.ok(page.url().endsWith('/actions'));
    await page.goForward();await page.locator('#pmMeetingText').waitFor();
-   await page.locator('#pmSidebar [data-pw-view="actions"]').click();assert.equal(await page.locator('#pmMeetingText').count(),1);
+   await openView('meetings','#pmMeetingText');assert.equal(await page.locator('#pmMeetingText').count(),1);
    failData=true;delayData=true;
-   await page.locator('#pmSidebar [data-pw-view="data"]').click();await page.locator('.pm-workspace-loading').waitFor();await page.locator('[data-pw-retry]').waitFor();
+   await openView('data','.pm-workspace-loading');await page.locator('[data-pw-retry]').waitFor();
    failData=false;delayData=false;await page.locator('[data-pw-retry]').click();await page.locator('#pmDetail .pm-workspace-view').waitFor();
-   await page.locator('[data-pm-library]').click();await page.locator('#pmSearch').fill('找不到这个项目');await page.getByText('没有匹配的项目').waitFor();
+   await page.locator('[data-pm-library]').click();await page.locator('#pmSearch').fill('找不到这个项目');await page.getByText('暂无匹配项目').waitFor();
    await page.locator('#pmSearch').fill('');await page.locator('[data-pm-select]').waitFor();
    await page.setViewportSize({width:800,height:900});assert.equal(await page.locator('[data-pm-head-view="data"]').isVisible(),true);
-   await page.locator('[data-pm-select]').click();await page.locator('#pmSidebar [data-pw-view="members"]').click();await page.locator('#pmDetail .pm-workspace-view').waitFor();
+   await page.locator('[data-pm-select]').click();await page.locator('#pmDetail .pm-page-heading').waitFor();await openView('members','.pm-workspace-view');
    await page.screenshot({path:'outputs/0907-investment-members-compact.png'});
    await page.locator('#ppClose').click();assert.equal(await page.locator('#projPanel').count(),0);
-   failList=true;await page.locator('#reopen').click();await page.locator('#pmRetryList').waitFor();
-   failList=false;await page.locator('#pmRetryList').click();await page.locator('[data-pm-select]').waitFor();
+   failList=true;await page.locator('#reopen').click();await page.locator('[data-pm-reload]').waitFor();
+   failList=false;await page.locator('[data-pm-reload]').click();await page.locator('[data-pm-select]').waitFor();
    assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,requests:requests.length,consoleErrors:errors,states:['library','overview','stages','facts','actions','scenarios','acceptance','versions','members','loading','failed/retry','empty','refresh','back/forward','repeat','close/reopen','compact'],writes:0}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

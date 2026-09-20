@@ -101,3 +101,30 @@
 @media(max-width:1100px){#projPanel .pm-main{grid-template-columns:190px minmax(0,1fr)}#projPanel .pm-page-content{padding:24px}#projPanel .pm-head-nav button{padding:10px 14px}#projPanel .pm-detail-head{flex-wrap:wrap}#projPanel .pm-two{grid-template-columns:1fr}}
 @media(max-width:700px){#projPanel .pm-head{padding:12px 16px;flex-wrap:wrap;gap:10px}#projPanel .pm-head-brand b{font-size:17px}#projPanel .pm-head-nav{order:3;width:100%;margin:0;justify-content:space-between}#projPanel .pm-head-nav button{padding:8px 12px}#projPanel .pm-main{grid-template-columns:140px minmax(0,1fr)}#projPanel #pmSidebar{padding:12px 6px}#projPanel .pm-current-project{padding:12px 6px}#projPanel .pm-page-content{padding:16px 12px}#projPanel .pm-overview-links{grid-template-columns:1fr}#projPanel .pm-toolbar{padding:12px;flex-wrap:wrap}#projPanel .pm-toolbar label{min-width:180px}#projPanel .pm-detail-head h2{font-size:19px}#projPanel .pm-detail-section,#projPanel .pm-workspace-view,#projPanel .pm-ops-block{padding:16px}}
 @media(max-width:500px){#projPanel .pm-main{grid-template-columns:112px minmax(0,1fr)}#projPanel .pm-workspace-tabs button{font-size:12px;padding:10px 7px}#projPanel .pm-stage-records li{align-items:flex-start;flex-wrap:wrap}#projPanel .pm-stage-nav button{font-size:12px;padding:7px 4px}}
+#projPanel .pm-library-section{background:#fff;border:1px solid #dbe5ee;border-radius:14px;margin-bottom:24px;overflow:hidden}
+#projPanel .pm-library-section header{padding:20px 24px;border-bottom:1px solid #e4ebf2}
+#projPanel .pm-library-section h2{font-size:20px;margin:0 0 6px;color:#204c70}
+#projPanel .pm-library-section p{font-size:13px;color:#687d91;margin:0;line-height:1.6}
+#projPanel .pm-table-scroll{overflow:auto;max-height:340px}
+#projPanel .pm-library-section th{position:sticky;top:0;z-index:1}
+#projPanel .pm-context-return{display:flex;align-items:center;gap:12px;margin-bottom:16px;color:#647b90;font-size:13px}
+#projPanel .pm-library-section table{width:100%;border-collapse:collapse;min-width:680px;font-size:14px;text-align:left}
+#projPanel .pm-library-section th{background:#f3f7fb;color:#5b7185;font-weight:600;padding:13px 18px;white-space:nowrap}
+#projPanel .pm-library-section td{padding:16px 18px;border-top:1px solid #edf1f5;line-height:1.6;color:#334c62}
+#projPanel .pm-library-section td:first-child{min-width:200px;max-width:420px;overflow-wrap:anywhere}
+#projPanel .pm-library-section td small{display:block;color:#7a8a9b;font-size:12px;margin-top:4px}
+#projPanel .pm-library-section tr:hover td{background:#f8fbfd}
+#projPanel .pm-table-empty{text-align:center;height:88px;color:#74879b}
+#projPanel button:not(.pp-close){border-radius:8px;font-family:inherit;cursor:pointer}
+#projPanel button:focus-visible{outline:3px solid #4798cd;outline-offset:2px}
+#projPanel button:disabled{opacity:.55;cursor:wait}
+#projPanel.pm-library-page .pm-main{grid-template-columns:1fr}
+#projPanel.pm-library-page #pmSidebar{display:none}
+#projPanel .pm-workspace-subtabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 20px}
+#projPanel .pm-workspace-subtabs button{padding:8px 14px;border:1px solid #cadcec;background:white;color:#35617f}
+#projPanel .pm-workspace-subtabs button.active{background:#e6f2fd;border-color:#5394c2}
+#projPanel .pm-section-actions{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+#projPanel .pm-section-actions h2{margin:0}
+#projPanel .pm-row-actions{display:flex;gap:7px;flex-wrap:wrap;align-items:center;min-width:220px}
+#projPanel .pm-row-actions button{white-space:nowrap;margin:0;padding:7px 10px}
+#projPanel .pm-row-actions .danger-lite{color:#aa3c35;border-color:#e3c1be;background:#fffafa}

@@ -6,6 +6,7 @@ import {signToken} from "../functions/api/_auth.js";
 function memoryDb(){
   const rows=new Map();
   return {rows,prepare(sql){const st={args:[]};return {bind(...a){st.args=a;return this;},async first(){
+    if(sql==='SELECT id,name,data,updated_at,user_id FROM projects WHERE id=?'&&['project-a1','project-b2','project-version-race'].includes(st.args[0]))return {id:st.args[0],name:'[系统测试]会话',data:'{}',updated_at:0,user_id:7};
     if(sql.includes("WHERE user_id=? AND project_id=?")){const k=st.args[0]+":"+st.args[1],r=rows.get(k);return r?{id:r.id,data:r.data,updated_at:r.updated_at}:null;}
     return null;
   },async run(){
