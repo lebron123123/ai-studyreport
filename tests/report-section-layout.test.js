@@ -1,10 +1,9 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const path=require('node:path');
-let chromium;
-try{({chromium}=require('playwright'));}catch{try{({chromium}=require(process.env.PLAYWRIGHT_MODULE||'C:/Users/HP/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright'));}catch{}}
-test('working draft canonical tables and contextual headings are lossless and idempotent',{skip:!chromium},async()=>{
-  const browser=await chromium.launch({headless:true,channel:'msedge'});
+const {chromium}=require('playwright');
+test('working draft canonical tables and contextual headings are lossless and idempotent',async()=>{
+  const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'msedge'})});
   try{
     const page=await browser.newPage();
     await page.addScriptTag({path:path.resolve('report-table-templates.js')});

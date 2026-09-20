@@ -1,7 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),path=require('node:path');
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'C:/Users/HP/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 test('document plan owns each table once, preserves distinct rent series and cannot misaggregate site rows',async()=>{
- const browser=await chromium.launch({headless:true,channel:'msedge'});
+ const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'msedge'})});
  try{
   const page=await browser.newPage();
   await page.addScriptTag({path:path.resolve('report-table-templates.js')});

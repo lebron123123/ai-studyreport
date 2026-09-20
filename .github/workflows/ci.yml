@@ -36,9 +36,11 @@ jobs:
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - name: 安装根项目与本地服务依赖
         run: npm ci
+      - name: 安装浏览器测试运行时
+        run: npx playwright install --with-deps chromium
       - name: JavaScript 语法检查
         run: npm run check:syntax
       - name: 规则、表格、API 与迁移一致性

@@ -1,7 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
-let chromium;try{({chromium}=require('playwright'));}catch{({chromium}=require('C:/Users/HP/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright'));}
+const {chromium}=require('playwright');
 test('统一候选入口：默认局部、全篇、取消、重复打开、刷新和忙碌状态',async()=>{
- const browser=await chromium.launch({headless:true,channel:'msedge'});
+ const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'msedge'})});
  try{
   const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   const src=fs.readFileSync('aireport.js','utf8'),functions=src.slice(src.indexOf('function airDocLogicBarHtml(){'),src.indexOf('function airOpenKeepOriginal(){'));
