@@ -73,9 +73,9 @@ export default {
     }
   },
   "migrations": {
-    "count": 37,
-    "latest": "0037_calc_experience_library.sql",
-    "orderedListSha256": "4d6872a0e9ce7fc6793ed3ef511fca28691bf5ef65f6003bee629336b63ddafa"
+    "count": 38,
+    "latest": "0038_calc_experience_workspaces.sql",
+    "orderedListSha256": "c4b041c4a634688adcceb01def78344f5440c5c7e5fe1779ab5243889369e34f"
   },
   "capabilities": {
     "evidenceSigningGate": {
