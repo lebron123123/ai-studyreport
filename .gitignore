@@ -76,3 +76,6 @@ outputs/baoan-source/parallel-parts/
 outputs/city-dem-source/*.tif
 project-map/city/buildings.glb
 project-map/baoan-lod-v1/overview-known.glb
+
+# 本地参考仓库不作为无配置的 Git 子模块发布；保留本机原件。
+outputs/anju-calculator-reference-0908/
