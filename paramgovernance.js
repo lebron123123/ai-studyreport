@@ -95,6 +95,7 @@ function classifyParameters(table){
     const strength=metricStrength(r);
     if(strength>=0.25) level="core";
     else if(strength>=0.1 && level!=="core") level="important";
+    if(typeof r.selected==='boolean')level=r.selected?'core':'low';
     const labels={core:"核心",important:"重要",general:"一般",low:"低影响"};
     return Object.assign({},r,{impactLevel:level,impactLabel:labels[level],impactRank:i+1});
   });
@@ -179,6 +180,10 @@ function suggestDraftRows(rows,type,evidenceRefs){
   }));
 }
 
+// These fields count complete periods; scenario sampling must obey the same domain.
+function scenarioValue(key,value){
+  return ['rentSpan','costSpan','decoInt','buildYears','operateYears','firstMonths','loanTotalYears'].includes(key)?Math.max(1,Math.round(value)):value;
+}
 function singleParameterCurve(params, key, def, evaluate, points){
   points=Math.max(3,Math.min(21,points||9));
   const base=Number(params[key]);
@@ -187,7 +192,7 @@ function singleParameterCurve(params, key, def, evaluate, points){
   if(lo===hi){ lo=base-1; hi=base+1; }
   const out=[];
   for(let i=0;i<points;i++){
-    const value=lo+(hi-lo)*i/(points-1), result=evaluate(Object.assign({},params,{[key]:value}));
+    const value=scenarioValue(key,lo+(hi-lo)*i/(points-1)), result=evaluate(Object.assign({},params,{[key]:value}));
     out.push({value,irr:result&&result.summary?result.summary.irr:null,npv:result&&result.summary?result.summary.totalNpv:null});
   }
   return out;
@@ -198,7 +203,8 @@ function jointLowSensitivityValidation(params, classified, defs, evaluate, opts)
   const samples=Math.max(8,Math.min(256,opts.samples||64));
   const maxDelta=Number.isFinite(opts.maxIrrDeltaPp)?opts.maxIrrDeltaPp:0.5;
   const defMap=Object.fromEntries((defs||[]).map(d=>[d.k||d.key,d]));
-  const low=(classified||[]).filter(x=>x.impactLevel==="low"&&Number.isFinite(params[x.key])&&params[x.key]!==0);
+  // Ramp grouping is coupled to the number of supplied rates, not an independent scalar.
+  const low=(classified||[]).filter(x=>x.key!=='rampIntervalMonths'&&x.impactLevel==="low"&&Number.isFinite(params[x.key])&&params[x.key]!==0);
   const baseRes=evaluate(params), baseIrr=baseRes&&baseRes.summary?baseRes.summary.irr:null;
   if(!low.length||!Number.isFinite(baseIrr)) return {available:false,reason:"没有可验证的低影响参数或基准IRR不可计算",baseIrr,parameterCount:low.length};
   const deltas=[];
@@ -209,7 +215,7 @@ function jointLowSensitivityValidation(params, classified, defs, evaluate, opts)
       let v=params[x.key]*(1+sign*perturb), d=defMap[x.key];
       if(d&&Number.isFinite(d.lo)) v=Math.max(d.lo,v);
       if(d&&Number.isFinite(d.hi)) v=Math.min(d.hi,v);
-      p[x.key]=v;
+      p[x.key]=scenarioValue(x.key,v);
     });
     const r=evaluate(p), irr=r&&r.summary?r.summary.irr:null;
     if(Number.isFinite(irr)) deltas.push(Math.abs(irr-baseIrr));

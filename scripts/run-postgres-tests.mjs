@@ -27,7 +27,7 @@ try{
   console.log('已创建全新隔离测试库：'+name+'（无用户数据）');
   const env={...process.env,AGENT_TEST_DATABASE_URL:url.toString(),TEST_DATABASE_URL:url.toString(),REQUIRE_DATABASE_TESTS:'1'};
   const args=process.argv.slice(2);
-  for(const command of [['local-server/check-migrations.js','--require-db'],['--test',...args]]){
+  for(const command of [['local-server/check-migrations.js','--require-db'],['--require',path.join(root,'scripts/windows-browser-lockout-guard.cjs'),'--test',...args]]){
     const code=await new Promise((resolve,reject)=>{const child=spawn(process.execPath,command,{cwd:root,env,stdio:'inherit',windowsHide:true});child.once('error',reject);child.once('exit',(code)=>resolve(code??1));});
     if(code){process.exitCode=code;break;}
   }

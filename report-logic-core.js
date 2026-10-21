@@ -9,7 +9,10 @@
     return value==="commercial_renovation"?"commercial_renovation":"housing_conversion";
   };
   function rulesFor(projectType,options){
-    const set=current(projectType),scenario=scenarioOf(projectType,options),rules=set?.data?.rules||[];
+    return rulesForData(current(projectType)?.data,projectType,options);
+  }
+  function rulesForData(data,projectType,options){
+    const scenario=scenarioOf(projectType,options),rules=data?.rules||[];
     if(!scenario)return rules;
     return rules.filter(rule=>!Array.isArray(rule.scenarios)||!rule.scenarios.length||rule.scenarios.includes(scenario)).map(rule=>{
       const variant=rule.scenarioVariants&&rule.scenarioVariants[scenario];
@@ -52,19 +55,39 @@
     return global.ReportWritingPolicy?global.ReportWritingPolicy.requirements(data,scope):(data?.globalRequirements?.[scope]||"");
   }
   function match(projectType, chapterName, sectionTitle, options){
-    const set = current(projectType), opts = options || {};
-    if (!set?.data?.rules) return [];
-    const projectText = normalize(opts.projectText || "");
-    return rulesFor(projectType,opts).map(rule => {
+    return matchRules(current(projectType)?.data,chapterName,sectionTitle,{...options,projectType});
+  }
+  // Pure matching is also consumed by the server; request-side rule IDs are not authority.
+  function matchRules(data, chapterName, sectionTitle, options){
+    const opts = options || {},projectType=opts.projectType||data?.projectType||'rent';
+    if (!data?.rules) return [];
+    const projectText = normalize(opts.projectText || ""),title=normalize(sectionTitle);
+    const containsTitle = value => {
+      const text=normalize(value);
+      return text&&title&&Math.min(text.length,title.length)>=3&&(text.includes(title)||title.includes(text));
+    };
+    let candidates=rulesForData(data,projectType,opts).filter(rule=>{
+      if(rule.projectType&&typeOf(rule.projectType)!==typeOf(projectType))return false;
+      if(!rule.projectSpecific)return true;
+      const keywords=normalize(rule.note).replace(/本项目|核心|特色/g,"");
+      return !!keywords&&projectText.includes(keywords);
+    }).map(rule => {
       const chapterScore = overlap(rule.chapter, chapterName);
-      const sectionScore = Math.max(overlap(rule.section, sectionTitle), overlap(rule.subsection, sectionTitle), overlap(rule.pointTitle, sectionTitle), overlap(rule.displayTitle, sectionTitle));
-      let specificScore = 0;
-      if (rule.projectSpecific) {
-        const keywords = normalize(rule.note).replace(/本项目|核心|特色/g, "");
-        specificScore = keywords && projectText.includes(keywords) ? 20 : -100;
-      }
-      return { rule, score: chapterScore + sectionScore + specificScore };
-    }).filter(item => item.score >= 115).sort((a,b) => b.score - a.score || a.rule.sourceNo - b.rule.sourceNo).map(item => item.rule);
+      const aliases=[rule.subsection,rule.pointTitle,rule.displayTitle];
+      const sectionScore = Math.max(overlap(rule.section, sectionTitle), ...aliases.map(value=>overlap(value,sectionTitle)));
+      // A known parent section owns all its detailed rows. Weak shared words in
+      // neighbouring sections must not join an exact parent/child match.
+      const sectionRank=title&&normalize(rule.section)===title?4:aliases.some(value=>title&&normalize(value)===title)?3:containsTitle(rule.section)?2:aliases.some(containsTitle)?1:0;
+      const chapterRank=normalize(rule.chapter)===normalize(chapterName)&&normalize(chapterName)?2:chapterScore===80?1:0;
+      return { rule, chapterRank, sectionRank, score: chapterScore + sectionScore + (rule.projectSpecific?20:0) };
+    }).filter(item => item.score >= 115);
+    const chapterRank=Math.max(0,...candidates.map(item=>item.chapterRank));
+    if(chapterRank)candidates=candidates.filter(item=>item.chapterRank===chapterRank);
+    const sectionRank=Math.max(0,...candidates.map(item=>item.sectionRank));
+    // Old renamed headings retain the former fuzzy fallback only when no
+    // explicit parent, child or contained coarse heading is available.
+    if(sectionRank)candidates=candidates.filter(item=>item.sectionRank===sectionRank);
+    return candidates.sort((a,b) => b.score - a.score || a.rule.sourceNo - b.rule.sourceNo).map(item => item.rule);
   }
   function requirementStatus(rule, context){
     const ctx = context || {}, kinds = rule.sourceKinds || [], missing = [];
@@ -158,7 +181,7 @@
   function dataRequirementSchema(projectType,chapterName,sectionTitle,options){return match(projectType,chapterName,sectionTitle,options||{}).map(rule=>dataRequirement(rule,options));}
   function generationReadiness(rule, context){
     const status = requirementStatus(rule, context);
-    if(status.ready) return Object.assign({}, status, {level:"grounded", canDraft:true, marker:""});
+    if(status.ready) return Object.assign({}, status, {level:"grounded", canDraft:true, marker:"", factsVerified:false, availabilityOnly:true});
     const sourceKinds=rule.sourceKinds||[], form=String(rule.outputForm||"");
     const critical = /^★★★/.test(rule.importance || "")
       || (sourceKinds.includes("manual_upload") && criticalPattern.test(rule.requiredSources||""))
@@ -166,6 +189,8 @@
     return Object.assign({}, status, {
       level: critical ? "critical" : "framework",
       canDraft: true,
+      factsVerified:false,
+      availabilityOnly:true,
       marker: critical ? compact(rule.requiredSources, 90) : ""
     });
   }
@@ -210,27 +235,21 @@
     return "\n\n【内部生成约束｜严禁写入报告正文】（以下仅供模型规划写作，不是报告内容；不得复述其中的字段名、规则原文、编号或‘写作逻辑’字样。）\n"
       + scenarioGuard
       + (whole?"【全篇要求｜每个小节均须遵守，不得复述到正文】\n"+whole+"\n\n":"")
-      + "材料不足不等于停止写作：禁止整节只输出待补提示或返回空内容；应把规则转化为可直接下载使用的正式报告正文，先写能够成立的背景、分析和论证内容。只有项目专属数字、批复、证照、合同等关键依据，在对应句子或表格单元格处用简短【待补：具体依据】标记。不得输出‘本节重点按照以下逻辑展开’‘材料状态’‘所需材料摘要’‘写作逻辑’‘输出形式’等内部提示语。\n\n" + rules.map(rule => {
+      + "材料不足时仅保留已知事实、关键缺口及其对结论的限制；允许简短待补正文，不用通用背景、政策解读或完整框架补足篇幅，不制造无实际数据的占位核查表。上传材料或渠道存在不等于事实已核实，未定位不等于原件不存在。"+(opts.gapPresentation?"本项目已应用全篇缺口台账，完整待补与跨节限制按台账分工，不按下列渠道清单追加红字。\n"+opts.gapPresentation.instructions:"项目专属数字、批复、证照、合同等关键依据缺失时，在对应位置用简短【待补：具体依据】标记，不臆造事实。")+"下列旧规则的字数、全面展开或框架要求均服从本次成稿计划；依据类小节只列文件清单。不得输出‘本节重点按照以下逻辑展开’‘材料状态’‘所需材料摘要’‘写作逻辑’‘输出形式’等内部提示语。\n\n" + rules.map(rule => {
       const scope = rule.projectSpecific ? "【仅项目特征命中时适用】" : "";
       const readiness=generationReadiness(rule,opts.context||{});
-      const statusText=readiness.level==="grounded"?"已有依据，可据实撰写":readiness.level==="critical"?"可先写框架；关键事实处标注【待补："+readiness.marker+"】":"可先写通用框架；涉及本项目的事实后续核实";
+      const statusText=opts.gapPresentation?"渠道信息仅供检索；具体缺口按已应用台账执行，不能把渠道缺少直接写成事实缺失":readiness.level==="grounded"?"已关联材料，仍须核对原文后据实撰写":readiness.level==="critical"?"关键依据未齐，仅写已知事实和结论限制；缺口处标注【待补："+readiness.marker+"】":"仅写已有证据支持的内容；无依据时简要说明缺口，不铺通用框架";
       return `[${rule.id}｜第${rule.sourceNo}项]${scope}\n材料状态：${statusText}\n所需材料摘要：${compact(rule.requiredSources,180)}\n写作逻辑：${rule.writingLogic || "按小节标题规范撰写"}\n输出形式：${rule.outputForm || "文字"}`;
     }).join("\n\n");
   }
   function fallbackDraft(projectType, chapterName, sectionTitle, options){
     const opts=options||{}, rules=match(projectType,chapterName,sectionTitle,opts);
     const critical=rules.map(rule=>({rule,readiness:generationReadiness(rule,opts.context||{})})).filter(x=>x.readiness.level==="critical").slice(0,4);
-    const lines=[
-      `本项目${sectionTitle}相关工作应以项目实际条件、适用政策及已确认的建设目标为基础，统筹考虑实施必要性、条件适配性和后续运营要求。根据现阶段掌握的信息，可先形成完整的论证框架；涉及本项目的专属事实和关键指标，待正式依据取得后据实补充并复核。`,
-      "从现状条件看，应结合项目区位、建设内容、服务对象及实施边界，分析与本节相关的现实基础和主要约束；从实施要求看，应核对适用政策、技术标准和管理要求，明确有关事项对建设方案、投资安排及运营管理的影响；从决策角度看，应在资料核实的基础上形成可追溯、可复核的结论，并将需持续跟踪的事项纳入后续工作计划。"
-    ];
-    if(opts.numeric){
-      lines.push("[[TABLE]]\n核查项目|分析口径|当前状态|待补依据\n核心指标|按正式批复或测算口径核定|待核实|项目正式数据\n比较基准|按适用政策、行业标准或案例口径确定|待核实|有效依据及统计期\n分析结论|待数据齐备后复核形成|框架已建立|相关证明材料\n[[/TABLE]]");
-    }
+    const lines=[`${sectionTitle}尚未形成经核验的完整论证，现阶段不能据此作出确定性结论。`];
     if(critical.length){
-      lines.push("经初步核查，本节尚有以下关键依据需要补充；取得材料后应替换占位内容并同步复核相关判断：\n"+critical.map(x=>`【待补：${x.readiness.marker}】`).join("\n"));
+      lines.push(critical.map(x=>`【待补：${x.readiness.marker}】`).join("\n"));
     }else{
-      lines.push("后续应结合已核实的项目资料完善具体表述；在依据未确认前，不写入未经证实的项目名称、政策文号和精确数值。");
+      lines.push(`【待补：${sectionTitle}相关原始依据及已确认结论】`);
     }
     return lines.join("\n\n");
   }
@@ -268,5 +287,5 @@
     const preferred=set?.data?.structure?.scenarioStructures?.[scenarioOf(projectType,options)]?.chapterNames||[],chapterOrder=value=>{const found=preferred.indexOf(value);if(found>=0)return found;const hit=String(value||"").match(/^第([一二三四五六七八九十]+)章/);return Object.keys(cnMap).indexOf(hit?.[1]);};
     return {label:set.name,businessScenario:scenarioOf(projectType,options),chapters:[...groups.entries()].sort((a,b)=>chapterOrder(a[0])-chapterOrder(b[0])).map(([chapter,sections])=>{const hit=chapter.match(/^第([一二三四五六七八九十]+)章\s*(.*)$/);return{cn:cnMap[hit&&hit[1]]||(hit&&hit[1])||String(groups.size),name:(hit&&hit[2])||chapter,sections:sections.sort((a,b)=>a.order-b.order).map(({t,numeric})=>({t,numeric}))};})};
   }
-  global.ReportLogicCore = { load, current, match, prompt, globalRequirements, requirementStatus, generationReadiness, dataRequirement, dataRequirementSchema, fallbackDraft, ensureMissingMarkers, suggestMaterialRuleLinks, materialInventory, sourcePlan, overview, outline, normalize };
-})(window);
+  global.ReportLogicCore = { load, current, match, matchRules, prompt, globalRequirements, requirementStatus, generationReadiness, dataRequirement, dataRequirementSchema, fallbackDraft, ensureMissingMarkers, suggestMaterialRuleLinks, materialInventory, sourcePlan, overview, outline, normalize };
+})(typeof window!=='undefined'?window:globalThis);

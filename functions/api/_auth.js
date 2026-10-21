@@ -41,7 +41,7 @@ export async function signToken(env, userId, username){
   return payload + "." + sig;
 }
 
-export async function verifyAuth(request, env){
+export async function verifyAuth(request, env, options){
   if(!env.SESSION_SECRET) return null;
   const h = request.headers.get("authorization") || "";
   const token = h.replace(/^Bearer\s+/i, "").trim();
@@ -53,7 +53,7 @@ export async function verifyAuth(request, env){
   const expect = await hmacHex(env.SESSION_SECRET, payload);
   if(sig !== expect) return null;
   if(Date.now() > +exp) return null;
-  const state=await accountSecurity(env,+uid);
+  const state=await accountSecurity(env,+uid,options);
   if(Number(state?.disabled)||(+exp-SESSION_TTL)<=Number(state?.revoked_before||0))return null;
   try{return { userId: +uid, username: decodeURIComponent(uname) };}catch{return null;}
 }

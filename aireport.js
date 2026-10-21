@@ -30,6 +30,8 @@ let aiReportMsgSeq = 0;
 let aiReportBusy = false;     // 是否有请求在途，防止重复提交
 let aiReportExtracted = null; // 阶段①抽取结果（可编辑，支持多轮口语修正）
 let aiReportSuggested = null; // 阶段②推荐结果 {params, sources, keyFields}
+let aiReportCalculationMode = 'full';
+let aiReportFullCalcBusy = false;
 let aiReportProgressMsg = null;  // 阶段⑤生成进度卡片的引用（原地更新，不重复插入消息）
 let aiReportPendingTasks = null; // 尚未生成的子节任务队列，供"停止/继续生成"复用
 let aiReportStopFlag = false;
@@ -58,6 +60,7 @@ let aiReportImpactedProgress = null; // 项目逻辑批量同步的即时进度�
 let aiReportStateRevision = 0; // AI会话保存序号；防止较慢的旧请求覆盖较新的完成状态
 let aiReportStateSaveInFlight = Promise.resolve();
 let aiReportCollapsedCards = {params:null,materials:null}; // null采用流程默认值；用户手动收起后按项目本地保存
+let aiReportRestoreEpoch=0,aiReportRestoreLoading=false,aiReportRestoreError="";
 
 function airCurrentStage(){
   const state={chat:aiReportChat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,
@@ -77,6 +80,8 @@ if(window.addEventListener)window.addEventListener('beforeunload',event=>{if(air
 function airClearLocalState(){try{localStorage.removeItem(airLocalStateKey());}catch(e){}}
 
 function airSwitchProjectSession(){
+  aiReportCalculationMode='full';
+  aiReportRestoreEpoch++;aiReportRestoreLoading=false;aiReportRestoreError="";
   aiReportStopFlag=true;aiReportChat=[];aiReportExtracted=null;aiReportSuggested=null;aiReportProgressMsg=null;aiReportPendingTasks=null;
   aiReportHasDoc=false;aiReportDocVisible=false;aiReportDocZoom=100;aiReportChatCollapsed=false;aiReportOutlineCollapsed=false;aiReportDocFullscreen=false;aiReportPendingCalcChange=null;aiReportBusy=false;aiReportChatLoaded=false;aiReportParamsConfirmed=false;aiReportMaterialTarget=null;aiReportBatchFiles=[];aiReportLogicEnhanceState=null;aiReportLocationCandidates=[];aiReportLocationConfirmed=null;aiReportSiteSearches=[];aiReportSiteLocations=[];aiReportMaterialAutoRetryStarted=false;aiReportCollapsedCards={params:null,materials:null};
   aiReportEntryContext=null;aiReportGenerationLockId=null;aiReportImpactedProgress=null;aiReportStateRevision=0;aiReportStateSaveInFlight=Promise.resolve();
@@ -97,9 +102,11 @@ function renderAiReportModule(){
     +'<div class="doc-eyebrow">AI可研生成 · 对话式</div>'
     +'<h1 class="doc-title">AI可研生成</h1>'
     +'<div class="step-desc">可以先批量上传项目材料，也可以一句话描述项目；AI会抽取待确认信息、从历史案例库推荐一整套测算参数初值。'
-    +'你只需要确认<b>7个真正影响结论的关键参数</b>，其余系统自动填好。测算数字仍然全部来自确定性引擎，AI不会替你编造IRR。'
+    +'可以选择<b>关键参数输入</b>快速核对推荐值，或选择<b>全量参数测算</b>进入财务测算界面，逐项调整并引用经验库。两种方式共用确定性引擎，AI不会替你编造IRR。'
     +'开始测算后会弹出报告预览，实时显示AI正在撰写的内容，随时可以收起或展开。</div>'
-    +'<div class="air-module-bar"><span>独立模块：</span><button type="button" data-module="project">项目信息</button><button type="button" data-module="materials">数据与材料</button><button type="button" data-module="params">关键参数</button><button type="button" data-module="logic">可研逻辑</button><button type="button" data-module="report">报告生成/修订</button><button type="button" data-module="word">下载当前阶段 Word</button><button type="button" data-module="delivery">验收与运行保障</button></div>'
+    +'<div class="air-module-bar"><span>项目工具：</span><button type="button" data-module="project">项目信息</button><button type="button" data-module="materials">数据与材料</button><button type="button" data-module="sources">所需数据来源</button><button type="button" data-module="params">关键参数</button><button type="button" data-module="calculation">财务测算</button><button type="button" data-module="map">项目地图</button><button type="button" data-module="search">联网搜索</button><button type="button" data-module="logic">可研逻辑</button><button type="button" data-module="report">报告查看/修订</button><button type="button" data-module="word">下载当前阶段 Word</button><button type="button" data-module="delivery">验收与运行保障</button></div>'
+    +'<div id="airRestoreStatus" role="status" aria-live="polite"></div>'
+    +airCalculationRouteHtml()
     +'<div id="airMsgs" style="min-height:80px; margin-top:14px;"></div>'
     +'<div id="airDocToggle" class="air-doc-toggle"></div>'
     +'<div id="airChips"></div>'
@@ -117,10 +124,15 @@ function airRestartChat(){
   if(window.ResearchUI)return ResearchUI.importLegacy().catch(e=>alert(e.message));
   alert('研究功能尚未加载，未清除任何内容。请刷新后重试。');
 }
+// 已有正文时，旧会话缺失“参数已确认”等阶段标记也不能重新开放采集/整篇生成。
+function airGenerationFlowLocked(){
+  return aiReportHasDoc||airReportGenerationStatus().generated>0;
+}
 
 /* 返回只撤销“流程确认状态”，不删除用户已经填写的信息、测算参数或已生成正文。
    重新进入下一步时会基于保留的数据重算/续写，因此比“重新开始”安全。 */
 function airBackStep(){
+  if(airGenerationFlowLocked()){alert("已有报告正文，生成向导已锁定。请使用上方独立工具查看资料、测算或修订报告。");return;}
   const stage=airCurrentStage(),prev=window.ProjectWorkflow&&ProjectWorkflow.previousAiReportStage?ProjectWorkflow.previousAiReportStage(stage):null;
   if(!prev){alert("当前已经是第一步，无需返回。");return;}
   if(["generating","paused","delivered"].includes(stage)){
@@ -146,9 +158,9 @@ function bindAiReportEvents(){
   window.ResearchUI?.resumeAction();
   const s = id=>document.getElementById(id);
   if(s("airRestartBtn")) s("airRestartBtn").onclick = airRestartChat;
-  if(s("airBackStepBtn")){s("airBackStepBtn").onclick = airBackStep;s("airBackStepBtn").disabled=!(window.ProjectWorkflow&&ProjectWorkflow.previousAiReportStage(airCurrentStage()));}
+  if(s("airBackStepBtn")){s("airBackStepBtn").onclick = airBackStep;s("airBackStepBtn").disabled=airGenerationFlowLocked()||!(window.ProjectWorkflow&&ProjectWorkflow.previousAiReportStage(airCurrentStage()));}
   if(s("airSend")) s("airSend").onclick = aiReportSend;
-  document.querySelectorAll(".air-module-bar [data-module]").forEach(button=>button.onclick=()=>airOpenIndependentModule(button.dataset.module));
+  document.querySelectorAll(".air-module-bar [data-module]").forEach(button=>button.onclick=()=>airOpenIndependentModule(button.dataset.module).catch(error=>alert("打开项目工具失败："+error.message)));
   if(s("airInput")){
     const inp = s("airInput");
     inp.addEventListener("keydown", e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); aiReportSend(); } });
@@ -167,10 +179,7 @@ function bindAiReportEvents(){
       if(revise){airOpenRevisionModal(revise.dataset.cn,+revise.dataset.si,"");return;}
       const candidatePreview=e.target.closest(".air-candidate-preview-toggle");
       if(candidatePreview){
-        const info=airFindChapterSection(candidatePreview.dataset.cn,+candidatePreview.dataset.si);if(!info)return;
-        const key=airCandidateKey(info.chapter,+candidatePreview.dataset.si);
-        if(airExpandedCandidateKeys.has(key))airExpandedCandidateKeys.delete(key);else airExpandedCandidateKeys.add(key);
-        airRefreshSection(info.chapter.cn,+candidatePreview.dataset.si);return;
+        airToggleCandidatePreview(candidatePreview.dataset.cn,+candidatePreview.dataset.si,candidatePreview.dataset.expanded==='true');return;
       }
       const accept=e.target.closest(".air-candidate-accept");
       if(accept){airResolveRevision(accept.dataset.cn,+accept.dataset.si,"accept");return;}
@@ -179,6 +188,9 @@ function bindAiReportEvents(){
       const reject=e.target.closest(".air-candidate-reject");
       if(reject){airResolveRevision(reject.dataset.cn,+reject.dataset.si,"reject");return;}
       if(e.target.closest(".air-doc-accept-candidates")){airAcceptAllCandidates();return;}
+      if(e.target.closest('.air-length-fill')){airFillLengthGaps();return;}
+      const candidateIssue=e.target.closest('.air-candidate-issue-locate');
+      if(candidateIssue){airLocateCandidateIssue(candidateIssue.dataset.cn,+candidateIssue.dataset.si);return;}
       if(e.target.closest(".air-doc-keep-original")){airOpenKeepOriginal();return;}
       const undo=e.target.closest(".air-section-undo");
       if(undo){airResolveRevision(undo.dataset.cn,+undo.dataset.si,"undo");return;}
@@ -214,7 +226,8 @@ function bindAiReportEvents(){
       if(e.target.closest(".air-doc-zoom-out")){aiReportDocZoom=Math.max(70,aiReportDocZoom-10);airApplyDocViewState();return;}
       if(e.target.closest(".air-doc-zoom-in")){aiReportDocZoom=Math.min(160,aiReportDocZoom+10);airApplyDocViewState();return;}
       if(e.target.closest(".air-doc-zoom-reset")){aiReportDocZoom=100;airApplyDocViewState();return;}
-      if(e.target.closest(".air-doc-download")){exportWord();return;}
+      const download=e.target.closest('.air-doc-download');
+      if(download){exportWord({versionId:download.dataset.reportVersionId||null,button:download});return;}
       if(e.target.closest(".air-doc-fullscreen")){aiReportDocFullscreen=!aiReportDocFullscreen;airApplyDocViewState();return;}
       if(e.target.closest(".air-doc-current-draft")){airRestoreDocPaneIfNeeded();return;}
       const close = e.target.closest(".air-doc-close");
@@ -230,6 +243,7 @@ function bindAiReportEvents(){
   airCheckAdminLogicCapability();
   airRenderDocToggle();
   airLoadState();
+  airRenderRestoreStatus();
   airRestoreDocPaneIfNeeded();
 }
 function airHandleDocPaneChange(e){
@@ -239,6 +253,8 @@ function airHandleDocPaneChange(e){
 }
 
 async function airOpenIndependentModule(module){
+  if(aiReportRestoreLoading)return alert("正在恢复当前项目工具，请稍候。");
+  if(airHydrateCurrentWorkspace())renderAiReportMsgs();
   if(module==="delivery")return window.ReportDeliveryUI?.open();
   if(window.ProjectWorkflow?.touchModule)ProjectWorkflow.touchModule(projectWorkflow,module,{reason:"打开独立模块",value:{projectId:typeof currentProjectId!=="undefined"?currentProjectId:null}});
   if(module==="word")return exportWord();
@@ -248,27 +264,61 @@ async function airOpenIndependentModule(module){
     airBuildDocPane();return;
   }
   if(module==="logic")return airOpenLogicModule();
-  if(module==="materials"){
+  if(module==="projectEdit")return airOpenProjectInfoEditor();
+  if(module==="map"){
+    if(typeof openProjectCityMap!=="function")return alert("地图组件尚未加载，请刷新后重试。");
+    const sites=aiReportSiteLocations.length?aiReportSiteLocations:project.analysisSites||[];
+    const primary=sites.find(site=>site.role==="primary"&&site.confirmed&&site.location)||sites.find(site=>site.confirmed&&site.location);
+    const coordinate=primary?.location||project.poiLoc||"";
+    const point=String(coordinate).split(',').map(Number);
+    if(point.length!==2||!point.every(Number.isFinite)||Math.abs(point[0])>180||Math.abs(point[1])>90)return alert("当前项目没有有效的已确认地图坐标。请先在地图中搜索并人工确认点位；不会按文字地址猜测标记。");
+    return openProjectCityMap({name:primary?.projectName||primary?.name||project.poiLocLabel||project.name,location:coordinate});
+  }
+  if(module==="search"){
+    if(!airFocusExistingMessage("materialCheck")){await airCheckWholeReportMaterials();renderAiReportMsgs();airFocusExistingMessage("materialCheck");}
+    // 只定位入口，不因打开模块自动发起付费检索。
+    const search=document.getElementById("airBatchWebSearch");if(search){search.scrollIntoView({behavior:"smooth",block:"center"});search.focus();}return;
+  }
+  if(module==="materials"||module==="sources"){
     if(airFocusExistingMessage("materialCheck"))return;
     await airCheckWholeReportMaterials();renderAiReportMsgs();airFocusExistingMessage("materialCheck");return;
   }
-  if(module==="params"){
+  if(module==="params"||module==="calculation"){
     if(calcParams&&calcResult)return airOpenCalcDetails();
     if(airFocusExistingMessage("confirmCard"))return;
     if(aiReportSuggested&&!aiReportChat.some(m=>m.kind==="confirmCard"))aiReportChat.push({id:"module_params_"+Date.now(),role:"assistant",kind:"confirmCard",content:""});
-    renderAiReportMsgs();airFocusExistingMessage("confirmCard");return;
+    renderAiReportMsgs();if(!airFocusExistingMessage("confirmCard"))alert(calcParams?"当前项目的测算参数已保留，但重算未成功。请从财务测算页面核对输入；不会使用其他项目的结果。":"当前项目尚无已保存的测算参数。请先补充项目信息并确认参数，再进行测算。");return;
   }
   if(module==="project"){
     if(airFocusExistingMessage("infoCard"))return;
     if(aiReportExtracted&&!aiReportChat.some(m=>m.kind==="infoCard"))aiReportChat.push({id:"module_project_"+Date.now(),role:"assistant",kind:"infoCard",content:""});
-    renderAiReportMsgs();airFocusExistingMessage("infoCard");return;
+    renderAiReportMsgs();if(!airFocusExistingMessage("infoCard"))alert("当前尚未选择项目类型，请先选择出租、出售或非居改保，再填写项目信息。");return;
   }
+}
+
+function airOpenProjectInfoEditor(){
+  if(typeof projectCanEdit==="function"&&!projectCanEdit())return alert("当前项目为只读状态，不能修改项目资料。");
+  document.getElementById("airProjectInfoEditor")?.remove();
+  const value=aiReportExtracted||{},sites=airAnalysisSites(value);
+  const modal=document.createElement("div");modal.id="airProjectInfoEditor";modal.className="air-modal-overlay";
+  modal.innerHTML='<div class="air-modal-card" style="max-width:720px"><div class="air-modal-head"><div><b>修改项目信息</b><span>只更新项目资料，不重新运行已锁定的整篇生成；既有正文需按小节复核修订。</span></div><button type="button" class="air-editor-close" aria-label="关闭">×</button></div><div style="display:grid;gap:12px;max-height:60vh;overflow:auto"><label>项目名称<input id="airEditProjectName" value="'+escapeHtml(value.projectName||project.name||"")+'"></label><label>建设/委托单位<input id="airEditProjectOwner" value="'+escapeHtml(value.owner||project.owner||"")+'"></label><label>项目概况<textarea id="airEditProjectDesc" rows="5">'+escapeHtml(value.desc||project.desc||"")+'</textarea></label><div><b>点位与地址</b><div>'+sites.map(site=>'<div>'+escapeHtml((site.role==="primary"?'主项目':'次项目')+'｜'+(site.name||'未命名')+'｜'+(site.address||site.query||'未填写'))+'</div>').join('')+'</div><small>已确认的地图坐标不在此改写，避免地址与坐标错位。可在项目地图中独立搜索并核对。</small></div></div><div class="air-modal-actions"><button type="button" class="btn ghost air-editor-close">取消</button><button type="button" class="btn" id="airSaveProjectInfo">保存资料</button></div></div>';
+  document.body.append(modal);
+  modal.querySelectorAll('.air-editor-close').forEach(button=>button.onclick=()=>modal.remove());
+  modal.querySelector('#airSaveProjectInfo').onclick=()=>{
+    const name=modal.querySelector('#airEditProjectName').value.trim(),owner=modal.querySelector('#airEditProjectOwner').value.trim(),desc=modal.querySelector('#airEditProjectDesc').value.trim();
+    if(!name)return alert('请填写项目名称。');
+    aiReportExtracted=Object.assign({},aiReportExtracted||{},{projectName:name,owner,desc});
+    project.name=name;project.owner=owner;project.desc=desc;
+    saveDraft();airSaveState();modal.remove();renderAiReportMsgs();
+  };
 }
 
 function airFocusExistingMessage(kind){
   if(!aiReportChat.some(message=>message.kind===kind))return false;
   const message=document.querySelector('#airMsgs [data-air-msg-kind="'+kind+'"]');
   if(!message)return false;
+  aiReportChatCollapsed=false;airApplyDocViewState();
+  message.querySelectorAll("details.air-persistent-card").forEach(card=>{card.open=true;});
   message.scrollIntoView({behavior:"smooth",block:"center"});
   return true;
 }
@@ -346,7 +396,7 @@ function airSetBusy(b){
 
 /* ================= 阶段① 采集：一句话 → 抽取信息卡片；再说一句 → 当作修正合并进已有信息 ================= */
 async function aiReportSend(){
-  if(aiReportBusy) return;
+  if(aiReportBusy||aiReportRestoreLoading) return;
   const inp = document.getElementById("airInput");
   const text = (inp.value||"").trim();
   if(!text) return;
@@ -427,6 +477,11 @@ function airCaptureInfoCard(){
 function airInfoCardHtml(){
   const v = aiReportExtracted || {};
   const siteCount=airAnalysisSites(v).length;
+  if(airGenerationFlowLocked()){
+    const fields=[["报告/批次名称",v.projectName||project.name],["测算类型",AI_TYPE_CN[v.calcType]||v.calcType],["改造业务场景",v.calcType==="gaibao"?(AI_GAIBAO_SCENARIO_CN[v.businessScenario]||"未记录"):null],["建设/委托单位",v.owner||project.owner],["用地面积",v.landArea==null?null:v.landArea+" ㎡"],["开工/建设起始年",v.startYear],["土地性质",v.landNature],["项目概况",v.desc]].filter(([,value])=>value!=null&&String(value).trim());
+    const sites=airAnalysisSites(v).map((site,index)=>'<div class="air-completed-location-row"><span><b>'+(site.role==='primary'?'主项目':'次项目')+'｜'+escapeHtml(site.name||'点位'+(index+1))+'</b><small>'+escapeHtml(site.address||site.query||'地址未记录')+'</small></span></div>').join('');
+    return '<div class="air-card air-step-done"><b>✓ 项目信息（生成时资料回顾）</b><div class="air-other-param-list" style="margin-top:8px;">'+fields.map(([label,value])=>'<div class="air-other-param-row"><span>'+escapeHtml(label)+'</span><span>'+escapeHtml(String(value))+'</span></div>').join('')+'</div>'+(sites?'<div style="margin-top:8px;">'+sites+'</div>':'')+'<small>本卡只读；修改项目资料请使用上方“项目信息”独立入口。</small></div>';
+  }
   if(airStageAtLeast("suggested")) return '<div class="air-card air-step-done"><b>✓ 项目信息已确认</b><span>'+escapeHtml(v.projectName||"未命名项目")+'｜'+siteCount+'个分析点位｜主项目：'+escapeHtml((airAnalysisSites(v).find(x=>x.role==='primary')||{}).name||v.location||"")+'｜'+escapeHtml(v.calcType==="gaibao"?(AI_GAIBAO_SCENARIO_CN[v.businessScenario]||"改造场景待确认"):(AI_TYPE_CN[v.calcType]||""))+'</span></div>';
   if(aiReportChat.some(m=>m.kind==="locationCard"))return '<div class="air-card air-step-done"><b>✓ 核心信息已填写，等待逐个确认地图位置</b><span>'+escapeHtml(v.projectName||"未命名项目")+'｜共'+siteCount+'个点位。请在下方为各点位选择真实候选，系统不会自动套用第一条结果。</span></div>';
   const opt = (val,label)=>'<option value="'+val+'" '+(v.calcType===val?"selected":"")+'>'+label+'</option>';
@@ -462,6 +517,7 @@ function airInfoCardHtml(){
 }
 
 async function aiReportConfirmInfo(){
+  if(airGenerationFlowLocked())return;
   if(aiReportBusy) return;
   const g = id=>document.getElementById(id);
   const calcType = g("air_ctype").value;
@@ -532,6 +588,7 @@ async function airSearchLocationCandidates(overrideQuery){
 }
 
 function airLocationCardHtml(m){
+  if(airGenerationFlowLocked())return '<div class="air-card air-step-done"><b>地图候选步骤已锁定</b><span>旧地图候选仅作历史记录；已确认点位请查看位置结果，新的位置检索请使用“项目地图”独立工具。</span></div>';
   const sites=(m.sites&&m.sites.length?m.sites:aiReportSiteSearches).slice(0,6);
   const tips='<div class="air-location-tip"><b>批量位置确认（'+sites.length+'个点位）</b><span>每个点位都独立检索、独立确认，不会把同一区的候选混到另一个项目。完整门牌 ＞ 区＋街道＋社区/道路 ＞ 仅区名；没有真实候选的点位会保留为待补，不伪造位置。</span></div>';
   const blocks=sites.map((site,si)=>{
@@ -550,6 +607,7 @@ function airLocationResultHtml(m){
 }
 
 async function airConfirmLocation(){
+  if(airGenerationFlowLocked())return;
   const confirmed=[];
   for(let si=0;si<aiReportSiteSearches.length;si++){
     const site=aiReportSiteSearches[si],checked=document.querySelector('input[name="airLocationCandidate_'+si+'"]:checked');
@@ -571,6 +629,7 @@ async function airConfirmLocation(){
 }
 
 async function airSkipLocation(){
+  if(airGenerationFlowLocked())return;
   if(!confirm("跳过后不会生成地图周边、竞品和POI职住代理数据，但不影响参数推荐与可研框架生成。是否继续？"))return;
   aiReportSiteLocations=airAnalysisSites().map(x=>Object.assign({},x,{projectName:x.name,skipped:true,query:x.address}));aiReportLocationConfirmed=aiReportSiteLocations.find(x=>x.role==='primary')||aiReportSiteLocations[0];project.analysisSites=aiReportSiteLocations;const locationCard=aiReportChat.find(m=>m.kind==="locationCard");if(locationCard){locationCard.kind="locationResult";locationCard.sites=aiReportSiteLocations;locationCard.content="";}
   airPush({role:"assistant",kind:"text",content:"已按你的选择跳过地图检索。报告中需要周边实测数据的位置会标注待补，不会套用其他行政区结果。"});
@@ -699,11 +758,11 @@ async function airRunSuggest(){
       airResolve(loading, {kind:"text", content:"参数推荐失败："+(d.error||"未知错误"), retry:{type:"suggest"}});
       return;
     }
-    aiReportSuggested = { calcType, params:d.params, sources:d.sources, keyFields:d.keyFields, paramMeta:d.paramMeta||{}, sourceHierarchy:d.sourceHierarchy||[] };
+    aiReportSuggested = { calcType, params:d.params, sources:d.sources, keyFields:d.keyFields, requiredFields:d.requiredFields||[], paramMeta:d.paramMeta||{}, sourceHierarchy:d.sourceHierarchy||[] };
     aiReportParamsConfirmed = false;
     const caseNote = d.caseCount? ("案例库中共有 "+d.caseCount+" 个「"+AI_TYPE_CN[calcType]+"」历史案例，其中 "+d.regionCaseCount+" 个与本项目同区域。")
       : "案例库中暂无「"+AI_TYPE_CN[calcType]+"」的已确认历史案例，以下参数为行业默认值，请务必人工核实。";
-    airResolve(loading, {kind:"text", content:"已自动填好全套测算参数（约"+Object.keys(d.params).length+"项）。"+caseNote+" 下面这7项对结果影响最大，请重点确认（点「查看依据」能看到具体是哪几个历史项目）："});
+    airResolve(loading, {kind:"text", content:"已整理测算参数（约"+Object.keys(d.params).length+"项）。"+caseNote+" 本次入选关键指标 "+d.keyFields.length+" 项，请重点核对；必要项目时间安排和缺失资料仍须补充，不能用其他项目事实替代。"});
     airPush({role:"assistant", kind:"confirmCard"});
     await airSaveState();
   }catch(e){
@@ -738,37 +797,46 @@ function airPersistentCardHtml(kind,title,summary,content,defaultCollapsed){
 
 function airConfirmCardHtml(){
   const sug = aiReportSuggested;
-  if(!sug) return "";
-  const alreadyCalculated=airStageAtLeast("calculated");
-  const shownParams=alreadyCalculated&&calcParams?calcParams:sug.params;
+  if(!sug){
+    if(!airGenerationFlowLocked()||!calcParams)return "";
+    const rows=Object.entries(calcParams).map(([key,value])=>'<div class="air-other-param-row"><span><b>'+escapeHtml(key)+'</b></span><span class="air-other-param-value">'+escapeHtml(airFormatParamValue(value,{}))+'</span><span>历史测算参数；原始来源未随旧会话保存</span></div>').join('');
+    return airPersistentCardHtml("params","测算参数与数据来源","历史会话无AI推荐记录；'+Object.keys(calcParams).length+'项参数可核对",'<div class="air-card"><div class="air-step-done"><b>来源记录不完整</b><span>以下是当前项目保存的测算参数，不将其冒充为AI推荐值或已核实来源。项目上传材料和逐节所需来源请查看“数据与材料来源”。</span></div><div class="air-other-param-list"><div class="air-other-param-row head"><span>参数</span><span>当前值</span><span>来源</span></div>'+rows+'</div></div>',false);
+  }
+  const alreadyCalculated=airGenerationFlowLocked()||airStageAtLeast("calculated");
+  if(!alreadyCalculated&&aiReportCalculationMode==='full'){
+    return airPersistentCardHtml('params','全量参数测算','推荐初值不是最终测算', '<div class="air-card"><b>请进入上方“全量财务测算”逐项核对</b><p>已准备 '+Object.keys(sug.params||{}).length+' 项推荐参数。完整参数界面可调整租金、收楼方式、运营费用、还款计划、月份安排及税率，也可引用经验项目；执行测算后明确采用结果，再回到本可研继续。</p><p>若只需快速初测，可在上方切换“关键参数输入”。两条路径使用同一计算引擎，不自动确认资料来源。</p></div>',false);
+  }
+  const suggestedParams=sug.params||{},suggestedSources=sug.sources||{},keyFields=sug.keyFields||[];
+  const shownParams=alreadyCalculated&&calcParams?calcParams:suggestedParams;
   const confCls = c => c==="高"?"air-conf-hi":c==="中"?"air-conf-mid":"air-conf-lo";
-  const rows = sug.keyFields.map(f=>{
-    const src = sug.sources[f.key] || {};
+  const confirmFields=[...keyFields,...(sug.requiredFields||[])];
+  const rows = confirmFields.map(f=>{
+    const src = suggestedSources[f.key] || {};
     const val = (shownParams[f.key]!=null? shownParams[f.key] : "");
-    const disp = f.pct ? (val!==""? Math.round(val*100): "") : val;
+    const disp = f.inputKind==='rates'&&Array.isArray(val)?val.join('; '):f.pct ? (val!==""? Math.round(val*100): "") : val;
     const evid = (src.evidence||[]).length
       ? '<details class="air-kf-evidence"><summary>查看依据</summary><div class="air-kf-evidence-body">'
         + src.evidence.map(e=>{const head=escapeHtml(e.label||e.name||"依据");if(e.value!==undefined)return head+'：'+(f.pct?Math.round(e.value*100)+'%':e.value);return head+escapeHtml([e.version,e.sourceRef].filter(Boolean).length?'｜'+[e.version,e.sourceRef].filter(Boolean).join('｜'):'');}).join('<br>')
         + '</div></details>'
       : '';
     return '<div class="air-kf-row">'
-      +'<div><div class="air-kf-label">'+f.label+'</div><div class="air-kf-src">'+escapeHtml(src.from||"")+'</div>'+evid+'</div>'
-      +'<input class="air-kf" data-key="'+f.key+'" data-pct="'+(f.pct?1:0)+'" type="number" step="any" value="'+disp+'" '+(alreadyCalculated?'disabled ':'')
+      +'<div><div class="air-kf-label">'+f.label+'</div><div class="air-kf-src">'+escapeHtml(src.from||(alreadyCalculated?'历史来源未保存':''))+'</div>'+evid+'</div>'
+      +'<input class="air-kf" data-key="'+escapeHtml(f.key)+'" data-kind="'+escapeHtml(f.inputKind||'number')+'" data-pct="'+(f.pct?1:0)+'" type="'+(f.inputKind==='month'?'month':f.inputKind==='rates'||f.inputKind==='mode'?'text':'number')+'" step="any" value="'+escapeHtml(String(disp))+'" '+(alreadyCalculated?'disabled ':'')
         +(f.pct?' title="百分比，如90表示90%"':'')+'>'
       +'<span class="air-conf '+confCls(src.confidence||"低")+'">'+(src.confidence||"低")+'</span>'
-      +(src.requiresManualConfirmation?(alreadyCalculated?'<span style="font-size:11px;color:var(--ok-green);">✓ 已人工确认</span>':'<label style="font-size:11px;white-space:nowrap;"><input class="air-kf-confirm" data-key="'+f.key+'" type="checkbox"> 人工确认</label>'):'<span style="font-size:11px;color:var(--ok-green);">资料已给定</span>')
+      +(src.requiresManualConfirmation?(alreadyCalculated?'<span style="font-size:11px;color:var(--ok-green);">✓ 已人工确认</span>':'<label style="font-size:11px;white-space:nowrap;"><input class="air-kf-confirm" data-key="'+f.key+'" type="checkbox"> 人工确认</label>'):src.from?'<span style="font-size:11px;color:var(--ok-green);">资料已给定</span>':'<span style="font-size:11px;">来源未记录</span>')
       +'</div>';
   }).join("");
-  const keySet = new Set(sug.keyFields.map(f=>f.key));
-  const otherKeys = Object.keys(sug.params).filter(k=>!keySet.has(k));
-  const otherManual = otherKeys.filter(k=>(sug.sources[k]||{}).requiresManualConfirmation);
+  const keySet = new Set(confirmFields.map(f=>f.key));
+  const otherKeys = Object.keys(suggestedParams).filter(k=>!keySet.has(k));
+  const otherManual = otherKeys.filter(k=>(suggestedSources[k]||{}).requiresManualConfirmation);
   const sourceCounts = {};
-  Object.values(sug.sources||{}).forEach(src=>{ const k=src.sourceCode||"unknown"; sourceCounts[k]=(sourceCounts[k]||0)+1; });
+  Object.values(suggestedSources).forEach(src=>{ const k=src.sourceCode||"unknown"; sourceCounts[k]=(sourceCounts[k]||0)+1; });
   const sourceNames={project_excel:"项目Excel",project_document:"项目正式资料",binding_rule:"适用硬规则",regional_case:"同区域案例",general_case:"其他案例",industry_fallback:"行业兜底",expert_default:"专家默认"};
   const sourceSummary=Object.entries(sourceCounts).map(([k,n])=>(sourceNames[k]||k)+" "+n+"项").join("｜");
   const otherDetails=otherKeys.length?'<details style="margin-top:10px;"><summary style="font-size:12px;cursor:pointer;">查看其余 '+otherKeys.length+' 项参数及来源</summary><div class="air-other-param-list">'
     +'<div class="air-other-param-row head"><span>参数</span><span>当前值</span><span>来源/依据</span><span>确认状态</span></div>'
-    +otherKeys.map(k=>{const s=sug.sources[k]||{},m=(sug.paramMeta&&sug.paramMeta[k])||{},value=shownParams[k];return '<div class="air-other-param-row"><span><b>'+escapeHtml(m.label||k)+'</b><br><code>'+escapeHtml(k)+'</code></span><span class="air-other-param-value">'+escapeHtml(airFormatParamValue(value,m))+'</span><span>'+escapeHtml(s.from||"来源待确认")+'</span><span>'+(s.requiresManualConfirmation?'待批量确认':'资料已给定')+'</span></div>';}).join("")+'</div></details>':'';
+    +otherKeys.map(k=>{const s=suggestedSources[k]||{},m=(sug.paramMeta&&sug.paramMeta[k])||{},value=shownParams[k];return '<div class="air-other-param-row"><span><b>'+escapeHtml(m.label||k)+'</b><br><code>'+escapeHtml(k)+'</code></span><span class="air-other-param-value">'+escapeHtml(airFormatParamValue(value,m))+'</span><span>'+escapeHtml(s.from||"历史来源未保存")+'</span><span>'+(s.requiresManualConfirmation?'待批量确认':s.from?'资料已给定':'来源未记录')+'</span></div>';}).join("")+'</div></details>':'';
   const content = '<div class="air-card">'
     +'<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">来源层级：'+escapeHtml((sug.sourceHierarchy||[]).join(" → "))+'</div>'
     +'<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">本次全量来源：'+escapeHtml(sourceSummary)+'</div>'
@@ -778,9 +846,9 @@ function airConfirmCardHtml(){
     +(!alreadyCalculated&&otherManual.length?'<label style="display:block;margin-top:10px;font-size:11.5px;"><input class="air-kf-confirm" data-key="__other_batch" type="checkbox"> 已批量核对其余 '+otherManual.length+' 项案例/兜底/默认参数（低影响项后续还会做联合扰动验证）</label>':'')
     +'<div style="margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
     +(alreadyCalculated?'<span class="air-complete-pill">测算步骤已完成</span>':'<button class="btn" id="airConfirmParams">确认，开始测算 →</button>')
-    +'<span style="font-size:11.5px; color:var(--ink-soft);">其余约'+(Object.keys(sug.params).length-sug.keyFields.length)+'项参数的当前值、单位和来源已列在上方折叠区</span>'
+    +'<span style="font-size:11.5px; color:var(--ink-soft);">其余约'+(Object.keys(suggestedParams).length-keyFields.length)+'项参数的当前值、单位和来源已列在上方折叠区</span>'
     +'</div></div>';
-  return airPersistentCardHtml("params",alreadyCalculated?"关键参数（已确认）":"关键参数确认",alreadyCalculated?"测算已完成，可展开查看参数与来源":"请核对7个关键参数后开始测算",content,alreadyCalculated);
+  return airPersistentCardHtml("params",alreadyCalculated?"关键参数（已确认）":"关键参数确认",alreadyCalculated?"测算已完成，可展开查看参数与来源":"请核对"+keyFields.length+"个关键参数后开始测算",content,alreadyCalculated);
 }
 
 /* ================= 阶段③④ 确认→测算：读7个字段，合并成完整参数，跑确定性引擎 ================= */
@@ -793,21 +861,32 @@ function airIrrTakeaway(irr){
 }
 
 async function aiReportConfirmParams(){
-  if(aiReportBusy || !aiReportSuggested) return;
+  if(aiReportBusy || airGenerationFlowLocked() || !aiReportSuggested) return;
+  aiReportCalculationMode='quick';
   const researchCalculation=window.ResearchUI?.active()?ResearchUI.capture('calculation'):null;
   if(researchCalculation)await ResearchUI.guard(researchCalculation);
   const sug = aiReportSuggested;
   const pending=[...document.querySelectorAll(".air-kf-confirm:not(:checked)")];
   if(pending.length){ alert("还有 "+pending.length+" 个案例/兜底来源参数未勾选人工确认。请核对依据和值后再继续。"); return; }
   const edited = {};
+  let invalidField='';
   document.querySelectorAll(".air-kf").forEach(inp=>{
     const key = inp.dataset.key;
+    if(inp.dataset.kind==='month'){if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(inp.value))invalidField=key;else edited[key]=inp.value;return;}
+    if(inp.dataset.kind==='mode'){if(!(key==='operateCostMode'?['per-unit','rent-percent']:['lease','rent-percent','share']).includes(inp.value.trim()))invalidField=key;else edited[key]=inp.value.trim();return;}
+    if(inp.dataset.kind==='rates'){const parts=inp.value.split(/[;；]/).map(x=>x.trim()),rates=parts.map(Number);if(parts.some(x=>!x)||rates.some(x=>!Number.isFinite(x)||x<0||x>1))invalidField=key;else edited[key]=rates;return;}
     let v = parseFloat(inp.value);
-    if(!isFinite(v)) return;
+    if(!isFinite(v)){invalidField=key;return;}
     if(inp.dataset.pct==="1") v = v/100;
     edited[key] = v;
   });
     const finalParams = Object.assign({}, sug.params, edited);
+  if(sug.calcType==='gaibao'&&finalParams.occupancyMode==='monthly-phases'){
+    finalParams.rampStartMonth=finalParams.operateStartMonth;
+    const match=/^(\d{4})-(\d{2})$/.exec(finalParams.rampEndMonth||'');
+    if(match){const next=Number(match[1])*12+Number(match[2]);finalParams.stableStartMonth=Math.floor(next/12)+'-'+String(next%12+1).padStart(2,'0');}
+    if(Array.isArray(finalParams.rampRates))finalParams.rampOcc=finalParams.rampRates[0];
+  }
   const ex = aiReportExtracted || {};
   if(ex.startYear) finalParams.buildStart = ex.startYear;
 
@@ -849,10 +928,77 @@ function airSyncConfirmButtonState(){
   btn.disabled=pending>0;btn.title=pending?"请先完成人工确认（尚有 "+pending+" 项）":"全部参数已确认，可以开始测算";
 }
 
+function airCurrentPartialCandidateBatch(){
+  if(typeof projectWorkflow==='undefined')return null;
+  if(window.ProjectWorkflow?.currentCandidateBatchAcceptance){const current=ProjectWorkflow.currentCandidateBatchAcceptance(projectWorkflow,chapters);return current?.status==='partial'?current:null;}
+  const version=(projectWorkflow.reportVersions||[]).find(item=>item.id===projectWorkflow.currentReportVersionId);
+  if(version?.candidateBatchAcceptance?.status!=='partial')return null;
+  // A historical partial snapshot must not label a later or manually edited body.
+  const body=list=>(list||[]).map(c=>({cn:c.cn,name:c.name,checked:c.checked!==false,sections:(c.sections||[]).map(s=>({t:s.t,content:s.content||'',editedHtml:s.editedHtml||null}))}));
+  return JSON.stringify(body(chapters))===JSON.stringify(body(version.chapters))?version.candidateBatchAcceptance:null;
+}
 function airReportGenerationStatus(){
-  if(window.ProjectWorkflow?.reportGenerationStatus)return ProjectWorkflow.reportGenerationStatus(chapters);
-  const all=chapters.filter(c=>c.checked!==false).flatMap(c=>c.sections||[]),generated=all.filter(reportHasVisibleBody).length;
-  return {total:all.length,generated,remaining:Math.max(0,all.length-generated),complete:all.length>0&&generated===all.length};
+  let status;
+  if(window.ProjectWorkflow?.reportGenerationStatus)status=ProjectWorkflow.reportGenerationStatus(chapters);
+  else{
+    const all=chapters.filter(c=>c.checked!==false).flatMap(c=>c.sections||[]),generated=all.filter(reportHasVisibleBody).length;
+    status={total:all.length,generated,remaining:Math.max(0,all.length-generated),complete:all.length>0&&generated===all.length};
+  }
+  const partial=typeof airCurrentPartialCandidateBatch==='function'?airCurrentPartialCandidateBatch():null;
+  if(partial)status.partialUpdate=partial;
+  const delivery=typeof airReportLengthDelivery==='function'?airReportLengthDelivery():null;
+  status.bodyComplete=status.complete;
+  if(partial)status.complete=false;
+  if(delivery?.applicable){status.lengthDelivery=delivery;status.lengthPending=delivery.status!=='within-range';if(status.lengthPending)status.complete=false;}
+  const initial=window.ReportInitialDeliveryRuntime?.status?.();
+  if(initial?.active){status.initialDelivery=initial;status.deliveryPending=!initial.complete;if(status.deliveryPending)status.complete=false;}
+  return status;
+}
+function airReportLengthDelivery(candidateSections){
+  const api=window.ReportCompletionContract,plan=window.ReportLengthUI?.savedPlan?.();
+  if(!api?.reviewLength||(!plan&&!window.ReportLengthUI?.reviewDelivery))return null;
+  const projected=candidateSections instanceof Set?candidateSections:null;
+  const entries=chapters.filter(c=>c.checked!==false).flatMap(c=>(c.sections||[]).map(s=>({key:c.name+' / '+s.t,text:projected?.has(s)&&s.pendingRevision?String(s.pendingRevision.after||''):String(s.editedHtml||s.content||'')})));
+  const review=window.ReportLengthUI?.reviewDelivery?ReportLengthUI.reviewDelivery(entries):api.reviewLength(entries,plan);
+  if(!review)return null;
+  const initial=!projected?window.ReportInitialDeliveryRuntime?.status?.():null;
+  if(initial?.active&&initial.planId===review.planId&&!['stale-plan','incomplete'].includes(review.status))return {...review,wordStatus:review.status,status:initial.complete?'within-range':'delivery-pending',initialDelivery:initial,actualPages:initial.pages||null,targetRole:initial.targetRole,projected:false};
+  return {...review,projected:!!projected};
+}
+function airLengthDeliveryCopy(delivery){
+  if(!delivery?.applicable)return '';
+  if(delivery.status==='stale-plan')return delivery.message;
+  if(delivery.initialDelivery){
+    const initial=delivery.initialDelivery;
+    if(initial.complete&&initial.targetRole==='pages-primary')return '当前整份报告已按正常 Word 模板排版，共 '+initial.pages+' 页，达到确认的页数范围。正文 '+delivery.actual+' 字仅供参考；仍请核对具体事实和分析内容。';
+    if(initial.complete)return '当前正文 '+delivery.actual+' 字，在确认的 '+delivery.min+'–'+delivery.max+' 字范围内；整份 Word 已正常排版，共 '+initial.pages+' 页。具体事实和分析内容仍须核对。';
+    return (initial.pages?'最近一次整份 Word 排版为 '+initial.pages+' 页。':'整份 Word 页数尚未核对完成。')+'正文已经保留；'+(typeof reportInitialDeliveryReasonCopy==='function'?reportInitialDeliveryReasonCopy(initial.reason):'本轮仍在补齐和核对中')+'，目前不算整篇达标。';
+  }
+  const numbers='已确认目标 '+delivery.target+' 字；'+(delivery.projected?'接受后预计正文 ':'当前正文 ')+delivery.actual+' 字（'+(delivery.projected?'仅计将接受的候选，不含表格':'不含表格和候选稿')+'），核对范围 '+delivery.min+'–'+delivery.max+' 字。';
+  if(delivery.status==='short')return numbers+'还差 '+delivery.shortfall+' 字才到下沿，不能算按要求完成。请补充薄弱分析，不要加套话，也不用重写已写好的小节。';
+  if(delivery.status==='over')return numbers+'已超出确认范围，请先核对重复内容；系统不会自动删正文或压平标题。';
+  if(delivery.status==='incomplete')return numbers+'仍有正文缺失或目录与计划不一致，不能算整篇完成。';
+  return numbers+'字数在确认范围内；内容质量仍须核对，实际页数以 Word 排版为准。';
+}
+function airLengthDeliveryMeta(delivery){
+  if(!delivery?.applicable)return null;
+  return {schemaVersion:1,status:delivery.status,planId:delivery.planId||null,target:delivery.target,actual:delivery.actual,min:delivery.min,max:delivery.max,...(delivery.initialDelivery?{targetRole:delivery.targetRole,actualPages:delivery.actualPages,initialDeliveryStatus:delivery.initialDelivery.status,paginationReceipt:delivery.initialDelivery.receipt||null}:{}),checkedAt:new Date().toISOString()};
+}
+function airLengthDeliveryHtml(){
+  const delivery=airReportLengthDelivery();if(!delivery?.applicable)return '';
+  const rows=(delivery.sections||[]).filter(row=>!row.basis&&row.shortfall>0),attr=value=>escapeHtml(String(value??'')).replace(/"/g,'&quot;');
+  const locate=row=>{const c=chapters.find(c=>c.checked!==false&&(c.sections||[]).some(s=>c.name+' / '+s.t===row.key));return c?{c,si:c.sections.findIndex(s=>c.name+' / '+s.t===row.key)}:null;};
+  const gaps=rows.map(row=>{const hit=locate(row);return hit?'<li><button type="button" class="air-doc-tool air-candidate-issue-locate" data-cn="'+attr(hit.c.cn)+'" data-si="'+hit.si+'">'+escapeHtml(row.key)+'</button>：已写 '+row.actual+' / 分配 '+row.target+' 字'+(hit.c.sections[hit.si].locked?'（已锁定，不能自动改）':hit.c.sections[hit.si].pendingRevision?'（已有候选，请先处理）':'')+'</li>':'';}).join('');
+  const headline=delivery.initialDelivery?.targetRole==='pages-primary'?(delivery.actualPages?delivery.actualPages+' 页':'等待整份 Word 排版'):delivery.actual+' / '+delivery.target+' 字';
+  return '<details class="air-length-delivery" style="flex-basis:100%;width:100%" '+(delivery.status==='within-range'?'':'open')+'><summary>篇幅核对 · '+headline+'</summary><p>'+escapeHtml(airLengthDeliveryCopy(delivery))+'</p><ul>'+(delivery.chapters||[]).map(row=>'<li>'+escapeHtml(row.key)+'：已写 '+row.actual+' / 分配 '+row.target+' 字</li>').join('')+'</ul>'+(gaps?'<details><summary>查看篇幅偏少的小节（仅定位，不拒收、不自动改）</summary><ol>'+gaps+'</ol></details>':'')+(delivery.status==='short'&&rows.length?'<button type="button" class="air-doc-tool air-length-fill" '+(aiReportBusy||aiReportImpactedProgress?.active||airAcceptCandidatesBusy?'disabled':'')+'>仅补充篇幅不足的小节</button>':'')+'</details>';
+}
+function airRefreshLengthDelivery(){
+  const current=document.querySelector?.('#airDocPane .air-length-delivery');
+  if(current)current.outerHTML=airLengthDeliveryHtml();
+}
+async function airFillLengthGaps(){
+  const delivery=airReportLengthDelivery();if(!delivery?.applicable||delivery.status!=='short')return;
+  return airGenerateImpactedCandidates(false,false,(delivery.sections||[]).filter(row=>!row.basis&&row.shortfall>0).map(row=>row.key));
 }
 function airIsIncompleteGenerationMessage(message){
   return !!message&&(message.kind==="generationIncomplete"||(
@@ -861,6 +1007,8 @@ function airIsIncompleteGenerationMessage(message){
 }
 function airGenerationIncompleteHtml(message){
   const coverage=airReportGenerationStatus();
+  if(coverage.partialUpdate)return '<div class="air-card"><b>本轮更新尚未完成</b><div>旧正文仍在，当前不是整篇新版完成；'+Number(coverage.partialUpdate.unresolved||0)+' 节仍待处理。请打开报告，查看“候选问题清单”。</div><div style="margin-top:12px;"><button type="button" class="btn air-resume-inline-btn">查看报告并处理剩余候选</button><button type="button" class="btn ghost air-act air-act-btn" data-act="exportWord">下载当前阶段 Word</button></div></div>';
+  if(coverage.bodyComplete&&(coverage.lengthPending||coverage.deliveryPending))return '<div class="air-card"><b>'+(coverage.initialDelivery?.active?'正文已保留，整篇仍待核对':'小节都有正文，但还没达到确认篇幅')+'</b><p>'+escapeHtml(airLengthDeliveryCopy(coverage.lengthDelivery))+'</p><button type="button" class="btn air-resume-inline-btn">'+(coverage.initialDelivery?.active?'继续本轮补齐和页数核对':'查看篇幅与薄弱小节')+'</button><button type="button" class="btn ghost air-act air-act-btn" data-act="exportWord">下载当前阶段 Word</button></div>';
   if(coverage.complete)return '<div class="air-step-done"><b>✓ 当前报告已完整生成</b><span>已完成 '+coverage.generated+'/'+coverage.total+' 个子标题。</span></div>';
   const content=message&&message.content||("本轮实际完成 "+coverage.generated+"/"+coverage.total+" 个子标题，仍有 "+coverage.remaining+" 个没有正文。不会标记为完成，也不会覆盖上一完整版本。");
   return '<div class="air-card"><div>'+(window.MD?window.MD.renderHtml(content):escapeHtml(content))+'</div>'
@@ -877,10 +1025,16 @@ function airRebuildPendingGenerationTasks(){
 async function airResumeGeneration(){
   if(aiReportBusy)return;
   const coverage=airReportGenerationStatus();
+  if(coverage.partialUpdate){airOpenExistingReport('旧正文仍在，但本轮更新尚未完成；已打开当前工作稿，请查看“候选问题清单”处理剩余小节。');return;}
+  if(coverage.bodyComplete&&coverage.lengthPending&&!coverage.initialDelivery?.active){airOpenExistingReport(airLengthDeliveryCopy(coverage.lengthDelivery)+' 已打开报告，请查看“篇幅核对”。本次未调用AI。');return;}
   if(coverage.complete){airOpenExistingReport("当前报告已经完整生成，已为你打开报告预览。");return;}
-  const tasks=airRebuildPendingGenerationTasks();
-  if(!tasks.length){airOpenExistingReport("没有发现需要继续生成的小节，已为你打开现有报告预览。");return;}
-  const claim=window.ProjectWorkflow?.claimReportGeneration?ProjectWorkflow.claimReportGeneration(projectWorkflow,chapters,{force:false}):{ok:true,lock:{id:"local-"+Date.now()}};
+  let tasks=airRebuildPendingGenerationTasks();
+  if(!tasks.length&&!coverage.initialDelivery?.active){airOpenExistingReport("没有发现需要继续生成的小节，已为你打开现有报告预览。");return;}
+  const mutation=airCaptureReportMutation();
+  const initial=window.ReportInitialDeliveryRuntime?.start?await ReportInitialDeliveryRuntime.start({tasks}):null;
+  await airGuardReportMutation(mutation);
+  if(initial?.active){tasks=initial.tasks.map(t=>({...t,si:t.c.sections.indexOf(t.s)}));aiReportPendingTasks=tasks;}
+  const claim=window.ProjectWorkflow?.claimReportGeneration?ProjectWorkflow.claimReportGeneration(projectWorkflow,chapters,{force:false,...(initial?.active?{resumeInitialDeliveryRunId:initial.run.runId}:{})}):{ok:true,lock:{id:"local-"+Date.now()}};
   if(!claim.ok){alert("该项目已有生成任务在运行。请等待完成或刷新查看进度，不会重复启动。");return;}
   aiReportGenerationLockId=claim.lock.id;
   const targetReportVersion=window.ProjectWorkflow?.nextReportVersionNumber?ProjectWorkflow.nextReportVersionNumber(projectWorkflow):(projectWorkflow.reportVersions||[]).length+1;
@@ -893,7 +1047,7 @@ async function airResumeGeneration(){
   }
   aiReportStopFlag=false;airSetBusy(true);saveDraft();airSaveState();renderAiReportMsgs();
   try{await airRunGenTasks();}
-  catch(e){airPush({role:"assistant",kind:"text",content:"继续生成失败："+e.message+"。已保留现有内容，可以再次点击继续。"});}
+  catch(e){airPush({role:"assistant",kind:"text",content:"本轮续接暂未完成："+e.message+"。现有正文和原任务已保留，未把缺失小节当作完成。"});}
   finally{
     if(window.ProjectWorkflow?.releaseReportGeneration&&aiReportGenerationLockId){const status=aiReportStopFlag?"paused":(airReportGenerationStatus().complete?"completed":"incomplete");ProjectWorkflow.releaseReportGeneration(projectWorkflow,aiReportGenerationLockId,status);}
     aiReportGenerationLockId=null;saveDraft();airSaveState();airSetBusy(false);
@@ -906,6 +1060,8 @@ async function airOpenExistingReport(message){
 async function aiReportStartGenerate(options){
   options=options||{};
   if(aiReportBusy) return;
+  if(!options.force&&typeof airCurrentPartialCandidateBatch==='function'&&airCurrentPartialCandidateBatch()){airOpenExistingReport('旧正文仍在，但本轮更新尚未完成；请在报告预览处理剩余候选。本次没有调用模型，也没有覆盖原稿。');return;}
+  if(airGenerationFlowLocked()&&!options.force){airOpenExistingReport("🔒 已有报告正文，原生成向导已锁定；未完成小节请使用续写入口。");return;}
   if(!aiReportParamsConfirmed || !calcResult){ alert("请先完成人工确认并成功生成财务测算，再开始可研生成。"); return; }
   const coverage=airReportGenerationStatus();
   if(coverage.complete&&!options.force){airOpenExistingReport("🔒 已有完整可研报告，系统已直接打开原版预览；本次没有联网检索、没有调用模型，也没有覆盖原报告。");return;}
@@ -917,7 +1073,7 @@ async function aiReportStartGenerate(options){
   }
   aiReportGenerationLockId=claim.lock.id;saveDraft();airSaveState();
   airSetBusy(true);
-  try{ await aiReportRunGenerate(); }
+  try{ await aiReportRunGenerate(options); }
   catch(e){ airPush({role:"assistant",kind:"text",content:"可研生成未能启动："+e.message+"。按钮已恢复，可检查参数或稍后重试。"}); }
   finally{
     if(window.ProjectWorkflow?.releaseReportGeneration&&aiReportGenerationLockId){const status=aiReportStopFlag?"paused":(airReportGenerationStatus().complete?"completed":"incomplete");ProjectWorkflow.releaseReportGeneration(projectWorkflow,aiReportGenerationLockId,status);}
@@ -925,16 +1081,18 @@ async function aiReportStartGenerate(options){
   }
 }
 async function airRequestFullRegeneration(){
+  if(aiReportBusy)return;
   const status=airReportGenerationStatus();if(!status.generated)return aiReportStartGenerate();
+  if(chapters.some(c=>(c.sections||[]).some(s=>s.pendingRevision)))return alert('请先接受或拒绝已有候选稿，再启动整篇新工作版本；当前正文和候选均未改动');
   if(!confirm("第一次确认：重新生成会再次消耗模型额度。现有报告会先保存为版本，是否继续？"))return;
   if(!confirm("第二次确认：将重新生成全部未锁定小节；原版可从项目库的报告版本中查看。确定继续？"))return;
-  if(window.ProjectWorkflow)ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("重新生成前自动备份"));
-  chapters.filter(c=>c.checked!==false).forEach(c=>(c.sections||[]).forEach(s=>{if(!s.locked){s.content="";s.editedHtml=null;s.pendingRevision=null;}}));
-  saveDraft();airSaveState();await aiReportStartGenerate({force:true});
+  await aiReportStartGenerate({force:true});
 }
 
 /* ================= 阶段⑤ 生成：复用 report.js 的 generateSection()（接上流式），实时写入右侧预览面板 ================= */
-async function aiReportRunGenerate(){
+async function aiReportRunGenerate(options){
+  options=options||{};
+  let mutation=airCaptureReportMutation();
   const ex = aiReportExtracted || {};
   const sug = aiReportSuggested;
   const domainKey_ = AI_DOMAIN_OF[sug.calcType];
@@ -943,9 +1101,23 @@ async function aiReportRunGenerate(){
   if(window.ReportLogicCore){
     try{ await ReportLogicCore.load(sug.calcType); logicOutline=ReportLogicCore.outline(sug.calcType,{businessScenario:airBusinessScenario()}); }catch(e){}
   }
-  if(logicOutline) reportLoadDomainSource(domainKey_,logicOutline);
-  else loadDomain(domainKey_);
+  await airGuardReportMutation(mutation);
+  const hasExistingBody=chapters.some(c=>(c.sections||[]).some(reportHasVisibleBody));
+  if(!hasExistingBody&&chapters.some(c=>(c.sections||[]).some(s=>s.pendingRevision)))throw new Error('存在尚未处理的候选稿，原目录和候选均保留；请先处理候选');
+  if(!hasExistingBody){if(logicOutline)reportLoadDomainSource(domainKey_,logicOutline);else loadDomain(domainKey_);}
+  mutation=airCaptureReportMutation();
   rptCtype = sug.calcType;
+
+  if(!await reportConfirmGenerationLength({initialDelivery:true,force:!!options.force}))return false;
+  await airGuardReportMutation(mutation);
+  if(window.ResearchUI?.active()){await ResearchUI.flush();await airGuardReportMutation(mutation);}
+  if(options.force){
+    if(chapters.some(c=>(c.sections||[]).some(s=>s.pendingRevision)))throw new Error('已有候选稿，未启动整篇重生成；请先处理候选');
+    if(!window.ProjectWorkflow?.createReportVersion||!ProjectWorkflow.resetCandidateBatchForGeneration)throw new Error('报告版本备份模块未加载，原稿未清空');
+    const backup=ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta('重新生成前自动备份'));
+    if(!ProjectWorkflow.resetCandidateBatchForGeneration(projectWorkflow,aiReportGenerationLockId,backup?.id))throw new Error('新一轮生成身份核对失败，原稿未清空');
+    chapters.filter(c=>c.checked!==false).forEach(c=>(c.sections||[]).forEach(s=>{if(!s.locked){s.content='';s.editedHtml=null;}}));
+  }
 
   const today = new Date().toLocaleDateString("zh-CN");
   const who = (typeof getUser==="function" && getUser()) || "当前用户";
@@ -955,8 +1127,9 @@ async function aiReportRunGenerate(){
     location: ex.location || "",
     type: sug.calcType==="gaibao"?(AI_GAIBAO_SCENARIO_CN[airBusinessScenario()]||AI_TYPE_CN.gaibao):(AI_TYPE_CN[sug.calcType] || ""),
     businessScenario: sug.calcType==="gaibao"?airBusinessScenario():"",
-    scale: calcParams && (calcParams.totalInvestment || calcParams.invest || calcParams.loan) || "",
-    desc: (ex.desc||"") + "\n\n【参数说明】本报告关键测算参数由系统依据历史项目类比自动推荐并计算，经"+who+"于"+today+"确认；如需复核请以导出的《测算说明书》与Excel为准。",
+    // Preserve the registered estimate. Borrowing and a depreciation/construction
+    // base are not the project's all-in investment; the cover labels them separately.
+    desc: (ex.desc||"") + "\n\n【参数说明】"+(aiReportCalculationMode==='full'?"本报告采用专门财务测算界面核对的全量参数与确定性计算结果":"本报告关键测算参数由系统推荐初值并经人工核对，其他参数沿用已展示的推荐值")+"，经"+who+"于"+today+"确认；如需复核请以导出的《测算说明书》与Excel为准。",
   });
   appMode = "report";
   saveDraft();
@@ -966,7 +1139,9 @@ async function aiReportRunGenerate(){
   const active = chapters.filter(c=>c.checked);
   const tasks = [];
   active.forEach(c=>c.sections.forEach((s,si)=>{if(!reportHasVisibleBody(s))tasks.push({c,s,si});}));
-  aiReportPendingTasks = tasks;
+  const initial=window.ReportInitialDeliveryRuntime?.start?await ReportInitialDeliveryRuntime.start({tasks,force:!!options.force}):null;
+  await airGuardReportMutation(mutation);
+  aiReportPendingTasks = initial?.active?initial.tasks.map(t=>({...t,si:t.c.sections.indexOf(t.s)})):tasks;
   aiReportStopFlag = false;
   aiReportChat=aiReportChat.filter(message=>message.kind!=="genProgress");
   const coverage=airReportGenerationStatus();
@@ -986,6 +1161,14 @@ async function airRunGenTasks(){
     renderAiReportMsgs();
   }, reportGenerationConcurrency(tasks.length), ()=>!aiReportStopFlag);
   saveDraft();
+  if(window.ReportInitialDeliveryRuntime?.finish){
+    const outcome=await ReportInitialDeliveryRuntime.finish({shouldContinue:()=>!aiReportStopFlag,onProgress:state=>{
+      p.deliveryPhase=state.phase;p.deliveryReason=state.reason||null;p.additionalCalls=state.additionalCalls;p.paginationPasses=state.paginationPasses;
+      const current=airReportGenerationStatus();p.done=current.generated;p.total=current.total;renderAiReportMsgs();
+    }});
+    if(outcome.active){p.initialDelivery={status:outcome.status,complete:outcome.complete,phase:outcome.phase,reason:outcome.reason,pages:outcome.pages};airBuildDocPane();}
+  }
+  if(typeof airRefreshLengthDelivery==='function')airRefreshLengthDelivery();
 
   if(aiReportStopFlag && tasks.length){
     const coverage=airReportGenerationStatus();
@@ -1000,17 +1183,23 @@ async function airRunGenTasks(){
   p.done=coverage.generated;p.total=coverage.total;
   aiReportPendingTasks=tasks.filter(t=>!reportHasVisibleBody(t.s));
   p.active=false;p.stopped=!coverage.complete;
+  if(coverage.bodyComplete&&coverage.lengthPending){
+    if(window.ProjectWorkflow){const version=ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{...currentReportVersionMeta('正文已保存，尚未达到确认篇幅'),lengthDelivery:airLengthDeliveryMeta(coverage.lengthDelivery)});p.reportVersionId=version?.id||null;p.reportVersion=version?.version||null;}
+    aiReportChat=aiReportChat.filter(message=>!airIsIncompleteGenerationMessage(message));
+    airPush({role:'assistant',kind:'generationIncomplete',content:airLengthDeliveryCopy(coverage.lengthDelivery)});
+    airPush({role:'assistant',kind:'deliver'});renderAiReportMsgs();saveDraft();if(typeof flushCloudSave==='function')await flushCloudSave();await airSaveState();return;
+  }
   if(!coverage.complete){
     renderAiReportMsgs();
     aiReportChat=aiReportChat.filter(message=>!airIsIncompleteGenerationMessage(message));
-    airPush({role:"assistant",kind:"generationIncomplete",content:"本轮实际完成 "+coverage.generated+"/"+coverage.total+" 个子标题，仍有 "+coverage.remaining+" 个没有正文，因此不会标记为完成、不会生成完成版，也不会覆盖上一完整版本。"});
+    airPush({role:"assistant",kind:"generationIncomplete",content:coverage.initialDelivery?.active?'正文和原任务已保留；'+reportInitialDeliveryReasonCopy(coverage.initialDelivery.reason)+'。本轮还没有完成全部内容和实际页数核对，不会覆盖上一完整版本。':"本轮实际完成 "+coverage.generated+"/"+coverage.total+" 个子标题，仍有 "+coverage.remaining+" 个没有正文，因此不会标记为完成、不会生成完成版，也不会覆盖上一完整版本。"});
     airRepairFlowCards();renderAiReportMsgs();
     saveDraft();if(typeof flushCloudSave==="function")await flushCloudSave();await airSaveState();return;
   }
   aiReportPendingTasks=[];
   aiReportChat=aiReportChat.filter(message=>!airIsIncompleteGenerationMessage(message));
   p.failed=0;
-  if(window.ProjectWorkflow){const version=window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("AI可研初稿生成完成"));p.reportVersionId=version&&version.id||null;p.reportVersion=Number(version&&version.version)||p.targetReportVersion||null;}
+  if(window.ProjectWorkflow){const version=window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{...currentReportVersionMeta("AI可研初稿生成完成"),lengthDelivery:typeof airLengthDeliveryMeta==='function'?airLengthDeliveryMeta(coverage.lengthDelivery):null});p.reportVersionId=version&&version.id||null;p.reportVersion=Number(version&&version.version)||p.targetReportVersion||null;}
   renderAiReportMsgs();
   airPush({role:"assistant", kind:"text", content:"🎉 可研报告已经生成啦！已完成 "+(p.total-p.failed)+"/"+p.total+" 个子标题的初稿起草"+(p.failed? "（"+p.failed+" 个失败，可在右侧预览里逐节点「重试」）。":"。")+"\n\n接下来你可以继续和我对话修改测算或报告，也可以点击下方「复核与人工审查」，或者直接给我发送“复核”，我会带你进入复核与签发。"});
   airPush({role:"assistant", kind:"deliver"});
@@ -1024,6 +1213,9 @@ async function airRunGenTasks(){
    共用这一个核心，两处调用只传各自需要的差异部分，不必维护两份近乎相同的DOM操作代码。 */
 async function airDriveSectionGen(chapter, section, si, opts){
   opts = opts || {};
+  const initialOwned=window.ReportInitialDeliveryRuntime?.accepts?.(chapter,section)===true;
+  const owner=reportCaptureGenerationContext(),mutation=reportCaptureGenerationContext({chapter,section});
+  if(section.locked||section.pendingRevision)throw new Error('小节已锁定或已有候选，未重新生成正文');
   const cn = chapter.cn;
   const secId = 'sec_'+cn+'_'+si;
   const secEl = document.getElementById(secId);
@@ -1041,19 +1233,25 @@ async function airDriveSectionGen(chapter, section, si, opts){
     if(streamTimer)return;
     streamTimer=setTimeout(()=>{
       streamTimer=null;
+      try{reportCheckGenerationContext(mutation);}catch{return;}
       const el=document.getElementById(secId),body=el&&el.querySelector(".body");
       if(body)body.textContent=streamText;
     },50);
   };
   let generated=false;
   try{
+    await reportGuardGenerationContext(mutation);
     const text = await generateSection(chapter, section, (partial)=>{
       streamWrite(partial);
-    });
+    },{autoRepair:!initialOwned&&opts.autoRepair===true});
+    await reportGuardGenerationContext(mutation);
     if(!reportHasVisibleBody({content:text}))throw new Error("模型未返回正文，本节没有计入完成");
+    reportCheckGeneratedDraft(chapter,section,text);
     if(streamTimer){clearTimeout(streamTimer);streamTimer=null;}
     if(section.editedHtml&&!reportHasVisibleBody({editedHtml:section.editedHtml}))section.editedHtml=null;
     section.content = text;
+    delete section.generationFailure;
+    if(initialOwned)await ReportInitialDeliveryRuntime.recordGenerated(chapter,section);
     if(secEl){
       secEl.dataset.status = "done";
       secEl.classList.remove("pending"); secEl.classList.remove("gen");
@@ -1063,13 +1261,19 @@ async function airDriveSectionGen(chapter, section, si, opts){
     generated=true;
   }catch(e){
     if(streamTimer){clearTimeout(streamTimer);streamTimer=null;}
+    if(initialOwned)await ReportInitialDeliveryRuntime.recordGenerated(chapter,section,{error:e});
+    try{reportCheckGenerationContext(owner);}catch{return false;}
+    if(String(section.editedHtml||section.content||'')!==mutation.body||!!section.locked!==mutation.locked)return false;
+    section.generationFailure={code:e.code||'section-generation-failed',message:String(e.message||'生成失败'),at:new Date().toISOString()};
     if(secEl){
       secEl.dataset.status = "failed";
       secEl.classList.remove("gen");
       secEl.querySelector(".body").innerHTML = '<span style="color:var(--seal-red);">'+(opts.failLabel||"生成失败")+'：'+escapeHtml(e.message)+'</span> '
         +'<button class="air-retry-btn" data-cn="'+cn+'" data-si="'+si+'">重试</button>';
+      if(section.pendingRevision)airRenderCompletedSection(chapter,section,si);
     }
-    if(opts.onFail) opts.onFail();
+    if(opts.onFail) opts.onFail(e);
+    saveDraft();airSaveState();
   }
   airUpdateChapterChipStatus(cn);
   return generated;
@@ -1077,7 +1281,8 @@ async function airDriveSectionGen(chapter, section, si, opts){
 
 async function airGenOneSection(t){
   return airDriveSectionGen(t.c, t.s, t.si, {
-    onFail: ()=>{ aiReportProgressMsg.failed++; },
+    autoRepair:true,
+    onFail: error=>{if(aiReportProgressMsg){aiReportProgressMsg.failed++;(aiReportProgressMsg.failures||(aiReportProgressMsg.failures=[])).push({sectionKey:t.c.name+' / '+t.s.t,code:error?.code||'section-generation-failed',message:String(error?.message||'生成失败')});}},
   });
 }
 
@@ -1088,6 +1293,47 @@ function airFindChapterSection(cn,si){
   return {chapter,section:chapter.sections[si]};
 }
 
+function airCaptureReportMutation(info){
+  const research=window.ResearchUI?.active()?ResearchUI.capture('report'):null;
+  if(research?!ResearchUI.editable():typeof projectCanEdit==='function'&&!projectCanEdit())throw new Error(research?'当前研究不可编辑':'当前项目无编辑权限');
+  return {research,projectId:typeof currentProjectId==='undefined'?null:currentProjectId,chapters,info,pending:info?.section.pendingRevision||null,pendingToken:info?.section.pendingRevision?ProjectWorkflow.candidateToken(info.section.pendingRevision):null,body:info?String(info.section.editedHtml||info.section.content||''):null};
+}
+function airCheckReportMutation(context){
+  const same=context.research?window.ResearchUI?.active()&&ResearchUI.accepts(context.research):!window.ResearchUI?.active()&&(typeof currentProjectId==='undefined'?null:currentProjectId)===context.projectId;
+  if(!same||chapters!==context.chapters)throw new Error('项目或研究轮次已切换，旧结果未采用');
+  if(context.research?!ResearchUI.editable():typeof projectCanEdit==='function'&&!projectCanEdit())throw new Error(context.research?'当前研究不可编辑':'当前项目无编辑权限');
+  if(context.info){
+    const {chapter,section}=context.info;
+    if(!chapters.includes(chapter)||!chapter.sections.includes(section))throw new Error('小节已变化，旧结果未采用');
+    const now=ProjectWorkflow.candidateToken(section.pendingRevision);
+    if((section.pendingRevision||null)!==context.pending||JSON.stringify(now)!==JSON.stringify(context.pendingToken)||String(section.editedHtml||section.content||'')!==context.body)throw new Error('正文或候选已变化，旧结果未覆盖新状态');
+  }
+}
+async function airGuardReportMutation(context){
+  airCheckReportMutation(context);
+  if(context.research)await ResearchUI.guard(context.research);
+  airCheckReportMutation(context);
+}
+function airStoreNewCandidate(info,text,instruction,meta){
+  const candidate=ProjectWorkflow.setCandidate(info.section,text,instruction,meta);
+  if(!candidate)throw new Error('小节已锁定或已有待审候选，生成结果未覆盖现有内容');
+  delete info.section.candidateGenerationFailure;
+  return candidate;
+}
+async function airProposeSectionRevision(args){
+  const query=String(args.title),hits=chapters.flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).filter(x=>x.s.t.includes(query)||query.includes(x.s.t));
+  if(hits.length!==1)return JSON.stringify({ok:false,error:hits.length?'匹配到多个小节，请说完整标题':'没有找到该小节'});
+  const x=hits[0],info={chapter:x.c,section:x.s};
+  try{
+    const context=airCaptureReportMutation(info);if(x.s.locked||x.s.pendingRevision)throw new Error('该小节已锁定或已有待审候选，请先处理');
+    await airGuardReportMutation(context);
+    const instruction=String(args.instruction),text=await reviseSection(x.c,x.s,instruction);
+    await airGuardReportMutation(context);const candidate=airStoreNewCandidate(info,text,instruction);
+    saveDraft();airSaveState();if(aiReportHasDoc)airRefreshSection(x.c.cn,x.si);
+    return JSON.stringify({ok:true,status:'candidate_only',quality:candidate.quality,cn:x.c.cn,chapter:x.c.name,si:x.si,title:x.s.t,message:'候选稿已生成，正式正文尚未变化；须检查候选质量及事实差异后人工接受或拒绝'});
+  }catch(error){return JSON.stringify({ok:false,error:error.message});}
+}
+
 async function airRetrySection(cn, si){
   const info = airFindChapterSection(cn, si);
   if(!info) return;
@@ -1096,6 +1342,7 @@ async function airRetrySection(cn, si){
     failLabel: "仍然失败",
     onDone: ()=>{
       if(aiReportProgressMsg && aiReportProgressMsg.failed>0){ aiReportProgressMsg.failed--; renderAiReportMsgs(); }
+      airRefreshLengthDelivery();
       saveDraft();
     },
   });
@@ -1104,7 +1351,17 @@ async function airRetrySection(cn, si){
 /* ================= 右侧报告预览面板 ================= */
 let aiReportSelectionState=null;
 var airExpandedCandidateKeys=new Set();
+var airCollapsedCandidateKeys=new Set();
+var airCandidateRepairsInFlight=new WeakSet();
+function airCandidateRepairInstruction(){return '只针对列出的检查问题定向修订；保持原稿的分析深度、论证链、关键数字与风险，保留业务标题层级及全部必要表格。未涉及的问题段落保持不变，不把完整分析改成短摘要，不凑字数或编造事实。';}
 function airCandidateKey(chapter,si){return String(chapter.cn)+'_'+Number(si);}
+function airToggleCandidatePreview(cn,si,expanded){
+  const info=airFindChapterSection(cn,si);if(!info)return;
+  const key=airCandidateKey(info.chapter,si);
+  if(expanded){airExpandedCandidateKeys.delete(key);airCollapsedCandidateKeys.add(key);}
+  else{airExpandedCandidateKeys.add(key);airCollapsedCandidateKeys.delete(key);}
+  airRefreshSection(info.chapter.cn,si);
+}
 function airSectionToolsHtml(chapter,section,si){
   const undo=Array.isArray(section.undoStack)&&section.undoStack.length?'<button type="button" class="air-section-action air-section-undo" data-cn="'+chapter.cn+'" data-si="'+si+'">撤销</button>':'';
   return '<div class="air-section-tools"><button type="button" class="air-section-action air-section-rewrite" data-cn="'+chapter.cn+'" data-si="'+si+'">↻ 重写</button>'
@@ -1118,33 +1375,101 @@ function airTrustBadgeHtml(section){
 }
 function airCandidateHtml(chapter,section,si){
   if(!section.pendingRevision||!window.ProjectWorkflow)return '';
-  const candidate=section.pendingRevision,key=airCandidateKey(chapter,si),expanded=airExpandedCandidateKeys.has(key),canAdopt=candidate.allowLogicAdoption!==undefined?candidate.allowLogicAdoption:!!(candidate.logicRevision&&!(section.staleKind==="logic"&&!candidate.logicRevision.localOverride));
+  const candidate=section.pendingRevision,key=airCandidateKey(chapter,si),canAdopt=candidate.allowLogicAdoption!==undefined?candidate.allowLogicAdoption:!!(candidate.logicRevision&&!(section.staleKind==="logic"&&!candidate.logicRevision.localOverride));
+  const quality=typeof reportReviewCandidate==='function'?reportReviewCandidate(chapter,section):candidate.quality;
+  const origin=ProjectWorkflow.candidateOrigin(candidate,{inputPlanId:candidate.completionInputPlanId&&typeof reportCandidateInputIdentity==='function'?reportCandidateInputIdentity():null,outputPolicyVersion:window.ReportOutputPolicy?.contentVersion});
+  const blocked=quality?.status==='blocked'||origin.status!=='current';
+  const originHtml='<div class="air-candidate-origin" role="status">'+escapeHtml(origin.status==='current'?'生成计划与当前一致（仍须核对）':origin.status==='stale'?'旧计划候选稿 · 非当前新版':'历史候选稿 · 未核验为当前新版')+(candidate.createdAt?' · 记录时间 '+escapeHtml(String(candidate.createdAt)):'')+'<div>'+escapeHtml(origin.message)+(origin.status!=='current'?'。如需新版，请点击“生成候选稿”，选择范围并勾选“重新生成并保留旧候选历史”。':'')+'</div></div>';
+  const expanded=airExpandedCandidateKeys.has(key)||(blocked&&!airCollapsedCandidateKeys.has(key)),busy=airCandidateRepairsInFlight.has(candidate),attrs='data-cn="'+escapeHtml(String(chapter.cn)).replace(/"/g,'&quot;')+'" data-si="'+si+'"';
+  const measure=text=>window.ReportCompletionContract?.measure?ReportCompletionContract.measure(String(text||'')).proseCharacters:String(text||'').replace(/<[^>]*>/g,'').replace(/\s/g,'').length;
+  const countHtml='<div class="air-candidate-metrics">修改前正文 '+measure(candidate.before)+' 字 · 候选正文 '+measure(candidate.after)+' 字'+(candidate.history?.length?' · 已保留 '+candidate.history.length+' 份旧候选':'')+'；字符数不等于实际排版页数。</div>';
+  const issuesHtml=(quality?.issues||[]).length?'<ul>'+quality.issues.map(issue=>'<li>'+escapeHtml(issue.message||issue.code||'待核对问题')+'</li>').join('')+'</ul>':'<div>未发现结构问题；事实、数据和分析仍需人工核对。</div>';
+  const repairHtml=blocked&&origin.status==='current'?'<label>本次修订要求（可修改）<textarea class="air-candidate-repair-instruction" rows="3" maxlength="2000" '+(busy?'disabled ':'')+'style="display:block;width:100%;box-sizing:border-box">'+escapeHtml(candidate.repairInstruction||airCandidateRepairInstruction())+'</textarea></label><div>仅在你点击后返修一次；原候选保留，不会自动接受，也不会连续自动精简。</div><button type="button" class="btn ghost" '+(busy?'disabled ':'')+attrs+' onclick="airRepairCandidate(this.dataset.cn,Number(this.dataset.si),this)">'+(busy?'正在按要求返修一次，原候选保留…':'按上述要求返修一次（保留旧候选）')+'</button>':'';
+  const qualityHtml='<div class="air-candidate-quality"><b>'+(blocked?'需返修，暂不可接受':quality?.status==='passed'?'结构检查通过，事实仍须人工核对':'待核实；未被认定为成稿达标')+'</b>'+issuesHtml+(candidate.instruction?'<div class="air-candidate-instruction"><b>本稿修订说明：</b>'+escapeHtml(candidate.instruction)+'</div>':'')+(candidate.repairError?'<div role="alert">上次返修未完成：'+escapeHtml(candidate.repairError)+'</div>':'')+repairHtml+'</div>';
   return '<div class="air-section-candidate wf-candidate"><b>AI修改候选稿 · 尚未覆盖正式正文</b>'
-    +'<button type="button" class="btn ghost air-candidate-preview-toggle" data-cn="'+chapter.cn+'" data-si="'+si+'">'+(expanded?'收起候选稿对比':'展开候选稿对比')+'</button>'
+    +originHtml+countHtml+qualityHtml
+    +'<button type="button" class="btn ghost air-candidate-preview-toggle" '+attrs+' data-expanded="'+expanded+'" aria-expanded="'+expanded+'">'+(expanded?'收起候选稿对比':'展开候选稿对比')+'</button>'
     +(expanded?ProjectWorkflow.simpleDiffHtml(candidate.before,candidate.after):'<div class="air-section-empty-state candidate">候选正文已保留；需要核对时再展开，减少长报告页面卡顿。</div>')
-    +'<div class="wf-candidate-actions"><button type="button" class="btn air-candidate-accept" data-cn="'+chapter.cn+'" data-si="'+si+'">接受修改</button>'
-    +(canAdopt?'<button type="button" class="btn ghost air-candidate-adopt" data-cn="'+chapter.cn+'" data-si="'+si+'">接受并采纳为后台逻辑</button>':candidate.logicRevision?'<span>已使用正式后台逻辑，无需再次采纳</span>':'')
+    +'<div class="wf-candidate-actions"><button type="button" class="btn air-candidate-accept" '+(blocked?'disabled ':'')+'data-cn="'+chapter.cn+'" data-si="'+si+'">接受修改</button>'
+    +(canAdopt?'<button type="button" class="btn ghost air-candidate-adopt" '+(blocked?'disabled ':'')+'data-cn="'+chapter.cn+'" data-si="'+si+'">接受并采纳为后台逻辑</button>':candidate.logicRevision?'<span>已使用正式后台逻辑，无需再次采纳</span>':'')
     +'<button type="button" class="btn ghost air-candidate-reject" data-cn="'+chapter.cn+'" data-si="'+si+'">拒绝</button></div></div>';
 }
 function airGenerationSkeletonHtml(){
   return '<span class="skel" style="width:94%"></span><span class="skel" style="width:99%"></span><span class="skel" style="width:70%"></span>';
 }
-function airEmptySectionBodyHtml(section){
+async function airRepairCandidate(cn,si,button){
+  const info=airFindChapterSection(cn,si);if(!info||!info.section.pendingRevision)return;
+  if(info.section.locked)return alert('本节已锁定，未启动返修');
+  if(button?.disabled||airCandidateRepairsInFlight.has(info.section.pendingRevision))return;
+  let context;try{context=airCaptureReportMutation(info);}catch(error){return alert(error.message);}
+  const candidate=info.section.pendingRevision,candidateToken=ProjectWorkflow.candidateToken(candidate),quality=reportReviewCandidate(info.chapter,info.section);
+  const errors=(quality?.issues||[]).filter(i=>i.severity==='error');
+  if(!errors.length)return alert('没有需要定向返修的结构问题，请人工核对事实');
+  if(errors.some(i=>!i.repairable))return alert('存在缺失事实或必要表格等不可自动修复问题。请先核对材料或修正计划；不会让AI猜测补齐。');
+  const input=button?.closest?.('.air-section-candidate')?.querySelector('.air-candidate-repair-instruction');
+  const requested=input?input.value:prompt('请确认或填写本次具体修订要求。仅生成一次候选，原稿保留，不会自动接受。',candidate.repairInstruction||airCandidateRepairInstruction());
+  if(requested===null)return;
+  const instruction=String(requested||'').trim();if(!instruction)return alert('请填写本次修订要求，未启动返修');
+  if(instruction.length>2000)return alert('修订要求最多2000字，未启动返修');
+  if(!confirm('按上述要求返修一次，保留分析深度、标题层级及必要表格。原候选留存历史，正式正文不变，不会自动接受。继续？'))return;
+  airCandidateRepairsInFlight.add(candidate);
+  const originalLabel=button?.textContent;if(button){button.disabled=true;button.textContent='正在按要求返修一次，原候选保留…';}if(input)input.disabled=true;
+  let replacementContext=null;
+  try{
+    await airGuardReportMutation(context);
+    if(info.section.locked)throw new Error('本节已锁定，未启动返修');
+    candidate.repairInstruction=instruction;delete candidate.repairError;
+    const text=await reportDurableSectionCall(info.chapter,info.section,'【用户确认的本次修订要求】\n'+instruction+'\n'+airCandidateRepairInstruction()+'\n'+ReportCompletionContract.repairPrompt(quality,candidate.completionContract||info.section.completionContract),'【待返修候选全文】\n'+candidate.after,null,{candidateRepair:candidate});
+    await airGuardReportMutation(context);
+    if(!ProjectWorkflow.replaceCandidate(info.section,text,'按用户确认要求定向返修一次：'+instruction,{outputPolicyVersion:ReportOutputPolicy.contentVersion,logicRevision:candidate.logicRevision},candidateToken))throw new Error('候选已变化或锁定，后台结果保留，未覆盖');
+    delete info.section.candidateGenerationFailure;
+    replacementContext=airCaptureReportMutation(info);
+    airCollapsedCandidateKeys.delete(airCandidateKey(info.chapter,si));
+    const saved=await persistReportDraft();airCheckReportMutation(replacementContext);airSaveState();airRefreshSection(cn,si);
+    if(!saved.ok)alert('返修结果尚未保存成功，请勿刷新，重试保存');
+  }catch(error){
+    let retainedBlocked=false;
+    try{
+      await airGuardReportMutation(context);
+      if(info.section.locked)throw new Error('本节已锁定，返修结果未覆盖');
+      if(error.code==='REPORT_CANDIDATE_QUALITY_BLOCKED'&&String(error.candidateText||'').trim()){
+        const next=ProjectWorkflow.replaceCandidate(info.section,error.candidateText,'按用户确认要求定向返修一次：'+instruction,{outputPolicyVersion:ReportOutputPolicy.contentVersion,logicRevision:candidate.logicRevision},candidateToken);
+        if(!next)throw new Error('候选已变化或锁定，返修结果未覆盖');
+        if(error.candidateContract)next.completionContract=ProjectWorkflow.clone(error.candidateContract);
+        if(error.resultQuality){next.serverQuality=ProjectWorkflow.clone(error.resultQuality);next.quality=ProjectWorkflow.clone(error.resultQuality);}
+        delete info.section.candidateGenerationFailure;
+        next.repairInstruction=instruction;next.repairError=String(error.message||error);
+        retainedBlocked=true;
+        airCollapsedCandidateKeys.delete(airCandidateKey(info.chapter,si));
+        replacementContext=airCaptureReportMutation(info);saveDraft();airSaveState();
+        const saved=await persistReportDraft();airCheckReportMutation(replacementContext);airRefreshSection(cn,si);
+        if(!saved.ok)alert('未通过检查的新返修候选尚未保存成功，请勿刷新，重试保存');
+      }else{candidate.repairError=String(error.message||error);saveDraft();airSaveState();}
+    }catch(_){}
+    alert((retainedBlocked?'本次返修仍未通过检查，新稿及旧候选历史均已保留，可展开核对；正式正文未改：':replacementContext?'返修新候选及旧候选历史已保留在当前页面，但保存未完成，请勿刷新并重试保存：':'候选返修未完成，正式正文未被自动覆盖；原候选保留：')+error.message);
+  }
+  finally{airCandidateRepairsInFlight.delete(candidate);if(input?.isConnected)input.disabled=false;if(button?.isConnected){button.disabled=false;button.textContent=originalLabel||'按上述要求返修一次（保留旧候选）';}try{airCheckReportMutation(replacementContext||context);airRefreshSection(cn,si);}catch(_){}}
+}
+function airEmptySectionBodyHtml(section,chapter,si){
   if(section&&section.pendingRevision)return '<div class="air-section-empty-state candidate">候选稿已生成，等待接受后成为当前工作稿。请在下方查看并接受或拒绝。</div>';
+  if(section?.generationFailure){
+    chapter=chapter||(typeof chapters==='undefined'?[]:chapters).find(c=>c.sections.includes(section));si=si??chapter?.sections.indexOf(section);
+    return '<div class="air-section-empty-state" role="status">生成失败：'+escapeHtml(section.generationFailure.message)+(chapter?' <button class="air-retry-btn" data-cn="'+escapeHtml(String(chapter.cn))+'" data-si="'+si+'">只重试本节</button>':'')+'</div>';
+  }
   if(section&&section.staleKind==="logic"&&section.syncStatus==="stale")return '<div class="air-section-empty-state">本节受最新逻辑影响，尚未生成候选稿；可点击上方“生成受影响候选稿”。</div>';
   return '<div class="air-section-empty-state">本节尚未生成正文。</div>';
 }
 function airRenderCompletedSection(chapter,section,si){
   const el=document.getElementById('sec_'+chapter.cn+'_'+si);if(!el)return;
   const ready=reportHasVisibleBody(section),hasCandidate=!!section.pendingRevision;
-  el.dataset.status=ready?'done':hasCandidate?'candidate':'pending';el.classList.toggle('pending',!ready);el.classList.remove('gen');
+  el.dataset.status=ready?'done':hasCandidate?'candidate':section.generationFailure?'failed':'pending';el.classList.toggle('pending',!ready);el.classList.remove('gen');
   // The authoritative section is in chapters, never in this preview placeholder.
   // Late generation results remain visible when the section is brought on screen.
   if(el.dataset.airDeferred==='1')return;
   const title=el.querySelector('h4');if(title){title.querySelector('.air-trust-badge')?.remove();title.querySelector('.done-stamp')?.remove();title.querySelector('.air-candidate-stamp')?.remove();if(ready){title.insertAdjacentHTML('beforeend','<span class="done-stamp">已拟</span>');title.insertAdjacentHTML('beforeend',airTrustBadgeHtml(section));}else if(hasCandidate)title.insertAdjacentHTML('beforeend','<span class="air-candidate-stamp">候选待确认</span>');}
   const tools=el.querySelector('.air-section-tools');
   if(ready){if(tools)tools.outerHTML=airSectionToolsHtml(chapter,section,si);else el.querySelector('.air-section-material')?.insertAdjacentHTML('afterend',airSectionToolsHtml(chapter,section,si));}else tools?.remove();
-  const body=el.querySelector('.body');if(body)body.innerHTML=ready?renderContent(airSectionDisplayContent(chapter,section)):airEmptySectionBodyHtml(section);
+  const body=el.querySelector('.body');if(body)body.innerHTML=ready?airSectionPreviewHtml(chapter,section,si):airEmptySectionBodyHtml(section,chapter,si);
   el.querySelector(':scope > .rpt-logic-note')?.remove();if(ready||hasCandidate)el.querySelector('h4')?.insertAdjacentHTML('afterend',renderSectionLogicHtml(chapter,section,true));
   el.querySelector('.air-section-candidate')?.remove();
   if(body)body.insertAdjacentHTML('afterend',airCandidateHtml(chapter,section,si));
@@ -1170,8 +1495,9 @@ function airHandleTextSelection(e){
 }
 async function airRewriteSection(cn,si,btn){
   const info=airFindChapterSection(cn,si);if(!info||!window.ProjectWorkflow)return;
+  if(btn.disabled)return;
   btn.disabled=true;const old=btn.textContent;btn.textContent='重写中…';
-  try{const text=await generateSection(info.chapter,info.section);ProjectWorkflow.setCandidate(info.section,text,'重写本节',{logicRevision:reportLogicRevision(info.chapter,info.section,'根据现有逻辑重新生成本节')});saveDraft();airSaveState();airRefreshSection(cn,si);}
+  try{const context=airCaptureReportMutation(info);if(info.section.locked||info.section.pendingRevision)throw new Error('请先处理已有候选稿或解除本节锁定');await airGuardReportMutation(context);const text=await generateSection(info.chapter,info.section);await airGuardReportMutation(context);airStoreNewCandidate(info,text,'重写本节',{logicRevision:reportLogicRevision(info.chapter,info.section,'根据现有逻辑重新生成本节')});saveDraft();airSaveState();airRefreshSection(cn,si);}
   catch(e){alert('重写失败：'+e.message);}finally{btn.disabled=false;btn.textContent=old;}
 }
 function airOpenRevisionModal(cn,si,selected){
@@ -1187,47 +1513,153 @@ function airOpenRevisionModal(cn,si,selected){
 }
 async function airRunRevision(cn,si,selected){
   const info=airFindChapterSection(cn,si),btn=document.getElementById('airRevisionSubmit'),input=document.getElementById('airRevisionInstruction'),out=document.getElementById('airRevisionOutput');
-  if(!info||!btn||!input)return;const instruction=input.value.trim();if(!instruction){input.focus();return;}
+  if(!info||!btn||!input||btn.disabled)return;const instruction=input.value.trim();if(!instruction){input.focus();return;}
   btn.disabled=true;btn.textContent='生成中…';if(out)out.textContent='AI正在形成候选稿…';
   try{
+    const context=airCaptureReportMutation(info);if(info.section.locked||info.section.pendingRevision)throw new Error('请先处理已有候选稿或解除本节锁定');await airGuardReportMutation(context);
     let candidate;
     if(selected){
       const replacement=await reviseSectionExcerpt(info.chapter,info.section,selected,instruction,partial=>{if(out)out.textContent=partial;});
+      await airGuardReportMutation(context);
+      const contract=ProjectWorkflow.generatedContract(info.section,replacement),inputPlanId=ProjectWorkflow.generatedInputPlanId(info.section,replacement);
+      if(!contract||!inputPlanId||inputPlanId!==reportCandidateInputIdentity())throw Error('局部修改缺少有效的本次生成凭据，未创建候选，请重试');
       const current=info.section.editedHtml?blocksToSource(info.section.editedHtml):(info.section.content||'');
       const merged=ProjectWorkflow.replaceSelectedText(current,selected,replacement);if(!merged.ok)throw new Error(merged.error);candidate=merged.text;
+      ProjectWorkflow.rememberGeneratedContract(info.section,candidate,contract,{completionInputPlanId:inputPlanId,completionFinancialSource:ProjectWorkflow.generatedFinancialSource(info.section,replacement)});
     }else candidate=await reviseSection(info.chapter,info.section,instruction,partial=>{if(out)out.textContent=partial;});
-    ProjectWorkflow.setCandidate(info.section,candidate,(selected?'局部修改：':'整节修改：')+instruction,{logicRevision:reportLogicRevision(info.chapter,info.section,instruction)});saveDraft();airSaveState();document.getElementById('airRevisionModal')?.remove();airRefreshSection(cn,si);
+    await airGuardReportMutation(context);
+    airStoreNewCandidate(info,candidate,(selected?'局部修改：':'整节修改：')+instruction,{logicRevision:reportLogicRevision(info.chapter,info.section,instruction)});saveDraft();airSaveState();document.getElementById('airRevisionModal')?.remove();airRefreshSection(cn,si);
     try{fetch('/api/revlog',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},authHeaders()),body:JSON.stringify({chapter:info.chapter.name,section:info.section.t,instruction,scope:selected?'selection':'section'})});}catch(e){}
   }catch(e){if(out)out.innerHTML='<span style="color:var(--seal-red)">修改失败：'+escapeHtml(e.message)+'</span>';btn.disabled=false;btn.textContent='生成候选稿';}
 }
 async function airResolveRevision(cn,si,action){
   const info=airFindChapterSection(cn,si);if(!info||!window.ProjectWorkflow)return;
+  try{await airGuardReportMutation(airCaptureReportMutation(info));}catch(error){return alert(error.message);}
+  const scope=airCaptureReportMutation();let revision=null;
+  if(info.section.locked)return alert('本节已锁定，未修改正文或候选稿');
   if(action==='accept'||action==='adopt'){
-    const revision=info.section.pendingRevision?.logicRevision;
-    ProjectWorkflow.acceptCandidate(info.section);ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta('在AI可研预览接受AI修改'));
-    if(action==='adopt'){try{const result=await adoptReportLogicRevision(info.chapter,info.section,revision);alert(result.message);}catch(error){alert('正文已接受，但逻辑采纳失败：'+error.message);}}
+    revision=info.section.pendingRevision?.logicRevision;
+    reportReviewCandidate(info.chapter,info.section);
+    const quality=ProjectWorkflow.refreshCandidateQuality(info.section);
+    if(quality?.status==='unverified'&&!confirm('该候选仍有待核实项：'+(quality.issues||[]).map(x=>x.message).join('；')+'。机械检查不代表事实认证。请核对原稿与候选的数字、表格后再接受，是否继续？'))return;
+    if(!ProjectWorkflow.acceptCandidate(info.section)){airRefreshSection(cn,si);return alert('候选稿未被接受：小节可能已锁定，或成稿检查未通过。原文和候选均保留，请查看检查结果。');}
+    ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta('在AI可研预览接受AI修改'));
   }
   else if(action==='reject')ProjectWorkflow.rejectCandidate(info.section);
   else if(action==='undo'){if(!ProjectWorkflow.undoSection(info.section))return;ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta('在AI可研预览撤销修改'));}
-  const saved=await persistReportDraft();airSaveState();airRefreshSection(cn,si);airApplyDocMaterialStatuses();
-  if(!saved.ok)alert("当前修改尚未保存成功，请勿刷新或关闭页面。点击顶部保存状态重试。");
+  try{
+    const saved=await persistReportDraft();
+    airCheckReportMutation(scope);airSaveState();airRefreshSection(cn,si);airApplyDocMaterialStatuses();
+    if(!saved.ok){alert("当前修改尚未保存成功，请勿刷新或关闭页面。点击顶部保存状态重试。");return;}
+    if(action==='adopt'){try{const result=await adoptReportLogicRevision(info.chapter,info.section,revision);alert(result.message);}catch(error){alert('正文已接受并保存，但逻辑采纳失败：'+error.message);}}
+  }catch(error){alert('修改后保存或页面身份校验未完成：'+error.message+'。未继续采纳逻辑，请确认原项目保存状态。');}
 }
 let airAcceptCandidatesBusy=false;
+let airAcceptCandidatesProgress=null;
+let airAcceptCandidatesProgressContext=null;
+function airAcceptCandidatesProgressVisible(){
+  const scope=airAcceptCandidatesProgressContext;
+  if(!scope)return false;
+  return scope.chapters===chapters&&(scope.research?window.ResearchUI?.active()&&ResearchUI.accepts(scope.research):!window.ResearchUI?.active()&&(typeof currentProjectId==='undefined'?null:currentProjectId)===scope.projectId);
+}
+function airShowAcceptCandidatesProgress(message){
+  airAcceptCandidatesProgress=message;
+  // A detached/broken preview must never prevent accepting work from being saved.
+  try{
+    const bar=typeof document==='undefined'?null:document.getElementById('airDocPane')?.querySelector?.('.air-doc-logicbar');
+    if(bar)bar.outerHTML=airDocLogicBarHtml();
+    return true;
+  }catch(error){return false;}
+}
+function airAcceptCandidatesYield(){return new Promise(resolve=>setTimeout(resolve,0));}
+function airCandidateBatchSummary(rows){
+  rows=rows||chapters.filter(c=>c.checked!==false).flatMap(c=>(c.sections||[]).map((s,si)=>({c,s,si})));
+  const summary={pending:0,eligible:0,blocked:0,locked:0,failed:0,problems:[]};
+  rows.forEach(({c,s,si})=>{
+    const candidate=s.pendingRevision,quality=candidate?.quality;
+    if(candidate){summary.pending++;if(s.locked)summary.locked++;else if(quality?.status==='blocked')summary.blocked++;else summary.eligible++;}
+    if(s.candidateGenerationFailure)summary.failed++;
+    if(!s.candidateGenerationFailure&&(!candidate||(!s.locked&&quality?.status!=='blocked')))return;
+    const serverIssues=candidate?.serverQuality?.issues||[];
+    const issues=[...(s.candidateGenerationFailure?[{...s.candidateGenerationFailure,checkSource:'本轮生成失败'}]:[]),...(quality?.issues||[]).filter(issue=>issue.severity==='error').map(issue=>({...issue,checkSource:serverIssues.some(prior=>prior.code===issue.code&&prior.message===issue.message)?'生成时检查（原记录保留）':'当前检查'}))];
+    if(s.locked&&candidate)issues.unshift({code:'candidate-locked',message:'本节已锁定；候选和原文保持不变。',checkSource:'锁定状态'});
+    if(!issues.length)issues.push({code:'candidate-quality-blocked',message:'候选未通过检查，请打开本节查看检查结果；原文和候选均保留。'});
+    summary.problems.push({cn:c.cn,si:si??c.sections.indexOf(s),title:c.name+' / '+s.t,issues:Array.from(new Map(issues.map(issue=>[(issue.code||'')+'|'+issue.message,issue])).values())});
+  });
+  const inherited=window.ProjectWorkflow?.currentCandidateBatchAcceptance?.(projectWorkflow,chapters);
+  for(const problem of inherited?.problems||[]){
+    if(summary.problems.some(row=>row.title===problem.sectionKey))continue;
+    const c=chapters.find(c=>c.checked!==false&&(c.sections||[]).some(s=>c.name+' / '+s.t===problem.sectionKey));
+    const si=c?c.sections.findIndex(s=>c.name+' / '+s.t===problem.sectionKey):-1;
+    summary.problems.push({cn:c?.cn,si,title:problem.sectionKey,issues:c?.sections[si]?.pendingRevision?[{code:'candidate-awaiting-acceptance',message:'已有新的候选稿，仍待你核对并接受；尚未计为本轮完成。'}]:(problem.issues?.length?problem.issues:[{code:'candidate-update-unresolved',message:'本轮更新仍未确认，旧正文保留。'}])});
+  }
+  return summary;
+}
+function airCandidateProblemListHtml(){
+  const summary=airCandidateBatchSummary();if(!summary.problems.length)return '';
+  const attr=value=>escapeHtml(String(value??'')).replace(/"/g,'&quot;');
+  return '<details class="air-candidate-problems" open style="flex-basis:100%;width:100%;padding:8px 0"><summary>候选问题清单 · '+summary.problems.length+' 节待处理（正文与候选均保留）</summary><p>以下小节没有完成本轮更新。可接受的其他小节可先接受，但这不代表整篇新报告已经完成。</p><ol>'+summary.problems.map(row=>'<li><button type="button" class="air-doc-tool air-candidate-issue-locate" data-cn="'+attr(row.cn)+'" data-si="'+row.si+'">定位：'+escapeHtml(row.title)+'</button><ul>'+row.issues.map(issue=>'<li>'+(issue.checkSource?'['+escapeHtml(issue.checkSource)+'] ':'')+escapeHtml(issue.message||issue.code||'请核对本节')+'</li>').join('')+'</ul></li>').join('')+'</ol></details>';
+}
+function airLocateCandidateIssue(cn,si){
+  const info=airFindChapterSection(cn,si);if(!info)return;
+  const key=airCandidateKey(info.chapter,si);airExpandedCandidateKeys.add(key);airCollapsedCandidateKeys.delete(key);
+  const el=document.getElementById('sec_'+info.chapter.cn+'_'+si);if(!el)return;
+  airHydratePreviewSection(el);airRefreshSection(info.chapter.cn,si);el.scrollIntoView({behavior:'smooth',block:'start'});
+}
 async function airAcceptAllCandidates(){
   if(airAcceptCandidatesBusy)return;
   if(!window.ProjectWorkflow?.acceptAllCandidates)return;
-  const pending=chapters.filter(c=>c.checked!==false).flatMap(c=>c.sections||[]).filter(s=>s.pendingRevision),unlocked=pending.filter(s=>!s.locked);
-  if(!unlocked.length)return alert(pending.length?"现有候选稿均已锁定，需要先解除锁定。":"当前没有待确认的候选稿。");
-  const locked=pending.length-unlocked.length;
-  if(!confirm("将一次接受 "+unlocked.length+" 个候选稿并更新当前工作稿"+(locked?"；另有 "+locked+" 个锁定候选稿不会修改":"")+"。是否继续？"))return;
   airAcceptCandidatesBusy=true;
+  let accepted=0;
   try{
+  const context=airCaptureReportMutation();
+  airAcceptCandidatesProgressContext=context;
+  const rows=chapters.filter(c=>c.checked!==false).flatMap(c=>(c.sections||[]).filter(s=>s.pendingRevision).map(s=>({c,s,locked:!!s.locked,context:airCaptureReportMutation({chapter:c,section:s})})));
+  const check=()=>{
+    airCheckReportMutation(context);
+    const now=chapters.filter(c=>c.checked!==false).flatMap(c=>c.sections||[]).filter(s=>s.pendingRevision);
+    if(now.length!==rows.length||rows.some(row=>!now.includes(row.s)||!!row.s.locked!==row.locked))throw new Error('候选范围或锁定状态已变化，请重新确认；原稿与候选保留');
+    rows.forEach(row=>airCheckReportMutation(row.context));
+  };
+  airShowAcceptCandidatesProgress('正在核查候选稿 0/'+rows.length+'；原稿保留，请勿刷新');
+  await airAcceptCandidatesYield();await airGuardReportMutation(context);check();
+  // Batch-local plan only: never cache across project/round or rule changes.
+  const plan=window.ReportCompletionContract&&typeof reportCompletionPlan==='function'?reportCompletionPlan():null;
+  for(let i=0;i<rows.length;i++){
+    const {c,s}=rows[i];reportReviewCandidate(c,s,plan);
+    if(!window.ReportCompletionContract)ProjectWorkflow.refreshCandidateQuality(s);
+    if((i+1)%4===0||i===rows.length-1){
+      airShowAcceptCandidatesProgress('正在核查候选稿 '+(i+1)+'/'+rows.length+'；原稿保留，请勿刷新');
+      await airAcceptCandidatesYield();check();
+    }
+  }
+  const pending=rows.map(row=>row.s);
+  const locked=pending.filter(s=>s.locked).length,blocked=pending.filter(s=>!s.locked&&s.pendingRevision.quality?.status==='blocked').length;
+  const eligible=pending.filter(s=>!s.locked&&s.pendingRevision.quality?.status!=='blocked'),unverified=eligible.filter(s=>s.pendingRevision.quality?.status!=='passed').length;
+  const batchSummary=airCandidateBatchSummary(),problems=batchSummary.problems,problemText=problems.length?'\n\n未完成更新的小节（原文保留，完整原因见“候选问题清单”）：\n'+problems.map(row=>row.title+'：'+(row.issues[0]?.message||'请核对本节')).join('\n'):'';
+  const projectedLength=typeof airReportLengthDelivery==='function'?airReportLengthDelivery(new Set(eligible)):null;
+  const projectedText=projectedLength?.applicable?'\n\n接受后预计正文 '+projectedLength.actual+' 字 / 确认目标 '+projectedLength.target+' 字。'+(projectedLength.status==='within-range'?'篇幅在确认范围内，内容仍须核对。':'仍未达到确认篇幅；接受有用正文不等于整篇达标。'):'';
+  if(!eligible.length){airShowAcceptCandidatesProgress(null);return alert((pending.length?'当前没有可接受的候选稿：'+locked+' 个已锁定，'+blocked+' 个未通过成稿检查。原稿和候选均保留。':'当前没有待确认的候选稿。')+problemText);}
+  if(!confirm('将一次接受 '+eligible.length+' 个候选稿并更新当前工作稿；'+blocked+' 个未通过检查、'+locked+' 个锁定候选保持不变。'+(batchSummary.failed?batchSummary.failed+' 节本轮生成失败，原稿与已有候选均保留。':'')+(problems.length?'这是部分更新，未通过小节仍保留旧正文，整篇本轮更新尚未完成。':'')+(unverified?'其中 '+unverified+' 个仍有待核实项，须核对数字与表格差异。':'')+'机械检查不代表事实认证。是否继续？'+problemText+projectedText)){airShowAcceptCandidatesProgress(null);return;}
+  await airGuardReportMutation(context);check();
+  if(plan&&reportCompletionPlan().planId!==plan.planId)throw new Error('成稿规则或项目资料已变化，请重新核查；原稿与候选保留');
+  airShowAcceptCandidatesProgress('正在接受 '+eligible.length+' 个候选稿；请勿重复点击或刷新');
   const result=ProjectWorkflow.acceptAllCandidates(chapters);
-  const version=result.accepted?ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("批量接受 "+result.accepted+" 个候选稿")):null;
-  const saved=await persistReportDraft();airSaveState();airBuildDocPane();
-  if(!saved.ok){alert("已在当前页面接受 "+result.accepted+" 个候选稿，但本机和项目库均未保存成功！请勿刷新或关闭页面。点击顶部保存状态可重试保存；当前正文和版本仍保留在页面中。");return;}
-  alert("已批量接受 "+result.accepted+" 个候选稿"+(version?"，并保存为报告第"+version.version+"版，可在右上角“查看版本”进入":"")+(saved.remote?"（项目库已确认保存）":"（本机已保存，项目库未同步；请使用此浏览器恢复）")+(result.locked?"；"+result.locked+" 个锁定候选稿保持不变":"")+"。");
-  }finally{airAcceptCandidatesBusy=false;}
+  accepted=result.accepted;
+  const remainder=airCandidateBatchSummary(),unresolved=remainder.problems.length,reason=(unresolved?'部分更新：':'')+'批量接受 '+result.accepted+' 个候选稿'+(unresolved?'，'+unresolved+' 节仍保留旧稿，整篇本轮更新尚未完成':'');
+  const inherited=ProjectWorkflow.currentCandidateBatchAcceptance?.(projectWorkflow,chapters);
+  const batchMeta={schemaVersion:1,status:unresolved?'partial':'scope-updated',startedAt:inherited?.startedAt||new Date().toISOString(),accepted:result.accepted,requested:rows.length,blocked:result.blocked||0,locked:result.locked||0,failed:remainder.failed,unresolved,problems:remainder.problems.map(row=>({sectionKey:row.title,issues:row.issues.map(issue=>({code:issue.code||null,message:String(issue.message||''),checkSource:issue.checkSource||null}))})),resolvedSections:inherited?.resolvedSections||[]};
+  const version=result.accepted?ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{...currentReportVersionMeta(reason),candidateBatchAcceptance:batchMeta,...(typeof airLengthDeliveryMeta==='function'?{lengthDelivery:airLengthDeliveryMeta(airReportLengthDelivery())}:{})}):null;
+  airShowAcceptCandidatesProgress('已接受 '+accepted+' 个候选稿，正在保存；请勿刷新');
+  // Start durable persistence before rendering; preview errors must not discard the save.
+  const saving=persistReportDraft().catch(error=>({ok:false,local:false,remote:false,error}));
+  let previewError=null;
+  try{airSaveState();airBuildDocPane();}catch(error){previewError=error;}
+  const saved=await saving;airCheckReportMutation(context);
+  if(!saved.ok){airShowAcceptCandidatesProgress('已接受 '+accepted+' 个，但尚未保存成功；请勿刷新，点击顶部保存状态重试');alert("已在当前页面接受 "+result.accepted+" 个候选稿，但本机和项目库均未保存成功！请勿刷新或关闭页面。点击顶部保存状态可重试保存；当前正文和版本仍保留在页面中。");return;}
+  airShowAcceptCandidatesProgress('已接受 '+accepted+' 个候选稿'+(unresolved?'，'+unresolved+' 节仍保留旧稿，本轮更新未完成':'')+' · '+(saved.remote?'项目库已保存':'本机已保存，项目库未同步'));
+  alert("已批量接受 "+result.accepted+" 个候选稿"+(version?"，并保存为报告第"+version.version+"版，可在右上角“查看版本”进入":"")+(saved.remote?"（项目库已确认保存）":"（本机已保存，项目库未同步；请使用此浏览器恢复）")+(result.locked?"；"+result.locked+" 个锁定候选稿保持不变":"")+(result.blocked?"；"+result.blocked+" 个未通过检查的候选保留待返修":"")+(unresolved?'。这是部分更新，不是整篇新版完成；请查看上方“候选问题清单”，定位后只处理未通过小节':'')+(previewError?'；预览未更新，可在保存确认后重新打开报告':'')+"。");
+  }catch(error){airShowAcceptCandidatesProgress(accepted?'已接受 '+accepted+' 个，请核对原项目保存状态；未继续操作':'核查中止，原稿与候选保留：'+error.message);alert((accepted?'正文已接受，保存或页面状态未能完成，请核对原项目保存状态：':'候选稿未能完成接受：')+error.message);}finally{airAcceptCandidatesBusy=false;airShowAcceptCandidatesProgress(airAcceptCandidatesProgress);}
 }
 function airFallbackSectionLogic(info){
   return {id:"project-"+info.chapter.cn+"-"+info.si,sourceNo:"",title:info.section.t,requiredSources:"按本节论证需要取得项目事实、测算结果和适用依据",sourceKinds:[],dataRequirement:null,writingLogic:"按本节标题、项目事实和已核实依据完成论证",outputForm:"文字",missingPolicy:"资料缺失时标注待补，不得虚构",changeReason:""};
@@ -1249,21 +1681,24 @@ async function airOpenSectionLogicEditor(cn,si){
   document.body.insertAdjacentHTML("beforeend",'<div class="air-modal-overlay" id="airSectionLogicModal"><div class="air-modal-card air-section-logic-modal"><div class="air-modal-head"><div><b>调整本节生成逻辑 · '+escapeHtml(info.section.t)+'</b><span>仅作用于当前项目和本小节。保存后可生成候选稿，但不会直接改后台规则，也不会进入下载的 Word。</span></div><button type="button" class="air-modal-close">×</button></div><div class="air-logic-edit-list">'+(rows||'<p>本节暂未匹配到可编辑规则。</p>')+'</div><div class="air-enhance-guard">安全边界：这里先形成项目级临时逻辑；正文须人工接受。若以后选择“接受并采纳为后台逻辑”，仍需通过自动评测与管理员权限。</div><div class="air-modal-actions"><button type="button" class="btn ghost air-logic-reset">恢复后台逻辑</button><button type="button" class="btn ghost air-modal-close">取消</button><button type="button" class="btn air-logic-save">仅保存逻辑</button><button type="button" class="btn air-logic-generate">保存并生成候选稿</button></div></div></div>');
   const modal=document.getElementById("airSectionLogicModal"),close=()=>modal?.remove();
   modal.querySelectorAll(".air-modal-close").forEach(button=>button.onclick=close);
-  modal.querySelector(".air-logic-reset").onclick=()=>{info.section.logicSnapshot=reportSectionLogicSnapshot(info.chapter,info.section,backendRules);saveDraft();airSaveState();close();airRefreshSection(cn,si);};
+  modal.querySelector(".air-logic-reset").onclick=async()=>{try{await airGuardReportMutation(airCaptureReportMutation(info));if(info.section.locked)throw new Error('本节已锁定');info.section.logicSnapshot=reportSectionLogicSnapshot(info.chapter,info.section,backendRules);saveDraft();airSaveState();close();airRefreshSection(cn,si);}catch(error){alert(error.message);}};
   modal.querySelector(".air-logic-save").onclick=()=>airSaveSectionLogicEditor(info,cn,si,false);
   modal.querySelector(".air-logic-generate").onclick=()=>airSaveSectionLogicEditor(info,cn,si,true);
 }
 async function airSaveSectionLogicEditor(info,cn,si,generateCandidate){
   const modal=document.getElementById("airSectionLogicModal");if(!modal)return;
+  const button=modal.querySelector(generateCandidate?'.air-logic-generate':'.air-logic-save');if(button.disabled)return;
+  let context;try{context=airCaptureReportMutation(info);if(info.section.locked||(generateCandidate&&info.section.pendingRevision))throw new Error('请先处理已有候选稿或解除本节锁定');button.disabled=true;await airGuardReportMutation(context);}catch(error){button.disabled=false;return alert(error.message);}
   const base=airEnsureEditableLogicSnapshot(Object.assign({si},info),reportSectionLogicSnapshot(info.chapter,info.section)),rules=[...modal.querySelectorAll(".air-logic-edit-row")].map((row,index)=>Object.assign({},base.rules?.[index]||{}, {writingLogic:row.querySelector(".air-logic-writing").value.trim(),outputForm:row.querySelector(".air-logic-output").value.trim()||"文字",changeReason:"当前项目人工调整"}));
-  if(!rules.length)return alert("本节暂未匹配到生成逻辑，不能保存。");
+  if(!rules.length){button.disabled=false;return alert("本节暂未匹配到生成逻辑，不能保存。");}
   info.section.logicSnapshot=Object.assign({},base,{rules,localOverride:true,updatedAt:new Date().toISOString(),changeReason:"当前项目人工调整"});
   saveDraft();airSaveState();
   if(!generateCandidate){modal.remove();airRefreshSection(cn,si);return;}
-  const button=modal.querySelector(".air-logic-generate");button.disabled=true;button.textContent="正在生成候选稿…";
+  button.textContent="正在生成候选稿…";
   try{
     const text=await generateSection(info.chapter,info.section);
-    ProjectWorkflow.setCandidate(info.section,text,"按项目级生成逻辑重新起草",{logicRevision:info.section.logicSnapshot});
+    await airGuardReportMutation(context);
+    airStoreNewCandidate(info,text,"按项目级生成逻辑重新起草",{logicRevision:info.section.logicSnapshot});
     saveDraft();airSaveState();modal.remove();airRefreshSection(cn,si);
   }catch(error){button.disabled=false;button.textContent="保存并生成候选稿";alert("候选稿生成失败："+error.message);}
 }
@@ -1282,30 +1717,37 @@ function airChapterSyncLevel(chapter){
 }
 function airChapterSyncTitle(level){return level==="ok"?"本章逻辑已同步":level==="missing"?"本章仍有受影响小节待生成或待处理":"本章候选稿待确认";}
 function airDocLogicBarHtml(){
-  const state=airReportLogicImpactSummary(),candidates=chapters.filter(c=>c.checked!==false).flatMap(c=>c.sections||[]).filter(s=>s.pendingRevision&&!s.locked).length,summary=state.total?("已标记 "+state.total+" 个受影响小节"+(state.pending?"，"+state.pending+" 个已有候选稿":"")+(state.locked?"，"+state.locked+" 个已锁定":"")):"录入经理意见后，只标记真正受影响的小节";
+  const state=airReportLogicImpactSummary(),pending=chapters.filter(c=>c.checked!==false).flatMap(c=>c.sections||[]).filter(s=>s.pendingRevision),inputPlanId=pending.some(s=>s.pendingRevision.completionInputPlanId)&&typeof reportCandidateInputIdentity==='function'?reportCandidateInputIdentity():null;
+  const origin=s=>window.ProjectWorkflow?.candidateOrigin?.(s.pendingRevision,{inputPlanId,outputPolicyVersion:window.ReportOutputPolicy?.contentVersion})?.status||'legacy';
+  const legacy=pending.filter(s=>origin(s)!=='current').length,candidates=pending.filter(s=>!s.locked&&origin(s)==='current').length;
+  const summary=(state.total?'已标记 '+state.total+' 个受影响小节':'录入经理意见后，只标记真正受影响的小节')+(pending.length?'；已保存候选 '+pending.length+' 个'+(legacy?'（其中 '+legacy+' 个历史/旧计划候选，非当前新版）':'，生成计划与当前一致，仍须核对'):'')+(state.locked?'；'+state.locked+' 个已锁定':'');
   const progress=aiReportImpactedProgress&&aiReportImpactedProgress.active?'<strong class="air-impacted-progress">生成进度 '+aiReportImpactedProgress.done+'/'+aiReportImpactedProgress.total+'</strong>':'';
   const generateLabel=progress?'生成中 '+aiReportImpactedProgress.done+'/'+aiReportImpactedProgress.total:'生成候选稿';
-  return '<div class="air-doc-logicbar"><b>报告逻辑与同步</b><button type="button" class="air-doc-tool air-doc-delivery">验收与运行保障</button><span>'+summary+'</span>'+progress+'<button type="button" class="air-doc-tool air-doc-report-logic">调整全报告逻辑</button><button type="button" class="air-doc-tool air-doc-keep-original" '+(state.unlocked&&!progress?'':'disabled')+'>批量保持原文</button><button type="button" class="air-doc-tool primary air-doc-update-impacted" '+(!progress&&!aiReportBusy?'':'disabled')+'>'+generateLabel+'</button>'+(candidates?'<button type="button" class="air-doc-tool primary air-doc-accept-candidates">批量接受候选稿（'+candidates+'）</button>':'')+'</div>';
+  const acceptStatus=airAcceptCandidatesProgress&&airAcceptCandidatesProgressVisible()?'<span class="air-accept-progress" role="status" aria-live="polite">'+escapeHtml(airAcceptCandidatesProgress)+'</span>':'';
+  return '<div class="air-doc-logicbar"><b>报告逻辑与同步</b><button type="button" class="air-doc-tool air-doc-delivery">验收与运行保障</button><span>'+summary+'</span>'+progress+acceptStatus+'<button type="button" class="air-doc-tool air-doc-report-logic" '+(airAcceptCandidatesBusy?'disabled':'')+'>调整全报告逻辑</button><button type="button" class="air-doc-tool air-doc-keep-original" '+(state.unlocked&&!progress&&!airAcceptCandidatesBusy?'':'disabled')+'>批量保持原文</button><button type="button" class="air-doc-tool primary air-doc-update-impacted" '+(!progress&&!aiReportBusy&&!airAcceptCandidatesBusy?'':'disabled')+'>'+generateLabel+'</button>'+(candidates?'<button type="button" class="air-doc-tool primary air-doc-accept-candidates" '+(airAcceptCandidatesBusy||progress||aiReportBusy?'disabled':'')+'>'+(airAcceptCandidatesBusy?'正在处理，请稍候':'批量接受候选稿（'+candidates+'）')+'</button>':'')+(typeof airCandidateProblemListHtml==='function'?airCandidateProblemListHtml():'')+(typeof airLengthDeliveryHtml==='function'?airLengthDeliveryHtml():'')+'</div>';
 }
 function airOpenCandidateScope(){
   if(aiReportBusy||aiReportImpactedProgress?.active||airAcceptCandidatesBusy)return;
   document.getElementById('airCandidateScope')?.remove();
-  document.body.insertAdjacentHTML('beforeend','<div class="air-modal-overlay" id="airCandidateScope"><div class="air-modal-card air-report-logic-modal" role="dialog" aria-modal="true" aria-labelledby="airCandidateScopeTitle"><div class="air-modal-head"><b id="airCandidateScopeTitle">生成候选稿</b><button type="button" data-scope-close aria-label="关闭">×</button></div><p>请选择生成范围。候选稿不会覆盖现有正文，接受后才生效。</p><label style="display:block;padding:12px"><input type="radio" name="airCandidateScope" value="affected" checked> 仅受影响小节（默认）</label><label style="display:block;padding:12px"><input type="radio" name="airCandidateScope" value="all"> 全部小节</label><p>全部小节将重新生成整篇，调用量较大；已有候选稿或锁定小节需先处理。</p><div class="air-modal-actions"><button type="button" class="btn ghost" data-scope-close>取消</button><button type="button" class="btn" data-scope-start>继续</button></div></div></div>');
+  const hasPending=chapters.some(c=>c.checked!==false&&(c.sections||[]).some(s=>s.pendingRevision));
+  document.body.insertAdjacentHTML('beforeend','<div class="air-modal-overlay" id="airCandidateScope"><div class="air-modal-card air-report-logic-modal" role="dialog" aria-modal="true" aria-labelledby="airCandidateScopeTitle"><div class="air-modal-head"><b id="airCandidateScopeTitle">生成候选稿</b><button type="button" data-scope-close aria-label="关闭">×</button></div><p>请选择生成范围。打开此窗口不会调用AI；候选稿接受后才替换正文。</p><label style="display:block;padding:12px"><input type="radio" name="airCandidateScope" value="affected" checked> 仅受影响小节（默认）</label><label style="display:block;padding:12px"><input type="radio" name="airCandidateScope" value="all"> 全部小节</label>'+(hasPending?'<label style="display:block;padding:12px"><input type="checkbox" data-scope-replace> 重新生成并保留旧候选历史</label><p>勾选后按当前篇幅计划、财务数据与规则生成，不沿用旧候选的短版契约；旧候选完整留存，不会自动接受。调用AI前须确认项目库保存成功。</p>':'')+'<p>全部小节调用量较大；锁定小节须先人工解除锁定。未勾选保留历史重新生成时，不替换已有候选。</p><div class="air-modal-actions"><button type="button" class="btn ghost" data-scope-close>取消</button><button type="button" class="btn" data-scope-start>继续</button></div></div></div>');
   const modal=document.getElementById('airCandidateScope');
   const summary=airReportLogicImpactSummary(),notice=document.createElement('p');
   notice.setAttribute('role','status');
-  notice.textContent=summary.unlocked?'当前可生成 '+summary.unlocked+' 个受影响小节（含尚未按最新精简、依据清单规则确认的旧正文）。待补标红直接应用于预览和导出，不单独触发AI生成。':'当前没有已标记的受影响小节。修改某一节，请取消后点击该节的“调整本节生成逻辑”或“AI修改”；需要按最新通用规则重做整篇，请选择“全部小节”。';
+  notice.textContent=summary.unlocked?'当前可生成 '+summary.unlocked+' 个受影响小节（含尚未按最新精简、依据清单规则确认的旧正文）。待补标红直接应用于预览和导出，不单独触发AI生成。':summary.pending?'受影响小节已有 '+summary.pending+' 个待审候选。若需按当前计划重做，请勾选“重新生成并保留旧候选历史”；锁定小节仍须人工解除锁定。':'当前没有已标记的受影响小节。修改某一节，请取消后点击该节的“调整本节生成逻辑”或“AI修改”；需要按最新通用规则重做整篇，请选择“全部小节”。';
   modal.querySelector('.air-modal-actions').before(notice);
   const start=modal.querySelector('[data-scope-start]');
-  const updateScope=()=>{start.disabled=modal.querySelector('input:checked')?.value!=='all'&&!summary.unlocked;};
+  const updateScope=()=>{start.disabled=modal.querySelector('input[name="airCandidateScope"]:checked')?.value!=='all'&&!summary.unlocked&&!(modal.querySelector('[data-scope-replace]')?.checked&&summary.pending>0);};
   modal.querySelectorAll('input[name="airCandidateScope"]').forEach(input=>input.onchange=updateScope);
+  if(hasPending)modal.querySelector('[data-scope-replace]').onchange=updateScope;
   updateScope();
   modal.querySelectorAll('[data-scope-close]').forEach(button=>button.onclick=()=>modal.remove());
-  modal.querySelector('[data-scope-start]').onclick=()=>{const all=modal.querySelector('input:checked')?.value==='all';modal.remove();void airGenerateImpactedCandidates(all);};
+  modal.querySelector('[data-scope-start]').onclick=()=>{const all=modal.querySelector('input[name="airCandidateScope"]:checked')?.value==='all',replaceExisting=!!modal.querySelector('[data-scope-replace]')?.checked;modal.remove();void airGenerateImpactedCandidates(all,replaceExisting);};
   modal.querySelector('input:checked').focus();
 }
 function airOpenKeepOriginal(){
   if(aiReportImpactedProgress?.active||airAcceptCandidatesBusy)return;
+  let scope;try{scope=airCaptureReportMutation();}catch(error){return alert(error.message);}
   const rows=chapters.filter(c=>c.checked!==false).flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).filter(({s})=>s.syncStatus==="stale"&&s.staleKind==="logic"&&!s.locked&&!s.pendingRevision&&(s.content||s.editedHtml)&&!(s.staleKeys||[]).some(key=>key!=="report_logic"));
   if(!rows.length)return alert("没有可保持原文的小节：空白、锁定、已有候选稿或同时有数据变化的小节不在本次范围。");
   document.getElementById("airKeepOriginalModal")?.remove();
@@ -1319,9 +1761,11 @@ function airOpenKeepOriginal(){
     if(!selected.length){status.textContent="请先勾选需要保持原文的小节。";return;}
     airAcceptCandidatesBusy=true;button.disabled=true;
     try{
+      await airGuardReportMutation(scope);
+      if(selected.some(x=>!chapters.includes(x.c)||!x.c.sections.includes(x.s)))throw new Error('小节已变化，请关闭后重新选择');
       const count=selected.filter(x=>ProjectWorkflow.keepOriginalLogic(x.s)).length;
       if(count)ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("人工复核："+count+" 节保持原文"));
-      const saved=await persistReportDraft();airSaveState();airBuildDocPane();
+      const saved=await persistReportDraft();airCheckReportMutation(scope);airSaveState();airBuildDocPane();
       if(!saved.ok){status.textContent="保存失败，请勿刷新。确认记录仍在当前页面，点击确认可重试保存。";return;}
       modal.remove();alert("已保存保持原文的复核记录。"+(saved.remote?"项目库已确认保存。":"仅本机已保存，项目库尚未同步。"));
     }catch(error){status.textContent="保存失败，请勿刷新："+error.message;}
@@ -1362,37 +1806,83 @@ async function airAnalyzeWholeReportLogicImpact(){
   }catch(error){status.textContent="影响判断失败："+error.message+"。你仍可手工勾选并填写。";}finally{button.disabled=false;button.textContent="重新判断影响范围";}
 }
 async function airSaveWholeReportLogic(generateCandidates){
+  try{await airGuardReportMutation(airCaptureReportMutation());}catch(error){return alert(error.message);}
   const modal=document.getElementById("airReportLogicModal"),instruction=modal?.querySelector("#airReportLogicInstruction")?.value.trim()||"报告整体生成逻辑调整",selected=[...(modal?.querySelectorAll(".air-report-logic-row")||[])].filter(row=>row.querySelector(".air-report-logic-check")?.checked);if(!selected.length)return alert("请至少勾选一个受影响小节。");
   const changes=selected.map(row=>{const info=airFindChapterSection(row.dataset.cn,+row.dataset.si);if(!info)return null;const base=airEnsureEditableLogicSnapshot({chapter:info.chapter,section:info.section,si:+row.dataset.si},reportSectionLogicSnapshot(info.chapter,info.section)),rules=base.rules.map((rule,index)=>index?rule:Object.assign({},rule,{writingLogic:row.querySelector(".air-report-logic-writing").value.trim()||rule.writingLogic,outputForm:row.querySelector(".air-report-logic-output").value.trim()||"文字",changeReason:instruction}));return {cn:row.dataset.cn,si:+row.dataset.si,reason:row.dataset.reason||instruction,force:true,logicSnapshot:Object.assign({},base,{rules,localOverride:true,updatedAt:new Date().toISOString(),changeReason:instruction})};}).filter(Boolean);
   const hits=ProjectWorkflow.markLogicImpacted(chapters,changes,instruction);projectWorkflow.reportLogicPlan={instruction,createdAt:new Date().toISOString(),impacts:hits.map(x=>({cn:x.cn,si:x.si,title:x.title,locked:x.locked,reason:x.reason}))};saveDraft();airSaveState();modal.remove();airBuildDocPane();
   if(generateCandidates)return airGenerateImpactedCandidates();
   alert("已保存并标记 "+hits.length+" 个受影响小节。正文未改变，可在右侧点击“生成受影响候选稿”。");
 }
-async function airGenerateImpactedCandidates(regenerateAll=false){
+async function airGenerateImpactedCandidates(regenerateAll=false,replaceExisting=false,lengthSectionKeys=null){
   if(aiReportBusy||aiReportImpactedProgress?.active||airAcceptCandidatesBusy)return;
+  let context;try{context=airCaptureReportMutation();}catch(error){return alert(error.message);}
   const all=chapters.filter(c=>c.checked!==false).flatMap(c=>c.sections.map((s,si)=>({c,s,si})));
-  if(regenerateAll&&all.some(x=>x.s.locked||x.s.pendingRevision))return alert("全篇重新生成前，请先处理已有候选稿并解除需要重写小节的锁定，避免覆盖未确认的修改。");
-  const tasks=regenerateAll?all:airCandidateImpactRows().filter(x=>!x.s.locked&&x.s.syncStatus!=="locked-stale"&&!x.s.pendingRevision);
-  const locked=airReportLogicImpactSummary().locked;if(!tasks.length)return alert(locked?"没有可自动生成的小节；受影响小节均已锁定，需要人工解除锁定。":"没有待同步的小节。");
-  if(!confirm("将为 "+tasks.length+(regenerateAll?" 个小节按最新通用规则全篇重新生成候选稿":" 个受影响小节生成候选稿")+"，会调用AI，不会覆盖现有正文。是否继续？"))return;
-  const batch={active:true,done:0,total:tasks.length,failed:0};
+  const lengthScope=Array.isArray(lengthSectionKeys)?new Set(lengthSectionKeys):null;
+  // An explicit click targets thin analysis only. Existing candidates and locks
+  // remain protected; neither opening the panel nor a short result triggers AI.
+  const lengthRows=lengthScope?all.filter(x=>lengthScope.has(x.c.name+' / '+x.s.t)&&!x.s.locked&&x.s.syncStatus!=='locked-stale'&&!x.s.pendingRevision):null;
+  if(regenerateAll&&all.some(x=>x.s.locked||(!replaceExisting&&x.s.pendingRevision)))return alert("全篇重新生成前，请先解除需要重写小节的锁定；已有候选请勾选“重新生成并保留旧候选历史”，不会删除旧稿。");
+  const tasks=(lengthRows||(regenerateAll?all:airCandidateImpactRows().filter(x=>!x.s.locked&&x.s.syncStatus!=="locked-stale"&&(replaceExisting||!x.s.pendingRevision)))).map(t=>({...t,context:airCaptureReportMutation({chapter:t.c,section:t.s})}));
+  const replacing=tasks.filter(x=>x.s.pendingRevision).length;
+  const locked=airReportLogicImpactSummary().locked;if(!tasks.length)return alert(lengthScope?'篇幅不足的小节已锁定或已有候选，请先处理；未调用AI，旧稿保留。':locked?"没有可自动生成的小节；受影响小节均已锁定，需要人工解除锁定。":"没有待同步的小节。");
+  if(!confirm("将为 "+tasks.length+(lengthScope?" 个篇幅不足小节补充分析并生成候选稿":regenerateAll?" 个小节按最新通用规则全篇重新生成候选稿":" 个受影响小节生成候选稿")+"，会调用AI，不会覆盖现有正文。"+(lengthScope?'只补有依据的分析，保留原有标题、表格和有效内容；资料不足不凑字，不自动再次返修。':'')+(replacing?'其中 '+replacing+' 个旧候选将完整留存历史，生成失败仍保留旧候选。':'')+"是否继续？"))return;
+  const batch={active:true,done:0,total:tasks.length,failed:0,failures:[]};
   aiReportImpactedProgress=batch;
-  if(window.ResearchUI?.active()){try{await ResearchUI.flush();}catch(e){if(aiReportImpactedProgress===batch)batch.active=false;return alert('尚未开始调用AI：'+e.message+'。请先点击研究工具栏“核对保存冲突”。');}}
+  try{
+    if(replaceExisting&&typeof reportConfirmGenerationLength==='function'&&!await reportConfirmGenerationLength()){batch.active=false;return;}
+    await airGuardReportMutation(context);
+    if(replacing){
+      const saved=await persistReportDraft();
+      await airGuardReportMutation(context);
+      if(!saved.ok||!saved.remote)throw Error('旧候选尚未确认同步到项目库，请先核对保存冲突；本次未调用AI，旧稿未改变');
+    }else if(window.ResearchUI?.active())await ResearchUI.flush();
+  }catch(error){batch.active=false;return alert('尚未开始调用AI：'+error.message);}
   if(aiReportImpactedProgress!==batch)return;
+  try{await airGuardReportMutation(context);}catch(error){batch.active=false;return alert('尚未开始调用AI：'+error.message);}
   airBuildDocPane();
   const updateProgress=()=>{const progress=document.querySelector(".air-impacted-progress"),button=document.querySelector(".air-doc-update-impacted");if(progress)progress.textContent="生成进度 "+aiReportImpactedProgress.done+"/"+aiReportImpactedProgress.total;if(button){button.disabled=true;button.textContent="生成中 "+aiReportImpactedProgress.done+"/"+aiReportImpactedProgress.total;}};
   updateProgress();
   await runWorkerPool(tasks.slice(),async t=>{if(aiReportImpactedProgress!==batch)return;try{
-    const policyReview=regenerateAll||window.ReportOutputPolicy?.needsContentReview(t.s);
-    const instruction=policyReview?'按最新通用成稿要求重新撰写本节全部正文，精简重复内容，依据章节只列文件清单；保留已核实事实与测算口径，不得编造。'+(t.s.staleReason||''):'报告生成逻辑已调整：'+(t.s.staleReason||'按最新项目级逻辑更新')+'。只修改受影响内容，保留真实事实和数字，缺失数据标待补。';
-    const hasDraft=!!(t.s.content||t.s.editedHtml),text=hasDraft?await reviseSection(t.c,t.s,instruction):await generateSection(t.c,t.s);
+    airCheckReportMutation(context);const info={chapter:t.c,section:t.s},taskContext=t.context;await airGuardReportMutation(taskContext);
+    if(t.c.checked===false)throw Error('本节已移出生成范围，本次未调用AI');
+    if(t.s.locked||(!replaceExisting&&t.s.pendingRevision))throw Error('小节已有候选或已锁定');
+    const policyReview=!!lengthScope||replaceExisting||regenerateAll||window.ReportOutputPolicy?.needsContentReview(t.s);
+    const instruction=(lengthScope?'本节篇幅低于用户确认的分配，请按已确认目标补充有依据的比较、原因、条件、风险及实施分析；现有有效内容和业务子标题完整保留，不改成摘要，不重复堆字，缺资料明确待补。':'')+(policyReview?'按用户确认的章节篇幅计划和最新通用成稿要求更新本节，保留业务分类标题、普通列表、必要表格及事实—比较—因果—判断的分析深度；仅删除套话和重复铺陈，不把有效分析压成摘要。依据章节只列文件清单，保留完整适用依据及已核实出处；保留已核实事实与测算口径，不得编造。'+(t.s.staleReason||''):'报告生成逻辑已调整：'+(t.s.staleReason||'按最新项目级逻辑更新')+'。只修改受影响内容，保留标题分类、列表、分析深度和真实事实数字，缺失数据标待补。');
+    const generationOptions={...(taskContext.pending?{candidateRegeneration:taskContext.pendingToken}:{}),...(regenerateAll?{autoRepair:true}:{})};
+    const hasDraft=!!(t.s.content||t.s.editedHtml),text=hasDraft?await reviseSection(t.c,t.s,instruction,undefined,generationOptions):await generateSection(t.c,t.s,undefined,generationOptions);
     if(aiReportImpactedProgress!==batch)return;
+    await airGuardReportMutation(taskContext);
     if(!reportHasVisibleBody({content:text}))throw Error('未返回有效正文');
-    ProjectWorkflow.setCandidate(t.s,text,regenerateAll?'全篇重新生成':hasDraft?'同步最新报告逻辑':'按最新框架新增小节',{logicRevision:t.s.logicSnapshot||reportLogicRevision(t.c,t.s,instruction),allowLogicAdoption:!!t.s.logicSnapshot?.localOverride,...(policyReview?{outputPolicyVersion:window.ReportOutputPolicy?.contentVersion}:{})});
+    const generatedInput=ProjectWorkflow.generatedInputPlanId(t.s,text);
+    if(replaceExisting&&(!generatedInput||!ProjectWorkflow.generatedContract(t.s,text)))throw Error('新结果缺少本次生成计划凭据，未替换旧候选；请重试当前计划生成');
+    if(generatedInput&&typeof reportCandidateInputIdentity==='function'&&generatedInput!==reportCandidateInputIdentity())throw Error('生成期间篇幅、资料或财务输入已变化，旧候选保留，请按当前计划重试');
+    const meta={logicRevision:t.s.logicSnapshot||reportLogicRevision(t.c,t.s,instruction),allowLogicAdoption:!!t.s.logicSnapshot?.localOverride,...(policyReview?{outputPolicyVersion:window.ReportOutputPolicy?.contentVersion}:{})};
+    if(taskContext.pending){
+      if(!ProjectWorkflow.replaceCandidate(t.s,text,'按当前计划重新生成（旧候选已保留）',meta,taskContext.pendingToken))throw Error('旧候选已变化或锁定，新结果未覆盖');
+    }else airStoreNewCandidate(info,text,regenerateAll?'全篇重新生成':hasDraft?'同步最新报告逻辑':'按最新框架新增小节',meta);
+    delete t.s.candidateGenerationFailure;
     saveDraft();airSaveState();airRefreshSection(t.c.cn,t.si);
-  }catch(error){batch.failed++;}finally{batch.done++;if(aiReportImpactedProgress===batch)updateProgress();}},3);
+  }catch(error){
+    const failure={sectionKey:t.c.name+' / '+t.s.t,code:error.code||'section-generation-failed',message:String(error.message||'本节生成失败')};batch.failed++;batch.failures.push(failure);
+    // A failed attempt stays visible after reopening; never write into a changed round/candidate.
+    try{airCheckReportMutation(t.context);t.s.candidateGenerationFailure={...failure,createdAt:new Date().toISOString()};saveDraft();}catch(_){}
+  }finally{batch.done++;if(aiReportImpactedProgress===batch)updateProgress();}},3);
   if(aiReportImpactedProgress!==batch)return;
-  const failed=aiReportImpactedProgress.failed;aiReportImpactedProgress.active=false;saveDraft();airSaveState();airBuildDocPane();alert("已生成 "+(tasks.length-failed)+"/"+tasks.length+" 个候选稿"+(failed?"，"+failed+" 个失败可单独重试":"")+"。请逐节接受或拒绝，现有正文尚未被覆盖。");
+  const failed=aiReportImpactedProgress.failed;aiReportImpactedProgress.active=false;
+  try{airCheckReportMutation(context);}catch(error){return alert(error.message+'；未采用的结果不计为成功。');}
+  let saveWarning='';
+  let batchReview=null;
+  if(typeof airCandidateBatchSummary==='function'){
+    try{
+      const reviewPlan=window.ReportCompletionContract&&typeof reportCompletionPlan==='function'?reportCompletionPlan():null;
+      tasks.forEach(t=>{if(t.s.pendingRevision&&typeof reportReviewCandidate==='function')reportReviewCandidate(t.c,t.s,reviewPlan);});
+      batchReview=airCandidateBatchSummary(tasks);
+    }catch(error){saveWarning='\n候选检查尚未完成：'+error.message+'。这批不能认定为已通过，请保留原稿并核对。';}
+  }
+  if(replacing){try{const saved=await persistReportDraft();airCheckReportMutation(context);if(!saved.ok||!saved.remote)saveWarning+='\n新旧候选仍保留在当前页面，但项目库尚未确认同步，请勿刷新，先重试保存。';}catch(error){saveWarning+='\n保存未完成：'+error.message+'。新旧候选保留在当前页面，请勿刷新。';}}else saveDraft();
+  try{airCheckReportMutation(context);}catch(error){return alert(error.message+'；未写入当前项目。');}
+  const reviewText=batchReview?'\n本轮检查：'+batchReview.eligible+' 个候选可接受（事实仍须核对），'+batchReview.blocked+' 个未通过，'+batchReview.locked+' 个已锁定。'+(batchReview.problems.length?'问题已列在上方“候选问题清单”，可逐节定位；没有被自动忽略。':''):'';
+  airSaveState();airBuildDocPane();alert("已生成 "+(tasks.length-failed)+"/"+tasks.length+" 个候选稿"+(failed?"，"+failed+" 个失败可单独重试":"")+"。请逐节接受或拒绝，现有正文尚未被覆盖。"+reviewText+saveWarning+(failed?'\n'+batch.failures.map(row=>row.sectionKey+'：'+row.message).join('\n'):''));
 }
 function airSectionMaterialState(chapter,section){
   if(!window.ReportLogicCore)return {rules:[],missing:[],ready:false};
@@ -1428,15 +1918,15 @@ function airSectionMaterialHtml(chapter,section,si){
 }
 function airChapterMaterialLevel(chapter){const levels=chapter.sections.map(s=>airSectionMaterialState(chapter,s).level);return levels.includes("critical")?"missing":levels.includes("framework")?"pending":"ok";}
 var airDocSectionObserver=null;
-function airDeferredPreviewHtml(section){
-  return '<h4>'+escapeHtml(section.t)+'</h4><div class="air-section-empty-state">滚动到此处时显示正文；原稿和候选稿均保留。</div>';
+function airDeferredPreviewHtml(section,chapter,si){
+  return '<h4>'+escapeHtml((chapters.indexOf(chapter)+1)+'.'+(si+1)+' '+section.t)+'</h4><div class="air-section-empty-state">滚动到此处时显示正文；原稿和候选稿均保留。</div>';
 }
 function airDehydratePreviewSection(el){
   if(!el||el.dataset.airHydrated!=='1'||!el.isConnected)return;
   if(el.contains&&document.activeElement&&el.contains(document.activeElement))return;
   const info=airFindChapterSection(el.dataset.airCn,Number(el.dataset.airSi));if(!info)return;
   el.dataset.airDeferred='1';delete el.dataset.airHydrated;el.style.minHeight='240px';
-  el.innerHTML=airDeferredPreviewHtml(info.section);
+  el.innerHTML=airDeferredPreviewHtml(info.section,info.chapter,Number(el.dataset.airSi));
 }
 function airHydratePreviewSection(el){
   if(!el||el.dataset.airDeferred!=='1'||!el.isConnected)return;
@@ -1446,7 +1936,7 @@ function airHydratePreviewSection(el){
   delete el.dataset.airDeferred;
   el.dataset.airHydrated='1';
   el.style.minHeight='';
-  el.innerHTML='<h4>'+escapeHtml(section.t)+(section.numeric?' ⚠数据':'')+'</h4>'+airSectionMaterialHtml(chapter,section,si)+'<div class="body"></div>';
+  el.innerHTML='<h4>'+escapeHtml((chapters.indexOf(chapter)+1)+'.'+(si+1)+' '+section.t)+(section.numeric?' ⚠数据':'')+'</h4>'+airSectionMaterialHtml(chapter,section,si)+'<div class="body"></div>';
   airRenderCompletedSection(chapter,section,si);
 }
 function airObservePreviewSections(pane){
@@ -1472,7 +1962,7 @@ function airBuildDocPane(){
   const deferPreview=totalSec>12&&typeof globalThis.IntersectionObserver==='function';
   const outline = active.map(c=>{const level=airChapterSyncLevel(c);return '<span class="chip" data-cn="'+c.cn+'"><i class="air-material-dot '+level+'" title="'+airChapterSyncTitle(level)+'"></i>'+c.cn+'·'+c.name+'</span>';}).join("");
   const body = active.map(c=>'<div class="chapter-block" id="block_'+c.cn+'"><h3><span class="cn">'+c.cn+'</span>'+c.name+'</h3>'
-    + c.sections.map((s,si)=>{const ready=reportHasVisibleBody(s),hasCandidate=!!s.pendingRevision;if(deferPreview)return '<div class="section-block" id="sec_'+c.cn+'_'+si+'" data-air-deferred="1" data-air-cn="'+escapeHtml(c.cn)+'" data-air-si="'+si+'" data-status="'+(ready?'done':hasCandidate?'candidate':'pending')+'" style="min-height:240px"><h4>'+escapeHtml(s.t)+'</h4><div class="air-section-empty-state">滚动到此处时显示正文；原稿和候选稿均保留。</div></div>';const content=ready?renderContent(airSectionDisplayContent(c,s)):airEmptySectionBodyHtml(s);return '<div class="section-block '+(ready?'':'pending')+'" id="sec_'+c.cn+'_'+si+'" data-status="'+(ready?'done':hasCandidate?'candidate':'pending')+'"><h4>'+s.t+(s.numeric?' ⚠数据':'')+(ready?'<span class="done-stamp">已拟</span>'+airTrustBadgeHtml(s):hasCandidate?'<span class="air-candidate-stamp">候选待确认</span>':'')+'</h4>'+((ready||hasCandidate)?renderSectionLogicHtml(c,s,true):'')+airSectionMaterialHtml(c,s,si)+(ready?airSectionToolsHtml(c,s,si):'')+'<div class="body">'+content+'</div>'+airCandidateHtml(c,s,si)+'</div>';}).join("")
+    + c.sections.map((s,si)=>{const ready=reportHasVisibleBody(s),hasCandidate=!!s.pendingRevision,title=escapeHtml((chapters.indexOf(c)+1)+'.'+(si+1)+' '+s.t);if(deferPreview)return '<div class="section-block" id="sec_'+c.cn+'_'+si+'" data-air-deferred="1" data-air-cn="'+escapeHtml(c.cn)+'" data-air-si="'+si+'" data-status="'+(ready?'done':hasCandidate?'candidate':s.generationFailure?'failed':'pending')+'" style="min-height:240px"><h4>'+title+'</h4><div class="air-section-empty-state">滚动到此处时显示正文；原稿和候选稿均保留。</div></div>';const content=ready?airSectionPreviewHtml(c,s,si):airEmptySectionBodyHtml(s,c,si);return '<div class="section-block '+(ready?'':'pending')+'" id="sec_'+c.cn+'_'+si+'" data-status="'+(ready?'done':hasCandidate?'candidate':s.generationFailure?'failed':'pending')+'"><h4>'+title+(s.numeric?' ⚠数据':'')+(ready?'<span class="done-stamp">已拟</span>'+airTrustBadgeHtml(s):hasCandidate?'<span class="air-candidate-stamp">候选待确认</span>':'')+'</h4>'+((ready||hasCandidate)?renderSectionLogicHtml(c,s,true):'')+airSectionMaterialHtml(c,s,si)+(ready?airSectionToolsHtml(c,s,si):'')+'<div class="body">'+content+'</div>'+airCandidateHtml(c,s,si)+'</div>';}).join("")
     +'</div>').join("");
   pane.innerHTML = '<div class="air-doc-head"><div class="air-doc-heading"><div class="air-doc-title">'+escapeHtml(project.name||"未命名项目")+'</div>'
     +'<div class="air-doc-meta">'+escapeHtml(project.industry||"")+' · 共 '+active.length+' 章 / '+totalSec+' 个子标题</div></div>'
@@ -1526,10 +2016,12 @@ function airOpenReportVersionById(versionId){
   const outline=active.map(c=>'<span class="chip" data-cn="saved_'+escapeHtml(c.cn)+'"><i class="air-material-dot ok"></i>'+escapeHtml(c.cn)+'·'+escapeHtml(c.name)+'</span>').join("");
   const body=active.map(c=>'<div class="chapter-block" id="block_saved_'+escapeHtml(c.cn)+'"><h3><span class="cn">'+escapeHtml(c.cn)+'</span>'+escapeHtml(c.name)+'</h3>'+(c.sections||[]).map((s,si)=>{
     const source=s.editedHtml&&typeof blocksToSource==="function"?blocksToSource(s.editedHtml):(s.content||"");
-    return '<div class="section-block" id="saved_sec_'+escapeHtml(c.cn)+'_'+si+'"><h4>'+escapeHtml(s.t)+'<span class="done-stamp">该版已拟</span></h4>'+airSavedVersionLogicHtml(c,s)+airSavedVersionFrameworkHtml(c,s)+'<div class="body">'+renderContent(source)+'</div></div>';
+    return '<div class="section-block" id="saved_sec_'+escapeHtml(c.cn)+'_'+si+'"><h4>'+escapeHtml((version.chapters.indexOf(c)+1)+'.'+(si+1)+' '+s.t)+'<span class="done-stamp">该版已拟</span></h4>'+airSavedVersionLogicHtml(c,s)+airSavedVersionFrameworkHtml(c,s)+'<div class="body">'+airSectionPreviewHtml(c,s,si,source,version.chapters)+'</div></div>';
   }).join("")+'</div>').join("");
   pane.classList.remove("empty");
   pane.innerHTML='<div class="air-doc-head"><div class="air-doc-heading"><div class="air-doc-title">'+escapeHtml(project.name||"未命名项目")+' · 第'+Number(version.version||1)+'版报告</div><div class="air-doc-meta">历史版本只读预览 · 共 '+active.length+' 章 / '+total+' 个子标题；不会覆盖当前工作稿</div></div><div class="air-doc-actions">'+airReportVersionSelectHtml(version.id)+'<button type="button" class="air-doc-tool air-doc-current-draft">返回当前工作稿</button><button type="button" class="air-doc-tool air-doc-chat-toggle">收起对话</button><span class="air-doc-zoom"><button type="button" class="air-doc-tool air-doc-zoom-out">−</button><button type="button" class="air-doc-tool air-doc-zoom-reset"><span class="air-doc-zoom-value">100%</span></button><button type="button" class="air-doc-tool air-doc-zoom-in">＋</button></span><button type="button" class="air-doc-tool air-doc-fullscreen">全屏阅读</button><button type="button" class="air-doc-close">✕</button></div></div><div class="air-doc-outline">'+outline+'</div><div class="air-doc-scroll" id="airDocScroll">'+body+'</div>';
+  const actions=pane.querySelector('.air-doc-actions'),download=document.createElement('button');
+  download.type='button';download.className='air-doc-tool air-doc-download';download.dataset.reportVersionId=version.id;download.textContent='下载本版 Word（V'+Number(version.version||1)+'）';actions?.prepend(download);
   airSetDocVisible(true);airApplyDocViewState();
 }
 function airUpdateChapterChipStatus(cn){
@@ -1547,6 +2039,13 @@ function airScrollToChapter(cn){
   const el = document.getElementById("block_"+cn);
   if(el)el.querySelectorAll('[data-air-deferred="1"]').forEach(airHydratePreviewSection);
   if(el) el.scrollIntoView({behavior:"smooth", block:"start"});
+}
+function airSectionPreviewHtml(chapter,section,si,source,sourceChapters=chapters){
+  const html=renderContent(source===undefined?airSectionDisplayContent(chapter,section):source);
+  if(!window.ReportSectionLayout?.normalizeHeadings)return html;
+  const box=document.createElement('div');box.innerHTML=html;
+  ReportSectionLayout.normalizeHeadings(box,{chapter:chapter.name,section:section.t,number:(sourceChapters.indexOf(chapter)+1)+'.'+(si+1)});
+  return box.innerHTML;
 }
 function airSectionDisplayContent(chapter,section){
   const base=section.editedHtml&&typeof blocksToSource==="function"?blocksToSource(section.editedHtml):(section.content||"");
@@ -1587,10 +2086,13 @@ async function airRestoreDocPaneIfNeeded(){
   if(!chapters.length) return;
   const hasContent = chapters.some(c=>c.sections.some(s=>s.content||s.editedHtml));
   if(!hasContent) return;
+  let context;try{context=airCaptureRestoreContext();}catch{return;}
   if(window.ReportLogicCore){
     try{await ReportLogicCore.load(calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent");}catch(e){}
   }
+  if(!context.accepts())return;
   await airSyncOfficialHousingLogic();
+  if(!context.accepts())return;
   airBuildDocPane();
   chapters.filter(c=>c.checked).forEach(c=>{
     c.sections.forEach((s,si)=>{
@@ -1605,12 +2107,16 @@ async function airRestoreDocPaneIfNeeded(){
 }
 
 function airProgressCardHtml(m){
+  const delivery=typeof airReportLengthDelivery==='function'?airReportLengthDelivery():null;
+  const current=m===aiReportProgressMsg,short=current&&delivery?.applicable&&delivery.status!=='within-range';
+  const initial=current?window.ReportInitialDeliveryRuntime?.status?.():null;
   const pct = m.total? Math.round(m.done/m.total*100) : 0;
   let actions = "";
   if(m.active) actions = '<button class="btn ghost air-progress-btn air-stop-btn">⏸ 停止生成</button>';
+  else if(initial?.active&&!initial.complete)actions='<button class="btn air-progress-btn air-resume-btn">▶ 继续本轮补齐和页数核对</button><button class="btn ghost air-progress-btn air-open-preview-btn">查看已保留正文</button>';
   else if(m.stopped&&m.total>m.done) actions = (m.recoveredFromMismatch&&airCompletedVersionForProgress(m)?'<button class="btn ghost air-progress-btn air-open-completed-version">📄 查看上一完整版本</button>':'')+'<button class="btn air-progress-btn air-resume-btn">▶ 继续'+(m.recoveredFromMismatch?'第二轮':'生成')+'剩余 '+(m.total-m.done)+' 节</button>';
   else actions = '<button class="btn air-progress-btn air-open-preview-btn">📄 查看已有报告</button><button class="btn ghost air-progress-btn air-regenerate-btn">🔒 重新生成全部</button>';
-  const label = m.active? "⏳ 正在起草，可在右侧实时查看…" : (m.recoveredFromMismatch?"⚠ 已识别为后续一轮未完成稿":(m.stopped&&m.total>m.done? "⏸ 已暂停" : "✅ 本轮生成已完成"));
+  const label = m.active?(m.deliveryPhase&&typeof reportInitialDeliveryProgressCopy==='function'?reportInitialDeliveryProgressCopy({phase:m.deliveryPhase,reason:m.deliveryReason}):"⏳ 正在起草，可在右侧实时查看…"):(initial?.active&&!initial.complete?'正文已保留，整篇尚待核对':short&&m.total===m.done?'⚠ 正文已保存，篇幅尚未达到确认范围':m.recoveredFromMismatch?"⚠ 已识别为后续一轮未完成稿":(m.stopped&&m.total>m.done? "⏸ 已暂停" : "✅ 本轮生成已完成"));
   const versionNo=Number(m.reportVersion||m.targetReportVersion)||0,versionLabel=versionNo?'报告第'+versionNo+'版 · ':'';
   return '<div class="air-progress-card"><div style="flex:1; min-width:180px;">'
     +'<div class="air-progress-text">'+versionLabel+label+'　已完成 '+m.done+'/'+m.total+(m.failed?'（失败 '+m.failed+'）':'')+'</div>'
@@ -1620,7 +2126,7 @@ function airProgressCardHtml(m){
 
 /* 测算和起草报告是两步：这张卡片是测算和生成之间的停顿点，人工确认数字没问题了再往下点。 */
 function airGenConfirmHtml(){
-  if(airStageAtLeast("generating")) return '<div class="air-card air-step-done"><b>✓ 已进入可研生成阶段</b><span>请查看当前生成进度或右侧报告预览；已完成的小节可立即重写、AI修改或拖选局部修改。</span></div>';
+  if(airGenerationFlowLocked()||airStageAtLeast("generating")) return '<div class="air-card air-step-done"><b>✓ 已进入可研生成阶段</b><span>旧生成向导已锁定；请从报告独立模块继续修订，未完成小节可使用续写入口。</span></div>';
   const logic=window.ReportLogicCore?ReportLogicCore.overview(calcType||(calcResult&&calcResult.__ctype)||rptCtype,{businessScenario:airBusinessScenario()}):null;
   return '<div class="air-card">'+(logic?'<div class="air-step-done" style="margin-bottom:10px;"><b>✓ 已接入公司逐小节生成逻辑 v'+logic.version+'</b><span>'+logic.chapterCount+'章 / '+logic.ruleCount+'项；生成、材料提示和复核共用同一规则ID。</span></div>':'')
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;">'+(logic?'<button class="btn" id="airCheckMaterials">先检查'+logic.chapterCount+'章所需材料 →</button><button class="btn ghost air-start-gen">资料暂缺，带缺口标记生成</button>':'<button class="btn air-start-gen">确认，开始可研生成 →</button>')+'</div>'
@@ -1628,10 +2134,105 @@ function airGenConfirmHtml(){
 }
 
 function airOpenCalcDetails(){
-  if(!calcParams||!calcResult){alert("当前还没有可查看的测算结果。");return;}
-  scParams=Object.assign({},calcParams);scResult=calcResult;calcType=(aiReportSuggested&&aiReportSuggested.calcType)||(calcResult&&calcResult.__ctype)||calcType;scStep=2;
-  airSaveState();try{sessionStorage.setItem("studyreport:calc-return-aireport:v1","1");}catch(e){}
-  appMode="calc";renderTOC();renderSheet();
+  return airStartFullCalc(true);
+}
+
+function airCalculationRouteHtml(){
+  const mode=aiReportCalculationMode;
+  return '<div class="air-card" id="airCalculationRoutes"><b>财务测算方式</b><div class="actions"><button type="button" class="btn '+(mode==='quick'?'':'ghost')+'" id="airChooseQuickCalc" aria-pressed="'+(mode==='quick')+'">关键参数输入</button><button type="button" class="btn '+(mode==='full'?'':'ghost')+'" id="airChooseFullCalc" aria-pressed="'+(mode==='full')+'">全量参数测算（推荐）</button><button type="button" class="btn" id="airStartFullCalc">进入全量财务测算 →</button></div><div style="font-size:12px;color:var(--ink-soft);">'+(mode==='full'?'逐项核对完整参数，可引用经验项目。结果需明确采用后才用于本可研。':'核对关键参数，其余沿用推荐值；适合快速初测，仍需核实默认值和来源。')+' 已有报告正文不会被自动改写。</div></div>';
+}
+
+async function airStartFullCalc(viewResult=false){
+  if(aiReportFullCalcBusy)return;
+  aiReportFullCalcBusy=true;
+  try{
+    const scope=JSON.stringify(calcAirScope());
+    if(!aiReportChatLoaded)await airLoadState();
+    if(scope!==JSON.stringify(calcAirScope()))throw new Error('项目或研究轮次已切换，请重新进入测算');
+    if(aiReportRestoreLoading||aiReportRestoreError||aiReportBusy)throw new Error('当前可研仍在读取或处理，请完成后再进入测算');
+    if(window.ResearchUI?.active()){const token=ResearchUI.capture('calculation');await ResearchUI.guard(token);}
+    else if(typeof projectCanEdit==='function'&&!projectCanEdit())throw new Error('当前项目没有编辑权限');
+    if(scope!==JSON.stringify(calcAirScope()))throw new Error('项目或研究轮次已切换');
+    const type=aiReportSuggested?.calcType||calcResult?.__ctype||aiReportExtracted?.calcType||calcType;
+    if(!['gaibao','rent','sale'].includes(type)||!(aiReportExtracted?.projectName||project?.name))throw new Error('请先填写并确认当前项目名称和测算类型');
+    if(!currentProjectId&&!window.ResearchUI?.active()){currentProjectId=genProjectId();rememberActiveProjectId(currentProjectId);}
+    const expectedScope=JSON.stringify(calcAirScope());
+    aiReportCalculationMode='full';
+    if(await airSaveState()===false)throw new Error('可研会话保存未成功，未跳转；请重试保存，原数据仍保留');
+    if(JSON.stringify(calcAirScope())!==expectedScope)throw new Error('保存期间项目或研究轮次已变化');
+    const ticket={version:2,scope:calcAirScope(),type,projectName:aiReportExtracted?.projectName||project.name,
+      baseline:JSON.stringify(calcParams||null),snapshotId:projectWorkflow?.currentCalcSnapshotId||null,createdAt:Date.now()};
+    sessionStorage.setItem('studyreport:calc-air-handoff:v2',JSON.stringify(ticket));
+    const seed=calcParams||aiReportSuggested?.params||{};
+    calcType=type;scParams=JSON.parse(JSON.stringify(seed));scResult=viewResult&&calcResult?JSON.parse(JSON.stringify(calcResult)):null;scStep=scResult?2:1;
+    calcDraftContext=calcDraftKey();calcDraftFields=null;calcDraftError='';calcExperienceSource=null;pgSelectedKey=null;pgJointCache=null;aiChat=[];
+    calcSaveDraft();appMode='calc';
+    if(await saveDraft(true)===false){appMode='aireport';throw new Error('测算接续状态未保存，请重试；原可研数据仍保留');}
+    if(JSON.stringify(calcAirScope())!==expectedScope)throw new Error('保存期间项目已变化，未打开旧测算');
+    renderTOC();renderSheet();
+  }catch(e){alert(e.message);}finally{aiReportFullCalcBusy=false;}
+}
+
+async function airReturnFromFullCalc(adopt){
+  if(aiReportFullCalcBusy)return;
+  const ticket=calcAirTicket();
+  if(!ticket)return alert('测算关联的账号、项目或研究轮次已变化。原结果仍保留，请从目标可研重新进入测算。');
+  aiReportFullCalcBusy=true;
+  const pending={type:calcType,params:scParams&&JSON.parse(JSON.stringify(scParams)),result:scResult,source:calcExperienceSource};
+  const stillCurrent=()=>JSON.stringify(ticket.scope)===JSON.stringify(calcAirScope())&&calcAirTicket()?.createdAt===ticket.createdAt;
+  try{
+    if(!aiReportChatLoaded)await airLoadState();
+    if(!stillCurrent())throw new Error('项目或研究轮次已切换，未采用旧结果');
+    if(aiReportRestoreLoading||aiReportRestoreError)throw new Error('可研会话读取未完成，未采用结果；请重试读取');
+    if(!adopt){
+      if(ticket.adopted)throw new Error('本次结果已确认采用，但保存尚未完成。请重试“采用本次结果”完成保存，不能当作未采用退出。');
+      appMode='aireport';
+      if(await saveDraft(true)===false){appMode='calc';throw new Error('返回状态未保存，请重试；原可研测算未改变');}
+      if(!stillCurrent())throw new Error('返回期间项目已变化，未打开旧可研');
+      calcType=ticket.type;calcAirClearTicket();renderTOC();renderSheet();return;
+    }
+    if(!pending.params||!pending.result||scStep!==2)throw new Error('请先执行完整测算，并在结果页核对后采用');
+    if(pending.type!==ticket.type)throw new Error('测算类型与当前可研不一致，请返回原项目对应类型重新测算');
+    if(JSON.stringify(calcParams||null)!==ticket.baseline||(projectWorkflow?.currentCalcSnapshotId||null)!==ticket.snapshotId)throw new Error('当前可研测算版本已经改变，未覆盖新版本；请重新进入测算');
+    const token=window.ResearchUI?.active()?ResearchUI.capture('calculation'):null;
+    if(token)await ResearchUI.guard(token);
+    if(!stillCurrent())throw new Error('权限核查期间项目或研究轮次已切换');
+    if(JSON.stringify(calcParams||null)!==ticket.baseline||(projectWorkflow?.currentCalcSnapshotId||null)!==ticket.snapshotId)throw new Error('权限核查期间可研测算版本已经改变，未覆盖新版本');
+    if(token?!ResearchUI.editable():typeof projectCanEdit==='function'&&!projectCanEdit())throw new Error('当前项目没有编辑权限，未采用测算');
+    const result=runCalcEngine(pending.type,pending.params);result.__ctype=pending.type;
+    if(JSON.stringify(result.summary)!==JSON.stringify(pending.result.summary))throw new Error('参数或计算版本已变化，请重新执行测算后核对结果');
+    if(!confirm('确认将本次完整测算用于「'+ticket.projectName+'」的 AI 可研？\n将保留原报告正文，仅标记受影响章节待复核；不会自动生成报告。'))return;
+    if(!stillCurrent())throw new Error('项目已切换，未采用测算');
+    if(!ticket.adopted){
+      const before=calcParams||{},changed=[...new Set([...Object.keys(before),...Object.keys(pending.params)])].filter(k=>JSON.stringify(before[k])!==JSON.stringify(pending.params[k]));
+      calcType=pending.type;calcParams=JSON.parse(JSON.stringify(pending.params));calcResult=result;aiReportCalculationMode='full';aiReportParamsConfirmed=true;
+      const prior=aiReportSuggested||{};
+      const sources={};for(const key of Object.keys(calcParams)){
+        const unchanged=JSON.stringify(before[key])===JSON.stringify(calcParams[key]);
+        sources[key]=unchanged&&prior.sources?.[key]?prior.sources[key]:{from:'全量参数界面人工确认（不代表外部资料已核实）',sourceCode:'manual_full_calculation',requiresManualConfirmation:false};
+      }
+      aiReportSuggested={...prior,calcType,params:JSON.parse(JSON.stringify(calcParams)),sources,keyFields:prior.keyFields||[],requiredFields:prior.requiredFields||[],calculationMode:'full'};
+      const snap=ProjectWorkflow.createCalcSnapshot(projectWorkflow,calcType,calcParams,calcResult,{reason:'AI可研采用全量参数测算',confirmedBy:typeof getUser==='function'?getUser():''});
+      snap.inputMode='full';snap.experienceSource=pending.source?{recordId:pending.source.record.id,revision:pending.source.record.revision,projectName:pending.source.record.projectName||pending.source.record.name||'',role:'参考初值，最终参数见快照'}:null;
+      ProjectWorkflow.markImpacted(chapters,changed,'已采用全量财务测算，正文保留原稿，财务相关内容待复核');
+      aiReportChat=aiReportChat.filter(m=>!['calcResult','genConfirm'].includes(m.kind));
+      const summary=result.summary,fmt=x=>x==null?'—':Number(x).toLocaleString('zh-CN',{maximumFractionDigits:4});
+      airPush({role:'assistant',kind:'calcResult',content:'已采用全量参数测算 V'+snap.version+'：IRR '+fmt(summary.irr)+'%，总收入 '+fmt(summary.totalIncome)+' 万元，净利润 '+fmt(summary.totalNetProfit)+' 万元，累计净现值 '+fmt(summary.totalNpv)+' 万元。\n参数、来源和计算快照已保留；原报告正文未覆盖。'});
+      if(!airGenerationFlowLocked())airPush({role:'assistant',kind:'genConfirm'});
+      airRepairFlowCards();
+      ticket.adopted=true;ticket.baseline=JSON.stringify(calcParams);ticket.snapshotId=snap.id;
+      sessionStorage.setItem('studyreport:calc-air-handoff:v2',JSON.stringify(ticket));
+    }
+    appMode='aireport';
+    const saved=await saveDraft(true);
+    if(!stillCurrent())throw new Error('保存期间项目已变化，未跳转');
+    if(saved===false||await airSaveState()===false)throw new Error('本次采用尚未确认保存成功，结果仍保留；请重试“采用本次结果”，不会重复创建版本。暂勿刷新或生成报告。');
+    if(!stillCurrent())throw new Error('保存期间项目或研究轮次已变化，未跳转');
+    calcAirClearTicket();appMode='aireport';renderTOC();renderSheet();
+  }catch(e){if(stillCurrent())appMode='calc';alert(e.message);}finally{
+    if(stillCurrent()){scParams=pending.params;scResult=pending.result;calcExperienceSource=pending.source;if(appMode==='calc')calcType=pending.type;}
+    aiReportFullCalcBusy=false;
+  }
 }
 
 function airOpenCalcExperienceLibrary(){
@@ -1665,23 +2266,25 @@ function airMaterialContext(){
 }
 async function airCheckWholeReportMaterials(){
   if(!window.ReportLogicCore)return airPush({role:"assistant",kind:"text",content:"逐小节生成逻辑模块未加载，暂时无法检查材料。"});
+  const context=airCaptureRestoreContext();
   const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent";await ReportLogicCore.load(type);
+  if(!context.accepts())return;
   const inventory=ReportLogicCore.materialInventory(type,airMaterialContext());
   if(!inventory.total)return airPush({role:"assistant",kind:"text",content:"当前项目类型还没有已发布的逐小节生成逻辑，可先按原流程生成。"});
   aiReportChat=aiReportChat.filter(m=>m.kind!=="materialCheck");airPush({role:"assistant",kind:"materialCheck",inventory});airSaveState();
 }
 function airMaterialCheckHtml(m){
   const inv=m.inventory||{summary:{},chapters:[]},sum=inv.summary||{},labels={knowledge_base:"知识库检索",web_search:"网上检索",provider:"数据接口",calculation_engine:"测算引擎",manual_upload:"人工上传",derived_section:"其他章节",system_rule:"系统规则",unclassified:"来源待确认"};
-  const batch=window.WebResearch?.batchStatus?.(),batchLabel=airReportGenerationStatus().complete?'🌐 查看已保存检索来源（只读）':batch?(batch.status==="completed"?"🌐 查看批量检索结果（"+batch.done+"/"+batch.total+"）":batch.status==="paused"?"🌐 批量检索已暂停（"+batch.done+"/"+batch.total+"）":"🌐 查看批量检索进度（"+batch.done+"/"+batch.total+"）"):"🌐 自动批量检索全部网上缺口（"+(sum.pendingWeb||0)+"）";
+  const batch=window.WebResearch?.batchStatus?.(),batchLabel=batch?(batch.status==="completed"?"🌐 查看批量检索结果（"+batch.done+"/"+batch.total+"）":batch.status==="paused"?"🌐 批量检索已暂停（"+batch.done+"/"+batch.total+"）":"🌐 查看批量检索进度（"+batch.done+"/"+batch.total+"）"):(sum.pendingWeb?"🌐 自动批量检索网上缺口（"+sum.pendingWeb+"）":"🌐 查看已保存检索来源");
   const stat=(num,label,color)=>'<div style="border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:#fff;"><b style="display:block;font-size:18px;color:'+color+';">'+(num||0)+'</b><span style="font-size:11px;color:var(--ink-soft);">'+label+'</span></div>';
   const rowHtml=item=>{const status=item.ready?'<span style="color:var(--ok-green);">✓ 已确认找到</span>':'<span style="color:var(--red);">● 待补充/待检索</span>';const kinds=(item.sourceKinds||[]).length?item.sourceKinds:["unclassified"];const channels=kinds.map(kind=>'<span style="display:inline-block;border:1px solid '+(item.missing.includes(kind)?'#e6a5a0':'#b7ddc6')+';background:'+(item.missing.includes(kind)?'#fff0ef':'#edf8f1')+';color:'+(item.missing.includes(kind)?'var(--red)':'var(--ok-green)')+';padding:1px 5px;border-radius:8px;margin:1px;font-size:10.5px;">'+escapeHtml(labels[kind]||kind)+'</span>').join(""),req=item.dataRequirement||null,reqHtml=req?'<div style="color:var(--ok-green);margin-top:4px;">'+escapeHtml(airRequirementSummary(req))+'</div>':'',web=item.missing.includes("web_search")&&req?.webAllowed?'<button type="button" class="air-web-search" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'" data-query="'+escapeHtml(req.query)+'" data-requirement-schema="'+encodeURIComponent(JSON.stringify(req))+'" data-required-sources="'+escapeHtml(item.requiredSources)+'">🌐 精确联网</button>':'';return '<tr><td style="white-space:nowrap;">第'+item.sourceNo+'项</td><td><b>'+escapeHtml(item.title)+'</b><div style="color:var(--ink-soft);margin-top:3px;white-space:pre-line;">'+escapeHtml(item.requiredSources)+'</div>'+reqHtml+'</td><td>'+channels+'</td><td><div class="air-material-row-actions">'+status+(item.blocking?'<span style="font-size:10px;color:var(--red);">重要阻断</span>':'')+(req?'<button type="button" class="air-refine-requirement" data-requirement="'+encodeURIComponent(JSON.stringify(req))+'">🎯 调整数据需求</button>':'')+web+'<button type="button" class="air-material-upload" data-rule-id="'+escapeHtml(item.ruleId)+'" data-chapter="'+escapeHtml(item.chapter)+'" data-section="'+escapeHtml(item.section||item.title)+'">＋ 上传补充</button></div></td></tr>';};
   const content='<div class="air-card"><div class="air-step-done" style="margin-bottom:10px;"><b>材料完整性台账 · 逻辑 v'+inv.version+'</b><span>共'+inv.total+'项、'+inv.chapters.length+'章。以下来源数量允许交叉，例如同一小节可能同时需要知识库和人工材料。</span></div>'
     +(aiReportCanEnhanceLogic?'<div class="air-enhance-entry-tip"><b>管理员增强模式已开启</b><span>请先生成右侧正文并持续修改；定稿后从对应小节点击“从本节成稿提炼增强规则”，AI会比较版本并交由管理员审定。</span></div>':'')
 +'<div style="display:grid;grid-template-columns:repeat(7,minmax(86px,1fr));gap:7px;margin-bottom:10px;">'+stat(sum.ready,"已确认找到","var(--ok-green)")+stat(sum.system_rule,"系统规则直接生成","var(--bp)")+stat(sum.pendingKnowledge,"需从知识库检索","var(--red)")+stat(sum.pendingWeb,"需网上检索","var(--red)")+stat(sum.pendingProvider,"需调用数据接口","var(--red)")+stat(sum.pendingCalculation,"需从测算引擎取得","var(--red)")+stat(sum.pendingManual,"需人工上传","var(--red)")+'</div>'
-    +'<div style="display:flex;gap:7px;margin-bottom:8px;flex-wrap:wrap;"><button type="button" class="btn sm ghost" id="airMaterialExpandAll">展开全部</button><button type="button" class="btn sm ghost" id="airMaterialCollapseAll">收起全部</button><button type="button" class="btn sm ghost air-material-ask" data-prompt="请把全报告'+inv.total+'项材料需求按章节列成完整Markdown表格，列出序号、材料名称、获取渠道、当前状态和是否阻断，不要省略。">让AI列完整材料表</button><button type="button" class="btn sm air-batch-web-search" id="airBatchWebSearch" '+(sum.pendingWeb||batch?'':'disabled')+'>'+batchLabel+'</button><button type="button" class="btn sm air-batch-material-upload" id="airBatchMaterialUpload">＋ 批量上传材料</button></div>'
+    +'<div style="display:flex;gap:7px;margin-bottom:8px;flex-wrap:wrap;"><button type="button" class="btn sm ghost" id="airMaterialExpandAll">展开全部</button><button type="button" class="btn sm ghost" id="airMaterialCollapseAll">收起全部</button><button type="button" class="btn sm ghost air-material-ask" data-prompt="请把全报告'+inv.total+'项材料需求按章节列成完整Markdown表格，列出序号、材料名称、获取渠道、当前状态和是否阻断，不要省略。">让AI列完整材料表</button><button type="button" class="btn sm air-batch-web-search" id="airBatchWebSearch" '+(sum.pendingWeb||batch||window.WebResearch?.openSavedEvidence?'':'disabled')+'>'+batchLabel+'</button><button type="button" class="btn sm air-batch-material-upload" id="airBatchMaterialUpload">＋ 批量上传材料</button></div>'
     +'<div style="max-height:470px;overflow:auto;border:1px solid var(--line);border-radius:8px;">'+inv.chapters.map(g=>'<details class="air-material-chapter" style="border-bottom:1px solid var(--line);"><summary style="cursor:pointer;padding:11px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b style="min-width:210px;">'+escapeHtml(g.chapter)+'</b><span style="color:var(--ok-green);">已找到 '+g.counts.ready+'/'+g.total+'</span><span style="color:var(--red);">需知识库检索 '+g.counts.pendingKnowledge+'</span><span style="color:var(--red);">需网搜 '+g.counts.pendingWeb+'</span><span style="color:var(--red);">需接口 '+g.counts.pendingProvider+'</span><span style="color:var(--red);">需测算 '+g.counts.pendingCalculation+'</span><span style="color:var(--red);">需上传 '+g.counts.pendingManual+'</span></summary><div style="padding:0 10px 11px;"><table class="air-material-table" style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr style="text-align:left;background:#f5f8fb;"><th style="padding:7px;">序号</th><th style="padding:7px;">具体需要的内容/材料</th><th style="padding:7px;">获取渠道</th><th style="padding:7px;min-width:150px;">当前状态/补充</th></tr></thead><tbody>'+g.items.map(rowHtml).join("")+'</tbody></table><button type="button" class="btn sm ghost air-material-ask" style="margin-top:8px;" data-prompt="请把'+escapeHtml(g.chapter)+'全部材料需求列成表格，并告诉我应该先补哪几项。">询问本章补充顺序</button></div></details>').join("")+'</div>'
     +'<input type="file" id="airMaterialFile" accept=".txt,.md,.doc,.docx,.pdf,.xlsx,.xls,.csv" multiple hidden>'
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;"><button class="btn air-start-gen">先联网检索并集中确认 →</button><button class="btn" id="airBackgroundSearchGenerate">后台检索并立即开始可研生成 →</button><button class="btn ghost air-material-ask" data-prompt="请按重要程度汇总全报告必须由我人工补充的材料清单，并列成表格">仅汇总人工材料</button></div><div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">“先联网检索”会等待你集中采用依据后再生成；“后台检索并立即生成”会让联网任务继续运行，同时先按现有资料起草可研，完成后可回到批量检索采用高价值来源并更新受影响章节。上传材料只关联你选择的逻辑项。</div></div>';
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">'+(airGenerationFlowLocked()?'<span class="air-complete-pill">整篇生成向导已锁定；来源补充与检索仍可独立操作</span>':'<button class="btn air-start-gen">先联网检索并集中确认 →</button><button class="btn" id="airBackgroundSearchGenerate">后台检索并立即开始可研生成 →</button>')+'<button class="btn ghost air-material-ask" data-prompt="请按重要程度汇总全报告必须由我人工补充的材料清单，并列成表格">仅汇总人工材料</button></div><div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">本台账展示当前逐节材料需求与来源状态；历史上传原件另见上方材料清单。补充来源不会自动覆盖已生成正文。</div></div>';
   return airPersistentCardHtml("materials","数据与材料来源","共"+(inv.total||0)+"项；待知识库"+(sum.pendingKnowledge||0)+"、待网搜"+(sum.pendingWeb||0)+"、待人工"+(sum.pendingManual||0),content,false);
 }
 
@@ -1695,15 +2298,14 @@ function airUpdateBatchWebButton(status){
   button.disabled=false;button.textContent=status.status==="completed"?"🌐 查看批量检索结果（"+status.done+"/"+status.total+"）":status.status==="paused"?"🌐 批量检索已暂停（"+status.done+"/"+status.total+"）":"🌐 查看批量检索进度（"+status.done+"/"+status.total+"）";
 }
 async function airBatchWebPreflight(continueAfter,backgroundImmediately){
+  if(airGenerationFlowLocked()&&(continueAfter||backgroundImmediately)){airOpenExistingReport("🔒 已有报告正文，整篇生成向导已锁定；可以独立检索和补充来源。");return;}
   const coverage=airReportGenerationStatus();
-  if(coverage.complete){
-    if(!continueAfter&&!backgroundImmediately&&window.WebResearch?.openSavedEvidence){await window.WebResearch.openSavedEvidence();return;}
-    airOpenExistingReport("🔒 已有完整可研报告，本次后台检索和重复生成已被阻止，原版没有被覆盖。");return;
-  }
+  if(coverage.complete&&(continueAfter||backgroundImmediately)){airOpenExistingReport("🔒 已有完整可研报告，整篇重复生成已被阻止；可单独检索来源缺口。");return;}
   if(!window.WebResearch?.batchSearchGaps)return alert("批量联网检索模块未加载，请刷新页面后重试");
   const type=calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent",inventory=ReportLogicCore.materialInventory(type,airMaterialContext());
+  if(coverage.complete&&!inventory.summary?.pendingWeb){if(window.WebResearch.openSavedEvidence)await window.WebResearch.openSavedEvidence();return;}
   try{
-    await window.WebResearch.batchSearchGaps(inventory.items,{continueAfter:!!continueAfter&&!backgroundImmediately,openReview:!backgroundImmediately,onProgress:airUpdateBatchWebButton,onAdopt:airRefreshMaterialInventory,onContinue:()=>aiReportStartGenerate()});
+    await window.WebResearch.batchSearchGaps(inventory.items,{continueAfter:!!continueAfter&&!backgroundImmediately&&!airGenerationFlowLocked(),openReview:!backgroundImmediately,onProgress:airUpdateBatchWebButton,onAdopt:airRefreshMaterialInventory,onContinue:()=>{if(!airGenerationFlowLocked())return aiReportStartGenerate();}});
     if(backgroundImmediately)await aiReportStartGenerate();
   }
   catch(error){alert("批量联网检索未完成："+error.message);}
@@ -2019,10 +2621,14 @@ async function airFullMaterialTableMarkdown(){
 
 /* ================= 阶段⑥ 交付：全部复用现成的导出/审查/存档逻辑 ================= */
 function airDeliverHtml(){
-  const coverage=airReportGenerationStatus(),complete=coverage.complete,logicRevision=!!window.ProjectWorkflow?.logicRevisionInProgress?.(chapters);
-  const title=logicRevision?'报告逻辑正在同步':complete?'下一步想做什么？':'下一步怎么处理当前工作稿？';
-  const copy=logicRevision?'这是逻辑调整流程，不是整篇报告重新生成。请在右侧点击“生成受影响候选稿”，生成后逐项或批量接受；未受影响正文不会重写。':complete?'你可以先复核签发，也可以继续在下方和我对话。我能预演参数变化、判断受影响章节，或者生成某一小节的候选修改稿；正式内容不会未经确认就被覆盖。':'当前工作稿已完成 '+coverage.generated+'/'+coverage.total+' 节。可以继续生成剩余 '+coverage.remaining+' 节，也可先下载当前阶段 Word 或查看上一完整版本；不会强制重新生成已完成内容。';
-  const actions=logicRevision
+  const coverage=airReportGenerationStatus(),complete=coverage.complete,partial=coverage.partialUpdate,lengthGap=coverage.bodyComplete&&coverage.lengthPending,logicRevision=!!window.ProjectWorkflow?.logicRevisionInProgress?.(chapters);
+  const title=partial?'本轮更新尚未完成':lengthGap?'正文已保存，还没达到确认篇幅':logicRevision?'报告逻辑正在同步':complete?'下一步想做什么？':'下一步怎么处理当前工作稿？';
+  const copy=partial?'旧正文仍在，不等于整篇新版已经完成；'+Number(partial.unresolved||0)+' 节仍待处理。可以下载当前阶段 Word，也可以打开报告，在“候选问题清单”中处理剩余小节。':lengthGap?escapeHtml(airLengthDeliveryCopy(coverage.lengthDelivery)):logicRevision?'这是逻辑调整流程，不是整篇报告重新生成。请在右侧点击“生成受影响候选稿”，生成后逐项或批量接受；未受影响正文不会重写。':complete?'你可以先复核签发，也可以继续在下方和我对话。我能预演参数变化、判断受影响章节，或者生成某一小节的候选修改稿；正式内容不会未经确认就被覆盖。':'当前工作稿已完成 '+coverage.generated+'/'+coverage.total+' 节。可以继续生成剩余 '+coverage.remaining+' 节，也可先下载当前阶段 Word 或查看上一完整版本；不会强制重新生成已完成内容。';
+  const actions=partial
+    ?'<button type="button" class="btn air-resume-inline-btn">查看报告并处理剩余候选</button><button class="btn ghost air-act air-act-btn" data-act="exportWord">📄 下载当前阶段 Word</button>'+(airCompletedVersionForProgress(aiReportProgressMsg)?'<button type="button" class="btn ghost air-open-completed-version">📄 查看上一完整版本</button>':'')
+    :lengthGap
+    ?'<button type="button" class="btn air-resume-inline-btn">查看篇幅与薄弱小节</button><button class="btn ghost air-act air-act-btn" data-act="exportWord">📄 下载当前阶段 Word</button>'
+    :logicRevision
     ?'<button class="btn ghost air-act air-act-btn" data-act="exportWord">📄 下载当前阶段 Word</button>'+(airCompletedVersionForProgress(aiReportProgressMsg)?'<button type="button" class="btn ghost air-open-completed-version">📄 查看上一完整版本</button>':'')
     :complete
     ?'<button class="btn ghost air-act air-act-btn" data-act="exportWord">📄 导出可研报告（Word）</button><button class="btn ghost air-act air-act-btn" data-act="exportExcel">📊 导出测算表（Excel）</button><button class="btn ghost air-act air-act-btn" data-act="exportCalcWord">📋 导出测算说明书（Word）</button><button class="btn air-act air-act-btn air-review-primary" data-act="review">🔍 进入复核与签发 →</button><button class="btn ghost air-act air-act-btn" data-act="saveCase">📁 存入历史项目案例库</button>'
@@ -2037,7 +2643,7 @@ function airDeliverHtml(){
     +'<button type="button" class="air-prompt" data-prompt="项目背景这一节应该按什么逻辑写？需要什么输出形式？">查看小节生成逻辑</button>'
     +'<button type="button" class="air-prompt" data-prompt="项目背景这一节目前还缺哪些材料？请区分可自动检索和必须人工上传的内容">检查小节材料缺口</button>'
     +'<button type="button" class="air-prompt" data-prompt="帮我修改项目建设必要性这一节，先给候选稿">修改某一章节文字</button></div></div>'
-    +'<div class="air-deliver-actions">'+actions+'</div><div class="air-deliver-tip">'+(complete?'也可以直接在对话框发送“复核”，我会自动带你进入。':'未完成稿不会被标记为最终版本，也不会覆盖上一完整版本。')+'</div></div>';
+    +'<div class="air-deliver-actions">'+actions+'</div><div class="air-deliver-tip">'+(partial?'当前阶段下载保留；部分更新不被认作整篇新版完成。':complete?'也可以直接在对话框发送“复核”，我会自动带你进入。':'未完成稿不会被标记为最终版本，也不会覆盖上一完整版本。')+'</div></div>';
 }
 async function airDeliverAction(act){
   if(act==="exportWord") return exportWord();
@@ -2084,7 +2690,7 @@ function airCalcResultHtml(message){
 /* 点类型标签：只记一条"已选择类型"的彩色标签消息（不是冒充用户说了一句话），
    然后弹出一张空白信息表——项目名称/地点/土地性质等都要用户自己填，不会拿AI猜的假数据往下走。 */
 function airPickCategory(calcType){
-  if(aiReportBusy) return;
+  if(aiReportBusy||airGenerationFlowLocked()) return;
   const opt = AI_CATEGORY_OPTIONS.find(c=>c.key===calcType);
   if(!opt) return;
   if(!currentProjectId&&!window.ResearchUI?.active()){currentProjectId=genProjectId();rememberActiveProjectId(currentProjectId);project.name="AI可研未命名项目";saveDraft();}
@@ -2099,8 +2705,17 @@ function renderAiReportMsgs(){
   if(!box) return;
   box.style.minHeight=aiReportChat.length?"80px":"0";
   const backButton=document.getElementById("airBackStepBtn");
-  if(backButton)backButton.disabled=!(window.ProjectWorkflow&&ProjectWorkflow.previousAiReportStage(airCurrentStage()));
-  box.innerHTML = aiReportChat.map(m=>{
+  const flowLocked=airGenerationFlowLocked(),coverage=airReportGenerationStatus();
+  const history=flowLocked?[
+    '项目资料：'+(aiReportExtracted?'已保存':'历史记录缺失'),
+    '上传材料：'+airInitialMaterialRows().length+'份',
+    '位置核对：'+(aiReportSiteLocations.length?aiReportSiteLocations.length+'个点位':'无历史确认记录'),
+    '测算参数：'+(calcParams?Object.keys(calcParams).length+'项':'未保存'),
+    '参数来源：'+(aiReportSuggested?'可逐项核对':'旧会话未保存'),
+    '报告正文：'+coverage.generated+'/'+coverage.total+'节'
+  ].map(item=>'<span class="air-complete-pill">'+escapeHtml(item)+'</span>').join(''):'';
+  if(backButton)backButton.disabled=flowLocked||!(window.ProjectWorkflow&&ProjectWorkflow.previousAiReportStage(airCurrentStage()));
+  box.innerHTML = (flowLocked?'<div class="air-card air-step-done" role="status"><b>🔒 可研生成向导已锁定</b><span>生成路径回顾；下方可展开原资料和来源，上方项目工具各自独立操作，不会重新触发整篇生成。</span><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">'+history+'</div></div>':'')+aiReportChat.map(m=>{
     // 类型标签：彩色小胶囊，不套用普通消息气泡（不带"AI："前缀，不是在冒充一句对话）
     if(m.kind==="typeTag"){
       return '<div class="air-typetag-row"><span class="air-typetag air-typetag-'+m.calcType+'">✓ 已选择测算类型：'+escapeHtml(m.content)+'</span></div>';
@@ -2127,13 +2742,16 @@ function renderAiReportMsgs(){
       body='<div class="air-msg-summary">'+escapeHtml(firstLine.length>105?firstLine.slice(0,105)+'…':firstLine)+'</div><div class="air-msg-detail" id="'+detailId+'" hidden>'+body+'</div>';
     }
     const copyBtn = (m.role==="assistant" && (m.kind==="text"||m.kind==="generationIncomplete")) ? '<button class="air-msg-copy" data-copy="'+m.id+'">复制</button>' : "";
+    const moduleActions={materialResult:[["materials","查看/补充材料"]],infoCard:[["projectEdit","修改项目信息"]],locationResult:[["map","地图定位"]],confirmCard:[["calculation","查看/调整测算"]],calcResult:[["calculation","查看测算"]],materialCheck:[["sources","查看所需数据来源"],["search","联网搜索"]],genProgress:[["report","查看/修订报告"]],deliver:[["report","查看/修订报告"]]}[m.kind];
+    if(flowLocked&&moduleActions)body='<div style="display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap;margin:0 0 8px">'+moduleActions.map(action=>'<button type="button" class="btn ghost air-module-action" data-module="'+action[0]+'">'+action[1]+'</button>').join('')+'</div>'+body;
     const detailBtn = collapsibleText ? '<button class="air-msg-detail-toggle" data-detail-target="airMsgDetail_'+m.id+'">查看详情</button>' : "";
-    const retryBtn = m.retry ? '<div style="margin-top:8px;"><button class="btn ghost air-msg-retry" data-retry="'+m.id+'" style="padding:4px 12px; font-size:11.5px;">重试</button></div>' : "";
+    const retryBtn = m.retry&&!flowLocked ? '<div style="margin-top:8px;"><button class="btn ghost air-msg-retry" data-retry="'+m.id+'" style="padding:4px 12px; font-size:11.5px;">重试</button></div>' : "";
     return '<div class="air-msg '+(m.role==="user"?"user":"assistant")+'" data-air-msg-kind="'+escapeHtml(m.kind||"text")+'">'
       +(m.role==="user"?"<b>你：</b>":"<b>AI：</b>")+copyBtn+detailBtn+body+retryBtn+'</div>';
   }).join("");
   box.scrollTop = box.scrollHeight;
   const s = id=>document.getElementById(id);
+  box.querySelectorAll('.air-module-action').forEach(button=>button.onclick=()=>airOpenIndependentModule(button.dataset.module).catch(error=>alert('打开项目工具失败：'+error.message)));
   if(s("airConfirmInfo")) s("airConfirmInfo").onclick = aiReportConfirmInfo;
   if(s("airRetryMaterialExtraction"))s("airRetryMaterialExtraction").onclick=()=>airRetrySavedMaterialExtraction(false);
   if(s("air_ctype"))s("air_ctype").onchange=()=>{const row=s("air_gaibao_scenario_row");if(row)row.style.display=s("air_ctype").value==="gaibao"?"":"none";};
@@ -2172,6 +2790,9 @@ function renderAiReportMsgs(){
   if(s("airBackgroundSearchGenerate"))s("airBackgroundSearchGenerate").onclick=()=>airBatchWebPreflight(false,true);
   if(s("airCheckMaterials")) s("airCheckMaterials").onclick = airCheckWholeReportMaterials;
   document.querySelectorAll(".air-open-calc-details").forEach(button=>button.onclick=airOpenCalcDetails);
+  if(s('airChooseQuickCalc'))s('airChooseQuickCalc').onclick=()=>{if(airGenerationFlowLocked()||aiReportParamsConfirmed)return alert('当前测算已确认；请进入完整测算调整并明确采用，不能用快速模式覆盖。');aiReportCalculationMode='quick';airSaveState();renderSheet();};
+  if(s('airChooseFullCalc'))s('airChooseFullCalc').onclick=()=>{aiReportCalculationMode='full';airSaveState();renderSheet();};
+  if(s('airStartFullCalc'))s('airStartFullCalc').onclick=()=>airStartFullCalc(false);
   document.querySelectorAll(".air-open-calc-experience").forEach(button=>button.onclick=airOpenCalcExperienceLibrary);
   if(s("airApplyCalc"))s("airApplyCalc").onclick=airApplyCalcPreview;
   if(s("airRejectCalc"))s("airRejectCalc").onclick=()=>{aiReportPendingCalcChange=null;aiReportChat=aiReportChat.filter(m=>m.kind!=="calcPreview");airPush({role:"assistant",kind:"text",content:"已取消本次参数修改，当前正式测算和报告没有变化。"});airSaveState();};
@@ -2299,7 +2920,7 @@ function airRegisterAgentTools(){
     const hits=inventory.items.filter(item=>[item.chapter,item.section,item.title].some(text=>ReportLogicCore.normalize(text).includes(nq)||nq.includes(ReportLogicCore.normalize(text))));
     return JSON.stringify({ok:true,scope:"matched",version:inventory.version,total:hits.length,summary:inventory.summary,items:hits.map(compact)});
   }});
-  AC.registerTool("propose_feasibility_section_revision",{schema:{type:"function",function:{name:"propose_feasibility_section_revision",description:"为一个明确小节生成候选修改稿，不覆盖正式正文；用户可在右侧报告预览或复核页接受、拒绝",parameters:{type:"object",properties:{title:{type:"string"},instruction:{type:"string"}},required:["title","instruction"]}}},validate:a=>a&&String(a.title||"").trim()&&String(a.instruction||"").trim()?{ok:true}:{ok:false,error:"必须提供小节标题和修改要求"},run:async a=>{const q=String(a.title),hits=chapters.flatMap(c=>c.sections.map((s,si)=>({c,s,si}))).filter(x=>x.s.t.includes(q)||q.includes(x.s.t));if(hits.length!==1)return JSON.stringify({ok:false,error:hits.length?"匹配到多个小节，请说完整标题":"没有找到该小节"});const x=hits[0];if(x.s.locked)return JSON.stringify({ok:false,error:"该小节已人工锁定，请先解除锁定"});const text=await reviseSection(x.c,x.s,String(a.instruction));ProjectWorkflow.setCandidate(x.s,text,String(a.instruction));saveDraft();airSaveState();if(aiReportHasDoc)airRefreshSection(x.c.cn,x.si);return JSON.stringify({ok:true,status:"candidate_only",cn:x.c.cn,chapter:x.c.name,si:x.si,title:x.s.t,message:"候选稿已生成，正式正文尚未变化；可直接在右侧报告预览接受或拒绝，也可进入复核页处理"});},label:a=>"生成章节候选稿："+a.title});
+  AC.registerTool("propose_feasibility_section_revision",{schema:{type:"function",function:{name:"propose_feasibility_section_revision",description:"为一个明确小节生成候选修改稿，不覆盖正式正文；用户可在右侧报告预览或复核页接受、拒绝",parameters:{type:"object",properties:{title:{type:"string"},instruction:{type:"string"}},required:["title","instruction"]}}},validate:a=>a&&String(a.title||"").trim()&&String(a.instruction||"").trim()?{ok:true}:{ok:false,error:"必须提供小节标题和修改要求"},run:airProposeSectionRevision,label:a=>"生成章节候选稿："+a.title});
 }
 async function airRunAgent(text){
   const researchChat=window.ResearchUI?.active()?ResearchUI.capture('chat'):null;
@@ -2333,7 +2954,7 @@ function airSerializableState(){
     if(m.kind==="locationCard"||m.kind==="locationResult"){chat.push({role:m.role,kind:m.kind,content:"",sites:m.sites||(m.kind==="locationResult"?aiReportSiteLocations:aiReportSiteSearches)||[]});return;}
     chat.push({role:m.role, kind:m.kind, content:m.content||""});
   });
-  return { savedAt:Date.now(),stateRevision:aiReportStateRevision,stage:airCurrentStage(),chat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,paramsConfirmed:aiReportParamsConfirmed,
+  return { savedAt:Date.now(),stateRevision:aiReportStateRevision,stage:airCurrentStage(),chat,extracted:aiReportExtracted,suggested:aiReportSuggested,hasDoc:aiReportHasDoc,paramsConfirmed:aiReportParamsConfirmed,calculationMode:aiReportCalculationMode,
     materialCheckOpen:aiReportChat.some(m=>m.kind==="materialCheck"),
     collapsedCards:Object.assign({},aiReportCollapsedCards),
     locationCandidates:aiReportLocationCandidates,locationConfirmed:aiReportLocationConfirmed,siteSearches:aiReportSiteSearches,siteLocations:aiReportSiteLocations,
@@ -2342,6 +2963,8 @@ function airSerializableState(){
     pendingTaskKeys };
 }
 function airSaveState(){
+  // 读取失败时不可把不完整的左栏回写覆盖服务器会话；正文仍走独立草稿保存。
+  if(aiReportRestoreLoading||aiReportRestoreError)return Promise.resolve(false);
   if(window.ResearchUI?.active())return ResearchUI.save();
   if(window.ResearchUI?.legacyAbandoned?.())return Promise.resolve(false);
   aiReportStateRevision++;
@@ -2364,6 +2987,44 @@ function airRestoredConfirmation(state){
   const chat=Array.isArray(state.chat)?state.chat:[];
   return !!(state.calcParams&&chat.some(m=>m&&["genProgress","deliver"].includes(m.kind)));
 }
+function airHasRestorableState(state){
+  return !!(state&&typeof state==="object"&&(state.extracted||state.suggested||state.calcParams||state.hasDoc||(Array.isArray(state.chat)&&state.chat.length)));
+}
+function airWorkspaceCalcType(workflow,fallback){
+  const snapshot=(workflow?.calcSnapshots||[]).find(item=>item&&item.id===workflow?.currentCalcSnapshotId);
+  return ["rent","sale","gaibao"].includes(snapshot?.calcType)?snapshot.calcType:fallback;
+}
+function airCaptureRestoreContext(){
+  const epoch=aiReportRestoreEpoch,projectId=currentProjectId,researchMode=!!window.ResearchUI?.active();
+  // 复用只读身份令牌；查看者也应能恢复工具，不要求编辑权限。
+  const token=researchMode?ResearchUI.capture("export"):null;
+  return {researchMode,accepts:()=>epoch===aiReportRestoreEpoch&&projectId===currentProjectId&&researchMode===!!window.ResearchUI?.active()&&(!researchMode||ResearchUI.accepts(token))};
+}
+function airRenderRestoreStatus(){
+  const el=document.getElementById("airRestoreStatus");if(!el)return;
+  el.style.cssText="margin-top:8px;font-size:12px;color:"+(aiReportRestoreError?"#b42318":"var(--ink-soft)");
+  el.textContent=aiReportRestoreLoading?"正在恢复当前项目工具…":aiReportRestoreError?"AI会话未完整读取，已保留当前项目正文与参数；会话同步暂停。"+aiReportRestoreError:"";
+  if(aiReportRestoreError&&!aiReportRestoreLoading){const button=document.createElement("button");button.type="button";button.className="btn ghost";button.textContent="重试恢复";button.onclick=()=>{aiReportChatLoaded=false;void airLoadState();};el.appendChild(button);}
+  document.querySelectorAll(".air-module-bar [data-module]").forEach(button=>{button.disabled=aiReportRestoreLoading;});
+  const send=document.getElementById("airSend");if(send)send.disabled=aiReportRestoreLoading||aiReportBusy;
+}
+function airHydrateCurrentWorkspace(){
+  const hasBody=chapters.some(c=>(c.sections||[]).some(reportHasVisibleBody));
+  const hasSavedData=hasBody||!!calcParams||!!kbEntries.length||!!currentProjectId&&!!project.name||window.ProjectWorkflow?.aiReportShouldSeedProject(aiReportEntryContext);
+  if(!hasSavedData)return false;
+  let changed=false;
+  const type=airWorkspaceCalcType(projectWorkflow,domainKey==="baozhang_gaibao"?"gaibao":calcType||rptCtype||"rent");
+  const seed=window.ProjectWorkflow?.aiReportProjectSeed(Object.assign({},project,aiReportEntryContext||{}),projectWorkflow,domainKey);
+  if(!aiReportExtracted&&seed){aiReportExtracted=Object.assign({},seed,{calcType:type});changed=true;}
+  else if(aiReportExtracted)airFillCurrentProjectGaps();
+  if(aiReportExtracted&&!aiReportChat.some(m=>m.kind==="infoCard")){aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"infoCard",content:""});changed=true;}
+  // 报告草稿已有测算，不等于AI会话已确认推荐参数。只恢复查看卡，不伪造确认与来源。
+  if(calcParams&&calcResult&&!aiReportChat.some(m=>m.kind==="calcResult")){
+    aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"calcResult",content:"已恢复当前项目保存的财务测算。可查看参数和结果；未自动确认新的AI推荐参数。"});changed=true;
+  }
+  if(hasBody)aiReportHasDoc=true;
+  return changed;
+}
 function airSeedCurrentProject(){
   const seed=window.ProjectWorkflow&&ProjectWorkflow.aiReportProjectSeed(Object.assign({},project,aiReportEntryContext||{}),projectWorkflow,domainKey);
   if(!seed||aiReportExtracted)return false;
@@ -2380,45 +3041,58 @@ function airFillCurrentProjectGaps(){
   if(!seed||!aiReportExtracted)return false;
   ["projectName","location","owner","businessScenario","landArea","landPrice","startYear","landNature","desc"].forEach(key=>{if(aiReportExtracted[key]==null||aiReportExtracted[key]==="")aiReportExtracted[key]=seed[key];});
   if(!Array.isArray(aiReportExtracted.analysisSites)||!aiReportExtracted.analysisSites.length)aiReportExtracted.analysisSites=seed.analysisSites;
-  if(!aiReportExtracted.calcType)aiReportExtracted.calcType=seed.calcType;
+  if(!aiReportExtracted.calcType)aiReportExtracted.calcType=airWorkspaceCalcType(projectWorkflow,seed.calcType);
   return true;
 }
-async function airRestoreMaterialCheck(state){
+async function airRestoreMaterialCheck(state,context=airCaptureRestoreContext()){
   const chat=Array.isArray(state&&state.chat)?state.chat:[],hasReportFlow=!!(state&&(state.hasDoc||["generating","paused","delivered"].includes(state.stage)||chat.some(m=>m&&["genProgress","deliver","generationIncomplete"].includes(m.kind))));
   if(!(state?.materialCheckOpen||hasReportFlow)||!window.ReportLogicCore||aiReportChat.some(m=>m.kind==="materialCheck"))return;
   const type=state.calcType||calcType||(calcResult&&calcResult.__ctype)||rptCtype||"rent";
   try{
     await ReportLogicCore.load(type);
+    if(!context.accepts())return;
     const inventory=ReportLogicCore.materialInventory(type,airMaterialContext());
     aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"materialCheck",inventory});
   }catch(e){console.warn("恢复材料完整性台账失败",e);}
 }
 async function airLoadState(){
-  const loadingProjectId=currentProjectId;
   if(aiReportChatLoaded) return;
   // 直接刷新到AI可研时，项目正文会在大纲和项目接口完成后才恢复。
   // 此时若用空的chapters纠正进度，会把真实27/42误写成0/0；等待restoreDraft后的第二次渲染再加载AI会话。
   if(currentProjectId&&!chapters.length)return;
+  let context;try{context=airCaptureRestoreContext();}catch{return;}
+  const retrying=!!aiReportRestoreError;
   aiReportChatLoaded = true;
-  if(aiReportChat.length) return; // 本次会话已经有内容了，不覆盖
+  if(aiReportChat.length&&!retrying){
+    airHydrateCurrentWorkspace();
+    await airRestoreMaterialCheck({hasDoc:aiReportHasDoc,calcType:airWorkspaceCalcType(projectWorkflow,calcType)},context);
+    if(!context.accepts())return;
+    airRepairFlowCards();renderAiReportMsgs();return;
+  } // 已有会话只补当前草稿工具，不覆盖
+  aiReportRestoreLoading=true;aiReportRestoreError="";airRenderRestoreStatus();
   try{
-    const researchMode=window.ResearchUI?.active();
+    const researchMode=context.researchMode;
     const localState=researchMode?null:await airLoadDurableLocalState();
-    if(currentProjectId!==loadingProjectId)return;
+    if(!context.accepts())return;
     const q=currentProjectId?"?projectId="+encodeURIComponent(currentProjectId):"";
     const researchState=researchMode?ResearchUI.state():null;
-    const d = researchMode?{ok:true,state:researchState.aiReport||researchState.legacySnapshot}:await (await fetch("/api/aireport"+q, {headers: authHeaders()})).json();
-    if(currentProjectId!==loadingProjectId)return;
+    let d;
+    try{
+      if(researchMode)d={ok:true,state:airHasRestorableState(researchState?.aiReport)?researchState.aiReport:researchState?.legacySnapshot};
+      else{const response=await fetch("/api/aireport"+q,{headers:authHeaders()});d=await response.json();if(!response.ok||!d.ok)throw new Error("会话接口读取失败，请重试。");}
+    }catch(error){if(!context.accepts())return;aiReportRestoreError=error.message||"网络异常，请重试。";d={ok:false};}
+    if(!context.accepts())return;
     const serverState=(d.ok&&d.state)?d.state:null;
     // 若用户刚完成一步就刷新，网络保存可能还在途中；优先采用时间更新的本地即时状态。
     const state=localState&&Number(localState.savedAt)>Number(serverState&&serverState.savedAt||0)?localState:(serverState||localState);
-    if(state && (state.extracted||state.suggested||state.calcParams||state.hasDoc||(Array.isArray(state.chat)&&state.chat.length))){
+    if(airHasRestorableState(state)){
       aiReportCollapsedCards=Object.assign({params:null,materials:null},state.collapsedCards||{});
       aiReportChat = (Array.isArray(state.chat)?state.chat:[]).map(m=>Object.assign({id: ++aiReportMsgSeq}, m));
       aiReportStateRevision=Math.max(aiReportStateRevision,Number(state.stateRevision)||0);
       aiReportExtracted = state.extracted || null;
       airFillCurrentProjectGaps();
       aiReportSuggested = state.suggested || null;
+      aiReportCalculationMode=state.calculationMode==='full'?'full':state.calculationMode==='quick'||state.paramsConfirmed?'quick':'full';
       aiReportLocationCandidates=Array.isArray(state.locationCandidates)?state.locationCandidates:[];
       aiReportLocationConfirmed=state.locationConfirmed||null;
       aiReportSiteSearches=Array.isArray(state.siteSearches)?state.siteSearches:[];
@@ -2426,9 +3100,10 @@ async function airLoadState(){
       aiReportHasDoc=!!state.hasDoc||chapters.some(c=>(c.sections||[]).some(reportHasVisibleBody));
       aiReportParamsConfirmed=airRestoredConfirmation(state);
       if(state.calcType)calcType=state.calcType;
-      if(aiReportParamsConfirmed&&state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;}catch(e){aiReportParamsConfirmed=false;}}
-      let repairedState=airRepairFlowCards();
-      await airRestoreMaterialCheck(state);
+      if(aiReportParamsConfirmed&&state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;if(calcType==="gaibao")calcResult.sens=computeSensitivity(calcParams);}catch(e){aiReportParamsConfirmed=false;}}
+      let repairedState=airHydrateCurrentWorkspace();repairedState=airRepairFlowCards()||repairedState;
+      await airRestoreMaterialCheck(state,context);
+      if(!context.accepts())return;
       aiReportProgressMsg=[...aiReportChat].reverse().find(m=>m.kind==="genProgress")||null;
       const historicalLogicProgress=aiReportProgressMsg&&window.ProjectWorkflow?.historicalProgressDuringLogicRevision?ProjectWorkflow.historicalProgressDuringLogicRevision(projectWorkflow,chapters,aiReportProgressMsg):null;
       if(historicalLogicProgress){
@@ -2447,31 +3122,29 @@ async function airLoadState(){
           repairedState=true;
         }
         if(!aiReportProgressMsg.reportVersion&&!aiReportProgressMsg.targetReportVersion){aiReportProgressMsg.targetReportVersion=ProjectWorkflow.nextReportVersionNumber(projectWorkflow);repairedState=true;}
-        if(reconciled.status.complete&&!airCompletedVersionForProgress(aiReportProgressMsg)&&window.ProjectWorkflow?.createReportVersion){
+        if(reconciled.status.complete&&airReportGenerationStatus().complete&&!airCompletedVersionForProgress(aiReportProgressMsg)&&window.ProjectWorkflow?.createReportVersion){
           const version=ProjectWorkflow.createReportVersion(projectWorkflow,chapters,currentReportVersionMeta("刷新恢复时补建完成版本"));aiReportProgressMsg.reportVersionId=version&&version.id||null;aiReportProgressMsg.reportVersion=Number(version&&version.version)||null;repairedState=true;saveDraft();
         }
       }
       repairedState=airRepairFlowCards()||repairedState;
       if(aiReportHasDoc&&chapters.length)airRestoreDocPaneIfNeeded();
       renderAiReportMsgs();
-      if(repairedState)airSaveState();
-      airMaybeAutoRetryMaterialExtraction();
-    }else if(window.ProjectWorkflow?.aiReportShouldSeedProject(aiReportEntryContext))airSeedCurrentProject();
+      // 工具恢复只补界面；不因打开项目自动创建/覆盖独立AI会话。
+      if(!aiReportRestoreError)airMaybeAutoRetryMaterialExtraction();
+    }else{
+      airHydrateCurrentWorkspace();
+      await airRestoreMaterialCheck({hasDoc:aiReportHasDoc,calcType:airWorkspaceCalcType(projectWorkflow,calcType)},context);
+      if(!context.accepts())return;
+      airRepairFlowCards();
+      renderAiReportMsgs();
+    }
   }catch(e){
-    const state=await airLoadDurableLocalState();
-    if(currentProjectId!==loadingProjectId)return;
-    if(state){
-      aiReportCollapsedCards=Object.assign({params:null,materials:null},state.collapsedCards||{});aiReportStateRevision=Math.max(aiReportStateRevision,Number(state.stateRevision)||0);aiReportChat=(state.chat||[]).map(m=>Object.assign({id:++aiReportMsgSeq},m));aiReportExtracted=state.extracted||null;airFillCurrentProjectGaps();aiReportSuggested=state.suggested||null;aiReportLocationCandidates=Array.isArray(state.locationCandidates)?state.locationCandidates:[];aiReportLocationConfirmed=state.locationConfirmed||null;aiReportHasDoc=!!state.hasDoc;aiReportParamsConfirmed=airRestoredConfirmation(state);
-      if(state.calcType)calcType=state.calcType;if(aiReportParamsConfirmed&&state.calcParams){calcParams=state.calcParams;try{calcResult=runCalcEngine(calcType,calcParams);calcResult.__ctype=calcType;scParams=calcParams;scResult=calcResult;}catch(_){aiReportParamsConfirmed=false;} }
-      let repairedState=airRepairFlowCards();await airRestoreMaterialCheck(state);aiReportProgressMsg=[...aiReportChat].reverse().find(m=>m.kind==="genProgress")||null;
-      const historicalLogicProgress=aiReportProgressMsg&&window.ProjectWorkflow?.historicalProgressDuringLogicRevision?ProjectWorkflow.historicalProgressDuringLogicRevision(projectWorkflow,chapters,aiReportProgressMsg):null;
-      if(historicalLogicProgress){Object.assign(aiReportProgressMsg,historicalLogicProgress.progress);repairedState=historicalLogicProgress.repaired||repairedState;}
-      else if(aiReportProgressMsg&&window.ProjectWorkflow?.recoverCompletedReport){const recovered=ProjectWorkflow.recoverCompletedReport(chapters,projectWorkflow,aiReportProgressMsg);if(recovered.recovered){chapters=recovered.chapters;aiReportProgressMsg.reportVersionId=recovered.version.id;aiReportProgressMsg.reportVersion=Number(recovered.version.version)||null;aiReportProgressMsg.recoveredFromMismatch=false;repairedState=true;saveDraft();}}
-      aiReportPendingTasks=[];chapters.filter(c=>c.checked!==false).forEach(c=>(c.sections||[]).forEach((s,si)=>{if(!reportHasVisibleBody(s))aiReportPendingTasks.push({c,s,si});}));
-      if(!historicalLogicProgress&&aiReportProgressMsg&&window.ProjectWorkflow?.reconcileGenerationProgress){const reconciled=ProjectWorkflow.reconcileGenerationProgress(aiReportProgressMsg,chapters);if(reconciled.repaired){Object.assign(aiReportProgressMsg,reconciled.progress);repairedState=true;}if(!aiReportProgressMsg.reportVersion&&!aiReportProgressMsg.targetReportVersion){aiReportProgressMsg.targetReportVersion=ProjectWorkflow.nextReportVersionNumber(projectWorkflow);repairedState=true;}}
-      repairedState=airRepairFlowCards()||repairedState;
-      if(aiReportHasDoc&&chapters.length)airRestoreDocPaneIfNeeded();renderAiReportMsgs();if(repairedState)airSaveState();airMaybeAutoRetryMaterialExtraction();
-    }else if(window.ProjectWorkflow?.aiReportShouldSeedProject(aiReportEntryContext))airSeedCurrentProject();
+    if(!context.accepts())return;
+    aiReportRestoreError="恢复工具失败，请重试；原项目资料未删除。";
+    airHydrateCurrentWorkspace();renderAiReportMsgs();
+    console.warn("恢复AI项目工具失败",e);
+  }finally{
+    if(context.accepts()){aiReportRestoreLoading=false;airRenderRestoreStatus();}
   }
 }
 
@@ -2490,9 +3163,12 @@ function airRepairFlowCards(){
       if(aiReportChat.length!==before)repaired=true;
     }
   }
-  if(aiReportExtracted&&airInitialMaterialRows().length&&!aiReportChat.some(message=>message.kind==="materialResult")){
+  if(airInitialMaterialRows().length&&!aiReportChat.some(message=>message.kind==="materialResult")){
     const oldIndex=aiReportChat.findIndex(message=>message.kind==="text"&&/(?:公网DeepSeek已恢复.*保存的\s*\d+\s*份材料|已保存并解析\s*\d+\s*份材料|已解析\s*\d+\s*份材料并形成)/.test(String(message.content||"")));
-    if(oldIndex>=0){aiReportChat.splice(oldIndex,1,{id:aiReportChat[oldIndex].id,role:"assistant",kind:"materialResult",content:"",files:airInitialMaterialRows(),extractionStatus:aiReportExtracted.__materialExtractionDegraded?"degraded":"extracted"});repaired=true;}
+    const materialResult={id:oldIndex>=0?aiReportChat[oldIndex].id:++aiReportMsgSeq,role:"assistant",kind:"materialResult",content:"",files:airInitialMaterialRows(),extractionStatus:aiReportExtracted.__materialExtractionDegraded?"degraded":"extracted"};
+    if(oldIndex>=0)aiReportChat.splice(oldIndex,1,materialResult);
+    else {const infoIndex=aiReportChat.findIndex(message=>message.kind==="infoCard");aiReportChat.splice(infoIndex>=0?infoIndex:0,0,materialResult);}
+    repaired=true;
   }
   // 兼容旧存档：历史财务结果是普通文本，恢复后升级为带“进入详情”操作的结果卡。
   aiReportChat.forEach(m=>{if(m.kind==="text"&&/^✅ 财务测算完成：/.test(m.content||""))m.kind="calcResult";});
@@ -2518,7 +3194,7 @@ function airRepairFlowCards(){
   const has=kind=>aiReportChat.some(m=>m.kind===kind);
   if(aiReportExtracted&&!has("infoCard"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"infoCard"});
   if(aiReportExtracted&&!aiReportSuggested&&!aiReportLocationConfirmed&&aiReportLocationCandidates.length&&!has("locationCard"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"locationCard",query:aiReportExtracted.location||"",candidates:aiReportLocationCandidates});
-  if(aiReportSuggested&&!has("confirmCard"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"confirmCard"});
+  if((aiReportSuggested||airGenerationFlowLocked()&&calcParams)&&!has("confirmCard")){aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"confirmCard"});repaired=true;}
   const stage=airCurrentStage();
   if(stage==="calculated"&&!has("genConfirm"))aiReportChat.push({id:++aiReportMsgSeq,role:"assistant",kind:"genConfirm"});
   const settledProgress=[...aiReportChat].reverse().find(m=>m.kind==="genProgress");

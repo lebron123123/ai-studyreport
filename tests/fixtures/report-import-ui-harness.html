@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <base href="/">
+  <title>[系统测试]已有报告完善</title>
+  <link rel="stylesheet" href="/report-import.css">
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#eef3f7;font-family:"Microsoft YaHei",system-ui,sans-serif;color:#203348}
+    .fixture-bar{display:flex;align-items:center;gap:10px;background:#123e5d;color:white;padding:12px 22px}
+    .fixture-bar strong{margin-right:auto}.fixture-bar button{padding:7px 12px;border:1px solid #bed1df;border-radius:5px;background:white;color:#234a66;cursor:pointer}
+    #fixtureMount{padding:26px;max-width:1900px;margin:auto}#fixtureAway{padding:40px}
+  </style>
+</head>
+<body>
+  <header class="fixture-bar"><strong>[系统测试] 独立原稿导入工作区</strong><button id="fixtureLeave">返回首页</button><button id="fixtureEnter">已有报告完善</button></header>
+  <main id="fixtureMount"></main>
+  <section id="fixtureAway" hidden>已返回测试首页，未访问正式项目。</section>
+  <script>window.__fixtureOwner='[系统测试]导入UI';window.getUser=()=>window.__fixtureOwner;</script>
+  <script src="/report-import-core.js"></script>
+  <script src="/report-completion-contract.js"></script>
+  <script src="/report-writing-standard.js"></script>
+  <script src="/report-import-context.js"></script>
+  <script src="/report-import-review.js"></script><script src="/report-import-quality.js"></script>
+  <script src="/report-import-store.js"></script>
+  <script src="/report-import-backup.js"></script>
+  <script src="/report-import-ai.js"></script>
+  <script src="/report-import-ui.js"></script>
+  <script>
+    document.getElementById('fixtureLeave').onclick=()=>{document.getElementById('fixtureMount')?.remove();document.getElementById('fixtureAway').hidden=false;};
+    document.getElementById('fixtureEnter').onclick=()=>{document.getElementById('fixtureAway').hidden=true;let mount=document.getElementById('fixtureMount');if(!mount){mount=document.createElement('main');mount.id='fixtureMount';document.body.appendChild(mount);}ReportImportUI.mount(mount);};
+    ReportImportUI.mount(document.getElementById('fixtureMount'));
+  </script>
+</body>
+</html>

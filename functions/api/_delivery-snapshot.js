@@ -1,4 +1,5 @@
 // Immutable delivery format. Never re-project stored v1 snapshots before validating their original hash.
+import {hasDeliveryGapRegistry,deliveryGapSnapshot} from './_delivery-gaps.js';
 function copy(value){return value===undefined?null:JSON.parse(JSON.stringify(value));}
 function canonical(value){if(Array.isArray(value))return value.map(canonical);if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])]));return value;}
 export function legacyDeliverySnapshot(data){
@@ -9,8 +10,9 @@ function paragraphs(content,sectionId){
   return String(content).replace(/<\/(?:p|div|li|tr|h[1-6])>|<br\s*\/?>/gi,'\n').split(/\r?\n/).map(text=>text.replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/g,' ').trim()).filter(Boolean).map((text,index)=>({id:sectionId+':p'+(index+1),ordinal:index+1,text}));
 }
 export function deliveryVisibleText(content){return String(content||'').replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi,'').replace(/<[^>]*>/g,' ').replace(/&(?:nbsp|#160|#xA0);/gi,' ').replace(/[\s\u200b-\u200d\ufeff]/g,'');}
-export function deliverySnapshot(data,schemaVersion=3){
+export function deliverySnapshot(data,schemaVersion=hasDeliveryGapRegistry(data)?4:3,gapContext){
   if(schemaVersion===1)return legacyDeliverySnapshot(data);
+  if(schemaVersion===4){const snapshot=deliverySnapshot(data,3);snapshot.schemaVersion=4;snapshot.gapReview=deliveryGapSnapshot(data,gapContext);return canonical(snapshot);}
   if(schemaVersion===3){const snapshot=deliverySnapshot(data,2);snapshot.schemaVersion=3;snapshot.chapters=snapshot.chapters.filter(c=>c.checked);snapshot.project=copy(data.project||{});snapshot.exportContext={calcResult:copy(data.calcResult),calcSummary:copy(data.calcSummary),domainKey:copy(data.domainKey),docNo:copy(data.docNo)};return canonical(snapshot);}
   if(schemaVersion!==2)throw new Error('不支持的冻结快照版本');
   const wf=data.workflow||{},active=(wf.reportVersions||[]).find(v=>v.id===wf.currentReportVersionId);
@@ -22,7 +24,7 @@ export function deliverySnapshot(data,schemaVersion=3){
 }
 export function deliverySchema(snapshot){
   if(snapshot?.schemaVersion===undefined)return 1;
-  if(![2,3].includes(snapshot.schemaVersion))throw new Error('不支持的冻结快照版本');
+  if(![2,3,4].includes(snapshot.schemaVersion))throw new Error('不支持的冻结快照版本');
   return snapshot.schemaVersion;
 }
 export function restoreDeliveryDraft(data,snapshot,deliveryId,contentHash){
@@ -33,6 +35,10 @@ export function restoreDeliveryDraft(data,snapshot,deliveryId,contentHash){
   wf.restoredDelivery={id:deliveryId,contentHash,schemaVersion:schema,referenceStatus:schema===1?'unknown':'recorded_unverified',requiresReview:true};
   if(schema>=2){next.kb=copy(snapshot.references.kb||[]);wf.lineage=copy(snapshot.references.lineage);for(const [key,value]of Object.entries(snapshot.references.logic||{}))wf[key]=copy(value);}
   else next.kb=[]; // Old snapshots did not record sources; never borrow today's references as historical evidence.
+  // Restoring body/references does not restore proof validity for today's facts.
+  // Keep the ledger (including unresolved records) but require explicit re-review.
+  if(schema===4)wf.reportGapRegistry=copy(snapshot.gapReview?.registry);
+  if(hasDeliveryGapRegistry(next)&&wf.reportGapRegistry&&typeof wf.reportGapRegistry==='object')wf.reportGapRegistry.activation={confirmed:false,reason:'restored-delivery-requires-review'};
   // Do not roll back current project facts/calculation parameters or remove calculation history.
   // Their exact historical values remain available in the immutable snapshot for manual reconciliation.
   return next;

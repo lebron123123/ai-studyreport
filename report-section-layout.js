@@ -9,7 +9,115 @@
     for(const a of aliases)if(a.map(key).includes(k))return key(a[0]);
     return k;
   }
-  const missing=s=>!String(s||'').trim()||/^(?:待填|待补|暂无|—|-|【待补[^】]*】)$/.test(String(s).trim());
+  // A concrete missing-evidence request is report content, not an empty value.
+  // Keep it in the main table/difference register until a reviewer resolves it.
+  const missing=s=>!String(s||'').trim()||/^(?:待填|待补|暂无|—|-|【待补\s*[:：]?\s*】)$/.test(String(s).trim());
+  const supplementSelector='[data-report-supplement]';
+  const valueKey=value=>{
+    const text=String(value||'').trim().replace(/(?<=\d)[,，](?=\d{3}(?:\D|$))/g,'');
+    return /^-?\d+(?:\.\d+)?$/.test(text)?String(Number(text)):key(text);
+  };
+  // Financial summaries repeat the same metric with units in either its label,
+  // unit column or value. Only explicit, unambiguous units are propagated; no
+  // currency conversion or assumption about an unstated accounting basis occurs.
+  function normalizeFinancialRows(raw,entries,conflicts){
+    const records=[],unitOptions=new Map(),scopeOptions=new Map(),notes=new Map();
+    const unitKey=s=>missing(s)?'':String(s||'').trim().replace(/％/g,'%');
+    const aliases={'全投资内部收益率IRR':'全投资内部收益率','累计净现值NPV':'累计净现值','净利润合计':'净利润','全周期总成本费用':'总成本费用','税金及附加合计':'税金及附加'};
+    const noteHeader=h=>/^(备注|说明|口径说明)$/.test(h);
+    const addOption=(map,k,v)=>{if(v){if(!map.has(k))map.set(k,new Set());map.get(k).add(v);}};
+    const scopeOf=note=>[
+      (note.match(/\d{4}\s*[—–~至-]\s*\d{4}年?/g)||[]).map(s=>s.replace(/\s|年/g,'').replace(/[—–~至]/g,'-')).sort().join('|'),
+      (note.match(/不含税|含税|税前|税后/g)||[]).sort().join('|'),
+      (note.match(/不含建设期|含建设期|不含改造期|含改造期/g)||[]).sort().join('|')
+    ];
+    raw.forEach(({node,index})=>{
+      node.rows[0].cells[0].textContent='指标名称';
+      let heads=Array.from(node.rows[0].cells).map(c=>c.textContent.trim()),unit=heads.indexOf('单位');
+      if(unit<0){unit=heads.length;Array.from(node.rows).forEach((r,i)=>r.insertCell().textContent=i?'':'单位');heads.push('单位');}
+      const value=heads.findIndex(h=>header(h)===header('测算值'));
+      Array.from(node.rows).slice(1).forEach(row=>{
+        const label=row.cells[0].textContent.trim(),labelUnit=label.match(/[（(](万元|亿元|元|年|%|％)[）)]/);
+        let clean=label.replace(/[（(](?:万元|亿元|元|年|%|％|NPV|IRR)[）)]/gi,'');
+        clean=aliases[clean]||clean;if(/^IRR$/i.test(clean))clean='内部收益率';if(/^NPV$/i.test(clean))clean='净现值';
+        row.cells[0].textContent=clean;
+        const annotations=heads.map((h,j)=>noteHeader(h)&&!missing(row.cells[j].textContent)?[h,row.cells[j].textContent.trim()]:null).filter(Boolean);
+        const original=value<0?'':row.cells[value].textContent.trim();
+        const numeric=original.match(/^([+-]?\d[\d,，]*(?:\.\d+)?)(万元|亿元|元|年|%|％)?\s*([（(].*[）)])?$/);
+        const explicit=[unitKey(row.cells[unit].textContent),unitKey(labelUnit?.[1]),unitKey(numeric?.[2])].filter(Boolean);
+        const unique=Array.from(new Set(explicit));
+        if(unique.length>1){
+          conflicts.push([entries[index].context.number,clean,'单位',unique[0],unique.slice(1).join(' / ')+'（原值：'+original+'）']);
+          row.cells[unit].textContent=unique.join(' / ')+'（待核对）';
+        }else{
+          row.cells[unit].textContent=unique[0]||(/内部收益率/.test(clean)?'%':'');
+          if(numeric){row.cells[value].textContent=numeric[1];if(numeric[3])annotations.push(['数值附注',numeric[3]]);}
+        }
+        const scope=scopeOf(annotations.map(a=>a[1]).join('；'));
+        const metric=key(clean),record={row,index,heads,unit,metric,annotations,scope};records.push(record);
+        addOption(unitOptions,metric,row.cells[unit].textContent);
+        scope.forEach((v,j)=>addOption(scopeOptions,metric+'|'+j,v));
+      });
+    });
+    records.forEach(record=>{
+      const {row,index,unit,metric,annotations}=record,options=unitOptions.get(metric);
+      if(!row.cells[unit].textContent&&options?.size===1)row.cells[unit].textContent=Array.from(options)[0];
+      const scope=record.scope.map((v,j)=>v||(scopeOptions.get(metric+'|'+j)?.size===1?Array.from(scopeOptions.get(metric+'|'+j))[0]:''));
+      row.dataset.reportFinancialScope=JSON.stringify(scope);
+      const object=row.cells[0].textContent+(row.cells[unit].textContent?'（'+row.cells[unit].textContent+'）':''),identity=JSON.stringify([metric,row.cells[unit].textContent,scope]);
+      if(!notes.has(identity))notes.set(identity,{object,items:new Map(),facts:new Map()});
+      const group=notes.get(identity);
+      annotations.forEach(([field,text])=>{
+        // Equivalent punctuation/full-cycle labels need one explanation, while
+        // every different source statement remains explicitly attributed.
+        const k=key(text).replace(/^全周期(?:口径|合计)?$/,'全周期');
+        if(!group.items.has(k))group.items.set(k,{field,text,sources:new Set()});
+        group.items.get(k).sources.add(entries[index].context.number);
+        for(const match of text.matchAll(/(折现率|基准收益率|回正金额)\s*[:：]?\s*([+-]?\d+(?:\.\d+)?)\s*(%|％|万元|元)/g)){
+          const fact=match[1]+'|'+unitKey(match[3]),amount=valueKey(match[2]);
+          if(group.facts.has(fact)&&group.facts.get(fact)!==amount)conflicts.push([entries[index].context.number,object,match[1],group.facts.get(fact)+unitKey(match[3]),match[2]+unitKey(match[3])]);
+          else group.facts.set(fact,amount);
+        }
+      });
+    });
+    // Remarks are evidence, not part of a metric's identity or a second value.
+    // Move them together to the attributed difference register before union.
+    raw.forEach(({node})=>{for(let j=node.rows[0].cells.length-1;j>=0;j--)if(noteHeader(node.rows[0].cells[j].textContent.trim()))Array.from(node.rows).forEach(r=>r.deleteCell(j));});
+    return Array.from(notes.values()).filter(g=>g.items.size).map(g=>[g.object,Array.from(g.items.values()).map(n=>'第'+Array.from(n.sources).join('、')+'节 · '+n.field+'：'+n.text).join('；')]);
+  }
+  function financialValueKey(value,unit){
+    const text=String(value||'').trim().replace(/％/g,'%');
+    // A target of ≥5% and ≥5 in a percent row is identical, not a conflict.
+    return valueKey(unit&&text.endsWith(unit)?text.slice(0,-unit.length):text);
+  }
+  const rectangular=table=>Array.from(table.rows).every(row=>row.cells.length===table.rows[0]?.cells.length&&Array.from(row.cells).every(cell=>cell.colSpan===1&&cell.rowSpan===1));
+  const unambiguousHeaders=table=>{const headers=Array.from(table.rows[0]?.cells||[]).map(c=>header(c.textContent));return headers.length===new Set(headers).size;};
+  function sourceCaption(node){
+    if(node.dataset.reportSourceCaption)return node.dataset.reportSourceCaption;
+    const previous=node.previousElementSibling,text=previous?.textContent.trim()||'';
+    return previous&&text.length<140&&(previous.classList.contains('rpt-table-caption')||/^表\s*\d/.test(text)||/表$/.test(text))?text:'';
+  }
+  function tableScope(node){
+    if(node.dataset.reportTableScope)return node.dataset.reportTableScope;
+    const tables=node.tagName==='TABLE'?[node]:Array.from(node.querySelectorAll('table'));
+    const caption=sourceCaption(node);
+    // Units, periods and accounting bases are part of identity, not decoration.
+    const qualifiers=caption.match(/不含税|含税|税前|税后|改造前|改造后|月度|年度|\d{4}(?:[年./-]\d{1,2})?(?:[月./-]\d{1,2})?/g)||[];
+    const units=tables.flatMap(table=>Array.from(table.rows[0]?.cells||[]).flatMap(cell=>cell.textContent.match(/万元|亿元|元(?:\s*[\/／]\s*[^）)\s]+)?|㎡|m[²2]|平方米|%|％|百分比|套|间|个月|年/g)||[]));
+    return JSON.stringify([node.dataset.reportScope||'',node.dataset.period||'',qualifiers.sort(),units.sort()]);
+  }
+  function addSupplement(box,caption,headers,rows,kind){
+    if(!rows.length)return;
+    const signature=JSON.stringify([caption,headers,rows]);
+    if(Array.from(box.querySelectorAll(supplementSelector)).some(el=>el.dataset.reportDifferenceKey===signature))return;
+    const wrap=box.ownerDocument.createElement('div');wrap.dataset.reportSupplement='true';
+    wrap.dataset.reportDifferenceKey=signature;
+    if(kind)wrap.dataset[kind]='true';
+    const p=box.ownerDocument.createElement('p');p.className='rpt-table-caption';p.textContent=caption;wrap.appendChild(p);
+    const table=box.ownerDocument.createElement('table');
+    [headers,...rows].forEach(values=>{const row=table.insertRow();values.forEach(value=>{row.insertCell().textContent=value;});});
+    wrap.appendChild(table);box.appendChild(wrap);
+  }
   function normalizeHeadings(container,context){
     const candidates=[];
     container.querySelectorAll('p').forEach(el=>{
@@ -32,7 +140,8 @@
       const parent=title(text)===title(context.section)||title(text)===title(context.chapter);
       if(parent){el.remove();return;}
       const numericHeading=number&&text.length<100&&!/[。；;]/.test(text)&&! /^(?:万|亿|元|米|平方|公顷|亩|吨|年|个月|个百分点)/.test(number[2]);
-      if(explicit||numericHeading)candidates.push({el,text:number?number[2]:text.replace(/^(?:[一二三四五六七八九十]+、|[（(][一二三四五六七八九十\d]+[）)])\s*/,''),depth:number?number[1].split(/[.．]/).length:Number(el.tagName.slice(1))||3});
+      const chineseHeading=/^(?:[一二三四五六七八九十]+、|[（(][一二三四五六七八九十\d]+[）)])\s*\S/.test(text)&&text.length<100&&!/[。；;《》]/.test(text);
+      if(explicit||numericHeading||chineseHeading)candidates.push({el,text:number?number[2]:text.replace(/^(?:[一二三四五六七八九十]+、|[（(][一二三四五六七八九十\d]+[）)])\s*/,''),depth:number?number[1].split(/[.．]/).length:Number(el.dataset.reportHeadingLevel)||(/^H[1-6]$/.test(el.tagName)?Number(el.tagName.slice(1)):/^[（(]/.test(text)?4:3)});
     });
     if(!candidates.length)return;
     const levels=[];
@@ -76,12 +185,24 @@
     if(!library||!context.type)return box.innerHTML;
     const templates=context.templates||library.forSection(context.type,context.chapter,context.section);
     templates.forEach(source=>{
-      const template=JSON.parse(JSON.stringify(source));
-      const old=Array.from(box.querySelectorAll('figure[data-template-id]')).filter(el=>el.dataset.templateId===template.id);
+      let template=JSON.parse(JSON.stringify(source));
+      const old=Array.from(box.querySelectorAll('figure[data-template-id]')).filter(el=>el.dataset.templateId===template.id&&!el.closest('[data-report-independent]'));
+      // Keep frozen figures verbatim unless a raw table still needs reconciliation.
+      // Missing editor-only coordinates must never reload an empty catalogue.
+      const hasRaw=Array.from(box.querySelectorAll('table')).some(t=>!t.closest('figure')&&!t.closest(supplementSelector)&&!t.closest('[data-report-independent]')&&rectangular(t)&&unambiguousHeaders(t)&&
+        (context.strictTables?t.dataset.canonicalTemplate===template.id:template.segments.some(s=>{
+          const targets=s.rows[0].cells.map(c=>header(c.text)),keys=Array.from(t.rows[0].cells,c=>header(c.textContent));
+          const score=keys.filter(k=>k&&targets.includes(k)).length;
+          return score>=2&&score/Math.min(targets.length,keys.length)>=(score>=3?0.33:0.5);
+        })));
+      if(old.length&&!hasRaw)return;
+      const reader=library.fromFigure||root.ReportTableTemplates?.fromFigure;
+      if(old.length&&reader)template=reader(old[0],source);
       // Existing standard tables keep their cell edits, including explicitly blank values.
       const notes=[];
-      old.forEach((figure,figureIndex)=>figure.querySelectorAll('.rpt-template-segment').forEach(seg=>{
-        const target=template.segments[Number(seg.dataset.segment)];if(!target)return;
+      (reader?[]:old).forEach((figure,figureIndex)=>figure.querySelectorAll('.rpt-template-segment').forEach(seg=>{
+        const target=template.segments[Number(seg.dataset.segment)];
+        if(!target){Array.from(seg.querySelectorAll('tr')).forEach((row,ri)=>{if(row.textContent.trim())notes.push('旧模板未匹配分段第'+(ri+1)+'行：'+Array.from(row.cells).map(c=>c.textContent.trim()).join('；'));});return;}
         const oldHeaders=Array.from(seg.querySelectorAll('tr:first-child [data-col]')).map(c=>header(c.textContent));
         const sameSchema=JSON.stringify(oldHeaders)===JSON.stringify(target.rows[0].cells.filter(c=>c.vMerge!=='continue').map(c=>header(c.text)));
         if(context.strictTables&&sameSchema&&template.id.endsWith('-05')){
@@ -108,7 +229,7 @@
       template.segments.forEach(segment=>{
         const head=segment.rows[0].cells;
         const targets=head.map(c=>header(c.text));
-        const matches=Array.from(box.querySelectorAll('table')).filter(t=>!t.closest('figure')).map(table=>{
+        const matches=Array.from(box.querySelectorAll('table')).filter(t=>!t.closest('figure')&&!t.closest(supplementSelector)&&!t.closest('[data-report-independent]')&&rectangular(t)&&unambiguousHeaders(t)).map(table=>{
           const rows=Array.from(table.rows).map(r=>Array.from(r.cells).map(c=>c.textContent.trim()));
           const keys=(rows[0]||[]).map(header);
           const score=keys.filter(k=>k&&targets.includes(k)).length;
@@ -150,11 +271,39 @@
         });
         if(match.table!==anchor)match.table.remove();
       });
+      // A section match does not imply an empty optional table belongs in the report.
+      // Explicitly required templates remain visible so their missing inputs can be reviewed.
+      const populated=template.segments.some(s=>s.rows.some(r=>r.cells.some(c=>c.role==='value'&&!missing(c.text))));
+      if(!anchor&&!notes.length&&template.required!==true&&template.presence!=='required'&&!populated)return;
+      // If a fixed-row schema cannot identify any source object, keep the source
+      // table itself instead of a blank template plus a restatement of every row.
+      if(anchor?.tagName==='TABLE'&&!populated)return;
       const holder=doc.createElement('div');holder.innerHTML=library.renderTemplate(template);
-      const figure=holder.firstElementChild;
+      let figure=holder.firstElementChild;
+      if(old[0]&&reader){
+        // Reconciliation changes cells, not the surrounding project evidence.
+        // Keep original captions/notes/wrappers in place instead of replacing
+        // the whole figure with the catalogue's note-free presentation.
+        const preserved=old[0].cloneNode(true);
+        const ownedTables=el=>Array.from(el.querySelectorAll('table')).filter(t=>t.closest('figure')===el);
+        const previous=ownedTables(preserved),next=ownedTables(figure);
+        if(previous.length!==next.length)throw new Error('表格分段数量不一致，未替换原表；请核对后重试。');
+        previous.forEach((table,i)=>table.replaceWith(next[i]));
+        figure=preserved;
+      }
+      if(anchor?.dataset.reportTableScope)figure.dataset.reportTableScope=anchor.dataset.reportTableScope;
+      if(anchor?.dataset.reportSourceCaption)figure.dataset.reportSourceCaption=anchor.dataset.reportSourceCaption;
       if(anchor)anchor.replaceWith(figure);else box.appendChild(figure);
-      old.forEach(el=>{if(el.isConnected)el.remove();});
-      // Reconciliation details are not report prose. Original project materials remain unchanged.
+      // Other historical figures are evidence, not duplicates merely by id.
+      if(old[0]?.isConnected)old[0].remove();
+      // Never silently discard fields that do not fit a published template.
+      if(notes.length){
+        const wrap=doc.createElement('div');wrap.dataset.reportSupplement='true';
+        const caption=doc.createElement('p');caption.className='rpt-table-caption';caption.textContent='标准表补充明细（未自动匹配字段）';wrap.appendChild(caption);
+        const table=doc.createElement('table');const h=table.insertRow();h.insertCell().textContent='原表位置及内容';
+        Array.from(new Set(notes)).forEach(note=>table.insertRow().insertCell().textContent=note);
+        wrap.appendChild(table);figure.after(wrap);
+      }
     });
     return box.innerHTML;
   }
@@ -190,14 +339,20 @@
   // One document plan is shared by preview and export. Stable template IDs are scoped
   // by their business meaning: four different historical-rent series stay separate.
   let documentCache=null;
+  // cells-v1 matches the completion contract's physical cell identity. This is
+  // navigation integrity only, not a source hash or a claim that values are true.
+  function referenceTableHash(table){
+    const text=value=>String(value||'').replace(/<!--[\s\S]*?-->/g,'').replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi,'').replace(/<[^>]*>/g,' ').replace(/&(#x[\da-f]+|#\d+|nbsp|amp|quot|apos|lt|gt);/gi,(_,v)=>{if(v[0]!=='#')return {nbsp:' ',amp:'&',quot:'"',apos:"'",lt:'<',gt:'>'}[v.toLowerCase()];const n=v[1].toLowerCase()==='x'?parseInt(v.slice(2),16):Number(v.slice(1));return n>0&&n<=0x10ffff?String.fromCodePoint(n):'';}).replace(/\s+/g,' ').trim();
+    const rows=Array.from(table.rows).map(r=>Array.from(r.cells).map(c=>[text(c.innerHTML),c.rowSpan||1,c.colSpan||1]));
+    const value=JSON.stringify(rows);let hash=2166136261;for(let i=0;i<value.length;i++)hash=Math.imul(hash^value.charCodeAt(i),16777619);return (hash>>>0).toString(16).padStart(8,'0');
+  }
   function composeDocument(entries,library){
-    const signature=JSON.stringify(entries.map(e=>[e.html,e.context,library.forSection(e.context.type,e.context.chapter,e.context.section)]));
+    const signature=JSON.stringify(entries.map(e=>[e.key,e.html,e.context,library.forSection(e.context.type,e.context.chapter,e.context.section)]));
     if(documentCache?.signature===signature)return documentCache.result.slice();
     const result=composeDocumentUncached(entries,library);documentCache={signature,result};return result.slice();
   }
   function composeDocumentUncached(entries,library){
     if(!entries.length)return [];
-    if(entries[0].context.type!=='gaibao-housing')return entries.map(e=>compose(e.html,e.context,library));
     const docs=entries.map(e=>{
       const doc=new root.DOMParser().parseFromString('<div>'+compose(e.html,e.context)+'</div>','text/html');
       const box=doc.body.firstElementChild;
@@ -218,16 +373,34 @@
     }));
     const financial='gaibao-housing-table-11';
     if(templates.has(financial))owners.delete('gaibao-housing-table-06');
-    const reference=(node,owner,name)=>{
-      const p=node.ownerDocument.createElement('p');p.className='rpt-table-reference';
+    const sectionKey=owner=>entries[owner].key||entries[owner].context.chapter+' / '+entries[owner].context.section;
+    const reference=(node,owner,name,identity)=>{
+      // Legacy Markdown candidates can place a frozen table inside a paragraph.
+      // A replacement <p> there becomes invalid nested paragraphs, changing the
+      // DOM again on the next preview/export parse. An inline reference retains
+      // the existing paragraph and all its neighbouring prose without reparsing.
+      const p=node.ownerDocument.createElement(node.closest('p')?'span':'p');p.className='rpt-table-reference';
+      p.dataset.reportRefSection=sectionKey(owner);p.dataset.reportRefScope='document';p.dataset.reportRefTableKind='cells-v1';
+      if(identity?.template)p.dataset.reportRefTemplate=identity.template;
+      if(identity?.hash)p.dataset.reportRefTableHash=identity.hash;
       p.textContent='详见第'+entries[owner].context.number+'节“'+name+'”。';
       const prev=node.previousElementSibling;if(prev&&(prev.classList.contains('rpt-table-caption')||(/表$/.test(prev.textContent.trim())&&prev.textContent.length<100)))prev.remove();
       node.replaceWith(p);
     };
     docs.forEach((box,i)=>{
       box.querySelectorAll('figure[data-template-id],table').forEach(node=>{
+        if(node.closest(supplementSelector)||node.closest('[data-report-independent]'))return;
         if(node.tagName==='TABLE'&&node.closest('figure'))return;
-        let id=node.dataset.templateId||canonicalId(node);
+        if(node.tagName==='TABLE'&&(!rectangular(node)||!unambiguousHeaders(node)))return;
+        let id=node.dataset.templateId||node.dataset.canonicalTemplate||(entries[i].context.type==='gaibao-housing'?canonicalId(node):'');
+        if(!id&&node.tagName==='TABLE'){
+          const source=Array.from(node.rows[0]?.cells||[]).map(c=>header(c.textContent));
+          const candidates=library.forSection(entries[i].context.type,entries[i].context.chapter,entries[i].context.section).filter(t=>(t.segments||[]).some(segment=>{
+            const target=(segment.rows[0]?.cells||[]).map(c=>header(c.text));
+            return source.length>=2&&source.length===target.length&&source.every((h,j)=>h===target[j]);
+          }));
+          if(candidates.length===1)id=candidates[0].id;
+        }
         if(id==='gaibao-housing-table-06'&&owners.has(financial))id=financial;
         if(!id||!owners.has(id))return;
         if(!groups.has(id))groups.set(id,[]);
@@ -237,81 +410,76 @@
     // Sensitivity tables are one register keyed by factor AND change, not factor alone.
     const sensitivities=[];
     docs.forEach((box,index)=>box.querySelectorAll('table').forEach(node=>{
+      if(node.closest(supplementSelector)||node.closest('figure')||!rectangular(node)||!unambiguousHeaders(node))return;
       const h=node.rows[0]?.textContent||'';
       if(/敏感因素|变动因素/.test(h)&&/波动幅度|变动幅度/.test(h))sensitivities.push({node,index});
     }));
-    if(sensitivities.length>1){
+    if(sensitivities.length>1&&new Set(sensitivities.map(x=>tableScope(x.node))).size===1){
       const owner=entries.findIndex(e=>/不确定/.test(e.context.section));
       const chosen=sensitivities.find(x=>x.index===owner)||sensitivities[0], merged=chosen.node.cloneNode(false);
-      const headers=['变动因素','变动幅度','全投资内部收益率（IRR）','财务净现值（NPV，万元）','敏感系数','IRR变动（个百分点）','NPV变动（万元）'];
+      const sensitivityHeader=s=>header(s).replace('敏感因素','变动因素').replace('波动幅度','变动幅度');
+      const headers=[];
+      sensitivities.forEach(({node})=>Array.from(node.rows[0].cells).forEach(cell=>{if(!headers.some(h=>sensitivityHeader(h)===sensitivityHeader(cell.textContent)))headers.push(cell.textContent.trim());}));
       const row=values=>{const r=merged.insertRow();values.forEach(v=>r.insertCell().textContent=v);return r;};row(headers);
-      const seen=new Map();
-      sensitivities.forEach(({node})=>Array.from(node.rows).slice(1).forEach(r=>{
-        const hs=Array.from(node.rows[0].cells).map(c=>c.textContent),v=Array.from(r.cells).map(c=>c.textContent.trim());
-        const values=[v[0].replace(/基准方案|基准情形/,'基准情形').replace('建设投资（工程费用）','工程费用'),v[1],...[/IRR|内部收益率/,/净现值/,/敏感系数/,/IRR变动/,/NPV变动/].map((re,j)=>{const k=hs.findIndex(h=>re.test(h)&&(j!==0||!/变动/.test(h)));return k<0?'':v[k];})];
-        if(!missing(values[2])&&!/%$/.test(values[2]))values[2]+='%';
-        const k=key(values[0])+'|'+key(values[1]);
+      const seen=new Map(),conflicts=[];
+      sensitivities.forEach(({node,index})=>Array.from(node.rows).slice(1).forEach(r=>{
+        const hs=Array.from(node.rows[0].cells).map(c=>sensitivityHeader(c.textContent));
+        const values=headers.map(h=>{const i=hs.indexOf(sensitivityHeader(h));return i<0?'':r.cells[i]?.textContent.trim()||'';});
+        const factor=headers.findIndex(h=>sensitivityHeader(h).includes('变动因素')),change=headers.findIndex(h=>sensitivityHeader(h).includes('变动幅度'));
+        const dimensions=headers.map((h,j)=>/统计期|时点|口径|范围|方案|情景|年度|月份/.test(h)?j:-1).filter(j=>j>=0);
+        const k=JSON.stringify([key(values[factor]),key(values[change]),...dimensions.map(j=>key(values[j]))]);
         if(!seen.has(k))seen.set(k,row(values.map(x=>missing(x)?'':x)));
-        else values.forEach((v,j)=>{if(missing(seen.get(k).cells[j].textContent)&&!missing(v))seen.get(k).cells[j].textContent=v;});
+        else values.forEach((v,j)=>{const old=seen.get(k).cells[j];if(missing(old.textContent)&&!missing(v))old.textContent=v;else if(!missing(v)&&valueKey(v)!==valueKey(old.textContent))conflicts.push([entries[index].context.number,values[factor]+' / '+values[change],headers[j],old.textContent,v]);});
       }));
-      sensitivities.forEach(({node,index})=>{if(node===chosen.node)node.replaceWith(merged);else reference(node,chosen.index,'项目敏感性分析表');});
+      sensitivities.forEach(({node,index})=>{if(node===chosen.node)node.replaceWith(merged);else if(index===chosen.index)node.remove();else reference(node,chosen.index,'项目敏感性分析表',{hash:referenceTableHash(merged)});});
+      addSupplement(docs[chosen.index],'敏感性分析同对象字段冲突（待核对，未自动覆盖）',['来源小节','对象','字段','主表值','冲突值'],conflicts,'reportConflicts');
     }
     groups.forEach((items,id)=>{
-      const owner=owners.get(id), target=docs[owner], raw=items.filter(x=>x.node.tagName==='TABLE').sort((a,b)=>(b.index===owner)-(a.index===owner));
+      const owner=owners.get(id), target=docs[owner];
+      const primary=items.find(x=>x.index===owner)||items[0],scope=tableScope(primary.node),primaryCaption=sourceCaption(primary.node);
+      items=items.filter(item=>{
+        if(tableScope(item.node)===scope)return true;
+        // A different unit, period or accounting basis is an independent table.
+        // Keep it in place; do not flatten it into the owning template.
+        item.node.dataset.reportTableScope=tableScope(item.node);
+        const wrap=item.node.ownerDocument.createElement('div');wrap.dataset.reportIndependent='true';
+        item.node.before(wrap);const p=item.node.ownerDocument.createElement('p');p.className='rpt-table-caption';p.textContent='独立口径明细（单位、时点或范围不同，未合并）';wrap.appendChild(p);wrap.appendChild(item.node);
+        return false;
+      });
+      // Reconciliation replaces the owner's table, not its business position.
+      // Keep a DOM-only anchor so following analysis/headings and nested wrappers
+      // remain in place; a table absent from its owner still uses the end fallback.
+      const ownerNode=items.find(item=>item.index===owner)?.node;
+      const ownerPosition=ownerNode?target.ownerDocument.createComment('report-owner-table-position'):null;
+      if(ownerPosition)ownerNode.before(ownerPosition);
+      const placeOwnerNode=node=>ownerPosition?ownerPosition.before(node):target.appendChild(node);
+      const captions=Array.from(new Set(items.map(({node})=>sourceCaption(node)).filter(c=>c&&title(c)!==title(templates.get(id).title))));
+      const raw=items.filter(x=>x.node.tagName==='TABLE').sort((a,b)=>(b.index===owner)-(a.index===owner));
       // The template schema is authoritative. Combine compatible registers before
       // rendering so a later populated copy is not replaced by an earlier empty one.
       let merged=null;
-      const knownRows=new Map();
-      const valueKey=v=>{const s=String(v).replace(/[,，\s]/g,'').replace(/(?:万元|元|年|%)$/,'');return /^-?\d+(?:\.\d+)?$/.test(s)?String(Number(s)):key(s);};
-      raw.forEach(({node})=>{
+      const knownRows=new Map(),conflicts=[];
+      raw.forEach(({node,index})=>{
         const hs=Array.from(node.rows[0]?.cells||[]).map(c=>c.textContent.trim()), rows=Array.from(node.rows).slice(1).map(r=>Array.from(r.cells).map(c=>c.textContent.trim()));
         const rewrite=(heads,values)=>{node.innerHTML='';[heads,...values].forEach(vals=>{const r=node.insertRow();vals.forEach(v=>r.insertCell().textContent=missing(v)?'':v);});};
         if(/-(02|04)$/.test(id)&&hs.some(h=>/项目名称|小区名称/.test(h))){
           // Site rows with mixed bedroom types cannot prove complete totals by unit type.
           const total=rows.find(v=>v.includes('合计'));
           const count=hs.findIndex(h=>/套数/.test(h)),area=hs.findIndex(h=>/建筑面积/.test(h));
+          addSupplement(target,'按项目原始明细（对象粒度不同，不作为户型合计）',hs,rows.filter(v=>v!==total),'reportFieldDifferences');
           rewrite(['房型','层高（m）','套数（套）','建筑面积（㎡）','得房率（%）'],total?[['合计','',count<0?'':total[count],area<0?'':total[area],'']]:[]);
+          if(total){const remaining=total.map((v,j)=>j!==count&&j!==area&&!missing(v)&&v!=='合计'?hs[j]+'：'+v:'').filter(Boolean);if(remaining.length)addSupplement(target,'合计行未匹配字段',['来源小节','对象','字段差异'],[[entries[index].context.number,'合计',remaining.join('；')]],'reportFieldDifferences');}
         }
-        if(id.endsWith('-07')&&hs.includes('需求层次'))rewrite(['分析主题','核心指标','行政区','街道','项目3公里','数据时点与来源'],rows.map(v=>[v[0],v.slice(1).map((x,j)=>hs[j+1]+'：'+x).join('；'),'','','','']));
         if(id.endsWith('-09')){
           const aliases={'客群圈层':'客群类型','客群类别':'客群类型','来源范围':'来源区域/单位','需求动因':'需求特征','与本项目关系':'定位结论','与项目匹配度':'定位结论'};
           Array.from(node.rows[0].cells).forEach(c=>{if(aliases[c.textContent.trim()])c.textContent=aliases[c.textContent.trim()];});
         }
-        if(id.endsWith('-15')&&hs.includes('单位名称'))rewrite(['相关信息','详情'],[
-          ['公司名称',rows.map(v=>v[hs.indexOf('单位名称')]).join('；')],
-          ['经营范围',rows.map(v=>v[hs.indexOf('单位名称')]+'：'+v[hs.indexOf('主营业务')]).join('；')],
-          ['企业性质及股东',rows.map(v=>v[hs.indexOf('单位名称')]+'：'+v[hs.indexOf('企业性质')]+'；控股股东：'+v[hs.indexOf('控股股东')]).join('；')]
-        ]);
-        if(id.endsWith('-18')&&hs.some(h=>h.includes('竞品数量')))rewrite(['板块','项目数量','房间数量（间）','出租率','平均租金（元/㎡/月）'],rows.map(v=>[v[0]+'（'+v[1]+'）',v[2],'',v[5],v[4]]));
-        if(id.endsWith('-25')&&hs.includes('定位维度'))rewrite(['对标内容','本项目','重点竞品 1（XX）','重点竞品 2（XX）','重点竞品 3（XX）','对标结论'],rows.map(v=>[v[0]==='改造标准'?'装修标准':v[0],v[1],'','','',[v[2],v[3]].filter(x=>!missing(x)).join('；')]));
-        if(id.endsWith('-26')&&hs.includes('分类')){
-          let dimension='';rewrite(['地域范围','维度','分组','人数或比例','统计期及来源'],rows.map(v=>{dimension=v[0]||dimension;return ['',dimension,v[1],v[2],v[3]];}));
-        }
-        if(id.endsWith('-05')&&hs.includes('成本科目'))rewrite(['科目','计算单方成本（元/㎡）','科目释义'],rows.map(v=>[v[0],v[1],v[2]]));
-        if(id.endsWith('-05')){
-          const col=Array.from(node.rows[0].cells).findIndex(c=>c.textContent.trim()==='科目');
-          const aliases={'委托咨询费':'委托费用','机电工程费':'机电改造','机电改造费':'机电改造','代建管理费':'委托代建费'};
-          if(col>=0)Array.from(node.rows).slice(1).forEach(r=>{const c=r.cells[col];if(c&&aliases[c.textContent.trim()])c.textContent=aliases[c.textContent.trim()];});
-        }
-        if(id.endsWith('-03')){
-          const col=hs.indexOf('法定改建条件');
-          const labels=(templates.get(id).segments?.[0]?.rows||[]).slice(1).map(r=>r.cells[1]?.text||'');
-          const rules=[/权属|不动产/,/查封|抵押/,/城市更新|土地整备/,/独立可运营|规模满足/,/共有权|共有人/];
-          if(col>=0)Array.from(node.rows).slice(1).forEach(r=>{const c=r.cells[col];const n=rules.findIndex(re=>re.test(c?.textContent||''));if(n>=0&&labels[n])c.textContent=labels[n];});
-        }
-        if(id===financial){
-          node.rows[0].cells[0].textContent='指标名称';
-          let unitColumn=Array.from(node.rows[0].cells).findIndex(c=>c.textContent.trim()==='单位');
-          if(unitColumn<0){unitColumn=node.rows[0].cells.length;Array.from(node.rows).forEach((r,i)=>{r.insertCell().textContent=i?'':'单位';});}
-          Array.from(node.rows).slice(1).forEach(r=>{
-            const label=r.cells[0].textContent;const unit=label.match(/[（(](万元|元|年|%)[）)]/);
-            let clean=label.replace(/[（(](?:万元|元|年|%|NPV|IRR)[）)]/gi,'').replace(/IRR|NPV/gi,'').replace('净利润合计','净利润');
-            r.cells[0].textContent=clean;
-            if(!r.cells[unitColumn].textContent.trim())r.cells[unitColumn].textContent=unit?unit[1]:/内部收益率/.test(clean)?'%':'';
-          });
-        }
+        // Do not transpose, combine positional columns, or infer static row labels.
+        // Unmapped source fields are retained by compose as object-labelled differences.
+        if(id.endsWith('-05')&&hs.includes('成本科目'))node.rows[0].cells[hs.indexOf('成本科目')].textContent='科目';
       });
-      raw.forEach(({node})=>{
+      const financialNotes=id===financial?normalizeFinancialRows(raw,entries,conflicts):[];
+      raw.forEach(({node,index})=>{
         if(!merged){merged=node.cloneNode(true);Array.from(merged.rows).slice(1).forEach(r=>r.remove());}
         const sourceHeaders=Array.from(node.rows[0]?.cells||[]).map(c=>header(c.textContent));
         sourceHeaders.forEach((h,j)=>{if(!Array.from(merged.rows[0].cells).some(c=>header(c.textContent)===h))Array.from(merged.rows).forEach((r,i)=>{r.insertCell().textContent=i?'':node.rows[0].cells[j].textContent;});});
@@ -319,14 +487,23 @@
         Array.from(node.rows).slice(1).forEach(row=>{
           const values=targetHeaders.map(h=>{const pos=sourceHeaders.indexOf(h);return pos<0?'':row.cells[pos]?.textContent.trim()||'';});
           const identityHeader=id.endsWith('-01')?'项目名称':id.endsWith('-05')?'科目':id.endsWith('-03')?'法定改建条件':null;
-          const identityIndex=identityHeader?Math.max(0,targetHeaders.indexOf(header(identityHeader))):0;
+          const identityIndex=identityHeader?Math.max(0,targetHeaders.indexOf(header(identityHeader))):/^(序号|编号)$/.test(targetHeaders[0])&&targetHeaders.length>1?1:0;
           if(id.endsWith('-01')&&identityIndex>=0&&missing(values[identityIndex])&&/合计/.test(row.textContent))values[identityIndex]='合计';
-          const signature=key(values[identityIndex])||values.map(valueKey).join('|');
+          const dimensions=targetHeaders.map((h,j)=>/单位|统计期|时点|口径|范围|地域|方案|情景|年度|月份|项目名称|单位名称|客群|分类|维度|分组/.test(h)&&j!==identityIndex?j:-1).filter(j=>j>=0);
+          // A risk category is a group, not an individual risk. Distinct risk
+          // descriptions must remain separate records, even within one category.
+          // An absent description cannot prove identity, so only identical rows
+          // may coalesce in that case; genuine same-risk field conflicts remain.
+          const riskDescription=id.endsWith('-13')?targetHeaders.indexOf(header('风险描述')):-1;
+          const riskIdentity=riskDescription<0?[]:missing(values[riskDescription])?[values.map(valueKey)]:[values[riskDescription].replace(/\s/g,'')];
+          const signature=JSON.stringify([key(values[identityIndex])||values.map(valueKey).join('|'),...riskIdentity,...dimensions.map(j=>valueKey(values[j])),...(id===financial?[row.dataset.reportFinancialScope||'']:[])]);
           const oldRow=knownRows.get(signature);
           if(oldRow){values.forEach((v,col)=>{
             const cell=oldRow.cells[col];if(missing(cell.textContent)&&!missing(v))cell.textContent=v;
-            else if(!missing(v)&&valueKey(v)!==valueKey(cell.textContent)&&!cell.textContent.includes(v)&&!v.includes(cell.textContent))cell.textContent+='；'+v;
-            else if(v.length>cell.textContent.length&&v.includes(cell.textContent))cell.textContent=v;
+            else if(!missing(v)){
+              const compare=id===financial?x=>financialValueKey(x,values[targetHeaders.indexOf('单位')]):valueKey;
+              if(compare(v)!==compare(cell.textContent))conflicts.push([entries[index].context.number,riskDescription>=0?values[identityIndex]+'：'+values[riskDescription]:values[identityIndex],merged.rows[0].cells[col].textContent,cell.textContent,v]);
+            }
           });return;}
           const tr=merged.insertRow();values.forEach(v=>{tr.insertCell().textContent=v;});knownRows.set(signature,tr);
         });
@@ -334,10 +511,19 @@
       // Keep source figures (including edits) in their sole owning section.
       items.forEach(({node,index})=>{
         const copy=node.cloneNode(true);
-        if(index!==owner)reference(node,owner,templates.get(id).title);else{const prev=node.previousElementSibling;if(prev&&(prev.classList.contains('rpt-table-caption')||(/表$/.test(prev.textContent.trim())&&prev.textContent.length<100)))prev.remove();node.remove();}
-        if(copy.tagName==='FIGURE'&&copy.dataset.templateId===id)target.appendChild(copy);
+        if(index!==owner)reference(node,owner,templates.get(id).title,{template:id});else{const prev=node.previousElementSibling;if(prev&&(prev.classList.contains('rpt-table-caption')||(/表$/.test(prev.textContent.trim())&&prev.textContent.length<100)))prev.remove();node.remove();}
+        if(copy.tagName==='FIGURE'&&copy.dataset.templateId===id)placeOwnerNode(copy);
       });
-      if(merged){merged.dataset.canonicalTemplate=id;target.appendChild(merged);}
+      captions.forEach(caption=>{
+        const captionKey=id+'|'+caption;
+        if(!Array.from(target.querySelectorAll('[data-report-caption-key]')).some(p=>p.dataset.reportCaptionKey===captionKey)){
+          const p=target.ownerDocument.createElement('p');p.className='rpt-table-context';p.dataset.reportCaptionKey=captionKey;p.textContent='表格口径：'+caption+'。';placeOwnerNode(p);
+        }
+      });
+      if(merged){merged.dataset.canonicalTemplate=id;merged.dataset.reportTableScope=scope;merged.dataset.reportSourceCaption=primaryCaption;placeOwnerNode(merged);}
+      if(ownerPosition)ownerPosition.remove();
+      addSupplement(target,'财务指标原表说明（按指标归集，不同表述保留待核对）',['指标及单位','来源小节及原说明'],financialNotes,'reportFieldDifferences');
+      addSupplement(target,'同对象字段冲突（待核对，未自动覆盖）',['来源小节','对象','字段','主表值','冲突值'],Array.from(new Map(conflicts.map(row=>[JSON.stringify(row),row])).values()),'reportConflicts');
     });
     // POI counts are not room counts. Preserve this genuinely different source
     // table with its correct scope rather than mislabelling it as rental inventory.
@@ -353,17 +539,44 @@
     });
     // Exact duplicate legacy tables are references, never repeated full tables.
     const seen=new Map();
-    return result.map((html,i)=>{
+    const finalBoxes=result.map((html,i)=>{
       const doc=new root.DOMParser().parseFromString('<div>'+html+'</div>','text/html'),box=doc.body.firstElementChild;
       box.querySelectorAll('table').forEach(t=>{
         if(t.closest('figure'))return;
-        const rows=Array.from(t.rows).map(r=>Array.from(r.cells).map(c=>key(c.textContent)));
-        const signature=JSON.stringify(rows);
-        if(seen.has(signature)){const earlier=seen.get(signature);reference(t,earlier,'相关明细表');}else seen.set(signature,i);
+        const rows=Array.from(t.rows).map(r=>Array.from(r.cells).map(c=>[key(c.textContent),c.colSpan,c.rowSpan]));
+        // A preceding business paragraph is not a table title. Its wording can
+        // differ while the entire table (including units/spans/scope) is equal;
+        // keep that prose and use only explicit/source captions for identity.
+        const meaning=t.dataset.canonicalTemplate||title(sourceCaption(t));
+        const signature=JSON.stringify([meaning,tableScope(t),rows]);
+        // Same-section duplication is still content requiring review; do not
+        // manufacture a self-reference to make it disappear.
+        if(seen.has(signature)){const earlier=seen.get(signature);if(earlier.index!==i)reference(t.closest(supplementSelector)||t,earlier.index,'相关明细表',{hash:earlier.hash});}else seen.set(signature,{index:i,hash:referenceTableHash(t)});
       });
-      const refs=new Set();box.querySelectorAll('.rpt-table-reference').forEach(p=>{if(refs.has(p.textContent))p.remove();else refs.add(p.textContent);});
-      return box.innerHTML;
+      box.querySelectorAll(supplementSelector).forEach(el=>box.appendChild(el));
+      return box;
     });
+    // Bind newly created canonical references only after the shared template
+    // renderer has produced all segments. Existing identities are not silently
+    // re-signed when target values change: document review reports that mismatch.
+    finalBoxes.forEach(box=>box.querySelectorAll('.rpt-table-reference[data-report-ref-template]').forEach(p=>{
+      if(p.dataset.reportRefTableHash)return;
+      const owner=entries.findIndex((e,i)=>sectionKey(i)===p.dataset.reportRefSection);
+      if(owner<0)return;
+      const tables=Array.from(finalBoxes[owner].querySelectorAll('table')).filter(t=>t.closest('figure')?.dataset.templateId===p.dataset.reportRefTemplate||t.dataset.canonicalTemplate===p.dataset.reportRefTemplate);
+      if(tables.length)p.dataset.reportRefTableHash=tables.map(referenceTableHash).join(' ');
+    }));
+    // Re-prepared raw tables can create another reference to an existing one.
+    // Compare only after new hashes are bound, and only exact nodes: different
+    // attributes, inline markup and comments are content, not duplicate links.
+    finalBoxes.forEach(box=>{
+      const refs=new Set();
+      box.querySelectorAll('.rpt-table-reference').forEach(p=>{
+        const identity=p.outerHTML;
+        if(refs.has(identity))p.remove();else refs.add(identity);
+      });
+    });
+    return finalBoxes.map(box=>box.innerHTML);
   }
   root.ReportSectionLayout={compose,composeDocument,normalizeHeadings};
 })(typeof window!=='undefined'?window:globalThis);

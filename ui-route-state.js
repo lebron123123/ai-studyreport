@@ -2,7 +2,7 @@
 (function(root){
   "use strict";
   const KEY="studyreport:last-view:v1";
-  const MODES=new Set([null,"report","calc","review","office","aireport","collaboration","personalKnowledge","analysis"]);
+  const MODES=new Set([null,"report","calc","review","office","aireport","reportimport","collaboration","personalKnowledge","analysis"]);
   const OFFICE_VIEWS=new Set(["chat","ppt","assets"]);
   function projectRoute(hash){const route=root.ProjectWorkspaceUI&&root.ProjectWorkspaceUI.parseRoute(hash==null?location.hash:hash);return route?{projectId:route.projectId,projectView:route.view}:null;}
   function hashState(){const pr=projectRoute();if(pr)return pr;const raw=String(location.hash||"").replace(/^#\/?/,"");if(!raw)return{};const parts=raw.split("/").map(decodeURIComponent);const mode=parts[0]||null;return{mode:MODES.has(mode)?mode:null,officeView:OFFICE_VIEWS.has(parts[1])?parts[1]:"chat"};}

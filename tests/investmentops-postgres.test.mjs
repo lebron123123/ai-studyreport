@@ -16,8 +16,10 @@ test('隔离PostgreSQL：可信情景、独立版本、会议幂等和事务回�
     async function newUser(){const username='ops-test-'+crypto.randomUUID();await DB.prepare('INSERT INTO users(username,pass_hash,salt,created_at) VALUES(?,?,?,?)').bind(username,'disabled','test',Date.now()).run();return Number((await DB.prepare('SELECT id FROM users WHERE username=?').bind(username).first()).id);}
     const owner=await newUser(),editor=await newUser(),viewer=await newUser(),outside=await newUser();
     const source=readFileSync(new URL('./calc-engines.test.js',import.meta.url),'utf8'),match=source.match(/const GAIBAO_DEFAULT_PARAMS = (\{[\s\S]*?\n\});/),params=JSON.parse(JSON.stringify(vm.runInNewContext('('+match[1]+')')));
+    // Keep the approval report consistent with the current tax policy; debt timing remains legacy.
+    params.debtModel='legacy-annual';
     const snapshot={id:'calc-test-v1',version:1,calcType:'gaibao',params};snapshot.summary=calculator.calculate({snapshot}).summary;
-    const data={project:{type:'gaibao'},chapters:[{name:'总论',sections:[{t:'净现值',content:'净现值：768.04万元。'}]}],workflow:{currentCalcSnapshotId:snapshot.id,calcSnapshots:[snapshot]}};
+    const data={project:{type:'gaibao'},chapters:[{name:'总论',sections:[{t:'净现值',content:`净现值：${snapshot.summary.totalNpv}万元。`}]}],workflow:{currentCalcSnapshotId:snapshot.id,calcSnapshots:[snapshot]}};
     await DB.prepare('INSERT INTO projects(id,user_id,name,data,updated_at) VALUES(?,?,?,?,?)').bind(projectId,owner,'[系统测试]投资运营',JSON.stringify(data),Date.now()).run();
     await changeProjectMember(env,owner,projectId,editor,'EDITOR');await changeProjectMember(env,owner,projectId,viewer,'VIEWER');
     async function call(body,userId=owner,override={}){const headers={authorization:'Bearer '+await signToken(env,userId,'ops-test'),'content-type':'application/json'},request=new Request('http://test/api/investmentops?projectId='+projectId,{method:body?'POST':'GET',headers,body:body?JSON.stringify({projectId,...body}):undefined}),response=await(body?onRequestPost:onRequestGet)({env:{...env,...override},request});return {status:response.status,data:await response.json()};}
@@ -25,13 +27,13 @@ test('隔离PostgreSQL：可信情景、独立版本、会议幂等和事务回�
     await t.test('三种角色、显式快照、客户端指标与缺失引擎',async()=>{
       assert.equal((await call({action:'saveScenario'},viewer)).status,403);assert.equal((await call(null,outside)).status,404);
       assert.equal((await call({action:'saveScenario',scenario:{metrics:{irr:99}}})).status,400);assert.equal((await call({action:'saveScenario',calcSnapshotId:'missing'})).status,409);assert.equal((await call({action:'saveScenario'},owner,{INVESTMENT_CALCULATOR:null})).status,503);
-      const saved=await call({action:'saveScenario',scenario:{kind:'baseline'}});assert.equal(saved.status,200,JSON.stringify(saved.data));scenarioId=saved.data.id;assert.equal(saved.data.scenario.metrics.irr,23.11);
+      const saved=await call({action:'saveScenario',scenario:{kind:'baseline'}});assert.equal(saved.status,200,JSON.stringify(saved.data));scenarioId=saved.data.id;assert.equal(saved.data.scenario.metrics.irr,snapshot.summary.irr);
       assert.equal((await call(null,editor)).data.ops.scenarios.length,0);assert.equal((await call({action:'selectScenario',scenarioId},editor)).status,403);assert.equal((await call({action:'selectScenario',scenarioId})).status,200);assert.equal((await call(null,editor)).data.ops.adoptedScenarioId,scenarioId);
     });
     await t.test('只有项目有效证据+当前独立复核能生成就绪包；修改后失效',async()=>{
       const evidenceId=crypto.randomUUID();await DB.prepare("INSERT INTO project_facts(id,project_id,user_id,fact_type,fact_key,value_json,status,source_ref,created_by,created_at,updated_at) VALUES(?,?,?,'investment','verified.input','1','confirmed','test-source','test-reviewer',?,?)").bind(evidenceId,projectId,owner,Date.now(),Date.now()).run();
       const body={action:'createDecisionPackage',scenarioId,evidenceIds:[evidenceId]};assert.equal((await call({...body,evidenceIds:['missing']})).status,404);assert.equal((await call(body)).data.package.status,'blocked');
-      const frozen=await deliveryAction(env,owner,{action:'freeze',projectId,reviewerId:viewer,contract:{expected:[{label:'净现值',value:768.04,unit:'万元',sourceRef:'测试白箱快照',version:'1'}]}});await deliveryAction(env,viewer,{action:'approve',projectId,id:frozen.id,note:'[系统测试]模拟独立核验',factsReviewed:true,wordLayoutReviewed:true});
+      const frozen=await deliveryAction(env,owner,{action:'freeze',projectId,reviewerId:viewer,contract:{expected:[{label:'净现值',value:snapshot.summary.totalNpv,unit:'万元',sourceRef:'测试白箱快照',version:'1'}]}});await deliveryAction(env,viewer,{action:'approve',projectId,id:frozen.id,note:'[系统测试]模拟独立核验',factsReviewed:true,wordLayoutReviewed:true});
       const ready=await call(body);assert.equal(ready.status,200,JSON.stringify(ready.data));assert.equal(ready.data.package.status,'ready');
       const readReady=async()=>(await call(null)).data.ops.packages.find(x=>x.id===ready.data.id);assert.equal((await readReady()).status,'ready');
       await DB.prepare("UPDATE project_facts SET value_json='2' WHERE id=?").bind(evidenceId).run();assert.equal((await readReady()).status,'blocked');assert.equal((await readReady()).historicalStatus,'ready');

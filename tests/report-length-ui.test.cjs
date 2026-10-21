@@ -1,0 +1,67 @@
+const test=require('node:test'),assert=require('node:assert/strict');
+require('../scripts/windows-browser-lockout-guard.cjs');
+function outline(){return [{name:'总论',sections:[{t:'编制依据'},{t:'项目事实'}]},{name:'市场',sections:Array.from({length:20},(_,i)=>({t:'需求分析'+i}))},{name:'风险与财务',sections:Array.from({length:21},(_,i)=>({t:'经营判断'+i,numeric:true}))}];}
+async function fixture(page,options={}){
+  await page.goto('about:blank');await page.setContent('<!doctype html><meta charset="utf-8"><main>[系统测试]篇幅确认</main>');
+  await page.addScriptTag({path:require.resolve('../report-length-plan.js')});
+  await page.evaluate(({chapters,options})=>{
+    window.chapters=chapters;window.currentProjectId='[系统测试]项目A';window.projectWorkflow={reportCompletion:{budgets:options.legacy?{'总论 / 项目事实':{proseTarget:800,proseMax:1200,tableMax:4,reason:'旧人工审签'}}:{},history:[]}};
+    window.__saves=0;window.__saved=false;window.__round=1;window.__research=!!options.research;window.__saveFailure=false;window.__postSaveFailure=false;
+    window.projectCanEdit=()=>true;window.getUser=()=> '[系统测试]用户';
+    window.persistReportDraft=async()=>{window.__saves++;return {ok:!window.__saveFailure};};
+    window.airSaveState=async()=>{if(window.__postSaveFailure)throw new Error('[系统测试]页面状态缓存失败');};
+    window.ResearchUI={active:()=>window.__research,capture:()=>({round:window.__round}),accepts:context=>window.__research&&context.round===window.__round,editable:()=>true,guard:async()=>{}};
+  },{chapters:outline(),options});
+  await page.addScriptTag({path:require.resolve('../report-length-ui.js')});
+}
+async function open(page,options={}){await page.evaluate(options=>{window.__result='pending';window.__confirm=ReportLengthUI.confirm(options).then(value=>window.__result=value);},options);await page.locator('#reportLengthPlanModal').waitFor();}
+test('真实隔离浏览器：篇幅取消、旧预算显式确认、用户目标、保存失败与项目/轮次隔离',{timeout:60000},async()=>{
+  const {chromium}=require('playwright'),browser=await chromium.launch({headless:true});
+  try{
+    const page=await browser.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
+    // Cancelling never changes the working report or invokes a persistence request.
+    await fixture(page);const before=await page.evaluate(()=>JSON.stringify(projectWorkflow));await open(page);
+    assert.equal(await page.locator('#reportLengthPages').inputValue(),'120');assert.equal(await page.locator('#reportLengthWords').inputValue(),'84500');assert.equal(await page.locator('#reportLengthPriority').inputValue(),'pages');assert.equal(await page.locator('[data-length-chapters] tr').count(),3);assert.match(await page.locator('[data-length-page-range]').innerText(),/110–130/);
+    // Page-first changes recommend text; an explicit text choice changes priority and survives page edits.
+    await page.locator('#reportLengthPages').fill('100');await page.locator('#reportLengthPages').dispatchEvent('change');assert.equal(await page.locator('#reportLengthWords').inputValue(),'70500');
+    await page.locator('#reportLengthWords').fill('65000');await page.locator('#reportLengthWords').dispatchEvent('change');assert.equal(await page.locator('#reportLengthPriority').inputValue(),'words');
+    await page.locator('#reportLengthPages').fill('120');await page.locator('#reportLengthPages').dispatchEvent('change');assert.equal(await page.locator('#reportLengthWords').inputValue(),'65000');
+    await page.locator('[data-length-words-default]').click();assert.equal(await page.locator('#reportLengthWords').inputValue(),'75000');assert.equal(await page.locator('#reportLengthPriority').inputValue(),'words');
+    await page.locator('#reportLengthPages').fill('80');await page.locator('#reportLengthPages').dispatchEvent('change');assert.equal(await page.locator('#reportLengthWords').inputValue(),'75000');
+    await page.locator('#reportLengthPriority').selectOption('pages');assert.equal(await page.locator('#reportLengthWords').inputValue(),'56500');
+    await page.locator('[data-length-reset]').click();assert.equal(await page.locator('#reportLengthPages').inputValue(),'120');assert.equal(await page.locator('#reportLengthWords').inputValue(),'84500');assert.match(await page.locator('[data-length-page-range]').innerText(),/不保证页数或专业深度达标/);
+    await page.locator('[data-length-close]').first().click();await page.waitForFunction(()=>__result===false);assert.equal(await page.evaluate(()=>JSON.stringify(projectWorkflow)),before);assert.equal(await page.evaluate(()=>__saves),0);
+    // Old human values are kept, but may not silently shrink the confirmed plan.
+    await fixture(page,{legacy:true});const legacy=await page.evaluate(()=>JSON.stringify(projectWorkflow.reportCompletion.budgets));await open(page);
+    assert.equal(await page.locator('[data-length-confirm]').isDisabled(),true);assert.match(await page.locator('[data-length-legacy]').innerText(),/旧人工正文预算/);
+    await page.locator('#reportLengthPages').fill('80');await page.locator('#reportLengthPages').dispatchEvent('change');await page.locator('#reportLengthWords').fill('50000');await page.locator('#reportLengthWords').dispatchEvent('change');
+    await page.locator('[data-length-chapter="0"]').fill('3000');await page.locator('[data-length-chapter="0"]').dispatchEvent('change');await page.locator('[data-length-budget-ack]').check();await page.locator('[data-length-confirm]').click();await page.waitForFunction(()=>__result===true);
+    const confirmed=await page.evaluate(()=>({plan:projectWorkflow.reportCompletion.lengthPlan,budgets:JSON.stringify(projectWorkflow.reportCompletion.budgets),saved:!!ReportLengthUI.savedPlan(),saves:__saves,history:projectWorkflow.reportCompletion.history}));
+    assert.equal(confirmed.plan.targetPages,80);assert.equal(confirmed.plan.totalTarget,50000);assert.equal(confirmed.plan.chapters[0].target,3000);assert.equal(confirmed.plan.budgetResolution.policy,'confirmed-length-plan');assert.equal(confirmed.budgets,legacy);assert.equal(confirmed.saved,true);assert.equal(confirmed.saves,1);assert.equal(confirmed.history.at(-1).legacyProseBudgets[0].proseTarget,'800');
+    assert.equal(await page.evaluate(()=>ReportLengthUI.confirm()),true);assert.equal(await page.locator('#reportLengthPlanModal').count(),0);assert.equal(await page.evaluate(()=>__saves),1);
+    await page.evaluate(()=>{projectWorkflow.reportCompletion.budgets['总论 / 项目事实'].proseTarget=900;});assert.equal(await page.evaluate(()=>ReportLengthUI.savedPlan()),null);
+    // Changed headings remove obsolete chapter locks, never reset the user's total.
+    await page.evaluate(()=>{chapters[0].name='项目概况';});await open(page);assert.equal(await page.locator('#reportLengthPages').inputValue(),'80');assert.equal(await page.locator('#reportLengthWords').inputValue(),'50000');assert.match(await page.locator('[data-length-warnings]').innerText(),/总页数与字数目标保留/);await page.locator('[data-length-close]').first().click();await page.waitForFunction(()=>__result===false);
+    // The prior rule version stays untouched until the user reconfirms the original targets.
+    await fixture(page);await page.evaluate(()=>{const prior=ReportLengthPlan.createPlan(chapters,{proseTotal:50000});prior.version='20261008-confirmed-length-v2';delete prior.planningPriority;projectWorkflow.reportCompletion.lengthPlan={...prior,confirmedAt:'2026-10-08T12:00:00Z',budgetResolution:{policy:'confirmed-length-plan',legacyBudgetFingerprint:ReportLengthPlan.legacyBudgetSummary({}).fingerprint}};});const oldPlan=await page.evaluate(()=>JSON.stringify(projectWorkflow.reportCompletion.lengthPlan));
+    assert.equal(await page.evaluate(()=>ReportLengthUI.planStatus().status),'stale-confirmed');await open(page);assert.equal(await page.locator('#reportLengthWords').inputValue(),'50000');assert.equal(await page.locator('#reportLengthPriority').inputValue(),'words');assert.equal(await page.evaluate(()=>JSON.stringify(projectWorkflow.reportCompletion.lengthPlan)),oldPlan);assert.equal(await page.evaluate(()=>__saves),0);
+    await page.locator('[data-length-confirm]').click();await page.waitForFunction(()=>__result===true);assert.equal(await page.evaluate(()=>projectWorkflow.reportCompletion.lengthPlan.proseTotal),50000);assert.equal(await page.evaluate(()=>projectWorkflow.reportCompletion.lengthPlan.version),'20261010-confirmed-length-v3');assert.deepEqual(await page.evaluate(()=>projectWorkflow.reportCompletion.lengthPlan.targetPageRange),{min:110,max:130});
+    // A failed acknowledged write stays open, with the original workflow intact.
+    await fixture(page);await page.evaluate(()=>{__saveFailure=true;});const failedBefore=await page.evaluate(()=>JSON.stringify(projectWorkflow));await open(page);await page.locator('[data-length-confirm]').click();await page.waitForFunction(()=>document.querySelector('[data-length-status]').textContent.includes('尚未保存成功'));assert.equal(await page.evaluate(()=>JSON.stringify(projectWorkflow)),failedBefore);assert.equal(await page.evaluate(()=>__result),'pending');await page.locator('[data-length-close]').first().click();await page.waitForFunction(()=>__result===false);
+    // An acknowledged server plan is not silently rolled back by a later UI error.
+    await fixture(page);await page.evaluate(()=>{__postSaveFailure=true;});await open(page);await page.locator('[data-length-confirm]').click();await page.waitForFunction(()=>document.querySelector('[data-length-status]').textContent.includes('页面状态缓存失败'));assert.equal(await page.evaluate(()=>!!projectWorkflow.reportCompletion.lengthPlan),true);assert.equal(await page.evaluate(()=>__result),'pending');await page.locator('[data-length-close]').first().click();await page.waitForFunction(()=>__result===false);
+    // A modal for another project cannot be reused by a new generation entry.
+    await fixture(page);await open(page);await page.evaluate(()=>{currentProjectId='[系统测试]项目B';});const cross=await page.evaluate(async()=>{try{await ReportLengthUI.confirm();return '';}catch(error){return error.message;}});assert.match(cross,/另一个项目或研究/);await page.locator('[data-length-close]').first().click();await page.waitForFunction(()=>__result===false);assert.equal(await page.evaluate(()=>__saves),0);
+    // Private research has no project ID: changing a round while guarding rejects it.
+    await fixture(page,{research:true});await page.evaluate(()=>{currentProjectId=null;ResearchUI.guard=async()=>{__round++;};});await open(page);await page.locator('[data-length-confirm]').click();await page.waitForFunction(()=>document.querySelector('[data-length-status]').textContent.includes('权限复核期间项目已变化'));assert.equal(await page.evaluate(()=>__saves),0);assert.equal(await page.evaluate(()=>!!projectWorkflow.reportCompletion.lengthPlan),false);await page.locator('[data-length-close]').first().click();await page.waitForFunction(()=>__result===false);
+    // Same private-research identity succeeds and is reusable without another save.
+    await fixture(page,{research:true});await page.evaluate(()=>{currentProjectId=null;});await open(page);await page.locator('[data-length-confirm]').click();await page.waitForFunction(()=>__result===true);assert.equal(await page.evaluate(()=>!!ReportLengthUI.savedPlan()),true);
+    // An awaited permission check may not overwrite a newer completion state.
+    await fixture(page,{research:true});await page.evaluate(()=>{ResearchUI.guard=async()=>{projectWorkflow.reportCompletion={budgets:{},history:[{reason:'较新人工编辑'}]};};});await open(page);await page.locator('[data-length-confirm]').click();await page.waitForFunction(()=>document.querySelector('[data-length-status]').textContent.includes('未覆盖新配置'));assert.equal(await page.evaluate(()=>__saves),0);assert.equal(await page.evaluate(()=>projectWorkflow.reportCompletion.history[0].reason),'较新人工编辑');await page.locator('[data-length-close]').first().click();await page.waitForFunction(()=>__result===false);
+    // In-place outline changes are checked again even when the array identity survives.
+    await fixture(page,{research:true});await page.evaluate(()=>{ResearchUI.guard=async()=>{chapters[1].sections[0].t='更新后的需求主题';};});await open(page);await page.locator('[data-length-confirm]').click();await page.waitForFunction(()=>document.querySelector('[data-length-status]').textContent.includes('未覆盖新配置'));assert.equal(await page.evaluate(()=>__saves),0);assert.equal(await page.evaluate(()=>!!projectWorkflow.reportCompletion.lengthPlan),false);await page.locator('[data-length-close]').first().click();await page.waitForFunction(()=>__result===false);
+    // A late receipt cannot start AI with a now-obsolete budget acknowledgement.
+    await fixture(page,{legacy:true});await page.evaluate(()=>{persistReportDraft=async()=>{__saves++;projectWorkflow.reportCompletion.budgets['总论 / 项目事实'].proseTarget=900;return {ok:true};};});await open(page);await page.locator('[data-length-budget-ack]').check();await page.locator('[data-length-confirm]').click();await page.waitForFunction(()=>document.querySelector('[data-length-status]').textContent.includes('保存期间项目或计划已变化'));assert.equal(await page.evaluate(()=>__result),'pending');assert.equal(await page.evaluate(()=>ReportLengthUI.savedPlan()),null);assert.equal(await page.evaluate(()=>projectWorkflow.reportCompletion.budgets['总论 / 项目事实'].proseTarget),900);await page.locator('[data-length-close]').first().click();await page.waitForFunction(()=>__result===false);
+    assert.deepEqual(errors,[]);
+  }finally{await browser.close();}
+});

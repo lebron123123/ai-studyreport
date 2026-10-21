@@ -56,17 +56,18 @@ export const PARAM_META = {
   gaibao:{
     buildStart:p("改造开工年份","年"), buildYears:p("改造建设期","年"), operateYears:p("运营期","年"), firstMonths:p("运营首年计租月数","月"),
     area:p("可出租住房面积","㎡"), rent:p("起始租金","元/㎡/月","market_stat","market_dynamic"), rentSpan:p("租金递增间隔","年","industry_benchmark","market_dynamic","recommended"), rentRate:p("租金递增率","%","market_stat","market_dynamic"), rampOcc:p("首年出租率","比例","market_stat","market_dynamic"), stableOcc:p("稳定期出租率","比例","market_stat","market_dynamic"),
-    collect:p("收楼单价","元/㎡/月","market_stat","market_dynamic"), mode:p("收楼合作模式","文本","decision"), collectPct:p("固定收楼比例","%","decision"), sharePct:p("收入分成比例","%","decision"),
+    collect:p("收楼单价","元/㎡/月","market_stat","market_dynamic"), mode:p("收楼流出方式","文本","decision"), collectPct:p("旧版固定收楼比例","%","decision"), sharePct:p("旧版业主分成比例","%","decision"), collectRentPct:p("实际收租的收楼比例","%","decision"), collectReductionPct:p("固定收楼租金减免","%","decision"), projectSharePct:p("项目保留租金收益比例","%","decision"),
     deco:p("首次装修单价","元/㎡","market_stat","market_dynamic"), decoInt:p("装修重置间隔","年","industry_benchmark","project_specific"), decoRatio:p("再次装修成本系数","比例","industry_benchmark","project_specific"),
-    units:p("住房总套数","套"), unitCost:p("单套月运营成本","元/套/月","industry_benchmark","region_specific"), startup:p("项目开办费","万元","industry_benchmark","project_specific"), loan:p("总借款金额","万元","decision"),
+    units:p("住房总套数","套"), unitCost:p("单套月运营成本","元/套/月","industry_benchmark","region_specific"), operateCostMode:p("运营成本计取方式","文本","decision"), operateRentPct:p("运营成本占实际月租金比例","%","industry_benchmark","project_specific"), startup:p("项目开办费","万元","industry_benchmark","project_specific"), loan:p("总借款金额","万元","decision"),
     interestBase:p("计息本金","万元","decision"), rateDiscount:p("贷款利率折扣系数","比例","decision"), loanRate:p("贷款年利率","%","market_stat","market_dynamic"), discount:p("财务基准折现率","%","policy_constant","low_frequency"), repay:p("年度还本金额","万元","decision"),
+    principalRepayMode:p("归还本金方式","文本","decision"), principalRepayIntervalMonths:p("还本间隔","月","decision"), principalRepayPct:p("每期归还本金比例","%","decision"), principalRepayFinalMonth:p("末期还本月","月","decision"),
   },
 };
 
 const IMPACT_KEYS={
   rent:{core:["rent","area","stableOcc","rentRate","rentDiscount","manageCoeff","totalInvestment","invest"],important:["buildYears","occRamp","decorationCost","loanAmount","loanRate","parkPrice","subsidyStableOcc"],low:["buildStart","firstMonths","parkRatio","postOfficePrice","firstRepayRatio"]},
   sale:{core:["saleArea","saleAvgPrice","rate1","rate2","rate3","landCost","constructionCost","totalInvestment"],important:["buildYears","commArea","commRent","commStableOcc","loanAmount","loanRate","devCost"],low:["buildStart","leaseMonths","landUseArea","projectInputTax"]},
-  gaibao:{core:["rent","area","stableOcc","collect","deco","unitCost","loanRate","discount"],important:["buildYears","rampOcc","decoInt","units","loan","interestBase"],low:["buildStart","firstMonths","startup","rateDiscount"]},
+  gaibao:{core:["rent","area","stableOcc","collect","collectRentPct","collectReductionPct","projectSharePct","deco","unitCost","operateRentPct","loanRate","discount"],important:["buildYears","rampOcc","decoInt","units","loan","interestBase"],low:["buildStart","firstMonths","startup","rateDiscount"]},
 };
 function impactOf(type,key){const g=IMPACT_KEYS[type]||{};if((g.core||[]).includes(key))return"核心";if((g.important||[]).includes(key))return"重要";if((g.low||[]).includes(key))return"低影响";return"一般";}
 

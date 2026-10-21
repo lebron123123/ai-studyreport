@@ -54,7 +54,7 @@ test('真实规则后续修改仍只标记对应小节，不通过清空状态�
 });
 test('恢复保留锁定和未接受候选稿；旧无标题草稿仍兼容',()=>{
   const {ctx}=runtime(),chapters=fixture();
-  chapters[0].sections[0].locked=true;WF.setCandidate(chapters[0].sections[0],'待审稿','待审');
+  WF.setCandidate(chapters[0].sections[0],'待审稿','待审');chapters[0].sections[0].locked=true;
   ctx.restoreDraft({domainKey:'baozhang_gaibao',chapters});
   assert.equal(ctx.chapters[0].sections[0].locked,true);
   assert.equal(ctx.chapters[0].sections[0].pendingRevision.after,'待审稿');

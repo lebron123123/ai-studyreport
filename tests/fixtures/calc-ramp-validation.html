@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>爬坡间隔隔离验证</title><div id="sheet"></div>
+<script>
+let appMode='calc',currentProjectId='[系统测试]ramp-governance';
+function getUser(){return '[系统测试]';}
+function escapeHtml(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function renderTOC(){}
+// Export actions are outside this isolated calculation/validation fixture.
+function exportCalcExcel(){}
+function exportCalcWord(){}
+function renderSheet(){document.getElementById('sheet').innerHTML=renderCalcModule();bindCalcEvents();}
+</script>
+<script src="/nrcalc.js"></script><script src="/metrics.js"></script><script src="/sensitivity-core.js"></script><script src="/paramgovernance.js"></script><script src="/calc.js"></script>
+<script>
+calcType='gaibao';scStep=1;
+scParams={buildStartMonth:'2026-01',buildEndMonth:'2026-04',operateStartMonth:'2026-05',operateEndMonth:'2037-12',occupancyMode:'monthly-phases',rampStartMonth:'2026-05',rampEndMonth:'2026-08',stableStartMonth:'2026-09',rampIntervalMonths:1,rampRates:[.5,.6,.7,.8]};
+CALC_CFG.sensitivity.gaibao={table:['rampIntervalMonths','rentSpan','decoInt','rent'].map((key,i)=>({key,label:key,combinedRank:50+i,STi:0}))};
+renderSheet();
+</script>

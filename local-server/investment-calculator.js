@@ -29,7 +29,26 @@ export function createInvestmentCalculator(){
     if(!CORE[type]||!p||typeof p!=='object'||Array.isArray(p))fail('当前快照类型或参数不支持服务端复算，请重新测算并保存');
     if(JSON.stringify([p,configuration]).length>500000)fail('测算参数过大');
     validateNumbers(p);validateNumbers(configuration);
-    for(const key of ['buildStart','buildYears','operateYears',...CORE[type]])if(typeof p[key]!=='number'||!Number.isFinite(p[key]))fail('已保存快照缺少有效参数：'+key+'，请重新测算并保存');
+    const required=['buildStart','buildYears','operateYears',...CORE[type]];
+    if(type==='gaibao'){
+      if(p.mode!==undefined&&!['lease','rent-percent','share'].includes(p.mode))fail('收楼流出方式无效');
+      if(p.mode==='rent-percent'){
+        required.splice(required.indexOf('collect'),1,'collectRentPct');
+        if(p.collectRentPct<0||p.collectRentPct>100)fail('收楼成本占实际租金比例须为0至100%');
+      }
+      if(p.operateCostMode!==undefined&&!['per-unit','rent-percent'].includes(p.operateCostMode))fail('运营成本方式无效');
+      if(p.operateCostMode==='rent-percent'){
+        required.splice(required.indexOf('unitCost'),1,'operateRentPct');
+        if(p.operateRentPct<0||p.operateRentPct>100)fail('运营成本占实际租金比例须为0至100%');
+      }
+      if(p.principalRepayMode!==undefined&&!['principal-percent','rent-surplus'].includes(p.principalRepayMode))fail('归还本金方式无效');
+      if((p.principalRepayMode||'principal-percent')==='principal-percent'){
+        if(p.principalRepayIntervalMonths!==undefined&&(!Number.isInteger(p.principalRepayIntervalMonths)||p.principalRepayIntervalMonths<1||p.principalRepayIntervalMonths>1200))fail('还本间隔须为1至1200的整数月');
+        if(p.principalRepayPct!==undefined&&(!Number.isFinite(p.principalRepayPct)||p.principalRepayPct<0||p.principalRepayPct>100))fail('每期归还本金比例须为0至100%');
+        if(p.principalRepayFinalMonth!==undefined&&(!Number.isInteger(p.principalRepayFinalMonth)||p.principalRepayFinalMonth<1||p.principalRepayFinalMonth>1200))fail('末期还本月须为1至1200的整数月');
+      }
+    }
+    for(const key of required)if(typeof p[key]!=='number'||!Number.isFinite(p[key]))fail('已保存快照缺少有效参数：'+key+'，请重新测算并保存');
     if(!Number.isInteger(p.buildStart)||p.buildStart<1900||p.buildStart>2300||!Number.isInteger(p.buildYears)||p.buildYears<1||p.buildYears>20||!Number.isInteger(p.operateYears)||p.operateYears<1||p.operateYears>100)fail('建设及运营期间超出可复算范围');
     if(p.currency&&p.currency!=='CNY'||p.moneyUnit&&p.moneyUnit!=='万元')fail('当前引擎仅支持人民币万元口径，不支持自动币种或单位换算');
     const cfg={gaibao:{},rent:{},sale:{},...structuredClone(configuration)};

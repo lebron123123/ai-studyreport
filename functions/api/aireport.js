@@ -5,6 +5,7 @@
 // GET                                                 读取上次保存的对话进度
 // DELETE                                               清空对话进度
 import { verifyAuth, json } from "./_auth.js";
+import { selectedFields } from './_project-sensitivity-selection.js';
 import { adaptEnv } from "./_adapters.js";
 import {authorizeResearchTask,ResearchError} from './_research-store.js';
 import {resolveProjectAccess} from './_project-access.js';
@@ -44,10 +45,11 @@ const DEFAULTS = {
   gaibao: {
     buildStart:2026, buildYears:1, operateYears:12, firstMonths:12,
     area:20000, rent:75, rentSpan:3, rentRate:5, rampOcc:0.85, stableOcc:0.95,
-    collect:25, mode:"lease", collectPct:100, sharePct:0,
+    collect:25, mode:"lease", collectPct:100, sharePct:0, collectRentPct:20, collectReductionPct:0, projectSharePct:100,
     deco:1500, decoInt:10, decoRatio:0.30,
-    units:500, unitCost:800, startup:50, loan:13892,
+    units:500, unitCost:800, operateCostMode:"per-unit", operateRentPct:15.7, startup:50, loan:13892,
     interestBase:10600, rateDiscount:0.80, loanRate:3.5, discount:6, repay:1157.67,
+    principalRepayMode:"principal-percent", principalRepayIntervalMonths:6, principalRepayPct:2.5, principalRepayFinalMonth:60,
   },
 };
 const PARAM_CATALOG = catalogFor(DEFAULTS);
@@ -113,9 +115,10 @@ function median(nums){
    （敏感性分析里一些ie_前缀的投资估算细项，AI推荐这条链路目前并不单独采集，排进来也匹配不到案例数据，
    直接过滤掉，不然会挑出一个案例库永远填不上的"关键参数"）。没有可用的敏感性结果，或匹配数不足3个时，
    回退到原来手工维护的短名单，行为不变。 */
-function resolveKeyFields(calcType, sensAll){
+export function resolveKeyFields(calcType, sensAll){
   const fallback = KEY_FIELDS[calcType];
   const sens = sensAll && sensAll[calcType];
+  if(calcType==='gaibao'&&sens?.version==='anju-global-v2'&&sens.selectionApplied===true)return selectedFields(sens);
   if(!sens || !Array.isArray(sens.table) || !sens.table.length) return fallback;
   const eligibleKeys = new Set(Object.keys(DEFAULTS[calcType]));
   const rankOf = (row) => {
@@ -433,7 +436,32 @@ async function doSuggest(context, body){
     // 敏感性结果读取失败(没同步过/表还没建/JSON坏了)不阻断——退化为原来手工维护的关键参数短名单
     sensAll = null;
   }
-  const keyFields = resolveKeyFields(calcType, sensAll);
+  const activeMode=explicitParams.mode||effectiveDefaults.mode,activeCostMode=explicitParams.operateCostMode||effectiveDefaults.operateCostMode,activeRepayMode=explicitParams.principalRepayMode||effectiveDefaults.principalRepayMode;
+  const resolvedKeyFields=resolveKeyFields(calcType,sensAll);
+  const keyFields = resolvedKeyFields.filter(f=>calcType!=='gaibao'||(
+    !(['collect'].includes(f.key)&&activeMode==='rent-percent')&&
+    !(['collectRentPct'].includes(f.key)&&activeMode!=='rent-percent')&&
+    !(['collectReductionPct','projectSharePct','shareStartMonth'].includes(f.key)&&activeMode!=='share')&&
+    !(f.key==='unitCost'&&activeCostMode==='rent-percent')&&
+    !(f.key==='operateRentPct'&&activeCostMode!=='rent-percent')&&
+    !(['principalRepayIntervalMonths','principalRepayPct','principalRepayFinalMonth'].includes(f.key)&&activeRepayMode==='rent-surplus')
+  ));
+  if(calcType==='gaibao'&&resolvedKeyFields===KEY_FIELDS.gaibao){
+    if(activeMode==='rent-percent')keyFields.splice(3,0,{key:'collectRentPct',label:'实际租金收楼比例（%）'});
+    if(activeCostMode==='rent-percent')keyFields.splice(4,0,{key:'operateRentPct',label:'实际租金运营成本比例（%）'});
+  }
+  const requiredFields=[];
+  // Applied rankings may include month schedules and phase arrays absent from legacy defaults.
+  if(calcType==='gaibao'&&sensAll?.gaibao?.selectionApplied){
+    for(const f of keyFields)if(!(f.key in effectiveDefaults))effectiveDefaults[f.key]=null;
+    for(const key of ['buildStartMonth','buildEndMonth','operateStartMonth','operateEndMonth','rampStartMonth','rampEndMonth','stableStartMonth','rampRates','rampIntervalMonths','occupancyMode','debtModel','firstDecoLoanPct','costSpan','costRate','principalRepayMode','principalRepayIntervalMonths','principalRepayPct','principalRepayFinalMonth']){
+      if(Object.prototype.hasOwnProperty.call(explicitParams,key))effectiveDefaults[key]=explicitParams[key];
+    }
+    // Calendar facts are required regardless of their sensitivity; never copy another project's dates.
+    const schedule=[['buildStartMonth','建设开始年月','month'],['buildEndMonth','建设结束年月','month'],['operateStartMonth','运营开始年月','month'],['operateEndMonth','运营结束年月','month'],['rampEndMonth','爬坡结束年月','month'],['rampIntervalMonths','爬坡间隔（月）','number'],['rampRates','爬坡出租率（0—1；分号分隔）','rates']];
+    for(const [key,label,inputKind] of schedule){if(!(key in effectiveDefaults))effectiveDefaults[key]=null;if(!keyFields.some(f=>f.key===key))requiredFields.push({key,label:'必要项目事实 · '+label,inputKind});}
+    effectiveDefaults.occupancyMode='monthly-phases';effectiveDefaults.debtModel='monthly-v2';
+  }
 
   let configuredRules = [];
   try{
@@ -470,7 +498,7 @@ async function doSuggest(context, body){
 
   const params = Object.assign({}, effectiveDefaults);
   const sources = {};
-  const keyInfo = Object.fromEntries(keyFields.map(f=>[f.key,f]));
+  const keyInfo = Object.fromEntries([...keyFields,...requiredFields].map(f=>[f.key,f]));
   Object.keys(params).forEach(key=>{
     const f = keyInfo[key] || {key,label:key};
     const meta=(PARAM_CATALOG[calcType]&&PARAM_CATALOG[calcType][key])||{};
@@ -487,6 +515,8 @@ async function doSuggest(context, body){
     const explicitValue=explicitParams[key],hasExplicit=Object.prototype.hasOwnProperty.call(explicitParams,key)&&((typeof explicitValue==="number"&&isFinite(explicitValue))||typeof explicitValue==="string"||Array.isArray(explicitValue));
     if(hasExplicit){
       src={value:explicitValue,from:"项目正式资料/信息卡",confidence:"高",evidence:[],sourceCode:"project_document",sourceLevel:2,requiresManualConfirmation:false};
+    }else if(requiredFields.some(f=>f.key===key)||key.endsWith('Month')||key==='rampRates'){
+      src=expertSource();src.from='必要项目事实待补充，不使用其他项目日期或爬坡计划';
     }else if(rule && (meta.sourcePolicy==="binding_rule"||meta.sourcePolicy==="industry_fallback")){
       src=ruleSource();
     }else if(meta.sourcePolicy==="project_document"||meta.sourcePolicy==="manual_decision"){
@@ -502,7 +532,7 @@ async function doSuggest(context, body){
     sources[key] = src;
   });
 
-  return json({ok:true, params, sources, keyFields, paramMeta:PARAM_CATALOG[calcType], caseCount:cases.length, regionCaseCount:regionCases.length,
-    keyFieldsSource: keyFields===KEY_FIELDS[calcType] ? "manual" : "sensitivity",
+  return json({ok:true, params, sources, keyFields, requiredFields, paramMeta:PARAM_CATALOG[calcType], caseCount:cases.length, regionCaseCount:regionCases.length,
+    keyFieldsSource: resolvedKeyFields===KEY_FIELDS[calcType] ? "manual" : "sensitivity",
     sourceHierarchy:["项目Excel/测算底稿","项目正式资料","适用政策/公司硬规则","同区域同类型案例中位数","其他同类型案例中位数","行业规则兜底","专家默认值"]});
 }

@@ -181,6 +181,64 @@ export function providerOrder(env, requested) {
 }
 
 export async function callConfiguredLlm(env, requestedProvider, payload, fetchImpl = fetch, options = {}) {
+  // Opt-in import review contract: one provider, one POST, no fallback or hedging.
+  // Keep the deadline alive through the response body, not only response headers.
+  if (options.singleAttempt === true) {
+    if (payload.stream) throw new Error("单次候选请求不支持流式输出");
+    const status = providerStatus(env);
+    const name = String(requestedProvider || status.defaultProvider).toLowerCase();
+    if (!PROVIDERS[name] || (!status.companyProvidersEnabled && name !== "deepseek-cloud")) throw new Error("单次请求的模型Provider无效或未启用");
+    const cfg = getProviderConfig(env, name);
+    if (!cfg?.available) throw new Error("单次请求的默认模型尚未配置完整；未调用备用模型");
+    const controller = new AbortController(), startedAt = Date.now();
+    const timeoutMs = Math.min(120000, Math.max(1, Number(options.timeoutMs) || 120000));
+    let timer, rejectAbort, bodyReader, phase = "before_dispatch", bytes = 0, httpStatus = null, receivedContent = false;
+    const diagnostics = code => ({ code, provider: cfg.id, phase, elapsed_ms: Date.now() - startedAt,
+      http_status: httpStatus, received_bytes: bytes, received_non_whitespace: receivedContent });
+    const aborted = new Promise((_, reject) => { rejectAbort = reject; });
+    const stop = error => { controller.abort(); if (bodyReader) void bodyReader.cancel().catch(() => {}); rejectAbort(error); };
+    const parentAbort = () => stop(Object.assign(new Error("单次请求已取消；未自动重试，已发出的请求可能仍计费"), { name: "AbortError", code: "LLM_ABORTED" }));
+    const checkAbort = () => { if (controller.signal.aborted) throw Object.assign(new Error("单次请求已取消"), { name: "AbortError" }); };
+    if (options.signal?.aborted) parentAbort();
+    else options.signal?.addEventListener("abort", parentAbort, { once: true });
+    timer = setTimeout(() => stop(timeoutError(name, timeoutMs)), timeoutMs);
+    try {
+      return await Promise.race([aborted, (async () => {
+        checkAbort();
+        const providerPayload = { ...payload, model: cfg.model, stream: false };
+        if (/deepseek/i.test(cfg.id + " " + cfg.model) && !providerPayload.thinking) providerPayload.thinking = { type: "disabled" };
+        phase = "awaiting_headers";
+        const response = await fetchImpl(cfg.url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + cfg.apiKey }, body: JSON.stringify(providerPayload), signal: controller.signal });
+        checkAbort();
+        phase = "receiving_body"; httpStatus = response.status;
+        const chunks = [];
+        bodyReader = response.body?.getReader();
+        if (bodyReader) for (;;) {
+          const chunk = await bodyReader.read(); checkAbort();
+          if (chunk.done) break;
+          bytes += chunk.value.byteLength;
+          if (chunk.value.some(byte => ![9,10,13,32].includes(byte))) receivedContent = true;
+          if (bytes > 256 * 1024) { void bodyReader.cancel().catch(() => {}); throw Object.assign(new Error("单次模型响应过大，候选未采用；未自动重试"), { code: "LLM_RESPONSE_TOO_LARGE" }); }
+          chunks.push(chunk.value);
+        }
+        const buffer = new Uint8Array(bytes); let offset = 0;
+        for (const chunk of chunks) { buffer.set(chunk, offset); offset += chunk.byteLength; }
+        const text = new TextDecoder().decode(buffer);
+        phase = "body_complete";
+        if (!response.ok) throw Object.assign(new Error("模型返回 HTTP " + response.status + "；未自动重试或切换模型，已发出的请求可能仍计费"), { status: response.status, code: "LLM_UPSTREAM_HTTP" });
+        return { response: new Response(text, { status: response.status, headers: response.headers }), provider: cfg.id, model: cfg.model, latencyMs: Date.now() - startedAt, mode: "single_attempt", singleAttempt: true, diagnostics: diagnostics("LLM_RESPONSE_RECEIVED") };
+      })()]);
+    } catch (error) {
+      // Only bounded transport metadata is retained. Never record headers, prompts,
+      // response text, URLs, or credentials in a recoverable request receipt.
+      const codes = new Set(["LLM_TIMEOUT", "LLM_ABORTED", "LLM_UPSTREAM_HTTP", "LLM_RESPONSE_TOO_LARGE"]);
+      error.upstreamDiagnostics = diagnostics(codes.has(error.code) ? error.code : "LLM_NETWORK_ERROR");
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", parentAbort);
+    }
+  }
   const profile = String(options.profile || "standard").toLowerCase();
   const orderedNames = providerOrder(env, requestedProvider);
   const available = orderedNames.map((name) => getProviderConfig(env, name)).filter((cfg) => cfg && cfg.available);

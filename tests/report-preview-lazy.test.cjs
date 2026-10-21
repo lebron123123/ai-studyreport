@@ -8,7 +8,7 @@ function fixture(){
  const chapter={cn:'一',sections:[section]};let renders=0,observer;
  const element={dataset:{airDeferred:'1',airCn:'一',airSi:'0'},isConnected:true,style:{minHeight:'240px'},innerHTML:''};
  const pane={querySelectorAll:()=>[element],querySelector:()=>({})};
- const context={document:{getElementById:()=>pane,activeElement:null},escapeHtml:x=>x,
+ const context={chapters:[chapter],document:{getElementById:()=>pane,activeElement:null},escapeHtml:x=>x,
   airFindChapterSection:()=>({chapter,section}),airSectionMaterialHtml:()=>'<aside>资料</aside>',
   airRenderCompletedSection:()=>{renders++;element.innerHTML+=section.content+section.pendingRevision.content;},
   IntersectionObserver:class{constructor(cb,options){this.cb=cb;this.options=options;observer=this;}observe(){}disconnect(){this.disconnected=true;}}};

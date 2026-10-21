@@ -4,6 +4,7 @@ import { adaptEnv } from "./_adapters.js";
 import rentSeed from "./_reportlogic-seed.js";
 import gaibaoSeed from "./_reportlogic-gaibao-seed.js";
 import writingPolicy from "../../report-writing-policy.js";
+import "../../report-writing-standard.js";
 import { mergeHousingRevision } from "./_reportlogic-scoped-migration.js";
 
 const REPORT_LOGIC_SEEDS = { rent: rentSeed, gaibao: gaibaoSeed };
@@ -49,6 +50,7 @@ async function ensureSchema(env) {
 function validateSet(input, expectedType = "") {
   const data = input && typeof input === "object" ? writingPolicy.normalize(input) : null;
   if (!data || !Array.isArray(data.rules) || !data.rules.length) throw new Error("生成逻辑不能为空");
+  if(data.writingStandard!==undefined)data.writingStandard=globalThis.ReportWritingStandard.normalize(data.writingStandard);
   const projectType = clean(expectedType || data.projectType, 30);
   if (!projectType) throw new Error("缺少项目类型");
   for(const value of Object.values(data.globalRequirements||{}))if(typeof value!=="string"||value.length>12000)throw new Error("全篇要求必须是文字，且不超过12000字");

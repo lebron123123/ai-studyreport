@@ -5,14 +5,31 @@
 //   appendix: {summaryLine, mainRows:[[..]..], sensRows:[[..]..]} | null
 // }
 (function(root, factory){
+  // Versioned layout identity is embedded in the DOCX and bound to its exact
+  // bytes by the server's pagination receipt; caller payloads cannot override it.
+  factory.templateVersion = 'report-docx-20261013-cover-metadata-v7';
   if(typeof module!=="undefined" && module.exports){ module.exports = factory; }
   else { root.buildDocxDocument = factory; }
 })(typeof self!=="undefined"? self : this, function(docx, payload){
   const D = docx;
   const outputPolicy=typeof module!=="undefined"&&module.exports?require('./report-output-policy.js'):window.ReportOutputPolicy;
+  const coverMetadata=typeof module!=="undefined"&&module.exports?require('./report-cover-metadata.js'):window.ReportCoverMetadata;
+  if(!coverMetadata)throw new Error('封面元数据模块未加载，请刷新后重试；原报告未更改。');
   const FONT = { ascii:"SimSun", eastAsia:"SimSun", hAnsi:"SimSun", cs:"SimSun" };
   const LINE13 = { line: 312, lineRule: D.LineRuleType.AUTO }; // 1.3倍行距
   const PAGE_WIDTH=11906, PAGE_HEIGHT=16838, TEXT_WIDTH=PAGE_WIDTH-3400;
+  let reportBookmarkId=1;
+  const reportListNumbering=[];
+  function bookmarkedRuns(name,runs){
+    const id=reportBookmarkId++;
+    return [new D.BookmarkStart(name,id),...runs,new D.BookmarkEnd(id)];
+  }
+  function importedParagraph(xml){
+    // The bundled parser returns a document wrapper (rootKey=undefined), not
+    // the requested element. Inserting the wrapper creates invalid <undefined>.
+    const imported=D.ImportedXmlComponent.fromXmlString(xml);
+    return imported.rootKey?imported:imported.root[0];
+  }
   function tableWidths(weights){
     const total=weights.reduce((sum,w)=>sum+w,0)||weights.length;
     const widths=weights.map(w=>Math.floor(w/total*TEXT_WIDTH));
@@ -27,14 +44,48 @@
   }
   function textRuns(text,opt){
     const value=cleanWordText(text),parts=value.split(/(【待补\s*(?:：|:)?[^】]*】)/g).filter(Boolean);
-    return parts.map(part=>run(part,Object.assign({},opt||{},/^【待补\s*(?:：|:)?[^】]*】$/.test(part)?{color:"C62828",bold:true}:{})));
+    return parts.flatMap(part=>part.split('\n').map((line,index)=>run(line,Object.assign({},opt||{},/^【待补\s*(?:：|:)?[^】]*】$/.test(part)?{color:"C62828",bold:true}:{},index?{break:1}:{}))));
   }
-  function bodyPara(text){
+  function bodyPara(text,keepNext){
     return new D.Paragraph({
       children:textRuns(text,{size:24}),
+      keepNext:keepNext||undefined,
       spacing: Object.assign({before:0,after:0}, LINE13),
       indent:{firstLine:480},
     });
+  }
+  function legacyTableCaption(block,next){
+    // Old saved exports use plain paragraphs for short table names. Keep only
+    // these labels with the next table; do not glue its preceding analysis to it.
+    if(block.type!=='p'||next?.type!=='table'||!next.rows?.length)return false;
+    const text=cleanWordText(block.text);
+    if(text.length>80||/[\r\n]/.test(text)||/^(?:详见|参见|见|请参阅|如下|说明|注[：:])/.test(text))return false;
+    return /^[^。！？!?；;：:\r\n]+表(?:[（(][^（）()\r\n]{1,24}[）)])?$/.test(text)
+      ||/^表\s*(?:\d+(?:[.．-]\d+)*|[一二三四五六七八九十]+)[\s、．.：:]+[^。！？!?；;\r\n]+$/.test(text);
+  }
+  function listElems(block,depth=0){
+    const level=Math.min(8,depth),reference='report-list-'+(reportListNumbering.length+1);
+    const ordered=block.ordered===true,start=Number(block.start);
+    reportListNumbering.push({reference,levels:Array.from({length:9},(_,index)=>({
+      level:index,format:ordered?D.LevelFormat.DECIMAL:D.LevelFormat.BULLET,
+      text:ordered?'%'+(index+1)+'.':'\u2022',alignment:D.AlignmentType.LEFT,
+      start:index===level&&Number.isInteger(start)&&start>0?start:1,
+      style:{paragraph:{indent:{left:480*(index+1),hanging:240}},run:{font:FONT,color:'000000',size:24}},
+    }))});
+    const result=[];
+    for(const item of block.items||[]){
+      const itemBlocks=typeof item==='string'?[{type:'p',text:item}]:Array.isArray(item?.blocks)?item.blocks:[{type:'p',text:item?.text||''}];
+      const first=itemBlocks[0]?.type==='p'?itemBlocks[0]:null;
+      result.push(new D.Paragraph({children:textRuns(first?.text||'',{size:24}),
+        numbering:{reference,level},spacing:Object.assign({before:0,after:0},LINE13)}));
+      for(const inner of itemBlocks.slice(first?1:0)){
+        if(inner.type==='list')result.push(...listElems(inner,depth+1));
+        else if(inner.type==='p')result.push(new D.Paragraph({children:textRuns(inner.text||'',{size:24}),
+          indent:{left:480*(level+1)},spacing:Object.assign({before:0,after:0},LINE13)}));
+        else result.push(...blockToElems(inner));
+      }
+    }
+    return result;
   }
   function makeTable(rows,weights,fontSize){
     const border = {style:D.BorderStyle.SINGLE, size:4, color:"000000"};
@@ -45,6 +96,7 @@
       borders:{top:border,bottom:border,left:border,right:border,insideHorizontal:border,insideVertical:border},
       rows: rows.map((cells,ri)=> new D.TableRow({
         tableHeader:ri===0,
+        cantSplit:true,
         children: Array.from({length:count},(_,ci)=> new D.TableCell({
           width:{size:widths[ci],type:D.WidthType.DXA},
           shading: ri===0? {fill:"EEEEEE",type:D.ShadingType.CLEAR} : undefined,
@@ -120,7 +172,8 @@
     });
     return out;
   }
-  function blockToElems(b){
+  function blockToElems(b,next){
+    if(b.type==='list'&&Array.isArray(b.items))return listElems(b);
     if(b.type==="tableCaption" && b.text) return [new D.Paragraph({
       children:textRuns(b.text,{size:24,bold:true}),alignment:D.AlignmentType.CENTER,
       keepNext:true,spacing:{before:120,after:80}
@@ -138,7 +191,7 @@
       children:textRuns(b.text,{size:24, bold:true}),
       spacing:{before:160, after:80, line:360, lineRule:D.LineRuleType.AUTO},
     })];
-    return cleanWordText(b.text)?[bodyPara(b.text)]:[];
+    return cleanWordText(b.text)?[bodyPara(b.text,legacyTableCaption(b,next))]:[];
   }
 
   const children = [];
@@ -152,69 +205,50 @@
     children:[run(payload.documentTitle||"可 行 性 研 究 报 告",{size:44,bold:true})],
     alignment:D.AlignmentType.CENTER, spacing:{after:2400},
   }));
-  const meta = [
-    payload.project.owner? "建设/委托单位："+payload.project.owner : "",
-    payload.project.industry? "报告领域："+payload.project.industry : "",
-    payload.project.location? "建设地点："+payload.project.location : "",
-    payload.project.scale? "投资规模："+payload.project.scale+"万元" : "",
-  ].filter(Boolean);
-  meta.forEach(m=> children.push(new D.Paragraph({children:[run(m,{size:24})], alignment:D.AlignmentType.CENTER, spacing:{after:120}})));
+  const meta=coverMetadata.resolve(payload.project,payload.coverContext).lines;
+  meta.forEach(m=> children.push(new D.Paragraph({children:textRuns(m,{size:24}), alignment:D.AlignmentType.CENTER, spacing:{after:120}})));
   children.push(new D.Paragraph({children:[run(payload.documentDate||new Date().toLocaleDateString("zh-CN"),{size:24})], alignment:D.AlignmentType.CENTER}));
   if(payload.docNo) children.push(new D.Paragraph({children:[run("文档编号："+payload.docNo,{size:21,color:"666666"})], alignment:D.AlignmentType.CENTER, spacing:{before:200}}));
   if(payload.versionNote)children.push(new D.Paragraph({children:[run(payload.versionNote,{size:20,color:"666666"})],alignment:D.AlignmentType.CENTER,spacing:{before:120}}));
 
-  /* ---------- 目录页（可更新域，打开时Word提示更新即出页码） ---------- */
+  /* ---------- 原生目录：下载服务必须更新并保存域结果，不交付空缓存 ---------- */
   children.push(new D.Paragraph({
     children:[run("目　　录",{size:44,bold:true})],
     alignment:D.AlignmentType.CENTER, pageBreakBefore:true, spacing:{after:400},
   }));
-  const tocTab = [{type:D.TabStopType.RIGHT, position:D.TabStopPosition.MAX, leader:D.LeaderType.DOT}];
-  const WNS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
-  children.push(D.ImportedXmlComponent.fromXmlString(
-    '<w:p '+WNS+'><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>'
-    +'<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
-    +'<w:r><w:instrText xml:space="preserve"> TOC \\o "1-2" \\h \\z \\u </w:instrText></w:r>'
-    +'<w:r><w:fldChar w:fldCharType="separate"/></w:r></w:p>'));
-  payload.chapters.forEach((c,ci)=>{
-    children.push(new D.Paragraph({
-      tabStops:tocTab, spacing:{before:100, after:40, line:300, lineRule:D.LineRuleType.AUTO},
-      children:[ ...textRuns("第"+c.cn+"章　"+c.name,{size:24,bold:true}), run("\t"),
-        new D.SimpleField("PAGEREF _tc"+ci+" \\h") ],
-    }));
-    c.sections.forEach((s,si)=>{
-      children.push(new D.Paragraph({
-        tabStops:tocTab, indent:{left:420}, spacing:{after:40, line:300, lineRule:D.LineRuleType.AUTO},
-        children:[ ...textRuns((c.num||ci+1)+"."+(s.num||si+1)+"　"+(s.title||""),{size:24}), run("\t"),
-          new D.SimpleField("PAGEREF _tc"+ci+"_"+si+" \\h") ],
-      }));
-    });
-  });
-  children.push(D.ImportedXmlComponent.fromXmlString(
-    '<w:p '+WNS+'><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>'
-    +'<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'));
+  // Use the standard TOC content control so Word/WPS expose their native
+  // update-table command. The renderer supplies linked titles and page caches.
+  children.push(new D.TableOfContents('目录',{hyperlink:true,headingStyleRange:'1-2'}));
 
   /* ---------- 正文 ---------- */
   payload.chapters.forEach((c,ci)=>{
     children.push(new D.Paragraph({
-      heading: D.HeadingLevel.HEADING_1,
-      children:[ new D.Bookmark({id:"_tc"+ci, children:textRuns("第"+c.cn+"章　"+c.name,{size:44,bold:true})}) ],
+      heading: D.HeadingLevel.HEADING_1,keepNext:true,
+      children:bookmarkedRuns("_tc"+ci,textRuns("第"+c.cn+"章　"+c.name,{size:44,bold:true})),
       alignment:D.AlignmentType.CENTER, pageBreakBefore:true,
       spacing: Object.assign({after:360}, LINE13),
     }));
     c.sections.forEach((s,si)=>{
       children.push(new D.Paragraph({
-        heading: D.HeadingLevel.HEADING_2,
-        children:[ new D.Bookmark({id:"_tc"+ci+"_"+si, children:textRuns((c.num||ci+1)+"."+(s.num||si+1)+"　"+s.title,{size:28,bold:true})}) ],
+        heading: D.HeadingLevel.HEADING_2,keepNext:true,
+        children:bookmarkedRuns("_tc"+ci+"_"+si,textRuns((c.num||ci+1)+"."+(s.num||si+1)+"　"+s.title,{size:28,bold:true})),
         spacing: Object.assign({before:280, after:160}, LINE13),
       }));
-      outputPolicy.repairBlocks(s.blocks).forEach(b=> blockToElems(b).forEach(e=>children.push(e)));
+      const blocks=outputPolicy.repairBlocks(s.blocks);
+      blocks.forEach((b,index)=>blockToElems(b,blocks[index+1]).forEach(e=>children.push(e)));
+      // Zero-width body-level bookmarks add no paragraph/space/page. WPS uses
+      // this boundary to measure the real last page of this section, including
+      // tables. Existing _tc bookmarks remain intact for the TOC.
+      const endId=reportBookmarkId++;
+      children.push(new D.BookmarkStart('_rp_end_'+ci+'_'+si,endId));
+      children.push(new D.BookmarkEnd(endId));
     });
   });
 
   /* ---------- 附表 ---------- */
   if(payload.includeAppendices===true && payload.appendix){
     children.push(new D.Paragraph({
-      heading: D.HeadingLevel.HEADING_1,
+      heading: D.HeadingLevel.HEADING_1,keepNext:true,
       children:[run("附表　财务测算明细（单位：万元）",{size:44,bold:true})],
       alignment:D.AlignmentType.CENTER, pageBreakBefore:true, spacing:{after:300},
     }));
@@ -222,13 +256,13 @@
       children.push(new D.Paragraph({children:textRuns(payload.appendix.summaryLine,{size:24}), alignment:D.AlignmentType.CENTER, spacing:Object.assign({after:200},LINE13)}));
     if(payload.appendix.mainRows) children.push(makeTable(payload.appendix.mainRows));
     if(payload.appendix.sensRows){
-      children.push(new D.Paragraph({children:[run("附表二　单因素敏感性分析",{size:24,bold:true})], spacing:{before:300, after:120}}));
+      children.push(new D.Paragraph({children:[run("附表二　单因素敏感性分析",{size:24,bold:true})], keepNext:true,spacing:{before:300, after:120}}));
       children.push(makeTable(payload.appendix.sensRows));
     }
   }
   if(payload.includeAppendices===true && payload.tableAppendix&&payload.tableAppendix.length){
     children.push(new D.Paragraph({
-      heading:D.HeadingLevel.HEADING_1,
+      heading:D.HeadingLevel.HEADING_1,keepNext:true,
       children:[run("出租类标准财务附表",{size:44,bold:true})],
       alignment:D.AlignmentType.CENTER,pageBreakBefore:true,spacing:{after:260},
     }));
@@ -247,7 +281,7 @@
   // ===== 溯源附录：逐节生成依据与置信度（可追溯审计） =====
   if(payload.includeAppendices===true && payload.provenance && payload.provenance.rows && payload.provenance.rows.length > 1){
     children.push(new D.Paragraph({ children:[run("附：内容溯源与依据说明",{size:28,bold:true})],
-      heading:D.HeadingLevel.HEADING_1, alignment:D.AlignmentType.CENTER,
+      heading:D.HeadingLevel.HEADING_1,keepNext:true, alignment:D.AlignmentType.CENTER,
       spacing:{before:400, after:200}, pageBreakBefore:true }));
     children.push(new D.Paragraph({ children:[run(payload.provenance.note,{size:20,color:"666666"})],
       spacing:{after:200} }));
@@ -256,7 +290,7 @@
 
   if(payload.includeAppendices===true && payload.images && payload.images.length){
     children.push(new D.Paragraph({ children:[run("附　图",{size:28,bold:true})],
-      heading:D.HeadingLevel.HEADING_1, alignment:D.AlignmentType.CENTER,
+      heading:D.HeadingLevel.HEADING_1,keepNext:true, alignment:D.AlignmentType.CENTER,
       spacing:{before:400, after:200}, pageBreakBefore:true }));
     payload.images.forEach(im=>{
       children.push(new D.Paragraph({children:[run(im.title,{size:24,bold:true})], spacing:{before:240, after:120}}));
@@ -275,21 +309,33 @@
 
   children.push(new D.Paragraph({children:[run(signNote,{size:21,color:"888888"})], spacing:{before:600}}));
 
+  // Word/WPS joins directly adjacent tables into one logical table. Preserve
+  // each source table with a normal empty paragraph only at those boundaries;
+  // existing prose/captions and all table formatting stay untouched.
+  const separatedChildren=[];
+  children.forEach(child=>{
+    if(child instanceof D.Table && separatedChildren[separatedChildren.length-1] instanceof D.Table)
+      separatedChildren.push(new D.Paragraph({}));
+    separatedChildren.push(child);
+  });
+
   /* ---------- 文档：页眉页脚+标题样式+自动更新域 ---------- */
   return new D.Document({
+    customProperties:[
+      {name:'ReportTemplateVersion',value:'report-docx-20261013-cover-metadata-v7'},
+      {name:'ReportContentRulesVersion',value:String(outputPolicy.contentVersion||'unknown')},
+    ],
     features:{ updateFields:true },
+    numbering:{config:reportListNumbering},
     styles:{
       default:{ document:{ run:{ font:FONT, size:24, color:"000000" },paragraph:{spacing:Object.assign({before:0,after:0},LINE13)} },
-        heading1:{run:{color:"000000"}},heading2:{run:{color:"000000"}},heading3:{run:{color:"000000"}},
-        heading4:{run:{color:"000000"}},heading5:{run:{color:"000000"}},heading6:{run:{color:"000000"}},
+        heading1:{run:{size:44,bold:true,font:FONT,color:"000000"},paragraph:{keepNext:true,outlineLevel:0,alignment:D.AlignmentType.CENTER,spacing:{before:0,after:360}}},
+        heading2:{run:{size:28,bold:true,font:FONT,color:"000000"},paragraph:{keepNext:true,outlineLevel:1,spacing:{before:280,after:160}}},heading3:{run:{color:"000000"},paragraph:{keepNext:true,outlineLevel:2}},
+        heading4:{run:{color:"000000"},paragraph:{keepNext:true,outlineLevel:3}},heading5:{run:{color:"000000"},paragraph:{keepNext:true,outlineLevel:4}},heading6:{run:{color:"000000"},paragraph:{keepNext:true,outlineLevel:5}},
         hyperlink:{run:{color:"000000"}} },
       paragraphStyles:[
-        { id:"Heading1", name:"Heading 1", basedOn:"Normal", next:"Normal", quickFormat:true,
-          run:{ size:44, bold:true, font:FONT, color:"000000" },
-          paragraph:{ alignment:D.AlignmentType.CENTER, spacing:{before:0, after:360} } },
-        { id:"Heading2", name:"Heading 2", basedOn:"Normal", next:"Normal", quickFormat:true,
-          run:{ size:28, bold:true, font:FONT, color:"000000" },
-          paragraph:{ spacing:{before:280, after:160} } },
+        {id:'TOC1',name:'toc 1',basedOn:'Normal',next:'Normal',run:{size:24,bold:true,font:FONT,color:'000000'},paragraph:{tabStops:[{type:D.TabStopType.RIGHT,position:TEXT_WIDTH,leader:D.LeaderType.DOT}],spacing:{before:100,after:40,line:300,lineRule:D.LineRuleType.AUTO}}},
+        {id:'TOC2',name:'toc 2',basedOn:'Normal',next:'Normal',run:{size:24,font:FONT,color:'000000'},paragraph:{tabStops:[{type:D.TabStopType.RIGHT,position:TEXT_WIDTH,leader:D.LeaderType.DOT}],indent:{left:420},spacing:{after:40,line:300,lineRule:D.LineRuleType.AUTO}}},
       ],
     },
     sections:[{
@@ -305,7 +351,7 @@
           new D.TextRun({children:[D.PageNumber.CURRENT], size:18, color:"000000", font:FONT}),
           run(" —",{size:18,color:"666666"}) ],
       })]})},
-      children: children,
+      children: separatedChildren,
     }],
   });
 });

@@ -32,7 +32,7 @@ import { analyzeTemplateBuffer } from "./ppt-template-analyzer.js";
 import { ensureTemplatePreviews, resolvePreviewFile, resolveStoredTemplate } from "./ppt-template-preview.js";
 import { createLimiter, generatePptImage, imageProviderStatus } from "./ppt-image-generation.js";
 import { providerStatus as llmProviderStatus, probeProviderNetwork } from "../functions/api/_llm-providers.js";
-import { startAgentWorker } from "./agent-worker.js";
+import { startAgentWorker,agentWorkerConcurrency } from "./agent-worker.js";
 import { createRagObjectStore } from "./rag-object-store.js";
 import { createRuntimeMetrics } from "./runtime-metrics.js";
 import { publicStaticPath } from './static-policy.js';
@@ -148,20 +148,25 @@ async function selfCheck() {
 const app = new Hono();
 // Direct calls and the durable agent worker share this process budget.
 // These conservative numbers are not a 300-user capacity certification.
-const directGenerationAdmission=createWorkAdmission({concurrency:2,maxQueued:8,waitMs:10000});
+// One authoritative process-wide budget for direct generation and durable jobs.
+// Default matches the four frontend lanes; explicitly configurable up to six.
+const generationConcurrency=agentWorkerConcurrency(process.env.AGENT_WORKER_CONCURRENCY);
+const directGenerationAdmission=createWorkAdmission({concurrency:generationConcurrency,maxQueued:8,waitMs:10000});
 // Admit before reading JSON/base64: waiting OCR requests must not hold decoded
 // images. On Linux at most two exports plus one OCR run on the 4-core host.
 const documentAdmission=createWorkAdmission({concurrency:process.platform==='linux'?2:1,maxQueued:8,waitMs:30000});
 // The shared OCR worker is not reentrant. Keep its own single execution slot.
 const ocrAdmission=createWorkAdmission({concurrency:1,maxQueued:3,waitMs:15000});
-for(const [route,gate] of [['/api/generate',directGenerationAdmission],['/api/report-pagination',documentAdmission],['/api/local-ocr',ocrAdmission],['/api/ppt-export',documentAdmission]]){
+for(const [route,gate] of [['/api/generate',directGenerationAdmission],['/api/reportimportrequest',directGenerationAdmission],['/api/report-pagination',documentAdmission],['/api/local-ocr',ocrAdmission],['/api/ppt-export',documentAdmission]]){
  app.use(route,async(c,next)=>{
   if(c.req.method!=='POST')return next();
   if(!await verifyAuth(c.req.raw,ENV))return c.json({ok:false,error:'请先登录'},401);
-  try{return await admitResponse(gate,async()=>{await next();return c.res;},{signal:c.req.raw.signal});}
+  let admitted=false;
+  try{return await admitResponse(gate,async()=>{admitted=true;await next();return c.res;},{signal:c.req.raw.signal});}
   catch(error){
    if(!(error instanceof WorkAdmissionError))throw error;
-   c.header('Retry-After','5');return c.json({ok:false,error:error.message,retryable:error.status!==499},error.status);
+   const notDispatched=route==='/api/reportimportrequest'&&!admitted;
+   c.header('Retry-After','5');return c.json({ok:false,error:error.message,retryable:error.status!==499,...(notDispatched?{code:'ADMISSION_NOT_DISPATCHED',durable_import_request_protocol:1,no_dispatch:true,confirmedNoCharge:true,retry_allowed:false,retryable:false}:{})},error.status);
   }
  });
 }
@@ -357,9 +362,9 @@ httpServer.on("error", (err) => {
 });
 // Register the error handler before any asynchronous worker initialization.
 await new Promise(resolve=>{if(httpServer.listening)resolve();else httpServer.once('listening',resolve);});
-const agentWorker=startAgentWorker(ENV,{pollMs:process.env.AGENT_WORKER_POLL_MS,leaseMs:process.env.AGENT_WORKER_LEASE_MS,admission:directGenerationAdmission});
+const agentWorker=startAgentWorker(ENV,{concurrency:generationConcurrency,pollMs:process.env.AGENT_WORKER_POLL_MS,leaseMs:process.env.AGENT_WORKER_LEASE_MS,admission:directGenerationAdmission});
 const investmentWorker=await (await import('./investment-worker.js')).startInvestmentWorker(ENV);
 console.log('投资持续检查Worker已启动（仅扫描负责人启用的项目）');
-console.log("Agent后台Worker已启动："+agentWorker.workerId);
+console.log("Agent后台Worker已启动："+agentWorker.workerId+'；生成并发 '+generationConcurrency+'（与直接生成共享）');
 const operationsMonitor=await (await import('./operations-monitor.js')).startOperationsMonitor(ENV);
 console.log('自动运行监控：'+(operationsMonitor.enabled?'已启动':'已停用'));
