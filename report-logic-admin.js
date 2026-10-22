@@ -6,7 +6,7 @@
   const TYPE_LABELS={rent:"出租类",gaibao:"改造项目（双场景）"};
   const SCENARIO_LABELS={housing_conversion:"非居改保、居改居等（住房改造）",commercial_renovation:"商业改造（自持改造）"};
   const DEFAULT_LOGIC_VERSIONS={rent:"1.0",housing_conversion:"2.0",commercial_renovation:"1.0"};
-  let activeSet=null, activeType="rent", activeScenario="housing_conversion", editing=false;
+  let activeSet=null, activeType="rent", activeScenario="housing_conversion", editing=false, exportHandle=null;
   async function api(body){
     const response=await fetch("/api/reportlogic",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify(body)}),result=await response.json();
     if(!response.ok||!result.ok)throw new Error(result.error||"生成逻辑库请求失败");return result;
@@ -16,6 +16,13 @@
     if(!response.ok||!result.ok)throw new Error(result.error||"生成逻辑读取失败");if(result.set&&global.ReportWritingPolicy)result.set.data=global.ReportWritingPolicy.normalize(result.set.data);return result.set;
   }
   const clone=value=>JSON.parse(JSON.stringify(value));
+  function mountExportPanel(){
+    if(!global.ReportLogicExportUI)return;
+    const body=document.getElementById("rlaBody");if(!body)return;
+    const panel=document.createElement("div");panel.id="rlaExportPanel";body.before(panel);
+    const scope=()=>activeType==="gaibao"?activeScenario:activeType;
+    exportHandle=global.ReportLogicExportUI.mount(panel,{getCurrentScope:scope,isEditing:()=>editing,getDraft:()=>{if(!editing||!activeSet)return null;readEditors();return {set:clone(activeSet),scope:scope()};}});
+  }
   function numericPath(rule){
     const text=[rule?.subsection,rule?.section,rule?.pointTitle].find(value=>/^\s*\d+(?:\.\d+)*/.test(value||""))||"";
     const match=String(text).match(/^\s*(\d+(?:\.\d+)*)/);return match?match[1].split(".").map(Number):[];
@@ -86,9 +93,10 @@
   }
   function beginEdit(){const proceed=()=>{editing=true;activeSet=clone(activeSet);renderReportLogicTab();};if(typeof unlockStdEdit==="function")unlockStdEdit(proceed);else proceed();}
   function renderReportLogicTab(){
+    if(exportHandle){exportHandle.destroy();exportHandle=null;}
     const box=document.getElementById("editBox"),subnav=typeof arSubnavHtml==="function"?arSubnavHtml():"";
     box.innerHTML='<style>.rla-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.rla-head .sub{max-width:850px}.rla-type-tabs{display:flex;gap:8px;margin:14px 0 4px}.rla-type-tabs button{border:1px solid var(--line);background:#fff;color:var(--bp-deep);padding:8px 18px;border-radius:18px;cursor:pointer}.rla-type-tabs button.active{background:var(--bp);color:#fff;border-color:var(--bp)}.rla-type-tabs button:disabled{cursor:not-allowed;opacity:.72}.rla-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.rla-summary>div{border:1px solid var(--line);border-radius:10px;background:#fff;padding:15px 18px;display:flex;flex-direction:column}.rla-summary b{font-size:22px;color:var(--bp-deep)}.rla-summary span,.rla-summary small{font-size:12px;color:var(--soft);margin-top:4px}.rla-chapter,.rla-editor{border:1px solid var(--line);border-radius:10px;background:#fff;margin:12px 0;overflow:hidden}.rla-chapter>summary,.rla-editor>summary{padding:15px 18px;display:flex;justify-content:space-between;cursor:pointer;background:#f7fafc}.rla-rule{padding:15px 18px;border-top:1px solid var(--line)}.rla-rule-head{display:flex;justify-content:space-between;gap:20px}.rla-path{font-size:12px;color:var(--soft);margin:5px 0 10px}.rla-source-no{margin-left:10px;color:#98a6b5}.rla-grid{display:grid;grid-template-columns:1.05fr 1.4fr .55fr;gap:18px}.rla-grid label{font-size:11px;color:var(--soft)}.rla-grid p{margin:4px 0;white-space:pre-line;line-height:1.65}.rla-badge{font-size:11px;border:1px solid #bfd7ea;background:#edf6fc;color:#276796;padding:2px 6px;border-radius:9px;margin-right:4px}.rla-editor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:16px 18px}.rla-editor-grid label{font-size:12px;color:var(--soft)}.rla-editor-grid input,.rla-editor-grid textarea{display:block;width:100%;box-sizing:border-box;margin-top:5px}.rla-editor-grid textarea{min-height:78px}.rla-editor-actions,.rla-edit-tools{display:flex;gap:8px;flex-wrap:wrap;padding:0 18px 16px}.rla-auto-order{font-size:12px;color:var(--soft);align-self:center}.rla-edit-tools{padding:14px 0 2px}@media(max-width:900px){.rla-summary,.rla-grid,.rla-editor-grid{grid-template-columns:1fr 1fr}}</style><h1 style="font-size:18px;">AI生成规则、审核规则与逻辑</h1>'+subnav+'<div class="rla-head"><div><h2 style="font-size:15px;margin-top:16px;">可研逐小节生成逻辑</h2><div class="sub">出租类与改造项目分类存储；改造项目再按“非居改保、居改居等（住房改造）/商业改造（自持改造）”分流。生成正文与审核投影共用同一规则ID。</div><div class="rla-type-tabs">'+Object.entries(TYPE_LABELS).map(([type,label])=>'<button type="button" data-rla-type="'+type+'" class="'+(type===activeType?'active':'')+'">'+label+'</button>').join('')+'</div></div>'+(editing?'':'<button class="btn" id="rlaUnlock">🔓 修改生成逻辑</button>')+'</div><div id="rlaBody" class="empty">读取正式逻辑…</div>';
-    bindTabs();document.querySelectorAll("[data-rla-type]").forEach(button=>button.onclick=async()=>{const next=button.dataset.rlaType;if(next===activeType)return;if(editing&&!confirm("当前逻辑尚未发布，确定切换类型并放弃本轮编辑？"))return;editing=false;activeType=next;activeSet=null;await global.renderReportLogicAdminTab();});if(!editing){const unlock=document.getElementById("rlaUnlock");if(unlock)unlock.onclick=beginEdit;}renderSet();
+    bindTabs();document.querySelectorAll("[data-rla-type]").forEach(button=>button.onclick=async()=>{const next=button.dataset.rlaType;if(next===activeType)return;if(editing&&!confirm("当前逻辑尚未发布，确定切换类型并放弃本轮编辑？"))return;editing=false;activeType=next;activeSet=null;await global.renderReportLogicAdminTab();});if(!editing){const unlock=document.getElementById("rlaUnlock");if(unlock)unlock.onclick=beginEdit;}renderSet();mountExportPanel();
   }
   global.renderReportLogicAdminTab=async function(preferredType){const box=document.getElementById("editBox"),list=document.getElementById("listBox");if(TYPE_LABELS[preferredType]){activeType=preferredType;activeSet=null;}if(list)list.style.display="none";box.style.display="block";if(!activeSet){box.innerHTML='<div style="padding:30px 0;color:var(--soft);">加载'+TYPE_LABELS[activeType]+'正式生成逻辑…</div>';try{activeSet=await loadPublished(activeType);}catch(error){box.innerHTML='<div class="msg err">'+escHtml(error.message)+'</div>';return;}}renderReportLogicTab();};
   global.openReportLogicAdmin=global.renderReportLogicAdminTab;

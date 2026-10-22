@@ -72,17 +72,25 @@ async function budgetOk(env,runId){ const g=await env.DB.prepare("SELECT * FROM 
 export async function checkAgentBudget(env,runId){ return budgetOk(env,runId); }
 export async function executeLlmTask(env,job,payload){
   await withAgentJobLease(env,job,async scoped=>{const auth=await reauthorizeAgentJob(scoped,job);if(!auth.ok)throw new Error(auth.error);});
+  let outputLimit=4000;
   if(payload.reportSectionTaskId){
-    const {readReportSection}=await import('./reportexecution.js');
+    const {readReportSection,reportBoundOutputTokens}=await import('./reportexecution.js');
     const task=await readReportSection(env,job.user_id,payload.reportSectionTaskId);
     if(task.status==='invalidated')throw new Error(task.error);
+    // A caller flag must not raise ordinary Agent limits. Only the persisted,
+    // owned report contract bound to this exact run can authorize a larger call.
+    const binding=await env.DB.prepare('SELECT run_id,input_json FROM report_section_tasks WHERE id=? AND user_id=?').bind(payload.reportSectionTaskId,job.user_id).first();
+    if(!binding||binding.run_id!==job.run_id)throw new Error('报告任务与执行轮次不一致，未发送模型请求');
+    const snapshot=parseAgentJson(binding.input_json,{});
+    outputLimit=reportBoundOutputTokens(snapshot);
+    if(snapshot.outputBudget&&Number(payload.maxTokens)!==outputLimit)throw new Error('报告请求输出预算与绑定合同不一致，未发送模型请求');
   }
   const existing=await env.DB.prepare("SELECT state_json FROM agent_checkpoints WHERE run_id=? AND user_id=? ORDER BY step_no DESC,created_at DESC LIMIT 1").bind(job.run_id,job.user_id).first();
   const prior=parseAgentJson(existing&&existing.state_json,{});if(prior.completed&&prior.text)return {text:prior.text,provider:prior.provider||"",model:prior.model||"",resumed:true};
   await upsertRunGovernance(env,job.user_id,job.run_id,{});
   const config=providerOrder(env,payload.provider).map(id=>getProviderConfig(env,id)).find(x=>x?.available);
   if(!config)throw new Error('没有配置可用模型，未发送请求');
-  const messages=[{role:"system",content:String(payload.system||"")},{role:"user",content:String(payload.query||"")}],maxTokens=Math.max(200,Math.min(4000,Number(payload.maxTokens)||1200));
+  const messages=[{role:"system",content:String(payload.system||"")},{role:"user",content:String(payload.query||"")}],maxTokens=Math.max(200,Math.min(outputLimit,Number(payload.maxTokens)||1200));
   const callId='call:'+job.run_id, reservation=await reserveAgentCall(env,{id:callId,runId:job.run_id,userId:job.user_id,provider:config.id,model:config.model,messages,maxTokens});
   const started=Date.now();let result=reservation.result;
   if(!reservation.reused){
@@ -91,7 +99,8 @@ export async function executeLlmTask(env,job,payload){
       const called=await callConfiguredLlm(env,config.id,{messages,max_tokens:maxTokens,temperature:Number(payload.temperature)||0.2,stream:false},agentJobFetch(job));
       const data=await called.response.json(),text=String(data.choices?.[0]?.message?.content||'');
       if(!text)throw new Error('模型未返回正文');
-      result=await settleAgentCall(env,callId,{text,provider:called.provider,model:called.model},data.usage,Date.now()-started);
+      const finishReason=data.choices?.[0]?.finish_reason;
+      result=await settleAgentCall(env,callId,{text,provider:called.provider,model:called.model,...(payload.reportSectionTaskId?{finishReason:finishReason||null,truncated:finishReason==='length'}:{})},data.usage,Date.now()-started);
     }catch(_){await markAgentCallUnknown(env,callId);throw new Error('外部执行结果不确定：请求失败或已中止，可能产生费用；调用台账已保留，禁止自动重发');}
   }
   const {text,provider,model}=result;

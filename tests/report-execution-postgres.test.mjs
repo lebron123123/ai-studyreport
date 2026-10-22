@@ -36,7 +36,7 @@ test('真实数据库：报告任务、受控评测、发布消费与回滚',{sk
       const tasks=await Promise.all([startReportSection(env,user,input),startReportSection(env,user,input)]);assert.equal(tasks[0].id,tasks[1].id);first=tasks[0];
       const payload=JSON.parse((await DB.prepare('SELECT payload_json FROM agent_jobs WHERE run_id=?').bind(first.runId).first()).payload_json);assert.equal(payload.query,input.user);
       assert.equal(await finish(first.runId,'依据已经核对'),1);
-      const DB2=createD1Shim(target);try{const read=await readReportSection({...env,DB:DB2},user,first.id);assert.equal(read.text,'依据已经核对');assert.equal(read.graph[3].status,'ready');assert.equal((await startReportSection({...env,DB:DB2},user,input)).reused,true);}finally{await DB2._close();}
+      const DB2=createD1Shim(target);try{const read=await readReportSection({...env,DB:DB2},user,first.id);assert.equal(read.text,'依据已经核对');assert.equal(read.graph[3].status,'quality_unverified');assert.equal(read.quality.factsVerified,false);assert.equal((await startReportSection({...env,DB:DB2},user,input)).reused,true);}finally{await DB2._close();}
     });
     let candidate;
     await t.test('评测只消费绑定版本的后台结果，未完成不能通过，留出不能用来源项目',async()=>{

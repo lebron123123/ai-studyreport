@@ -61,6 +61,7 @@ function renderTOC(){
   if(appMode===null){
     const HM = [
       {id:"homeAiReport",ic:"✨", label:"AI可研生成"},
+      {id:"homeReportImport",ic:"▤", label:"已有报告完善"},
       {id:"homeCalc",  ic:"📊", label:"财务测算"},
       {id:"homeReview",ic:"🔍", label:"可研智能审查"},
       {id:"homeReport",ic:"📄", label:"可研生成"},
@@ -70,7 +71,7 @@ function renderTOC(){
       {id:"homeProjectMap",ic:"🗺", label:"项目地图"},
     ];
     const groups=[
-      {label:"可研与测算",ids:["homeAiReport","homeCalc","homeReport","homeReview"]},
+      {label:"可研与测算",ids:["homeAiReport","homeReportImport","homeCalc","homeReport","homeReview"]},
       {label:"AI办公",ids:["homeOffice"]},
       {label:"知识与数据",ids:["homePersonalKnowledge","homeAnalysis","homeProjectMap"]},
     ];
@@ -81,6 +82,7 @@ function renderTOC(){
     items += '<section class="toc-group"><b class="toc-group-label">当前工作区</b><div class="toc-item" style="cursor:pointer;" onclick="goHome()"><span class="num">⌂</span><span>返回首页</span><i class="toc-arrow">›</i></div>';
   }
   if(appMode!==null){
+    items += '<div class="toc-item '+(appMode==="reportimport"?'active':'')+'" data-report-import style="cursor:pointer;"><span class="num">▤</span><span>已有报告完善</span><i class="toc-arrow">›</i></div>';
     items += '<div class="toc-item" data-home="homeProjectMap" style="cursor:pointer;"><span class="num">🗺</span><span>项目地图</span><i class="toc-arrow">›</i></div></section>';
   }
   if(appMode==="calc"){
@@ -112,12 +114,14 @@ function renderTOC(){
   el.querySelectorAll("[data-gov]").forEach(it=>{ it.onclick = ()=>{ rvStep = +it.dataset.gov; renderTOC(); renderSheet(); }; });
   el.querySelectorAll("[data-home]").forEach(it=>{
     it.onclick = ()=>{
+      if(it.dataset.home==="homeReportImport"){ appMode="reportimport"; renderTOC(); renderSheet(); return; }
       if(it.dataset.home==="homeInvestmentOS"){ openProjectsPanel(); return; }
       if(it.dataset.home==="homeProjectMap"){ openProjectCityMap(); return; }
       const card = document.getElementById(it.dataset.home); if(card) card.click();
     };
   });
   el.querySelectorAll("[data-project-manager]").forEach(it=>{it.onclick=()=>openProjectsPanel();});
+  el.querySelectorAll("[data-report-import]").forEach(it=>{it.onclick=()=>{appMode="reportimport";renderTOC();renderSheet();};});
 }
 function goHome(){ appMode=null; if(window.UiRouteState){try{sessionStorage.removeItem("studyreport:last-view:v1");history.replaceState(null,"",location.pathname+location.search);}catch(e){}} renderTOC(); renderSheet(); }
 
@@ -125,12 +129,14 @@ function renderSheet(){
   if(window.UiRouteState) window.UiRouteState.write();
   const sheet = document.getElementById("sheet");
   sheet.classList.toggle("personal-sheet",appMode==="personalKnowledge");
+  sheet.classList.toggle("report-import-sheet",appMode==="reportimport");
   sheet.classList.toggle("ppt-sheet",appMode==="office" && typeof officeView!=="undefined" && officeView==="ppt");
   if(window.HousingParticles) window.HousingParticles.destroy();
   if(typeof projectCanEdit==='function'&&!projectCanEdit()&&(appMode==='aireport'||appMode==='review'||appMode==='calc'||appMode===null&&currentStep>0)){
     renderProjectReadOnly(sheet);return;
   }
   if(appMode===null){ sheet.innerHTML = stepHome(); bindEvents(); bindCalcEvents(); mountAnchorNav(); if(window.HousingParticles) window.HousingParticles.mount("housingHero"); return; }
+  if(appMode==="reportimport"){ sheet.innerHTML='<div id="reportImportRoot"></div>'; mountAnchorNav(); if(window.ReportImportUI)window.ReportImportUI.mount(document.getElementById("reportImportRoot"));else sheet.textContent='原稿导入组件未加载，请刷新后重试。'; return; }
   if(appMode==="calc"){ sheet.innerHTML = renderCalcModule(); bindEvents(); bindCalcEvents(); mountAnchorNav(); return; }
   if(appMode==="review"){ sheet.innerHTML = renderReviewModule(); bindEvents(); bindReviewEvents(); mountAnchorNav(); return; }
   if(appMode==="office"){ sheet.innerHTML = stepOffice(); bindEvents(); bindOfficeEvents(); return; }
@@ -222,6 +228,30 @@ function escapeHtml(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").repla
 
 
 // 把测算结果整理成给AI的数据摘要 + 现成表格
+async function appResolveCandidate(cn,si,action){
+  const info=findChapterSection(cn,si);if(!info)return;
+  try{
+    await airGuardReportMutation(airCaptureReportMutation(info));
+    if(info.section.locked)throw new Error('本节已锁定，未修改正文或候选稿');
+    if(action==='accept'||action==='adopt'){
+      reportReviewCandidate(info.chapter,info.section);
+      const quality=ProjectWorkflow.refreshCandidateQuality(info.section),revision=info.section.pendingRevision?.logicRevision;
+      if(quality?.status==='unverified'&&!confirm('候选仍有待核实项：'+(quality.issues||[]).map(x=>x.message).join('；')+'。请核对原稿与候选的数字和表格；机械检查不是事实认证。是否继续接受？'))return;
+      if(!ProjectWorkflow.acceptCandidate(info.section))throw new Error('候选未通过成稿检查或已变化；原稿和候选均保留，请检查后返修');
+      ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:action==='adopt'?'接受AI修改并采纳逻辑':'接受AI修改'});saveDraft();renderSheet();
+      if(action==='adopt'){try{const result=await adoptReportLogicRevision(info.chapter,info.section,revision);alert(result.message);}catch(error){alert('正文已接受，但逻辑采纳失败：'+error.message);}}
+      return;
+    }
+    if(action==='reject')ProjectWorkflow.rejectCandidate(info.section);
+    else if(action==='undo'){if(!ProjectWorkflow.undoSection(info.section))return;ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:'撤销章节修改'});}
+    saveDraft();renderSheet();
+  }catch(error){alert(error.message);renderSheet();}
+}
+function appSaveManualSection(info,html,before){
+  // Manual drafts remain savable even when over budget; recompute quality instead of inheriting a passed flag.
+  if(before!==undefined&&before!==html){info.section.undoStack=Array.isArray(info.section.undoStack)?info.section.undoStack:[];info.section.undoStack.push({at:new Date().toISOString(),content:info.section.content||'',editedHtml:before,completionContract:ProjectWorkflow.clone(info.section.completionContract||null),completionQuality:ProjectWorkflow.clone(info.section.completionQuality||null)});}
+  info.section.editedHtml=html;ProjectWorkflow.refreshSectionQuality(info.section,before);ProjectWorkflow.clearSectionStale(info.section);ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:'人工编辑章节'});saveDraft();
+}
 function bindEvents(){
   if(window.ReportEvidenceGraph?.bindDetails)ReportEvidenceGraph.bindDetails(document.getElementById('sheet'));
   const s = id=>document.getElementById(id);
@@ -300,14 +330,12 @@ function bindEvents(){
   if(document.querySelector(".cnum")) animateCountUps();
   // 复核页：编辑实时写回数据层（修复"返回再进来编辑丢失"）
   document.querySelectorAll('#sheet .section-block[data-cn] .body[contenteditable]').forEach(el=>{
-    el.addEventListener("focus",()=>{ el.__wfBefore=el.innerHTML; });
-    el.addEventListener("blur", ()=>{
+    el.addEventListener("focus",()=>{el.__wfBefore=el.innerHTML;try{const blk=el.closest('.section-block');el.__wfContext=airCaptureReportMutation(findChapterSection(blk.dataset.cn,+blk.dataset.si));}catch(error){el.__wfContext=null;}});
+    el.addEventListener("blur", async()=>{
       const blk = el.closest(".section-block");
-      const sec = findSection(blk.dataset.cn, +blk.dataset.si);
-      if(sec){
-        if(el.__wfBefore!==undefined&&el.__wfBefore!==el.innerHTML){ sec.undoStack=Array.isArray(sec.undoStack)?sec.undoStack:[]; sec.undoStack.push({at:new Date().toISOString(),content:sec.content||"",editedHtml:el.__wfBefore}); }
-        sec.editedHtml=el.innerHTML;if(window.ProjectWorkflow){window.ProjectWorkflow.clearSectionStale(sec);window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"人工编辑章节"});}saveDraft();
-      }
+      const info=findChapterSection(blk.dataset.cn,+blk.dataset.si),html=el.innerHTML;
+      if(!info||html===el.__wfBefore)return;
+      try{if(!el.__wfContext)throw new Error('当前正文不可编辑，修改保留在页面，未保存');await airGuardReportMutation(el.__wfContext);if(info.section.locked)throw new Error('本节已锁定');appSaveManualSection(info,html,el.__wfBefore);}catch(error){alert(error.message);}
     });
   });
   // 复核页：单节AI重写
@@ -321,6 +349,7 @@ function bindEvents(){
   });
   document.querySelectorAll(".rev-go").forEach(btn=>{
     const doRevise = async ()=>{
+      if(btn.disabled)return;
       const blk = btn.closest(".section-block");
       const inp = blk.querySelector(".rev-input");
       const instruction = inp.value.trim();
@@ -331,10 +360,11 @@ function bindEvents(){
       btn.disabled = true; btn.textContent = "修改中…";
       blk.querySelectorAll(".regen-btn").forEach(b=>b.disabled=true);
       try{
+        const context=airCaptureReportMutation(info);if(info.section.locked||info.section.pendingRevision)throw new Error('请先处理已有候选或解除本节锁定');await airGuardReportMutation(context);
         const text = await reviseSection(info.chapter, info.section, instruction, (partial)=>{
           bodyEl.textContent = partial;
         });
-        window.ProjectWorkflow.setCandidate(info.section,text,instruction,{logicRevision:reportLogicRevision(info.chapter,info.section,instruction)});
+        await airGuardReportMutation(context);airStoreNewCandidate(info,text,instruction,{logicRevision:reportLogicRevision(info.chapter,info.section,instruction)});
         inp.value = "";
         blk.querySelector(".revise-bar").style.display = "none";
         saveDraft(); renderSheet();
@@ -355,6 +385,7 @@ function bindEvents(){
   document.querySelectorAll(".regen-btn:not(.rev-toggle)").forEach(btn=>{
     btn.onclick = async (e)=>{
       e.preventDefault();
+      if(btn.disabled)return;
       const cn = btn.dataset.cn, si = +btn.dataset.si;
       const info = findChapterSection(cn, si);
       if(!info) return;
@@ -362,8 +393,9 @@ function bindEvents(){
       const bodyEl = blk.querySelector(".body");
       btn.disabled = true; btn.textContent = "重写中…"; blk.classList.add("gen");
       try{
+        const context=airCaptureReportMutation(info);if(info.section.locked||info.section.pendingRevision)throw new Error('请先处理已有候选或解除本节锁定');await airGuardReportMutation(context);
         const text = await generateSection(info.chapter, info.section);
-        window.ProjectWorkflow.setCandidate(info.section,text,"重写本节",{logicRevision:reportLogicRevision(info.chapter,info.section,"根据现有逻辑重新生成本节")});
+        await airGuardReportMutation(context);airStoreNewCandidate(info,text,"重写本节",{logicRevision:reportLogicRevision(info.chapter,info.section,"根据现有逻辑重新生成本节")});
         saveDraft(); renderSheet();
       }catch(err){ bodyEl.insertAdjacentHTML("afterbegin", '<p style="color:var(--seal-red);">重写失败：'+err.message+'</p>'); }
       blk.classList.remove("gen");
@@ -371,10 +403,7 @@ function bindEvents(){
     };
   });
   document.querySelectorAll(".wf-lock").forEach(btn=>{btn.onclick=()=>{const sec=findSection(btn.dataset.cn,+btn.dataset.si);if(!sec)return;sec.locked=!sec.locked;if(sec.syncStatus==="stale"&&sec.locked)sec.syncStatus="locked-stale";else if(sec.syncStatus==="locked-stale"&&!sec.locked)sec.syncStatus="stale";saveDraft();renderSheet();};});
-  document.querySelectorAll(".wf-accept").forEach(btn=>{btn.onclick=()=>{const sec=findSection(btn.dataset.cn,+btn.dataset.si);if(!sec)return;window.ProjectWorkflow.acceptCandidate(sec);window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"接受AI修改"});saveDraft();renderSheet();};});
-  document.querySelectorAll(".wf-adopt").forEach(btn=>{btn.onclick=async()=>{const info=findChapterSection(btn.dataset.cn,+btn.dataset.si);if(!info)return;const revision=info.section.pendingRevision?.logicRevision;window.ProjectWorkflow.acceptCandidate(info.section);window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"接受AI修改并采纳逻辑"});saveDraft();renderSheet();try{const result=await adoptReportLogicRevision(info.chapter,info.section,revision);alert(result.message);}catch(error){alert("正文已接受，但逻辑采纳失败："+error.message);}};});
-  document.querySelectorAll(".wf-reject").forEach(btn=>{btn.onclick=()=>{const sec=findSection(btn.dataset.cn,+btn.dataset.si);window.ProjectWorkflow.rejectCandidate(sec);saveDraft();renderSheet();};});
-  document.querySelectorAll(".wf-undo").forEach(btn=>{btn.onclick=()=>{const sec=findSection(btn.dataset.cn,+btn.dataset.si);if(window.ProjectWorkflow.undoSection(sec)){window.ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"撤销章节修改"});saveDraft();renderSheet();}};});
+  [['.wf-accept','accept'],['.wf-adopt','adopt'],['.wf-reject','reject'],['.wf-undo','undo']].forEach(([selector,action])=>document.querySelectorAll(selector).forEach(btn=>{btn.onclick=async()=>{if(btn.disabled)return;btn.disabled=true;try{await appResolveCandidate(btn.dataset.cn,+btn.dataset.si,action);}finally{btn.disabled=false;}};}));
   if(s("wfUpdateStale"))s("wfUpdateStale").onclick=updateStaleSections;
   if(s("wfRestoreVersion"))s("wfRestoreVersion").onclick=()=>{const id=s("wfReportVersion").value;if(!confirm("恢复所选报告版本及其绑定的测算快照？当前内容会先自动保存为一个可恢复版本。"))return;ProjectWorkflow.createReportVersion(projectWorkflow,chapters,{reason:"恢复前自动保存"});if(restoreReportVersion(id)){saveDraft();renderSheet();}};
   // 生成页：失败重试
@@ -387,11 +416,12 @@ function bindEvents(){
       secEl.classList.add("gen");
       btn.disabled = true; btn.textContent = "重试中…";
       try{
+        const context=airCaptureReportMutation(info);if(info.section.locked||info.section.pendingRevision)throw new Error('请先处理已有候选或解除本节锁定');await airGuardReportMutation(context);
         secEl.querySelector(".body").innerHTML = "";
         const text = await generateSection(info.chapter, info.section, (partial)=>{
           secEl.querySelector(".body").textContent = partial;
         });
-        info.section.content = text;
+        await airGuardReportMutation(context);reportCheckGeneratedDraft(info.chapter,info.section,text);info.section.content=text;
         secEl.classList.remove("pending"); secEl.classList.remove("gen");
         secEl.querySelector(".body").innerHTML = renderContent(text);
         secEl.querySelector("h4").insertAdjacentHTML("beforeend", '<span class="done-stamp">已拟</span>');

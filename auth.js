@@ -51,12 +51,23 @@ function showLoginModal(msg){
           password: document.getElementById("auPass").value,
           invite: mode==="register"? document.getElementById("auInvite").value.trim() : undefined })});
       const data = await resp.json();
-      if(data.ok){ setAuth(data.token, data.username); document.getElementById("gate").remove(); startApp(); }
+      if(data.ok){
+        const reopenProjects=!!document.getElementById("projPanel");
+        setAuth(data.token, data.username);
+        const userLabel=document.querySelector("#userBar .ub-user");if(userLabel)userLabel.textContent=data.username;
+        document.getElementById("gate").remove();
+        await startApp({skipProjectPanel:reopenProjects});
+        if(reopenProjects&&getToken())openProjectsPanel();
+      }
       else{ errEl.textContent = data.error||"操作失败"; errEl.style.display="block"; btn.disabled=false; btn.textContent = mode==="register"?"注 册":"登 录"; }
     }catch(e){ errEl.textContent="网络错误，请重试"; errEl.style.display="block"; btn.disabled=false; btn.textContent = mode==="register"?"注 册":"登 录"; }
   };
   document.getElementById("auSubmit").onclick = submit;
   document.getElementById("auPass").addEventListener("keydown", e=>{ if(e.key==="Enter") submit(); });
+}
+function requireLoginAgain(){
+  clearAuth();
+  showLoginModal("登录已过期，请重新登录。当前项目和本机草稿不会删除。");
 }
 
 /* ================= 云端项目库 ================= */
@@ -244,7 +255,7 @@ async function openProjectsPanel(){
   if(window.ProjectManager)return window.ProjectManager.open({
     userId:getUser()||'',
     preserveDraft:authPreserveCurrentDraft,
-    headers:authHeaders,currentId:()=>currentProjectId,genId:genProjectId,openProject,openAiReport:openAiReportProject,newProject,
+    headers:authHeaders,onAuthExpired:requireLoginAgain,currentId:()=>currentProjectId,genId:genProjectId,openProject,openAiReport:openAiReportProject,newProject,
     updateCurrentMeta:(meta,updatedAt)=>{currentProjectUpdatedAt=Number(updatedAt)||currentProjectUpdatedAt;projectWorkflow=window.ProjectWorkflow?ProjectWorkflow.ensureState(projectWorkflow):projectWorkflow;projectWorkflow.management=Object.assign(projectWorkflow.management||{},meta||{});saveDraft();}
   });
   const old = document.getElementById("projPanel"); if(old) old.remove();
@@ -280,9 +291,10 @@ async function openProjectsPanel(){
 async function openProject(id,options={}){
   if(window.ResearchUI?.active())return ResearchUI.leaveForProject(id);
   try{
-    if(!(await authPreserveCurrentDraft())){alert('保存未成功，未切换项目；请先重试保存。');return false;}
+    if(!(await authPreserveCurrentDraft())){if(!getToken()){requireLoginAgain();return false;}alert('保存未成功，未切换项目；请先重试保存。');return false;}
     const resp = await fetch("/api/projects?id="+encodeURIComponent(id), {headers:authHeaders()});
     const d = await resp.json();
+    if(resp.status===401){requireLoginAgain();return false;}
     if(!d.ok){ alert(d.error||"打开失败"); return false; }
     if(id!==currentProjectId&&typeof airSwitchProjectSession==="function")airSwitchProjectSession();
     currentProjectId = id;
@@ -309,7 +321,7 @@ async function openAiReportProject(id,entryOptions){
   return true;
 }
 
-async function startApp(){
+async function startApp(options={}){
   if(window.ResearchUI&&await ResearchUI.bootstrap())return;
   if(!currentProjectId) currentProjectId=recalledActiveProjectId();
   if(currentProjectId){currentProjectRole='PENDING';currentProjectReadOnlyData=null;}
@@ -319,7 +331,7 @@ async function startApp(){
   if(currentProjectId){
     try{
       const pr=await fetch("/api/projects?id="+encodeURIComponent(currentProjectId),{headers:authHeaders()});
-      const pd=await pr.json();if(pd.ok&&pd.project&&pd.project.data){applyProjectAccess(pd.project);currentProjectUpdatedAt=Number(pd.project.updated_at)||null;const resumeMode=appMode,resumeOffice=typeof officeView!=="undefined"?officeView:"chat",local=projectCanEdit()?await loadDurableDraft():null,selected=projectCanEdit()&&window.ProjectWorkflow?.selectProjectDraft?ProjectWorkflow.selectProjectDraft(pd.project.data,local,currentProjectId):pd.project.data;restoreDraft(selected,{openHome:true});if(window.UiRouteState){appMode=resumeMode;if(typeof officeView!=="undefined")officeView=resumeOffice;renderTOC();renderSheet();}}
+      const pd=await pr.json();if(pr.status===401){requireLoginAgain();return;}if(pd.ok&&pd.project&&pd.project.data){applyProjectAccess(pd.project);currentProjectUpdatedAt=Number(pd.project.updated_at)||null;const resumeMode=appMode,resumeOffice=typeof officeView!=="undefined"?officeView:"chat",local=projectCanEdit()?await loadDurableDraft():null,selected=projectCanEdit()&&window.ProjectWorkflow?.selectProjectDraft?ProjectWorkflow.selectProjectDraft(pd.project.data,local,currentProjectId):pd.project.data;restoreDraft(selected,{openHome:true});if(window.UiRouteState){appMode=resumeMode;if(typeof officeView!=="undefined")officeView=resumeOffice;renderTOC();renderSheet();}}
       else{currentProjectRole='DENIED';currentProjectReadOnlyData=null;currentProjectUpdatedAt=null;}
     }catch(e){ currentProjectRole='UNAVAILABLE';currentProjectReadOnlyData=null; }
   }
@@ -335,7 +347,7 @@ async function startApp(){
     }
   }
   const projectRoute=window.UiRouteState&&window.UiRouteState.projectRoute&&window.UiRouteState.projectRoute();
-  if(projectRoute)setTimeout(()=>openProjectsPanel(),60);
+  if(projectRoute&&!options.skipProjectPanel)setTimeout(()=>openProjectsPanel(),60);
 }
 function checkLogin(){
   if(getToken()){ startApp(); }

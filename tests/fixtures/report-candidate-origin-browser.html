@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>[系统测试] 候选来源与生成范围隔离验收</title>
+  <style>
+    body{margin:0;background:#f3f7fb;color:#19334b;font:15px/1.65 "Microsoft YaHei",sans-serif}main{max-width:1080px;margin:28px auto;padding:24px;background:white;border:1px solid #cbd9e8;border-radius:12px}h1{font-size:24px;margin:0 0 10px}button{padding:8px 13px;border:1px solid #aac5df;border-radius:6px;background:white;color:#205d92;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.primary,.btn:not(.ghost){background:#2d6fa9;color:white}.fixture-controls,.air-doc-logicbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:18px 0}.air-doc-logicbar{padding:16px;background:#eef5fb;border:1px solid #cbd9e8}.air-doc-logicbar>span{flex:1 0 90%}.fixture-warning{padding:12px;background:#fff7de;border:1px solid #e8c66b}.fixture-counts{display:flex;gap:24px}.fixture-counts b{font-size:24px}.fixture-list{max-height:270px;overflow:auto;padding-left:25px}.fixture-list li{padding:4px 0}.fixture-origin{display:inline-block;min-width:92px;color:#936000}.fixture-origin.current{color:#087c45}textarea{box-sizing:border-box;width:100%;height:150px;font:12px/1.5 monospace}#fixtureStatus{padding:10px;background:#edf8ef;min-height:25px}.air-modal-overlay{position:fixed;inset:0;background:#102b4e66;display:flex;align-items:center;justify-content:center;padding:24px;z-index:10}.air-modal-card{background:white;border-radius:12px;padding:22px;width:min(660px,100%);max-height:85vh;overflow:auto}.air-modal-head,.air-modal-actions{display:flex;justify-content:space-between;gap:10px}.air-modal-head b{font-size:21px}.air-modal-actions{justify-content:flex-end;margin-top:20px}.air-modal-card p{color:#536a7f}.fixture-ready{color:#087c45}
+  </style>
+</head>
+<body>
+<main>
+  <h1>[系统测试] 候选来源与生成范围隔离验收</h1>
+  <p class="fixture-warning">仅加载真实来源分类、工具栏和范围弹窗。不登录、不读取浏览器存储、不连接项目 API、不调用 AI。点击“继续”仅记录参数，不执行生成或保存。刷新恢复固定的 43 条历史样本，不是正式项目的保存验收。</p>
+  <div class="fixture-controls" aria-label="模拟数据切换">
+    <button id="fixtureLegacy" type="button">43 个历史候选</button>
+    <button id="fixtureCurrent" type="button">混合：3 个当前 + 40 个历史</button>
+    <button id="fixtureEmpty" type="button">空数据</button>
+    <button id="fixtureLocked" type="button">43 个锁定候选</button>
+    <label><input id="fixtureBusy" type="checkbox"> 模拟生成中</label>
+  </div>
+  <p id="fixtureReady" role="status">正在加载真实页面函数…</p>
+  <section id="fixtureBar" aria-label="真实报告同步工具栏"></section>
+  <div class="fixture-counts" aria-label="隔离样本计数">
+    <span>已保存 <b id="fixtureTotal">0</b></span>
+    <span>当前凭据 <b id="fixtureCurrentCount">0</b></span>
+    <span>历史/旧计划 <b id="fixtureLegacyCount">0</b></span>
+  </div>
+  <p id="fixtureStatus" role="status">隔离未调用AI；生成入口记录 0 次。</p>
+  <details>
+    <summary>模拟候选与来源（无正式正文）</summary>
+    <ol id="fixtureList" class="fixture-list"></ol>
+  </details>
+  <details>
+    <summary>JSON 序列化恢复（仅本页内存）</summary>
+    <p>切换数据时同步显示完整模拟快照；可复制后粘贴恢复。不会补写缺失的来源凭据，不使用 localStorage、Cookie 或项目库。</p>
+    <textarea id="fixtureJson" aria-label="系统测试候选 JSON" spellcheck="false"></textarea>
+    <button id="fixtureRestore" type="button">从 JSON 恢复模拟数据</button>
+  </details>
+  <p>测试边界：此页不验证真实生成、候选历史写入、权限或远端冲突保存；这些由模块行为测试另行验收。</p>
+</main>
+<script src="/project-workflow.js"></script>
+<script>
+(async function nrCandidateOriginFixture(){
+  'use strict';
+  const nrFixturePlan='[系统测试]input-plan-current',nrFixturePolicy='[系统测试]policy-current';
+  const nrFixtureClone=value=>JSON.parse(JSON.stringify(value));
+  window.__candidateOriginCalls=[];
+  window.__candidateOriginAcceptClicks=0;
+  window.__fixtureReady=false;
+  window.chapters=[];
+  window.aiReportBusy=false;
+  window.aiReportImpactedProgress=null;
+  window.airAcceptCandidatesBusy=false;
+  window.airAcceptCandidatesProgress=null;
+  window.ReportOutputPolicy={contentVersion:nrFixturePolicy};
+  window.reportCandidateInputIdentity=()=>nrFixturePlan;
+  window.escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  window.airAcceptCandidatesProgressVisible=()=>false;
+  window.airReportLogicImpactSummary=()=>{
+    const rows=chapters.filter(chapter=>chapter.checked!==false).flatMap(chapter=>chapter.sections||[]);
+    return {total:rows.length,unlocked:rows.filter(section=>!section.locked&&!section.pendingRevision).length,locked:rows.filter(section=>section.locked).length,pending:rows.filter(section=>section.pendingRevision).length};
+  };
+  // Explicitly isolate the side-effect entry. Only the real scope UI is under test.
+  window.airGenerateImpactedCandidates=async(regenerateAll=false,replaceExisting=false)=>{
+    __candidateOriginCalls.push({regenerateAll,replaceExisting});
+    document.getElementById('fixtureStatus').textContent='隔离未调用AI；生成入口记录 '+__candidateOriginCalls.length+' 次；参数 '+JSON.stringify(__candidateOriginCalls.at(-1))+'。未改正文、候选或项目库。';
+  };
+  function nrFixtureSnapshot(){return {fixture:'[系统测试]candidate-origin-v1',chapters:nrFixtureClone(chapters)};}
+  function nrFixtureRender(){
+    document.getElementById('fixtureBar').innerHTML=airDocLogicBarHtml();
+    const sections=chapters.flatMap(chapter=>chapter.sections||[]),pending=sections.filter(section=>section.pendingRevision);
+    const classified=pending.map(section=>({section,origin:ProjectWorkflow.candidateOrigin(section.pendingRevision,{inputPlanId:nrFixturePlan,outputPolicyVersion:nrFixturePolicy})}));
+    document.getElementById('fixtureTotal').textContent=String(pending.length);
+    document.getElementById('fixtureCurrentCount').textContent=String(classified.filter(row=>row.origin.status==='current').length);
+    document.getElementById('fixtureLegacyCount').textContent=String(classified.filter(row=>row.origin.status!=='current').length);
+    document.getElementById('fixtureList').innerHTML=classified.map(({section,origin})=>'<li><span class="fixture-origin '+origin.status+'">'+escapeHtml(origin.status)+'</span>'+escapeHtml(section.t)+(section.locked?'（锁定）':'')+' — '+escapeHtml(origin.message)+'</li>').join('');
+    document.getElementById('fixtureJson').value=JSON.stringify(nrFixtureSnapshot(),null,2);
+    document.getElementById('fixtureBar').querySelector('.air-doc-update-impacted').onclick=()=>airOpenCandidateScope();
+    const accept=document.getElementById('fixtureBar').querySelector('.air-doc-accept-candidates');
+    if(accept)accept.onclick=()=>{__candidateOriginAcceptClicks++;document.getElementById('fixtureStatus').textContent='隔离未调用AI；仅记录批量接受入口点击，未接受或修改任何候选。';};
+    document.getElementById('fixtureBar').querySelectorAll('.air-doc-delivery,.air-doc-report-logic,.air-doc-keep-original').forEach(button=>button.onclick=()=>{document.getElementById('fixtureStatus').textContent='隔离未调用AI；本测试页不执行该相邻功能。';});
+  }
+  function nrFixtureSetMode(mode){
+    document.getElementById('airCandidateScope')?.remove();
+    window.aiReportBusy=false;document.getElementById('fixtureBusy').checked=false;
+    window.chapters=mode==='empty'?[]:[{cn:'一',name:'[系统测试]隔离报告',checked:true,sections:Array.from({length:43},(_,index)=>{
+      const pendingRevision={id:'[系统测试]legacy-'+index,createdAt:'2026-09-30T10:00:00.000Z',before:{content:'[系统测试]原正文 '+index},after:'[系统测试]旧短版候选 '+index,quality:{passed:true}};
+      if((mode==='current'||mode==='locked')&&index<3)Object.assign(pendingRevision,{id:'[系统测试]current-'+index,completionInputPlanId:nrFixturePlan,completionContract:{version:'[系统测试]contract-v1',requirements:{proseTarget:1700}},outputPolicyVersion:nrFixturePolicy});
+      return {t:'[系统测试]小节 '+String(index+1).padStart(2,'0'),content:'[系统测试]原正文 '+index,locked:mode==='locked',syncStatus:mode==='locked'?'locked-stale':'stale',staleKind:'logic',pendingRevision};
+    })}];
+    nrFixtureRender();
+  }
+  try{
+    // Execute only the two production presentation functions, never aireport's app setup.
+    const response=await fetch('/aireport.js');
+    if(!response.ok)throw new Error('无法读取真实 aireport.js：'+response.status);
+    const source=await response.text(),start=source.indexOf('function airDocLogicBarHtml(){'),end=source.indexOf('function airOpenKeepOriginal(){',start);
+    if(start<0||end<=start)throw new Error('真实工具栏/范围函数边界缺失');
+    const presentation=new Function(source.slice(start,end)+'\nreturn {airDocLogicBarHtml,airOpenCandidateScope};')();
+    window.airDocLogicBarHtml=presentation.airDocLogicBarHtml;
+    window.airOpenCandidateScope=presentation.airOpenCandidateScope;
+    window.nrCandidateOriginFixtureSnapshot=nrFixtureSnapshot;
+    window.nrCandidateOriginFixtureRender=nrFixtureRender;
+    for(const [id,mode] of [['fixtureLegacy','legacy'],['fixtureCurrent','current'],['fixtureEmpty','empty'],['fixtureLocked','locked']])document.getElementById(id).onclick=()=>nrFixtureSetMode(mode);
+    document.getElementById('fixtureBusy').onchange=event=>{window.aiReportBusy=event.target.checked;nrFixtureRender();};
+    document.getElementById('fixtureRestore').onclick=()=>{
+      try{
+        const snapshot=JSON.parse(document.getElementById('fixtureJson').value);
+        if(snapshot?.fixture!=='[系统测试]candidate-origin-v1'||!Array.isArray(snapshot.chapters)||snapshot.chapters.length>12||snapshot.chapters.some(chapter=>!Array.isArray(chapter.sections)||chapter.sections.length>100||!String(chapter.name).startsWith('[系统测试]')||chapter.sections.some(section=>!String(section.t).startsWith('[系统测试]'))))throw new Error('只允许恢复有限的 [系统测试] 样本');
+        document.getElementById('airCandidateScope')?.remove();window.chapters=nrFixtureClone(snapshot.chapters);nrFixtureRender();
+        document.getElementById('fixtureStatus').textContent='隔离未调用AI；JSON 恢复完成，未补写来源凭据。';
+      }catch(error){document.getElementById('fixtureStatus').textContent='恢复失败，原模拟数据未变：'+error.message;}
+    };
+    nrFixtureSetMode('legacy');
+    document.getElementById('fixtureReady').textContent='已加载真实 ProjectWorkflow.candidateOrigin、airDocLogicBarHtml 和 airOpenCandidateScope。';
+    document.getElementById('fixtureReady').className='fixture-ready';
+    window.__fixtureReady=true;
+  }catch(error){document.getElementById('fixtureReady').textContent='隔离测试加载失败：'+error.message;window.__fixtureError=error.message;}
+})();
+</script>
+</body>
+</html>

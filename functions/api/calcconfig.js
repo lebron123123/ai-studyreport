@@ -2,6 +2,7 @@
 // GET              返回全部配置 {gaibao:{}, rent:{}, sale:{}, metrics:[]}
 // POST             {key:"gaibao"|"rent"|"sale"|"metrics", data:{...}|[...]}
 import { verifyAuth, json } from "./_auth.js";
+import { validateSelection } from "./_project-sensitivity-selection.js";
 
 import { adaptEnv } from "./_adapters.js";
 import { configTrigger,recordReviewEvent } from "./_paramreview.js";
@@ -52,6 +53,21 @@ export async function onRequestPost(context){
   try{ body = await request.json(); }catch(e){ return json({ok:false, error:"请求格式有误"}, 400); }
   const key = String(body.key||"");
   if(!KEYS.includes(key)) return json({ok:false, error:"未知配置项"}, 400);
+  if(body.applyProjectSensitivity){
+    if(key!=="sensitivity")return json({ok:false,error:"仅支持敏感性配置"},400);
+    try{validateSelection(body.data);}catch(e){return json({ok:false,error:e.message},400);}
+    const previous=await env.DB.prepare("SELECT key,data FROM configs WHERE key=?").bind("calc_sensitivity").first();
+    const all=previous?parseJson(previous.data,{}):{};
+    if(JSON.stringify(all.gaibao??null)!==JSON.stringify(body.expected??null))return json({ok:false,error:"排名已被其他操作更新，请重新进入页面读取最新配置后再应用"},409);
+    const merged={...all,gaibao:body.data},serialized=JSON.stringify(merged);
+    if(serialized.length>50000)return json({ok:false,error:"配置过大"},413);
+    let saved;
+    if(previous)saved=await env.DB.prepare("UPDATE configs SET data=?, updated_at=? WHERE key=? AND data=?").bind(serialized,Date.now(),"calc_sensitivity",previous.data).run();
+    else saved=await env.DB.prepare("INSERT INTO configs(key,data,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO NOTHING").bind("calc_sensitivity",serialized,Date.now()).run();
+    if(Number(saved.meta?.changes)!==1)return json({ok:false,error:"配置发生并发修改，请重新读取后应用"},409);
+    const reviewEventId=await recordReviewEvent(env,configTrigger(key,all,merged),user.username);
+    return json({ok:true,reviewEventId});
+  }
   const dataStr = JSON.stringify(body.data ?? (key==="metrics"? []:{}));
   const maxLen = key==="examples"? 400000 : key==="calclogic"? 150000 : 50000;
   if(dataStr.length > maxLen) return json({ok:false, error:"配置过大"}, 413);

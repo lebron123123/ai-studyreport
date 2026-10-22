@@ -2,7 +2,9 @@
 // No external model, project database, real report, signing or Word export is used.
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'C:/Users/HP/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const files=['project-workflow.js','report-trust.js','report-argument.js','report-evidence-graph.js','report-numeric-audit.js','report-orchestration-client.js','report.js','review.js','aireport.js','app.js'];
+// Keep the mandatory completion/writing modules aligned with index.html: absence
+// deliberately blocks generation, so an old fixture without them is not a happy path.
+const files=['md.js','report-writing-standard.js','report-completion-contract.js','project-workflow.js','report-trust.js','report-argument.js','report-evidence-graph.js','report-numeric-audit.js','report-orchestration-client.js','report.js','review.js','aireport.js','app.js'];
 const source=new Map(files.map(name=>[name,fs.readFileSync(path.join(__dirname,'..',name),'utf8')]));
 const fixtureHtml=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>系统测试：报告主链路</title>
 <style>body{font:15px system-ui;margin:24px;max-width:1000px;color:#17304b}button{padding:8px;margin:4px}details{border:1px solid #ccd7e2;padding:12px;margin:10px 0}summary{cursor:pointer}li{padding:10px}.section-block{border-bottom:1px solid #ccc}.air-trust-badge{font-size:12px}#fixtureState{white-space:pre-wrap}</style><body>
@@ -20,6 +22,9 @@ function fixtureReset(){
  chapters=[{cn:1,name:'总论',checked:true,sections:[{t:'结论与建议',content:''}]},{cn:2,name:'市场分析',checked:true,sections:[{t:'市场需求',content:''}]},{cn:3,name:'项目条件',checked:true,sections:[{t:'建设条件',content:''}]},{cn:4,name:'风险分析',checked:true,sections:[{t:'风险核对',content:''}]}];
  kbEntries=[{id:'fixture-source',title:'市场需求调查',sourceRef:'fixture-material#paragraph-1',version:'fixture-v1',content:'本项目应先核实目标客群的实际住房需求。'}];
  projectWorkflow=ProjectWorkflow.ensureState({projectId:currentProjectId});aiReportChat=[];aiReportMsgSeq=0;aiReportProgressMsg=null;aiReportPendingTasks=null;aiReportStopFlag=false;aiReportBusy=false;aiReportGenerationLockId=null;
+ // This narrow fixture has no project-overview section. Model the explicit
+ // human background allocation rather than bypassing the fact ownership gate.
+ projectWorkflow.reportCompletion={facts:[{key:'name',label:'项目名称',value:project.name,status:'pending',source:'系统测试输入',owner:'',required:false,allocationMode:'background'}]};
  document.getElementById('sheet').innerHTML=chapters.map(c=>'<section class="section-block" id="sec_'+c.cn+'_0"><h4>'+c.name+' / '+c.sections[0].t+'</h4><div class="body"></div></section>').join('');
  document.getElementById('fixtureState').textContent='ready';
 }
@@ -43,13 +48,16 @@ fixtureReset();</script></body></html>`;
   const task=tasks.get(url.searchParams.get('id'));assert.ok(task);const delay=state.delay;
   if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
   if(task.input.sectionKey===state.failSection){if(state.failOnce)state.failSection=null;events.push('failed:'+task.input.sectionKey);return route.fulfill({json:{ok:true,task:{id:task.id,status:'dead',error:'[系统测试]后台未能完成本节，可继续恢复'}}});}
-  const text=task.input.sectionKey.includes('市场需求')?'本项目应先核实目标客群的实际住房需求。':task.input.sectionKey.includes('结论')?'综合已完成细节，本项目的建设条件仍需独立核查。':task.input.sectionKey.includes('建设条件')?'建设条件应依据正式权属材料与现场资料逐项核对。':'风险分析应分别核实资金条件和运营管理安排。';
+  const prose=task.input.sectionKey.includes('市场需求')?'本项目应先核实目标客群的实际住房需求。':task.input.sectionKey.includes('结论')?'综合已完成细节，本项目的建设条件仍需独立核查。':task.input.sectionKey.includes('建设条件')?'建设条件应依据正式权属材料与现场资料逐项核对。':'风险分析应分别核实资金条件和运营管理安排。';
+  // Synthetic responses honor the actual contract's frozen source tables too.
+  const text=prose+(task.input.qualityContract?.frozenTables?.tables||[]).map(t=>t.html).join('');
   events.push('complete:'+task.input.sectionKey);return route.fulfill({json:{ok:true,task:{id:task.id,status:'completed',text,model:'fixture-model',provider:'fixture-provider'}}});
  });
  const done=()=>page.waitForFunction(()=>!aiReportBusy&&document.getElementById('fixtureState').textContent!=='ready');
- const status=()=>page.evaluate(()=>({busy:aiReportBusy,coverage:airReportGenerationStatus(),versions:projectWorkflow.reportVersions.length,pending:aiReportPendingTasks?.length,chat:aiReportChat.map(x=>({kind:x.kind,content:x.content})),state:document.getElementById('fixtureState').textContent}));
+ const status=()=>page.evaluate(()=>({busy:aiReportBusy,coverage:airReportGenerationStatus(),versions:projectWorkflow.reportVersions.length,pending:aiReportPendingTasks?.length,chat:aiReportChat.map(x=>({kind:x.kind,content:x.content})),state:document.getElementById('fixtureState').textContent,body:document.getElementById('sheet').textContent,alerts:window.alerts}));
  try{
-  await page.goto('http://report-main.test/fixture.html');await page.getByText('ready',{exact:true}).waitFor();
+  // Match the real localhost secure context, where crypto.subtle is available.
+  await page.goto('http://localhost/fixture.html');await page.getByText('ready',{exact:true}).waitFor();
   // Blank editor HTML must not borrow an older raw body to appear complete or skip resuming.
   const blank=await page.evaluate(()=>{
    chapters.forEach((c,i)=>{c.sections[0].content='旧正文必须保留到用户续写成功';c.sections[0].editedHtml=['<p><br></p>','<p>&nbsp;</p>','<p>\u200b\u2060</p>','<table><tr><td>&#160;</td></tr></table>'][i];});
@@ -92,5 +100,5 @@ fixtureReset();</script></body></html>`;
   const stale=await page.evaluate(()=>{chapters=[{cn:1,name:'项目条件',checked:true,sections:[{t:'建设条件',content:'旧版本正文仍需核对。',syncStatus:'stale'}]}];const before=JSON.stringify(chapters);let summaryBlocked=false;try{ReportArgument.summaryContext(chapters,'总论','结论');}catch(e){summaryBlocked=/等待正文完成/.test(e.message);}return {pending:airRebuildPendingGenerationTasks().length,unchanged:before===JSON.stringify(chapters),summaryBlocked,audit:preSubmitAuditForCurrentReport().ready};});
   assert.deepEqual(stale,{pending:0,unchanged:true,summaryBlocked:true,audit:false});
   assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,consoleErrors:errors,states:['blank-html-not-complete','blank-editor-resume','actual-argument-prompt','details-before-summary','no-fake-confidence','actual-review-evidence-navigation','read-only-review','failure-keeps-details','resume-missing-only','double-start','cancel-resume','numeric-mismatch','empty-report','stale-kept-not-approved'],boundary:'Synthetic API/draft fixture; no external AI, real project, Word export or human approval.'}));
- }finally{await browser.close();}
+ }catch(error){console.error(JSON.stringify({diagnostic:await status(),consoleErrors:errors,requests:requests.length}));throw error;}finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

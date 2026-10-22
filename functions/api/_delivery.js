@@ -4,6 +4,7 @@ import {scoreReportQuality,validateQualityContract} from './_report-quality.js';
 import {parseJson} from './_report-orchestration.js';
 import {deliverySnapshot,deliverySchema,restoreDeliveryDraft,deliveryVisibleText} from './_delivery-snapshot.js';
 import {riskSource,riskDeliverySource,riskDeliveryQuality} from './_risk-delivery-source.js';
+import {hasDeliveryGapRegistry,hasDeliveryGapHistory,loadDeliveryGapContext,deliveryGapQuality,deliveryGapNumericSnapshot} from './_delivery-gaps.js';
 export {deliverySnapshot} from './_delivery-snapshot.js';
 export async function ensureDelivery(env){
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS project_events (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,user_id INTEGER NOT NULL,event_type TEXT NOT NULL,actor TEXT DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',created_at BIGINT NOT NULL)").run();
@@ -27,10 +28,32 @@ export async function verifyFrozenDelivery(row,currentHash){
   if(!result.passed)throw new Error('冻结版本重新检查未通过，请核对检查依据后重新冻结');
   return result;
 }
-function deliveryQuality(snapshot,contract){return riskSource(snapshot)?riskDeliveryQuality(snapshot):scoreReportQuality({...validateQualityContract(contract),noPending:true},deliveryText(snapshot));}
+function deliveryQuality(snapshot,contract){
+  if(riskSource(snapshot))return riskDeliveryQuality(snapshot);
+  let result=scoreReportQuality({...validateQualityContract(contract),noPending:true},deliveryText(snapshot));const gapReview=deliveryGapQuality(snapshot);
+  if(!gapReview)return result;
+  if(gapReview.passed){
+    const numeric=scoreReportQuality({...contract,noPending:true},deliveryText(deliveryGapNumericSnapshot(snapshot))),kinds=new Set(['number','numeric_reconciliation']);
+    const checks=result.checks.filter(c=>!kinds.has(c.kind)).concat(numeric.checks.filter(c=>kinds.has(c.kind))),declaredChecksPassed=checks.length>0&&checks.every(c=>c.passed),meaningfulChecks=checks.some(c=>!['pending','forbidden'].includes(c.kind)),passed=declaredChecksPassed&&numeric.coverageComplete&&meaningfulChecks;
+    result={...result,checks,declaredChecksPassed,coverageComplete:numeric.coverageComplete,numericReconciliation:numeric.numericReconciliation,passed,score:passed?100:Math.min(99,Math.round(checks.filter(c=>c.passed).length/checks.length*100))};
+  }
+  return {...result,passed:result.passed&&gapReview.passed,declaredChecksPassed:result.declaredChecksPassed&&gapReview.passed,coverageComplete:result.coverageComplete&&gapReview.passed,score:gapReview.passed?result.score:Math.min(99,result.score),checks:result.checks.concat({kind:'structured_gap_registry',value:'当前版本资料缺口与关键事项核查',passed:gapReview.passed}),gapReview};
+}
+async function gapRequired(env,access,data){
+  if(hasDeliveryGapRegistry(data))return true;
+  if(access.deliveryGapHistory===undefined)access.deliveryGapHistory=await hasDeliveryGapHistory(env,access.row.id);
+  return access.deliveryGapHistory;
+}
+async function currentSnapshot(env,access,data,schema){
+  // Owner-scoped persisted requirements stay identical when an independent
+  // reviewer reads the same draft. Viewing does not change authority or facts.
+  if(schema===undefined)schema=await gapRequired(env,access,data)?4:3;
+  return deliverySnapshot(data,schema,schema===4?await loadDeliveryGapContext(env,access.ownerUserId,access.row.id,data):undefined);
+}
 async function deliveryCurrent(env,userId,access,data,snapshot){
  if(riskSource(snapshot)){const source=await riskDeliverySource(env,userId,access,riskSource(snapshot));return source.current?source.hash:'';}
- return reportEvidenceHash(deliverySnapshot(data,deliverySchema(snapshot)));
+ if(deliverySchema(snapshot)<4&&await gapRequired(env,access,data))return '';
+ return reportEvidenceHash(await currentSnapshot(env,access,data,deliverySchema(snapshot)));
 }
 export async function deliveryAction(env,userId,b){
   await ensureDelivery(env);if(!env.DB._transaction)throw new Error('正式验收需要事务数据库');
@@ -38,9 +61,10 @@ export async function deliveryAction(env,userId,b){
     const scoped={...env,DB},projectId=String(b.projectId||'');
     await DB.prepare('SELECT id FROM projects WHERE id=? FOR UPDATE').bind(projectId).first();
     const access=await resolveProjectAccess(scoped,userId,projectId);if(!access?.permissions.view)throw new Error('无项目权限');
-    const data=parseJson(access.row.data,{});let snapshot=deliverySnapshot(data),hash=await reportEvidenceHash(snapshot);
+    const data=parseJson(access.row.data,{});let snapshot=await currentSnapshot(scoped,access,data),hash=await reportEvidenceHash(snapshot);
     if(b.action==='freeze'){
       if(!access.permissions.manage)throw new Error('仅项目所有者可指定正式复核人');
+      if(!b.riskReportId&&!hasDeliveryGapRegistry(data)&&await gapRequired(scoped,access,data))throw new Error('该项目已启用资料缺口核验，台账被移除；请恢复并核对台账后重新冻结，不能降级为无台账版本');
       if(!b.riskReportId&&riskSource(snapshot))throw new Error('风险报告必须从服务端风险草稿送审，不能使用工作稿中的风险标记');
       if(b.riskReportId){const source=await riskDeliverySource(scoped,userId,access,String(b.riskReportId),{requireCurrent:true});snapshot=source.snapshot;hash=source.hash;}
       assertExpectedDeliveryHash(b.expectedContentHash,hash);
@@ -69,7 +93,7 @@ export async function deliveryAction(env,userId,b){
       await DB.prepare('INSERT INTO project_events(id,project_id,user_id,event_type,actor,payload_json,created_at) VALUES(?,?,?,?,?,?,?)').bind('delivery_restore_'+crypto.randomUUID(),projectId,access.ownerUserId,'report.delivery.restored',String(userId),JSON.stringify({deliveryId:row.id,contentHash:row.content_hash,previousUpdatedAt:Number(access.row.updated_at),previousData:data,documentRevision:restored.documentRevision,formalApproval:false}),now).run();
       const saved=await DB.prepare('UPDATE projects SET data=?,updated_at=? WHERE id=? AND updated_at=?').bind(JSON.stringify(restored),now,projectId,access.row.updated_at).run();
       if(saved.meta?.changes!==1)throw new Error('项目已更新；未覆盖任何工作稿，请重新读取');
-      return {id:row.id,status:'draft',workingDraft:true,updatedAt:now,documentRevision:restored.documentRevision,contentHash:await reportEvidenceHash(deliverySnapshot(restored)),requiresReload:true,requiresReview:true,restorationScope:'report_body_and_references_only',calculationsRestored:false,projectFactsRestored:false,versionConsistency:'requires_manual_reconciliation'};
+      return {id:row.id,status:'draft',workingDraft:true,updatedAt:now,documentRevision:restored.documentRevision,contentHash:await reportEvidenceHash(await currentSnapshot(scoped,access,restored)),requiresReload:true,requiresReview:true,restorationScope:'report_body_and_references_only',calculationsRestored:false,projectFactsRestored:false,versionConsistency:'requires_manual_reconciliation'};
     }
     if(b.action!=='approve'&&b.action!=='reject')throw new Error('未知验收操作');
     if(Number(row.reviewer_id)!==userId||Number(row.author_id)===userId||access.role!=='VIEWER')throw new Error('仅指定的独立只读复核人可操作');
@@ -80,6 +104,7 @@ export async function deliveryAction(env,userId,b){
     if(b.action==='approve'){
       const schema=deliverySchema(parseJson(row.snapshot_json,{}));
       if(schema<3)throw new Error('旧冻结格式未包含完整项目身份，请重新冻结后复核');
+      if(schema<4&&await gapRequired(scoped,access,data))throw new Error('项目已启用资料缺口台账，请重新冻结包含台账的版本后复核');
       await verifyFrozenDelivery(row,await deliveryCurrent(scoped,userId,access,data,parseJson(row.snapshot_json,{})));
       if(b.wordLayoutReviewed!==true||b.factsReviewed!==true)throw new Error('需检查通过，并由复核人确认Word版式和事实数值');
     }
@@ -89,7 +114,7 @@ export async function deliveryAction(env,userId,b){
 }
 export async function listDeliveries(env,userId,projectId,id='',riskReportId=''){
   const access=await resolveProjectAccess(env,userId,projectId);if(!access?.permissions.view)throw new Error('无项目权限');await ensureDelivery(env);
-  const data=parseJson(access.row.data,{}),hash=await reportEvidenceHash(deliverySnapshot(data)),legacyHash=await reportEvidenceHash(deliverySnapshot(data,1));
+  const data=parseJson(access.row.data,{}),hash=await reportEvidenceHash(await currentSnapshot(env,access,data));
   if(id){const row=await env.DB.prepare('SELECT * FROM report_deliveries WHERE id=? AND project_id=?').bind(id,projectId).first();if(!row)throw new Error('验收版本不存在');const snapshot=await verifyDeliverySnapshot(row),schema=deliverySchema(snapshot),review=parseJson(row.note,{}),result=deliveryQuality(snapshot,parseJson(row.contract_json,{}));return {id:row.id,status:row.status,contentHash:row.content_hash,createdAt:Number(row.created_at),approval:{authorId:row.author_id,reviewerId:row.reviewer_id,reviewedAt:row.reviewed_at,...review},formalExportAllowed:result.passed&&schema>=3&&row.status==='approved'&&Number(row.author_id)!==Number(row.reviewer_id)&&review.factsReviewed===true&&review.wordLayoutReviewed===true,current:row.content_hash===await deliveryCurrent(env,userId,access,data,snapshot),snapshot,integrity:{verified:true,schemaVersion:schema,referenceStatus:schema===1?'unknown':'recorded_unverified'},contract:parseJson(row.contract_json,{}),result};}
   const riskContract=JSON.stringify({kind:'immutable-risk-snapshot-v1'});
   const riskPattern='%'+('"reportId":'+JSON.stringify(riskReportId)).replace(/[!%_]/g,c=>'!'+c)+'%';

@@ -103,7 +103,7 @@ test('经验库入口、上传格式和当前测算提取已接入前台',()=>{
   assert.match(calc,/function calcOpenExperienceLibrary/);assert.match(calc,/id="scExperienceLibrary"/);assert.match(app,/data-calc-experience/);assert.match(app,/经验数据库/);
   assert.match(ui,/录入当前测算/);assert.match(ui,/上传 Excel \/ CSV \/ JSON/);assert.match(ui,/申请删除/);assert.match(ui,/经验区间只使用管理员确认的数据/);
   assert.match(ui,/手动新增数据/);assert.match(ui,/应用到当前测算/);assert.match(ui,/data-series-years/);assert.match(ui,/按类别填写指标/);
-  assert.match(calc,/calcApplyExperienceMetrics/);assert.match(calc,/期限与项目规模/);assert.match(calc,/c_repayPlanYears/);assert.match(calc,/c_repayPlanValues/);
+  assert.match(calc,/calcApplyExperienceMetrics/);assert.match(calc,/期限与项目规模/);assert.match(calc,/c_firstDecoLoanPct/);
   assert.match(ui,/record\.projectType===context\.projectType/);
   assert.match(html,/calc-month-picker\.js/);assert.match(html,/calc-month-picker\.css/);assert.doesNotMatch(calc,/id="c_buildStartMonth" type="month"/);
   assert.match(calc,/data-calc-month/);assert.match(monthPicker,/data-cmp-pick-year/);assert.match(monthPicker,/快速跳到年份/);assert.match(monthPicker,/MONTHS=/);

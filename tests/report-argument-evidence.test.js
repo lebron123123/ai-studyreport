@@ -45,3 +45,106 @@ test('纯章节序号不是待证数字，编号后的真实金额仍须核验�
   const paraphrase=E.preSubmitAudit(section('项目投资总额为1000万元',{rag:[{sourceRef:'p1',version:1,excerpt:'项目总投资：1000万元。'}]}));assert.equal(paraphrase.claimCoverage,0);assert.match(paraphrase.issues[0].message,/改写不代表错误/);
   assert.match(A.prompt('总论','编制依据'),/文件全称、文号、发布主体/);
 });
+
+test('依据清单不铺政策解读，缺材料不生成通用框架，成稿职责可注入',()=>{
+  const basis=A.contract('总论','编制依据与编制说明');
+  assert.equal(basis.basis,true);assert.equal(basis.summary,false);
+  assert.match(basis.responsibility,/只列依据文件清单/);
+  assert.equal(A.contract('政策符合性','适用条件分析').basis,false);
+  const prompt=A.prompt('经营方案','合作期限',{sectionRequirements:{responsibility:'只列六年协议期限和待确认条款',doNotRepeat:['测算章节的收入明细']}});
+  assert.match(prompt,/只列六年协议期限和待确认条款/);
+  assert.match(prompt,/不得复述：测算章节的收入明细/);
+  assert.match(prompt,/旧正文不是事实核验依据/);
+  assert.match(prompt,/不补写通用背景或制造占位表格/);
+  assert.match(prompt,/执行本次成稿计划的篇幅预算/);
+});
+
+test('摘要保留结尾完整风险和否定，不再只截各节头部',()=>{
+  const risk='财务结论：尚不能认定项目财务可行，须待协议口径重核；仅在六年合作期及抵扣分成安排确认后重新测算。';
+  const chapters=[{name:'财务',sections:[{t:'经营测算',content:'项目建筑面积为12345.67平方米。\n\n'+'普通市场背景描述。'.repeat(2500)+'\n\n'+risk+'\n\n后续安排另列。'}]}];
+  const original=JSON.stringify(chapters),context=A.summaryContext(chapters,'总论','建议');
+  assert.ok(context.includes(risk));assert.match(context,/12345\.67平方米/);
+  assert.match(context,/普通块省略 1 个/);assert.match(context,/财务 \/ 经营测算/);
+  assert.match(context,/不是独立核验凭证/);assert.ok(context.length<=20000);
+  assert.equal(JSON.stringify(chapters),original);
+});
+
+test('风险标题覆盖随后完整段落，保留无关键字的限定条件和末尾判断',()=>{
+  const context=A.summaryContext([{name:'工程',sections:[{t:'技术条件',content:'# 项目事实\n建筑面积100平方米。\n\n## 前置条件\n取得产权人书面授权后启动。\n\n消防验收通过后开放运营。\n\n## 工作安排\n普通背景。\n\n项目在现阶段保持论证状态。'}]}],'总论','建议');
+  assert.match(context,/取得产权人书面授权后启动。/);assert.match(context,/消防验收通过后开放运营。/);
+  assert.match(context,/前置条件/);assert.match(context,/项目在现阶段保持论证状态。/);
+  const bold=A.summaryContext([{name:'工程',sections:[{t:'方案',content:'基本情况。\n\n**风险及边界**\n\n取得产权人书面授权后启动。\n\n## 普通背景\n普通说明。'}]}],'总论','建议');
+  assert.match(bold,/取得产权人书面授权后启动。/);
+  const riskSection=A.summaryContext([{name:'风险分析',sections:[{t:'实施安排',content:'实施情况。\n\n取得产权人书面授权后启动。\n\n工作安排。'}]}],'总论','建议');
+  assert.match(riskSection,/取得产权人书面授权后启动。/);
+});
+
+test('多项完整风险超上下文预算明确阻断并列出小节，原文及候选均不修改',()=>{
+  const chapters=[{name:'合同',sections:[{t:'合作安排',content:'风险：'+('合同待确认事项甲。'.repeat(1300)),pendingRevision:{after:'待审核候选'}}]},{name:'财务',sections:[{t:'资金安排',content:'条件：'+('贷款审批事项乙。'.repeat(1300))}]}],before=JSON.stringify(chapters);
+  assert.throws(()=>A.summaryContext(chapters,'总论','建议'),error=>{
+    assert.equal(error.code,'REPORT_SUMMARY_CONTEXT_BUDGET');assert.equal(error.budget,20000);assert.ok(error.requiredChars>20000);
+    assert.equal(error.sections.length,2);assert.match(error.message,/合同 \/ 合作安排/);assert.match(error.message,/财务 \/ 资金安排/);
+    assert.match(error.message,/未截断结论、风险或条件/);return true;
+  });
+  assert.equal(JSON.stringify(chapters),before);
+});
+
+test('HTML结尾风险及合并单元格完整提取，表头数值单位与条件不拆散',()=>{
+  const content='<h2>基本情况</h2><p>项目建筑面积为123.45平方米。</p><p>'+('普通背景。'.repeat(3000))+'</p><h2>经营风险</h2><table><caption>合同边界</caption><tr><th>指标</th><th>值</th><th>条件</th></tr><tr><td rowspan="2">合作期限</td><td>6年</td><td>须待协议确认，尚不能认定财务可行。</td></tr><tr><td colspan="2">抵扣完成后分成；未核定抵扣额。</td></tr></table><p>取得书面授权后启动。</p>';
+  const context=A.summaryContext([{name:'经营',sections:[{t:'合作机制',editedHtml:content}]}],'总论','建议');
+  for(const expected of ['123.45平方米','合同边界','[指标] | [值] | [条件]','[rowspan=2；合作期限]','[6年]','须待协议确认，尚不能认定财务可行。','[colspan=2；抵扣完成后分成；未核定抵扣额。]','取得书面授权后启动。'])assert.ok(context.includes(expected),expected);
+  assert.ok(!context.includes('<table'));assert.ok(context.length<=20000);
+});
+
+test('旧TABLE及Markdown表格保留全表和原空值，不替换或捏造表中数字',()=>{
+  for(const table of ['[[TABLE]]\n事项|金额（万元）|限制\n租金|123.45|须待复核\n抵扣||按协议抵扣\n[[/TABLE]]','|事项|金额（万元）|限制|\n|---|---|---|\n|租金|123.45|须待复核|\n|抵扣||按协议抵扣|']){
+    const context=A.summaryContext([{name:'经营',sections:[{t:'合作机制',content:'项目事实。\n\n'+table+'\n\n一般背景说明。'}]}],'总论','建议');
+    assert.match(context,/\[事项\] \| \[金额（万元）\] \| \[限制\]/);assert.match(context,/\[租金\] \| \[123.45\] \| \[须待复核\]/);
+    assert.match(context,/\[抵扣\] \| \[\] \| \[按协议抵扣\]/);assert.doesNotMatch(context,/原表空白，待核对/);
+  }
+});
+
+test('无法完整解析HTML表格则阻断而不是删除表中限制后生成摘要',()=>{
+  for(const table of ['<table><tr><td>待审批</td></tr>','<table><tr><td>待审批</tr></table>'])assert.throws(()=>A.summaryContext([{name:'合同',sections:[{t:'协议边界',content:'项目事实。'+table}]}],'总论','建议'),error=>error.code==='REPORT_SUMMARY_CONTEXT_PARSE'&&/合同 \/ 协议边界/.test(error.message));
+});
+
+test('过期与锁定过期正文均阻断；当前正文不采纳未接受候选或未绑定结构化结果',()=>{
+  for(const syncStatus of ['stale','locked-stale'])assert.throws(()=>A.summaryContext([{name:'财务',sections:[{t:'现金流',content:'经营结果完整。',syncStatus}]}],'总论','建议'),/等待正文完成/);
+  const context=A.summaryContext([{name:'财务',sections:[{t:'现金流',content:'现有测算口径尚待确认。',syncStatus:'current',pendingRevision:{after:'财务已确认可行。'},executionTask:{structuredText:'{"blocks":[{"slot":"finding","text":"财务可行"}]}',quality:{status:'passed'}},structuredText:'未经正文版本绑定的结论'}]}],'总论','建议');
+  assert.match(context,/现有测算口径尚待确认。/);assert.match(context,/未接受候选未采用/);
+  assert.doesNotMatch(context,/财务已确认可行|未经正文版本绑定|"slot"/);
+});
+
+test('开头摘取只用完整句，单个超长事实不能被截成无条件片段',()=>{
+  const context=A.summaryContext([{name:'市场',sections:[{t:'情况',content:'项目面积123.45平方米。'+('普通背景描述。'.repeat(100))+'\n\n普通尾段。'}]}],'总论','建议');
+  assert.match(context,/项目面积123\.45平方米。/);assert.match(context,/仅节选开头完整句/);
+  assert.ok(context.includes('描述。\n[仅节选'));assert.ok(!context.includes('描\n[仅节选'));
+  assert.throws(()=>A.summaryContext([{name:'市场',sections:[{t:'未断句原文',content:'项目面积'+('甲'.repeat(21000))+'平方米。\n\n尾段。'}]}],'总论','建议'),error=>error.code==='REPORT_SUMMARY_CONTEXT_BUDGET');
+});
+
+test('上下文预算包含所有章节标签，不以每节最低额度突破总预算',()=>{
+  const chapters=Array.from({length:400},(_,i)=>({name:'章节'+i,sections:[{t:'情况',content:'项目事实。'}]}));
+  assert.throws(()=>A.summaryContext(chapters,'总论','建议'),error=>error.code==='REPORT_SUMMARY_CONTEXT_BUDGET'&&error.sections.length===400);
+});
+
+test('仅有脚本样式或模板的旧HTML不是已完成正文，不把非正文代码送入摘要',()=>{
+  assert.throws(()=>A.summaryContext([{name:'市场',sections:[{t:'情况',content:'<script>待确认风险伪正文</script><style>风险{}</style><template>待确认</template>'}]}],'总论','建议'),/等待正文完成/);
+  const context=A.summaryContext([{name:'市场',sections:[{t:'情况',content:'<p>真实口径未确认。</p><script>错误结论可行</script>'}]}],'总论','建议');
+  assert.match(context,/真实口径未确认。/);assert.doesNotMatch(context,/错误结论/);
+});
+
+test('否定结论单独作为标题或加粗段仍保留，仅有标题不能冒充完整正文',()=>{
+  for(const heading of ['## 尚不能认定财务可行','**尚不能认定财务可行**','<h2>尚不能认定财务可行</h2>']){
+    const context=A.summaryContext([{name:'财务',sections:[{t:'经营测算',content:'项目事实。\n\n'+heading+'\n\n## 其他信息\n普通背景。'}]}],'总论','建议');
+    assert.match(context,/尚不能认定财务可行/);
+  }
+  assert.throws(()=>A.summaryContext([{name:'财务',sections:[{t:'经营测算',content:'## 风险与条件'}]}],'总论','建议'),/等待正文完成/);
+});
+
+test('浏览器全局MD路径与Node路径提取一致，不引入模块装载顺序以外的隐式存储',()=>{
+  const fs=require('node:fs'),vm=require('node:vm'),context=vm.createContext({});
+  vm.runInContext(fs.readFileSync(require.resolve('../md.js'),'utf8'),context);
+  vm.runInContext(fs.readFileSync(require.resolve('../report-argument.js'),'utf8'),context);
+  const chapters=[{name:'财务',sections:[{t:'经营测算',editedHtml:'<p>面积100平方米。</p><table><tr><th>指标</th><th>条件</th></tr><tr><td>IRR</td><td>须待口径重核。</td></tr></table><p>尚不能认定财务可行。</p>'}]}];
+  assert.equal(context.ReportArgument.summaryContext(chapters,'总论','建议'),A.summaryContext(chapters,'总论','建议'));
+});

@@ -141,12 +141,57 @@
     const set=current(type||"rent"),t=set&&(set.templates||[]).find(x=>x.id===id);
     return t?JSON.parse(JSON.stringify(t)):null;
   }
+  // Frozen/history HTML is the source of truth, not the current blank catalogue.
+  // Editor coordinates are optional hints: read the actual DOM grid, including
+  // inserted rows, explicit blanks and merged cells, before preview or export.
+  function fromFigure(figure,source){
+    const template=source?clone(source):{id:figure.dataset.templateId||'',version:1};
+    const title=figure.querySelector('.rpt-template-segment-title')||figure.querySelector('figcaption b')||figure.querySelector('figcaption');
+    template.title=title?.textContent.trim().replace(/^表[：:]\s*/,'')||template.title||'项目明细表';
+    const tables=Array.from(figure.querySelectorAll('table')).filter(t=>t.closest('figure')===figure);
+    template.segments=tables.map((table,index)=>{
+      const segmentEl=table.closest('.rpt-template-segment');
+      const si=Number(segmentEl?.dataset.segment??index);
+      const prior=source?.segments?.[si],rows=[],occupied=[];
+      Array.from(table.rows).forEach((row,ri)=>{
+        rows[ri]||={cells:[]};occupied[ri]||=[];
+        let col=0;
+        Array.from(row.cells).forEach(cell=>{
+          while(occupied[ri][col])col++;
+          const colSpan=Math.max(1,cell.colSpan||1);
+          const rowSpan=Math.min(table.rows.length-ri,cell.rowSpan===0?table.rows.length-ri:Math.max(1,cell.rowSpan||1));
+          const hint=prior?.rows?.[ri]?.cells?.find(c=>Number(c.col||0)===col&&Number(c.colSpan||1)===colSpan);
+          const content=cell.cloneNode(true);
+          content.querySelectorAll('br').forEach(br=>br.replaceWith('\n'));
+          content.querySelectorAll('p,div,li').forEach(block=>block.append('\n'));
+          const item={col,colSpan,text:content.textContent.trim(),
+            role:cell.dataset.role||hint?.role||(ri===0?'static':'value')};
+          const align=cell.style.textAlign||hint?.align;if(align)item.align=align;
+          if(rowSpan>1)item.vMerge='restart';
+          rows[ri].cells.push(item);
+          for(let dr=0;dr<rowSpan;dr++){
+            occupied[ri+dr]||=[];
+            for(let dc=0;dc<colSpan;dc++)occupied[ri+dr][col+dc]=true;
+            if(dr){rows[ri+dr]||={cells:[]};rows[ri+dr].cells.push({col,colSpan,text:'',role:item.role,vMerge:'continue'});}
+          }
+          col+=colSpan;
+        });
+      });
+      rows.forEach(row=>row.cells.sort((a,b)=>a.col-b.col));
+      const count=Math.max(0,...occupied.map(r=>r.length));
+      const domWidths=Array.from(table.querySelectorAll('colgroup > col')).flatMap(c=>Array.from({length:c.span||1},()=>parseFloat(c.style.width||c.getAttribute('width'))));
+      const widths=domWidths.length===count&&domWidths.every(w=>Number.isFinite(w)&&w>0)?domWidths:
+        prior?.gridWidths?.length===count?prior.gridWidths:Array(count).fill(1);
+      return {gridWidths:widths,rows};
+    });
+    return template;
+  }
   function stats(type){
     const set=current(type);if(!set)return {templates:0,physicalTables:0,appendix:0,longPeriod:0};
     const list=set.templates||[];
     return {templates:list.length,physicalTables:Number(set.source&&set.source.physicalTableCount)||0,
       appendix:list.filter(x=>x.appendix).length,longPeriod:list.filter(x=>x.longPeriod).length};
   }
-  root.ReportTableTemplates={LIBRARIES,resolveType,load,current,baseline,config,applyOverrides,buildOverrides,forSection,appendix,renderTemplate,renderSection,renderAppendix,exportTemplate,preparedRows,stats};
+  root.ReportTableTemplates={LIBRARIES,resolveType,load,current,baseline,config,applyOverrides,buildOverrides,forSection,appendix,renderTemplate,renderSection,renderAppendix,exportTemplate,fromFigure,preparedRows,stats};
   if(typeof module==="object"&&module.exports)module.exports=root.ReportTableTemplates;
 })(typeof window!=="undefined"?window:globalThis);

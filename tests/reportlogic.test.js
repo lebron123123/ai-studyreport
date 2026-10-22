@@ -1,8 +1,60 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import seed from "../functions/api/_reportlogic-seed.js";
 import gaibaoSeed from "../functions/api/_reportlogic-gaibao-seed.js";
 import { validateSet, appendEnhancementData, mergeRuleRevisionData, evaluateRuleRevisionData, needsAuthoritativeBaseline, ensureSeeds, bumpLogicVersion } from "../functions/api/reportlogic.js";
+
+function isolatedMatcher(){
+  const context={};
+  runInNewContext(readFileSync(new URL("../report-logic-core.js",import.meta.url),"utf8"),context);
+  return context.ReportLogicCore;
+}
+
+test("精确父节只带本节细分逻辑，需求、供给和竞品职责不互相污染",()=>{
+  const core=isolatedMatcher(),options={projectType:"gaibao",businessScenario:"housing_conversion"};
+  const cases=[
+    ["3.2需求分析：人口、就业与租赁市场基础",["gaibao-v1-016","gaibao-v1-017"]],
+    ["3.3需求分析：职住关系与产业分析",["gaibao-v1-022"]],
+    ["3.4需求分析：目标客群画像",["gaibao-v1-021"]],
+    ["3.5供给分析：住房租赁供给分析",["gaibao-v1-019","gaibao-v1-024","gaibao-v1-027"]],
+    ["3.6供给分析：竞品与租金水平分析",["gaibao-v1-029","gaibao-v1-076","gaibao-v1-077"]]
+  ];
+  for(const [title,ids] of cases){
+    const matched=core.matchRules(gaibaoSeed,"项目市场分析",title,options);
+    assert.deepEqual(Array.from(matched,rule=>rule.id).sort(),ids.slice().sort(),title);
+    assert.ok(matched.every(rule=>core.normalize(rule.section)===core.normalize(title)));
+  }
+  assert.deepEqual(Array.from(core.matchRules(gaibaoSeed,"项目市场分析","人口就业基础",options),rule=>rule.id),["gaibao-v1-016"],"具体子标题不能把整章或其他父节拼入");
+});
+
+test("粗父节继续覆盖多个细规则且项目特例、业务场景和类型先过滤",()=>{
+  const core=isolatedMatcher(),general=core.matchRules(seed,"总论","项目背景",{projectType:"rent",projectText:"普通保障性租赁住房项目"});
+  assert.equal(general.length,15);
+  assert.equal(general.some(rule=>rule.projectSpecific),false);
+  const special=core.matchRules(seed,"总论","项目背景",{projectType:"rent",projectText:"涉及高压线迁改的项目"});
+  assert.equal(special.length,16);
+  assert.ok(special.some(rule=>rule.id==="rent-v1-004"));
+  const coarse=core.matchRules(gaibaoSeed,"项目市场分析","住房租赁供给分析",{projectType:"gaibao",businessScenario:"housing_conversion"});
+  assert.deepEqual(Array.from(coarse,rule=>rule.id).sort(),["gaibao-v1-019","gaibao-v1-024","gaibao-v1-027"]);
+  const commercial=core.matchRules(gaibaoSeed,"项目市场分析","商业市场分析",{projectType:"gaibao",businessScenario:"commercial_renovation"});
+  assert.ok(commercial.length>0&&commercial.every(rule=>rule.scenarios.includes("commercial_renovation")));
+  const mixed={projectType:"rent",rules:[{id:"rent",projectType:"rent",chapter:"总论",section:"项目背景"},{id:"sale",projectType:"sale",chapter:"总论",section:"项目背景"}]};
+  assert.deepEqual(Array.from(core.matchRules(mixed,"总论","项目背景",{projectType:"rent"}),rule=>rule.id),["rent"]);
+});
+
+test("精确章节优先且无明确归属的旧命名仍可回退，不改变规则原件",()=>{
+  const core=isolatedMatcher(),data={projectType:"rent",rules:[
+    {id:"own",sourceNo:1,chapter:"项目建设必要性",section:"建设条件分析",subsection:"场地建设条件"},
+    {id:"neighbour",sourceNo:2,chapter:"项目建设必要性与条件",section:"建设条件分析"}
+  ]},before=JSON.stringify(data);
+  assert.deepEqual(Array.from(core.matchRules(data,"项目建设必要性","建设条件分析"),rule=>rule.id),["own"]);
+  assert.deepEqual(Array.from(core.matchRules(data,"项目建设必要性","场地条件分析"),rule=>rule.id),["own"],"旧名无精确/包含匹配时保留相似标题回退");
+  const commercial=core.matchRules(gaibaoSeed,"项目总论","项目概况",{projectType:"gaibao",businessScenario:"commercial_renovation"});
+  assert.ok(commercial.some(rule=>rule.id==="gaibao-v1-009"));
+  assert.equal(JSON.stringify(data),before);
+});
 
 test("出租类逐小节逻辑以137条和14章为正式基线并连续重编号", () => {
   assert.equal(seed.rules.length, 137);
@@ -142,8 +194,10 @@ test("前端运行时可把粗粒度报告小节匹配到多条细分逻辑并�
   const prompt = core.prompt("rent", "总论", "项目背景", {projectText:"普通保障性租赁住房项目"});
   assert.match(prompt, /内部生成约束｜严禁写入报告正文/);
   assert.match(prompt, /所需材料/);
-  assert.match(prompt, /材料不足不等于停止写作/);
-  assert.match(prompt, /禁止整节只输出待补提示或返回空内容/);
+  assert.match(prompt, /材料不足时仅保留已知事实、关键缺口/);
+  assert.match(prompt, /允许简短待补正文/);
+  assert.match(prompt, /字数、全面展开或框架要求均服从本次成稿计划/);
+  assert.doesNotMatch(prompt, /禁止整节只输出待补提示或返回空内容|先写通用框架/);
   assert.match(prompt, /不得输出.*写作逻辑/);
   const outline=core.outline("rent");
   assert.equal(outline.chapters.length,14);
@@ -192,14 +246,17 @@ test("前端运行时可把粗粒度报告小节匹配到多条细分逻辑并�
   assert.deepEqual(unclassified.missing,["unclassified"]);
   const criticalReadiness=core.generationReadiness(manualRule,{});
   assert.equal(criticalReadiness.level,"critical");
-  assert.equal(criticalReadiness.canDraft,true,"关键资料缺失时仍应允许先生成章节框架");
+  assert.equal(criticalReadiness.canDraft,true,"关键资料缺失时仍允许保留简短缺口正文");
   const frameworkRule=seed.rules.find(rule=>/^★参考/.test(rule.importance||"")&&!/(数据|表格|金额|批复|证书)/.test([rule.requiredSources,rule.outputForm].join(" ")));
   const frameworkReadiness=core.generationReadiness(frameworkRule,{});
   assert.equal(frameworkReadiness.level,"framework");
   const fallback=core.fallbackDraft("rent","总论","项目背景",{projectText:"普通保障性租赁住房项目"});
-  assert.match(fallback,/可先形成完整的论证框架/);
+  assert.match(fallback,/不能据此作出确定性结论/);
+  assert.doesNotMatch(fallback,/完整的论证框架|统筹考虑/);
   assert.match(fallback,/【待补：/);
   assert.doesNotMatch(fallback,/本节重点按照以下逻辑展开|写作逻辑：|所需材料摘要：/);
+  const numericFallback=core.fallbackDraft("rent","财务分析","现金流",{numeric:true});
+  assert.doesNotMatch(numericFallback,/\[\[TABLE\]\]|框架已建立/);
   const marked=core.ensureMissingMarkers("本节可先形成正式分析正文。",[manualRule],{});
   assert.match(marked,/资料待补提示/);
   assert.match(marked,/【待补：/);

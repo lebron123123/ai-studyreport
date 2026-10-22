@@ -1,0 +1,41 @@
+import {chromium} from 'playwright';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const params={...JSON.parse(readFileSync('tests/fixtures/nrcalc-reference.json')).cases[0].params,buildStartMonth:'2026-01',buildEndMonth:'2026-09',operateStartMonth:'2026-10',operateEndMonth:'2037-12',rampStartMonth:'2026-10',rampEndMonth:'2026-12',stableStartMonth:'2027-01',occupancyMode:'monthly-phases',rampIntervalMonths:1,rampRates:[.6,.8,.95],costSpan:1,costRate:0,collectPct:50,sharePct:30,firstDecoLoanPct:80,debtModel:'monthly-v2'};
+const records=Array.from({length:5},(_,i)=>({id:'lab-'+i,revision:1,projectName:'[系统测试]实验项目'+i,projectType:'gaibao',status:'confirmed',payload:{params:{...params,rent:params.rent*(i===1?.9:i===3?1.1:1)}}}));
+let mode='normal',writes=0;const errors=[],postRequests=[];
+const browser=await chromium.launch({headless:true});
+try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});page.setDefaultTimeout(120000);
+ await page.addInitScript(()=>{localStorage.setItem('fs_token','isolated-system-test');localStorage.setItem('fs_user','[系统测试]');});
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.route('**/api/**',route=>{if(route.request().method()==='POST'){const path=new URL(route.request().url()).pathname,action=route.request().postDataJSON()?.action;postRequests.push({path,action});if(!(path==='/api/adminpass'||(path==='/api/rag'&&action==='stats')))writes++;}return route.fulfill({status:mode==='failure'&&route.request().url().includes('calcexperience')?503:200,json:route.request().url().includes('calcexperience')?(mode==='failure'?{ok:false,error:'测试服务失败'}:{ok:true,metrics:[],records:mode==='empty'?[]:records}):{ok:true,config:{},records:[],outlines:[]}});});
+ const open=async()=>{await page.goto('http://localhost:8080/admin.html');await page.evaluate(()=>{document.querySelector('#editBox').style.display='block';clType='gaibao';renderSensitivity();});};
+ await open();const host=page.locator('#projectSensitivityHost'),lab=host.locator('[data-role=lab]');await lab.waitFor();
+ await host.locator('[data-role=scope]').selectOption('private');await lab.waitFor();
+ await lab.locator('summary').filter({hasText:'①'}).click();
+ for(const i of [1,2,3,4])await lab.locator('[data-reference="'+i+'"]').check();await lab.locator('[data-validation="4"]').check();
+ await lab.locator('[data-lab=median]').click();assert.match(await lab.textContent(),/可比参考项目 3 个/);assert.equal(Number(await lab.locator('[data-experience=rent]').inputValue()),params.rent);
+ await lab.locator('[data-lab=ranges]').click();assert.match(await lab.textContent(),/已填入/);
+ // Two actual engine factors, N=16, keeps interactive fixture bounded; production options remain unchanged.
+ await page.evaluate(p=>{const rows=ProjectSensitivityGlobal.inventory(p);document.querySelectorAll('#projectSensitivityHost [data-range]').forEach(x=>{const r=rows[+x.dataset.range];x.value=r.key==='rent'?(+x.dataset.side?p.rent*1.1:p.rent*.9):r.key==='discount'?(+x.dataset.side?7:5):r.value;});const s=document.querySelector('#projectSensitivityHost [data-role=samples]');s.add(new Option('16 test','16'));s.value='16';},params);
+ await host.locator('[data-role=run]').click();await host.locator('[data-role=threshold]').waitFor();
+ await lab.locator('summary').filter({hasText:'③'}).click();await lab.locator('[data-lab=independent]').check();await lab.locator('[data-lab=validate]').click();
+ await page.waitForFunction(()=>document.querySelector('[data-lab=validation-result]').textContent.includes('独立留出 1 项'));
+ assert.match(await lab.locator('[data-lab=validation-result]').textContent(),/符合率 100%/);
+ const download=page.waitForEvent('download');await lab.locator('[data-lab=download]').click();const artifact=await download;const exported=JSON.parse(readFileSync(await artifact.path(),'utf8'));assert.equal(exported.validation.summary.n,1);assert.equal(exported.calibration.references.length,3);assert.equal(exported.validation.rows[0].irrError,0);
+ await lab.locator('[data-lab=validate]').click();await page.waitForFunction(()=>document.querySelector('[data-lab=validation-result]').textContent.includes('独立留出 0 项'));
+ await lab.locator('[data-experience=rent]').fill('');assert.equal(await lab.locator('[data-lab=validation-result]').textContent(),'');
+ await lab.locator('[data-experience=rent]').fill(String(params.rent));
+ await lab.locator('summary').filter({hasText:'②'}).click();
+ await page.evaluate(()=>{const s=document.querySelector('[data-lab=samples]');s.add(new Option('16 test','16'));s.value='16';document.querySelector('[data-lab=repeats]').value='2';});
+ await lab.locator('[data-lab=stability]').click();await page.waitForFunction(()=>document.querySelector('[data-lab=stability-result]').textContent.includes('STi排名范围'));
+ assert.match(await lab.locator('[data-lab=stability-result]').textContent(),/100%/);
+ await lab.screenshot({path:'.tmp/sensitivity-validation.png'});
+ await lab.locator('[data-lab=stability]').click();await host.locator('[data-role=cancel]').click();await page.waitForFunction(()=>document.querySelector('[data-lab=status]').textContent.includes('取消'));
+ assert.equal(await lab.locator('[data-lab=download]').isDisabled(),true);
+ mode='empty';await host.locator('[data-role=reload]').click();await page.waitForFunction(()=>document.querySelector('#projectSensitivityHost [data-role=status]').textContent.includes('没有可用'));assert.equal(await lab.count(),0);
+ mode='failure';await host.locator('[data-role=reload]').click();await page.waitForFunction(()=>document.querySelector('#projectSensitivityHost [data-role=status]').textContent.includes('读取失败'));
+ mode='normal';await open();await lab.waitFor();assert.equal(await lab.locator('[data-lab=values]').textContent(),'');assert.equal(writes,0,JSON.stringify(postRequests));assert.deepEqual(errors,[]);
+ console.log(JSON.stringify({pass:true,actualEngine:true,holdout:1,references:3,stabilityRuns:2,N:16,writes,errors,downloadParsed:true}));
+}finally{await browser.close();}

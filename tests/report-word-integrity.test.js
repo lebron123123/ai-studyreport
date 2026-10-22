@@ -19,7 +19,13 @@ test('真实Word包标题/目录/版本/溯源及全部表格宽度一致',async
   const template={title:'合并表头',segments:[{gridWidths:[1,2,1],rows:[{cells:[{col:0,colSpan:2,text:'金额口径'},{col:2,text:'依据'}]},{cells:[{col:0,text:'事项'},{col:1,text:'100万元'},{col:2,text:'【待补：原件】'}]}]}]};
   const doc=build(D,{project:{name:'[系统测试]Word完整性'},signed:false,docNo:'',versionNote:'关联报告版本 V3 · 工作稿修订 12',chapters:[{cn:'一',num:1,name:'总论',sections:[{title:'项目判断',blocks:[{type:'h',text:'1.1.1 判断条件'},{type:'p',text:'此为合成材料，不代表真实项目验收。'},{type:'table',rows:[['事项','金额','来源'],...Array.from({length:70},(_,i)=>['测试事项'+i,'100万元','对应原件，第'+i+'页'])]},{type:'templateTable',template}]}]}],provenance:provenance()});
   const buffer=await D.Packer.toBuffer(doc),zip=await JSZip.loadAsync(buffer),xml=await zip.file('word/document.xml').async('string');
-  assert.match(xml,/关联报告版本 V3/);assert.match(xml,/Heading3/);assert.match(xml,/TOC/);assert.match(xml,/PAGEREF/);assert.doesNotMatch(xml,/example.gov.cn\/policy/);assert.match(xml,/尚未经过人工复核签发/);
+  assert.match(xml,/关联报告版本 V3/);assert.match(xml,/Heading3/);assert.match(xml,/<w:sdt>[\s\S]*?TOC \\h \\o &quot;1-2&quot;/);assert.doesNotMatch(xml,/example.gov.cn\/policy/);assert.match(xml,/尚未经过人工复核签发/);
+  // Native page caches are populated by the paginator, not invented here.
+  const styles=await zip.file('word/styles.xml').async('string');
+  for(const [id,level]of [['Heading1',0],['Heading2',1]]){
+    const definitions=[...styles.matchAll(/<w:style\b[^>]*>[\s\S]*?<\/w:style>/g)].map(m=>m[0]).filter(s=>s.includes('w:styleId="'+id+'"'));
+    assert.equal(definitions.length,1);assert.match(definitions[0],new RegExp('<w:outlineLvl w:val="'+level+'"'));
+  }
   const tables=[...xml.matchAll(/<w:tbl>[\s\S]*?<\/w:tbl>/g)].map(m=>m[0]);assert.equal(tables.length,2);
   for(const table of tables){
     assert.match(table,/<w:tblW w:type="dxa" w:w="8506"\/>/);assert.match(table,/w:tblHeader/);

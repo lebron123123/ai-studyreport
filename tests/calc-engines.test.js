@@ -102,24 +102,25 @@ function runSale() {
 
 test("非居改保（NRCalc）默认参数基准数值回归", () => {
   const r = runGaibao();
-  // 用户确认的核心基准数值
+  // 收楼成本进项已纳入后，按新口径固定基准数值。
   assert.equal(r.summary.totalIncome, 21930.94);
-  assert.equal(r.summary.totalNetProfit, 1097.78);
-  assert.equal(r.summary.totalNpv, 768.04);
-  assert.equal(r.summary.irr, 23.11);
+  // 原年度计税基准为 1924.66；月度计税后逐月四位小数汇总为 1924.65。
+  assert.equal(r.summary.totalNetProfit, 1924.65);
+  assert.equal(r.summary.totalNpv, 1025.45);
+  assert.equal(r.summary.irr, 31.83);
   // 完整汇总快照，防止其它字段悄悄跑偏
   assert.deepEqual(r.summary, {
     totalIncome: 21930.94,
     totalCost: 18839.66,
-    totalTax: 1160.46,
-    totalNetProfit: 1097.78,
-    totalNpv: 768.04,
-    irr: 23.11,
-    paybackInfo: { year: 2033, index: 8 },
+    totalTax: 533.47,
+    totalNetProfit: 1924.65,
+    totalNpv: 1025.45,
+    irr: 31.83,
+    paybackInfo: { year: 2031, index: 6 },
     decoTimes: 2,
     totalEngCost: 3900,
     totalOperateMonths: 144,
-    interestCoverageReference: 1.56,
+    interestCoverageReference: 2.03,
   });
 });
 

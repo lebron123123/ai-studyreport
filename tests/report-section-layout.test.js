@@ -43,10 +43,10 @@ test('working draft canonical tables and contextual headings are lossless and id
       ReportTableTemplates.exportTemplate=()=>JSON.parse(JSON.stringify(template));
       return {matrix,once,twice,count:doc.querySelectorAll('table').length,text:doc.body.textContent,headers:[...doc.querySelectorAll('th')].map(x=>x.textContent),other,blocks:htmlToBlocks(once)};
     });
-    assert.equal(result.count,1);
+    assert.equal(result.count,2);
     assert.deepEqual(result.matrix,[],'all 144 chapter/section positions must normalize idempotently');
     assert.deepEqual(result.headers,['项目名称','项目面积','交通配套']);
-    assert.match(result.text,/584.76/);assert.doesNotMatch(result.text,/原表补充资料|原表第|套数：7/);
+    assert.match(result.text,/584.76/);assert.match(result.text,/套数：7/);assert.doesNotMatch(result.text,/原表补充资料/);
     assert.match(result.text,/来源：原始立项请示/);
     assert.match(result.text,/1.7.1 尚待解决/);assert.match(result.text,/1.7.2 建议/);
     assert.doesNotMatch(result.text,/一、项目总论|1.1 问题/);
@@ -56,8 +56,8 @@ test('working draft canonical tables and contextual headings are lossless and id
     const buffer=await docx.Packer.toBuffer(build(docx,{project:{name:'[系统测试]表格合并与编号'},chapters:[{cn:'一',num:1,name:'项目总论',sections:[{num:7,title:'问题、建议与结论',blocks:result.blocks}]}]}));
     const zip=await require('../local-server/node_modules/jszip').loadAsync(buffer);
     const xml=await zip.file('word/document.xml').async('string');
-    assert.equal((xml.match(/<w:tbl>/g)||[]).length,1);
-    assert.doesNotMatch(xml,/原表补充资料|原表第/);
+    assert.equal((xml.match(/<w:tbl>/g)||[]).length,2);
+    assert.match(xml,/套数：7/);assert.doesNotMatch(xml,/原表补充资料/);
     assert.doesNotMatch(xml,/来源：原始立项请示/);
     assert.match(xml,/584.76/);assert.match(xml,/1.7.1/);assert.doesNotMatch(xml,/1.1.1/);
     assert.match(xml,/1.7　问题、建议与结论/);

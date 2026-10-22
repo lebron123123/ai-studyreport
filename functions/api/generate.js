@@ -53,6 +53,15 @@ export async function onRequestPost(context) {
 
   let body;
   try { body = await request.json(); } catch (e) { return json({ error: "请求格式有误" }, 400); }
+  const singleAttempt = body?.single_attempt === true;
+  const singleAck = singleAttempt ? { single_attempt: true, single_attempt_protocol: 1, request_id: typeof body.request_id === 'string' ? body.request_id : '' } : {};
+  if (singleAttempt && (body.stream || body.research || body.researchRuntime || body.projectId || body.tools || body.latency_profile === 'interactive'
+    || typeof body.system !== 'string' || body.system.length > 8000 || !Array.isArray(body.messages) || !body.messages.length || body.messages.length > 2
+    || body.messages.some(message => !message || message.role !== 'user' || typeof message.content !== 'string')
+    || body.messages.reduce((sum, message) => sum + message.content.length, 0) > 64000
+    || typeof body.request_id !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(body.request_id))) {
+    return json({ error: '单次候选请求格式无效；未调用模型', ...singleAck }, 400);
+  }
   if(body?.research&&!context.researchValidated){
     if(typeof env.DB?._transaction!=='function')return json({error:'研究轮次需要事务存储'},503);
     try{
@@ -136,17 +145,21 @@ export async function onRequestPost(context) {
   let upstream;
   let usedProvider = "";
   let usedModel = "";
+  let upstreamDiagnostics;
   try{
     const called = await callConfiguredLlm(env, body.provider, dsPayload, fetch, {
       profile: body.latency_profile === "interactive" ? "interactive" : "standard",
+      ...(singleAttempt ? { singleAttempt: true, signal: request.signal } : {}),
     });
     upstream = called.response;
     usedProvider = called.provider;
     usedModel = called.model;
+    if (singleAttempt) upstreamDiagnostics = called.diagnostics;
     var upstreamLatencyMs = called.totalLatencyMs || called.latencyMs || 0;
   }catch(e){
     if (counted) await refund(env, userKey, globalKey);
-    return json({ error: "上游AI接口连接失败：" + e.message }, 502);
+    return json({ error: "上游AI接口连接失败：" + e.message, ...singleAck,
+      ...(singleAttempt && e.upstreamDiagnostics ? { upstream_diagnostics: e.upstreamDiagnostics } : {}) }, 502);
   }
 
   if (!upstream.ok) {
@@ -168,12 +181,25 @@ export async function onRequestPost(context) {
     });
   } else {
     // 非流式：原逻辑
-    const data = await upstream.json();
+    let data;
+    try { data = await upstream.json(); }
+    catch (error) { if (!singleAttempt) throw error; return json({ error: '模型响应不是有效 JSON，候选未采用；未自动重试', ...singleAck }, 502); }
+    if (singleAttempt && (!data || typeof data !== 'object' || !Array.isArray(data.choices) || data.choices.length !== 1)) return json({ error: '模型响应结构无效，候选未采用；未自动重试', ...singleAck }, 502);
     const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
     const text = msg.content || "";
+    const finishReason = data.choices?.[0]?.finish_reason || null;
+    if (singleAttempt && (finishReason !== 'stop' || typeof text !== 'string' || !text.trim() || text.length > 128000 || msg.tool_calls?.length || msg.refusal)) {
+      return json({ error: '模型未返回完整候选（可能截断或拒绝），原文未修改；未自动重试', finish_reason: finishReason, ...singleAck }, 502);
+    }
+    if (singleAttempt) {
+      const currentUser = await verifyAuth(request, env);
+      if (!currentUser || currentUser.userId !== user.userId) return json({ error: '登录状态已变化，候选未返回；已发出的请求可能仍计费，未自动重试', ...singleAck }, 401);
+      if (request.signal.aborted) return json({ error: '请求已取消，候选未返回；已发出的请求可能仍计费，未自动重试', ...singleAck }, 499);
+    }
     // 有工具调用时一并返回,前端据此执行工具、回填结果、再次调用(ReAct循环)
     return json({ content: [{ type: "text", text }], tool_calls: msg.tool_calls || null, usage: data.usage || null,
-      provider: usedProvider, model: usedModel, upstream_latency_ms: upstreamLatencyMs });
+      provider: usedProvider, model: usedModel, upstream_latency_ms: upstreamLatencyMs, finish_reason: finishReason, ...singleAck,
+      ...(singleAttempt && upstreamDiagnostics ? { upstream_diagnostics: upstreamDiagnostics } : {}) });
   }
 }
 
@@ -192,8 +218,10 @@ export async function onRequestGet(context){
   };
   const chat  = await read("u:chat:"  + user.userId + ":" + today);
   const batch = await read("u:batch:" + user.userId + ":" + today);
-  return json({ ok:true, today,
+  const response = json({ ok:true, today, capabilities: { single_attempt: true, single_attempt_protocol: 1 },
     chat:  { used: chat,  limit: LIMITS.chat,  left: Math.max(0, LIMITS.chat  - chat)  },
     batch: { used: batch, limit: LIMITS.batch, left: Math.max(0, LIMITS.batch - batch) },
     models: providerStatus(env) });
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
 }

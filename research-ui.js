@@ -127,7 +127,7 @@
     }
    }
    if(state.draft)restoreDraft(state.draft,{deferRender:true});else Object.assign(project,{name:current().study.title});
-   currentProjectRole=editable()?'OWNER':'VIEWER';currentProjectReadOnlyData=state.draft||{};appMode='aireport';renderTOC();renderSheet();toolbar();
+   currentProjectRole=editable()?'OWNER':'VIEWER';currentProjectReadOnlyData=state.draft||{};appMode=location.hash==='#reportimport'?'reportimport':'aireport';renderTOC();renderSheet();toolbar();
    if(recoveryNotice&&document.getElementById('researchStatus'))document.getElementById('researchStatus').textContent=recoveryNotice;
    return true;
   }catch(e){loaded=false;currentProjectRole='UNAVAILABLE';renderTOC();renderSheet();toolbar();error(e);return true;}

@@ -31,10 +31,65 @@
     build:["buildStart","buildYears","operateYears","firstMonths","repayStart"],
     scale:["area","saleArea","commArea","subsidyArea","totalBuildArea","landArea","landUseArea","parkCount","units"],
     market:["rent","rentRate","rentSpan","stableOcc","rampOcc","occRamp","rentDiscount","saleAvgPrice","rate1","rate2","rate3","commRent","commRentRate","commStableOcc","parkPrice","collect"],
-    finance:["totalInvestment","invest","loan","loanAmount","loanRate","loanTotalYears","repay","repayAmount","discount","discountPct","constructionCost","landCost","deco","decorationCost","unitCost"],
+    finance:["totalInvestment","invest","loan","loanAmount","loanRate","loanTotalYears","repay","repayAmount","discount","discountPct","constructionCost","landCost","deco","decorationCost","unitCost","collectRentPct","collectReductionPct","projectSharePct","operateRentPct","operateCostMode","principalRepayMode","principalRepayIntervalMonths","principalRepayPct","principalRepayFinalMonth"],
   };
 
   function clone(v){ return v==null?v:JSON.parse(JSON.stringify(v)); }
+  // Persist only the small, public failure receipt, never Error/raw/stack or accessors.
+  function persistentSectionFailure(value,kind){
+    if(!value||typeof value!=="object"||Array.isArray(value))return null;
+    try{
+      const proto=Object.getPrototypeOf(value);
+      if(proto!==null&&Object.getPrototypeOf(proto)!==null)return null;
+      const fields=kind==="candidate"?{sectionKey:1024,code:128,message:4096,createdAt:64}:{code:128,message:4096,at:64},saved={};
+      Object.keys(fields).forEach(key=>{
+        const field=Object.getOwnPropertyDescriptor(value,key);
+        if(field&&typeof field.value==="string"&&field.value.trim())saved[key]=field.value.slice(0,fields[key]);
+      });
+      return Object.keys(saved).length?saved:null;
+    }catch(_){return null;}
+  }
+  // A generated contract belongs to its exact result, not to the accepted body.
+  // Keep receipts transient and scoped to the section object until a candidate adopts it.
+  const generatedContracts=new WeakMap();
+  function completionInputPlanId(value){return typeof value==="string"&&value.trim()&&value.length<=512?value:null;}
+  // Classify persisted provenance without upgrading old drafts or changing their body.
+  // A timestamp or a passed quality check cannot prove which input plan produced it.
+  function candidateOrigin(candidate,options){
+    const planId=completionInputPlanId(candidate?.completionInputPlanId),contract=candidate?.completionContract;
+    if(!planId||!contract||typeof contract!=="object"||Array.isArray(contract))return {status:"legacy",message:"历史候选稿缺少生成计划或成稿契约凭据，保留供对照，不能认定为本轮新稿"};
+    const expectedPlanId=completionInputPlanId(options?.inputPlanId);
+    if(!expectedPlanId)return {status:"legacy",message:"当前生成计划尚不可核验，不能认定该候选稿属于本轮"};
+    if(planId!==expectedPlanId)return {status:"stale",message:"该候选稿对应的生成计划已变化，请对照保留稿或重新生成"};
+    const policy=typeof candidate?.outputPolicyVersion==="string"&&candidate.outputPolicyVersion.trim()?candidate.outputPolicyVersion:null;
+    const expectedPolicy=typeof options?.outputPolicyVersion==="string"&&options.outputPolicyVersion.trim()?options.outputPolicyVersion:null;
+    if(policy&&!expectedPolicy)return {status:"legacy",message:"当前正文规则版本尚不可核验，不能认定该候选稿属于本轮"};
+    if(policy&&policy!==expectedPolicy)return {status:"stale",message:"该候选稿对应的正文规则版本已变化，请对照保留稿或重新生成"};
+    return {status:"current",message:"该候选稿的生成计划与本轮一致，成稿质量仍须另行核验"};
+  }
+  function completionFinancialSource(value){
+    if(!value||typeof value!=="object"||typeof value.version!=="string"||!value.version||typeof value.snapshotId!=="string"||!value.snapshotId||typeof value.sourceSignature!=="string"||!value.sourceSignature)return null;
+    const scalar=v=>v==null||typeof v==="string"||typeof v==="number"&&Number.isFinite(v);
+    if(!scalar(value.projectId)||!scalar(value.snapshotVersion))return null;
+    return {version:value.version,projectId:value.projectId??null,snapshotId:value.snapshotId,snapshotVersion:value.snapshotVersion??null,sourceSignature:value.sourceSignature};
+  }
+  function rememberGeneratedContract(section,text,contract,meta){
+    if(!section||typeof section!=="object"||typeof text!=="string")return null;
+    if(!contract){generatedContracts.delete(section);return null;}
+    const saved=clone(contract);generatedContracts.set(section,{text,contract:saved,completionInputPlanId:completionInputPlanId(meta?.completionInputPlanId),completionFinancialSource:completionFinancialSource(meta?.completionFinancialSource)});return clone(saved);
+  }
+  function generatedContract(section,text){
+    if(!section||typeof section!=="object"||typeof text!=="string")return null;
+    const receipt=generatedContracts.get(section);return receipt&&receipt.text===text?clone(receipt.contract):null;
+  }
+  function generatedInputPlanId(section,text){
+    if(!section||typeof section!=="object"||typeof text!=="string")return null;
+    const receipt=generatedContracts.get(section);return receipt&&receipt.text===text?receipt.completionInputPlanId:null;
+  }
+  function generatedFinancialSource(section,text){
+    if(!section||typeof section!=="object"||typeof text!=="string")return null;
+    const receipt=generatedContracts.get(section);return receipt&&receipt.text===text?clone(receipt.completionFinancialSource):null;
+  }
   function uid(prefix){
     if(root.crypto && typeof root.crypto.randomUUID==="function") return prefix+"-"+root.crypto.randomUUID();
     return prefix+"-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10);
@@ -135,7 +190,7 @@
   function createReportVersion(state,chapters,meta){
     state=state||{}; state.reportVersions=Array.isArray(state.reportVersions)?state.reportVersions:[];
     meta=meta||{};const trust=root.ReportTrust,evidenceApi=root.ReportEvidenceGraph,dependencyApi=root.ReportDependency;
-    const body=(chapters||[]).map(c=>({cn:c.cn,name:c.name,checked:c.checked,sections:(c.sections||[]).map(s=>({t:s.t,numeric:!!s.numeric,content:s.content||"",editedHtml:s.editedHtml||null,locked:!!s.locked,syncStatus:s.syncStatus||"current",prov:clone(s.prov||null),logicSnapshot:clone(s.logicSnapshot||null),trust:trust?trust.buildSectionProfile(s,{hasCalculation:!!state.currentCalcSnapshotId}):null}))}));
+    const body=(chapters||[]).map(c=>({cn:c.cn,name:c.name,checked:c.checked,sections:(c.sections||[]).map(s=>({t:s.t,numeric:!!s.numeric,content:s.content||"",editedHtml:s.editedHtml||null,locked:!!s.locked,syncStatus:s.syncStatus||"current",prov:clone(s.prov||null),logicSnapshot:clone(s.logicSnapshot||null),outputPolicyVersion:s.outputPolicyVersion||null,completionContract:clone(s.completionContract||null),completionQuality:clone(s.completionQuality||null),trust:trust?trust.buildSectionProfile(s,{hasCalculation:!!state.currentCalcSnapshotId}):null}))}));
     const nextVersion=state.reportVersions.reduce((n,x)=>Math.max(n,Number(x.version)||0),0)+1;
     const lineage=trust?trust.buildLineage(state,meta):null;
     const evidenceAudit=evidenceApi?evidenceApi.preSubmitAudit(chapters):null;
@@ -143,9 +198,12 @@
     const ver={id:uid("report"),version:nextVersion,createdAt:new Date().toISOString(),
       calcSnapshotId:state.currentCalcSnapshotId||null,analysisSnapshotId:state.currentAnalysisSnapshotId||null,reason:String(meta.reason||"报告保存"),chapters:body,hash:hash(body),lineage,
       trustSummary:trust?trust.buildReportSummary(chapters,{hasCalculation:!!state.currentCalcSnapshotId}):null,
-      evidenceAudit,dependencyGraph:dependencyGraph?{schemaVersion:dependencyGraph.schemaVersion,parameters:dependencyGraph.parameters,metrics:dependencyGraph.metrics,sections:dependencyGraph.sections,hash:hash(dependencyGraph)}:null};
+      evidenceAudit,dependencyGraph:dependencyGraph?{schemaVersion:dependencyGraph.schemaVersion,parameters:dependencyGraph.parameters,metrics:dependencyGraph.metrics,sections:dependencyGraph.sections,hash:hash(dependencyGraph)}:null,
+      ...(meta.lengthDelivery?{lengthDelivery:clone(meta.lengthDelivery)}:{}),
+      ...(meta.candidateBatchAcceptance?{candidateBatchAcceptance:clone(meta.candidateBatchAcceptance)}:{})};
     const prev=state.reportVersions[state.reportVersions.length-1];
-    if(prev&&prev.hash===ver.hash&&prev.calcSnapshotId===ver.calcSnapshotId&&prev.analysisSnapshotId===ver.analysisSnapshotId&&(!lineage||prev.lineage&&prev.lineage.hash===lineage.hash))return prev;
+    const deliveryHash=value=>value?hash({...value,checkedAt:undefined}):null;
+    if(prev&&prev.hash===ver.hash&&prev.calcSnapshotId===ver.calcSnapshotId&&prev.analysisSnapshotId===ver.analysisSnapshotId&&deliveryHash(prev.lengthDelivery)===deliveryHash(ver.lengthDelivery)&&hash(prev.candidateBatchAcceptance||null)===hash(ver.candidateBatchAcceptance||null)&&(!lineage||prev.lineage&&prev.lineage.hash===lineage.hash))return prev;
     state.reportVersions.push(ver);if(state.reportVersions.length>50)state.reportVersions.splice(0,state.reportVersions.length-50);state.currentReportVersionId=ver.id; return ver;
   }
   function reportBodyText(value){
@@ -168,7 +226,7 @@
   }
   function mergeReportDraft(templateChapters,savedChapters,options){
     options=options||{};
-    const saved=Array.isArray(savedChapters)?savedChapters:[],used=new Set(),usedSections=new Set(),sectionFields=["content","editedHtml","locked","syncStatus","staleReason","staleKeys","staleKind","pendingRevision","undoStack","prov","logicSnapshot","structureMigrated","migrationSource"];
+    const saved=Array.isArray(savedChapters)?savedChapters:[],used=new Set(),usedSections=new Set(),sectionFields=["content","editedHtml","locked","syncStatus","staleReason","staleKeys","staleKind","pendingRevision","undoStack","prov","logicSnapshot","structureMigrated","migrationSource","outputPolicyVersion","completionContract","completionQuality"];
     return (Array.isArray(templateChapters)?templateChapters:[]).map((chapter,chapterIndex)=>{
       let savedIndex=saved.findIndex((item,index)=>!used.has(index)&&String(item&&item.cn||"")===String(chapter&&chapter.cn||"")&&String(item&&item.name||"")===String(chapter&&chapter.name||""));
       if(savedIndex<0)savedIndex=saved.findIndex((item,index)=>!used.has(index)&&String(item&&item.name||"")===String(chapter&&chapter.name||""));
@@ -195,6 +253,14 @@
         if(prior)usedSections.add(priorChapterIndex+":"+oldIndex);
         const restored={...section};
         if(prior)sectionFields.forEach(field=>{if(prior[field]!==undefined)restored[field]=clone(prior[field]);});
+        // A reopened, unchanged section must retain its generation receipt. A renamed
+        // section is a new task identity; never attach the old section's active task.
+        if(prior&&!migrated&&prior.executionTask!==undefined)restored.executionTask=clone(prior.executionTask);
+        else if(migrated)delete restored.executionTask;
+        for(const field of ["generationFailure","candidateGenerationFailure"]){
+          const failure=migrated?null:persistentSectionFailure((prior||section)[field],field==="candidateGenerationFailure"?"candidate":undefined);
+          if(failure)restored[field]=failure;else delete restored[field];
+        }
         if(migrated||(!prior&&options.markNewSectionsStale)){
           restored.structureMigrated=true;restored.migrationSource=prior?String(saved[priorChapterIndex]?.name||"")+" / "+String(prior.t||""):"新增小节";
           restored.syncStatus=restored.locked?"locked-stale":"stale";restored.staleKind="logic";restored.staleKeys=["report_logic","report_structure"];
@@ -242,7 +308,9 @@
   }
   function claimReportGeneration(state,chapters,options){
     state=state||{};options=options||{};const status=reportGenerationStatus(chapters),now=Date.now(),old=state.reportGenerationLock;
-    if(status.complete&&!options.force)return {ok:false,reason:"already_complete",status};
+    const initial=state.reportCompletion?.initialDelivery;
+    const continuingInitial=!!options.resumeInitialDeliveryRunId&&options.resumeInitialDeliveryRunId===initial?.run?.runId&&initial?.lastOutcome?.complete!==true&&initial?.run?.status!=='completed';
+    if(status.complete&&!options.force&&!continuingInitial)return {ok:false,reason:"already_complete",status};
     if(old&&old.status==="active"&&now-Number(old.startedAt||0)<30*60*1000&&!options.force)return {ok:false,reason:"generation_active",status,lock:clone(old)};
     const lock={id:uid("report-generation"),status:"active",startedAt:now,generatedAtStart:status.generated,totalAtStart:status.total,force:!!options.force};state.reportGenerationLock=lock;
     return {ok:true,status,lock:clone(lock)};
@@ -250,6 +318,16 @@
   function releaseReportGeneration(state,lockId,status){
     if(!state||!state.reportGenerationLock||state.reportGenerationLock.id!==lockId)return false;
     state.reportGenerationLock.status=String(status||"completed");state.reportGenerationLock.finishedAt=Date.now();return true;
+  }
+  function resetCandidateBatchForGeneration(state,lockId,backupId){
+    const lock=state?.reportGenerationLock;
+    if(!lockId||!backupId||!lock||lock.id!==lockId||lock.status!=="active"||lock.force!==true||state.currentReportVersionId!==backupId)return false;
+    const backup=(Array.isArray(state.reportVersions)?state.reportVersions:[]).find(version=>version?.id===backupId);
+    if(!backup)return false;
+    // This boundary belongs to the new working draft, not to the replaceable
+    // generation lock. Keep it across a stop, refresh and ordinary resume.
+    state.reportCandidateBatchReset={schemaVersion:1,backupVersionId:backupId,generationId:lockId,resetAt:new Date().toISOString()};
+    return true;
   }
   function persistedGenerationProgress(progress,pendingCount){
     progress=progress||{};const total=Math.max(0,Number(progress.total)||0),done=Math.max(0,Math.min(total,Number(progress.done)||0)),pending=Math.max(0,Number(pendingCount)||0);
@@ -262,47 +340,133 @@
     return {progress:expected,status,repaired};
   }
   function latestCompleteReportVersion(state,preferredId){
-    const versions=Array.isArray(state&&state.reportVersions)?state.reportVersions:[],complete=version=>version&&reportGenerationStatus(version.chapters).complete;
+    const versions=Array.isArray(state&&state.reportVersions)?state.reportVersions:[],complete=version=>version&&version.candidateBatchAcceptance?.status!=='partial'&&(!version.lengthDelivery||version.lengthDelivery.status==='within-range')&&reportGenerationStatus(version.chapters).complete;
     const preferred=preferredId&&versions.find(version=>version&&version.id===preferredId);
     if(complete(preferred))return preferred;
     for(let index=versions.length-1;index>=0;index--)if(complete(versions[index]))return versions[index];
     return null;
   }
-  function setCandidate(section,newText,instruction,meta){
-    if(!section)return null;
+  // A later single-section acceptance must not forget unresolved work from a
+  // partial batch. Rejecting a candidate or merely editing text is not acceptance.
+  function currentCandidateBatchAcceptance(state,chapters){
+    const version=(state?.reportVersions||[]).find(v=>v.id===state.currentReportVersionId),prior=version?.candidateBatchAcceptance;
+    if(version&&state?.reportCandidateBatchReset?.backupVersionId===version.id)return null;
+    if(!prior||(!Array.isArray(prior.problems)&&!Array.isArray(prior.resolvedSections)))return prior?.status==='partial'?clone(prior):null;
+    const rows=new Map((chapters||[]).filter(c=>c.checked!==false).flatMap(c=>(c.sections||[]).map(s=>[c.name+' / '+s.t,s])));
+    const startedAt=prior.startedAt||version.createdAt||null,problems=[],resolvedSections=[];
+    const tracked=new Map([...(prior.problems||[]).map(p=>[p.sectionKey,{problem:p}]),...(prior.resolvedSections||[]).map(p=>[p.sectionKey,{resolved:p}])]);
+    for(const [sectionKey,trackedRow] of tracked){
+      const section=rows.get(sectionKey),bodyHash=section?hash({content:section.content||'',editedHtml:section.editedHtml||null}):null;
+      const undo=section?.undoStack?.[section.undoStack.length-1],decision=section?.logicSnapshot?.reviewDecision;
+      const sinceStart=at=>!!at&&(!startedAt||Date.parse(at)>=Date.parse(startedAt));
+      const accepted=!!undo?.appliedCandidate&&sinceStart(undo.at)&&!section.editedHtml&&section.content===undo.appliedCandidate.after;
+      const kept=decision?.action==='keep-original'&&sinceStart(decision.at)&&section.syncStatus==='current';
+      const resolved=section&&!section.pendingRevision&&!section.candidateGenerationFailure&&(trackedRow.resolved?.bodyHash===bodyHash||accepted||kept);
+      if(resolved)resolvedSections.push({sectionKey,bodyHash});
+      else problems.push(trackedRow.problem||{sectionKey,issues:[{code:'candidate-update-unresolved',message:'本节更新被撤销或仍未确认；旧正文保留，请核对本节。'}]});
+    }
+    return {...clone(prior),status:problems.length?'partial':'scope-updated',startedAt,unresolved:problems.length,problems:clone(problems),resolvedSections};
+  }
+  function candidateQuality(text,contract,before,options){
+    const api=root.ReportCompletionContract||(typeof require==="function"?require("./report-completion-contract.js"):null);
+    if(!api)return {status:contract?"blocked":"unverified",factsVerified:false,issues:[{code:"quality-module-unavailable",severity:contract?"error":"warning",message:"成稿检查模块未加载，不能视为质量通过"}]};
+    try{
+      const quality={...api.inspect(String(text||""),contract||null,options),factsVerified:false};
+      const differences=before!==undefined&&api.compareFacts?api.compareFacts(String(before||""),String(text||"")):null;
+      if(differences?.issues?.length){quality.issues=[...(quality.issues||[]),...differences.issues];if(quality.status!=="blocked")quality.status="unverified";}
+      return quality;
+    }
+    catch(error){return {status:"blocked",factsVerified:false,issues:[{code:"invalid-contract",severity:"error",message:String(error.message||error)}]};}
+  }
+  function buildCandidate(section,newText,instruction,meta){
     meta=meta||{};
-    const candidate={id:uid("patch"),createdAt:new Date().toISOString(),instruction:String(instruction||""),before:currentText(section),after:String(newText||""),logicRevision:clone(meta.logicRevision||null)};
+    const after=String(newText||""),contract=meta.completionContract||generatedContract(section,after)||section.completionContract||null;
+    const candidate={id:uid("patch"),createdAt:new Date().toISOString(),instruction:String(instruction||""),before:currentText(section),after,logicRevision:clone(meta.logicRevision||null),completionContract:clone(contract)};
+    const inputPlanId=completionInputPlanId(meta.completionInputPlanId)||generatedInputPlanId(section,after);
+    if(inputPlanId)candidate.completionInputPlanId=inputPlanId;
+    const financialSource=completionFinancialSource(meta.completionFinancialSource)||generatedFinancialSource(section,after);
+    if(financialSource)candidate.completionFinancialSource=financialSource;
+    // newText is the full merged section, including unchanged text from a local edit.
+    // Provider success or supplied metadata never substitutes for this deterministic check.
+    candidate.quality=candidateQuality(candidate.after,candidate.completionContract,candidate.before);
     if(meta.allowLogicAdoption!==undefined)candidate.allowLogicAdoption=!!meta.allowLogicAdoption;
     if(meta.outputPolicyVersion)candidate.outputPolicyVersion=meta.outputPolicyVersion;
+    return candidate;
+  }
+  function setCandidate(section,newText,instruction,meta){
+    if(!section||section.locked||section.pendingRevision)return null;
+    const candidate=buildCandidate(section,newText,instruction,meta);
     section.pendingRevision=candidate; return candidate;
   }
+  function candidateToken(candidate){return candidate?{id:candidate.id,contentHash:hash({before:candidate.before,after:candidate.after})}:null;}
+  function replaceCandidate(section,newText,instruction,meta,expectedCandidate){
+    if(!section||section.locked||!section.pendingRevision||!expectedCandidate)return null;
+    const previous=section.pendingRevision,current=candidateToken(previous);
+    if(expectedCandidate!==previous&&(expectedCandidate.id!==current.id||expectedCandidate.contentHash!==current.contentHash))return null;
+    const candidate=buildCandidate(section,newText,instruction,meta),prior=clone(previous);
+    if(!candidate.completionContract&&previous.completionContract){candidate.completionContract=clone(previous.completionContract);candidate.quality=candidateQuality(candidate.after,candidate.completionContract,candidate.before);}
+    delete prior.history;
+    candidate.history=[...clone(previous.history||[]),prior];candidate.replacesId=previous.id;
+    section.pendingRevision=candidate;return candidate;
+  }
+  function refreshCandidateQuality(section){
+    if(!section?.pendingRevision)return null;
+    const c=section.pendingRevision;
+    // Historical decoded candidates may carry errors invisible in their flattened text.
+    // Only an explicit replacement creates a new candidate; refreshing is not schema repair.
+    const outputErrors=(c.quality?.issues||[]).filter(i=>i.severity==='error'&&(/^(structured-)/.test(i.code||'')||i.code==='output-format-version'));
+    c.quality=candidateQuality(c.after,c.completionContract||section.completionContract||null,c.before);
+    if(outputErrors.length){c.quality.issues=[...(c.quality.issues||[]),...clone(outputErrors)];c.quality.status='blocked';}
+    // The report module owns current-plan/source admission. Rechecking the immutable
+    // candidate contract must not erase a later context failure from that review.
+    const admissionIssues=Array.isArray(c.admissionIssues)?c.admissionIssues.filter(issue=>issue&&typeof issue==='object'):[];
+    if(admissionIssues.length){
+      c.quality.issues=[...(c.quality.issues||[]),...clone(admissionIssues)];
+      if(admissionIssues.some(issue=>issue.severity==='error'))c.quality.status='blocked';
+      else if(c.quality.status==='passed')c.quality.status='unverified';
+    }
+    if(c.before!==undefined&&String(c.before)!==currentText(section)){
+      c.quality.status="blocked";
+      c.quality.issues=[...(c.quality.issues||[]),{code:"stale-candidate-base",severity:"error",repairable:false,message:"当前正文已在候选生成后修改；请对照处理差异，不能用旧候选覆盖新正文"}];
+    }
+    return c.quality;
+  }
+  function refreshSectionQuality(section,before){
+    if(!section)return null;
+    section.completionQuality=candidateQuality(currentText(section),section.completionContract||null,before,{html:!!section.editedHtml});
+    return section.completionQuality;
+  }
   function acceptCandidate(section){
-    if(!section||!section.pendingRevision)return null;
+    if(!section||section.locked||!section.pendingRevision)return null;
+    const c=section.pendingRevision,contract=c.completionContract||section.completionContract||null;
+    refreshCandidateQuality(section);
+    if(c.quality.status==="blocked")return null;
     section.undoStack=Array.isArray(section.undoStack)?section.undoStack:[];
-    section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null,logicSnapshot:clone(section.logicSnapshot||null),syncState:{syncStatus:section.syncStatus||"current",staleReason:section.staleReason||"",staleKeys:clone(section.staleKeys||[]),staleKind:section.staleKind||""}});
+    section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null,logicSnapshot:clone(section.logicSnapshot||null),completionContract:clone(section.completionContract||null),completionQuality:clone(section.completionQuality||null),appliedCandidate:clone(c),syncState:{syncStatus:section.syncStatus||"current",staleReason:section.staleReason||"",staleKeys:clone(section.staleKeys||[]),staleKind:section.staleKind||""}});
     section.undoStack[section.undoStack.length-1].outputPolicyVersion=section.outputPolicyVersion||null;
-    const c=section.pendingRevision; section.content=c.after; section.editedHtml=null;if(c.logicRevision)section.logicSnapshot=clone(c.logicRevision);if(c.outputPolicyVersion)section.outputPolicyVersion=c.outputPolicyVersion; section.pendingRevision=null; clearSectionStale(section); return c;
+    section.content=c.after; section.editedHtml=null;if(c.logicRevision)section.logicSnapshot=clone(c.logicRevision);if(c.outputPolicyVersion)section.outputPolicyVersion=c.outputPolicyVersion;section.completionContract=clone(contract);section.completionQuality=clone(c.quality);section.pendingRevision=null;clearSectionStale(section);return c;
   }
   function keepOriginalLogic(section){
     if(!section||section.locked||section.pendingRevision||!(section.content||section.editedHtml)||section.staleKind!=="logic"||section.syncStatus!=="stale")return false;
     if((section.staleKeys||[]).some(key=>key!=="report_logic"))return false;
     section.undoStack=Array.isArray(section.undoStack)?section.undoStack:[];
-    section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null,logicSnapshot:clone(section.logicSnapshot||null),syncState:{syncStatus:section.syncStatus,staleReason:section.staleReason||"",staleKeys:clone(section.staleKeys||[]),staleKind:section.staleKind}});
+    section.undoStack.push({at:new Date().toISOString(),content:section.content||"",editedHtml:section.editedHtml||null,logicSnapshot:clone(section.logicSnapshot||null),completionContract:clone(section.completionContract||null),completionQuality:clone(section.completionQuality||null),syncState:{syncStatus:section.syncStatus,staleReason:section.staleReason||"",staleKeys:clone(section.staleKeys||[]),staleKind:section.staleKind}});
     section.logicSnapshot=Object.assign({},section.logicSnapshot,{reviewDecision:{action:"keep-original",at:new Date().toISOString(),reason:"人工确认现有正文无需按本轮逻辑重写"}});
     section.structureMigrated=false;
     clearSectionStale(section);return true;
   }
   function rejectCandidate(section){ if(!section)return; section.pendingRevision=null; }
   function acceptAllCandidates(chapters){
-    const rows=(chapters||[]).filter(c=>c&&c.checked!==false).flatMap(c=>(c.sections||[]).map((section,si)=>({chapter:c,section,si}))),pending=rows.filter(x=>x.section&&x.section.pendingRevision),accepted=[];
-    pending.forEach(item=>{if(!item.section.locked&&acceptCandidate(item.section))accepted.push(item);});
-    return {total:pending.length,accepted:accepted.length,locked:pending.length-accepted.length,items:accepted};
+    const rows=(chapters||[]).filter(c=>c&&c.checked!==false).flatMap(c=>(c.sections||[]).map((section,si)=>({chapter:c,section,si}))),pending=rows.filter(x=>x.section&&x.section.pendingRevision),accepted=[],locked=[],blocked=[];
+    pending.forEach(item=>{if(item.section.locked)locked.push(item);else if(acceptCandidate(item.section))accepted.push(item);else blocked.push(item);});
+    return {total:pending.length,accepted:accepted.length,locked:locked.length,blocked:blocked.length,items:accepted,lockedItems:locked,blockedItems:blocked};
   }
   function undoSection(section){
     if(!section||!Array.isArray(section.undoStack)||!section.undoStack.length)return false;
     const prev=section.undoStack.pop(); section.content=prev.content; section.editedHtml=prev.editedHtml;section.logicSnapshot=clone(prev.logicSnapshot||null);
     if(prev.syncState)Object.assign(section,clone(prev.syncState));
     if(Object.prototype.hasOwnProperty.call(prev,'outputPolicyVersion'))section.outputPolicyVersion=prev.outputPolicyVersion;
+    for(const field of ['completionContract','completionQuality'])if(Object.prototype.hasOwnProperty.call(prev,field))section[field]=clone(prev[field]);
     return true;
   }
   function escapeHtml(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
@@ -449,8 +613,8 @@
       guardrails:["财务数字来自白箱测算结果","异常结论来自硬规则检查","知识资料仅按检索匹配度作为依据","未提供的数据必须明确写暂无，不能推测","本工具只诊断，不修改参数或正文"]};
   }
 
-  const api={keepOriginalLogic,clone,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,logicSnapshotCore,logicSnapshotDiff,markLogicImpacted,
-    createCalcSnapshot,createReportVersion,reportBodyText,hasReportBody,reportGenerationStatus,logicImpactedTasks,logicRevisionInProgress,historicalProgressDuringLogicRevision,nextReportVersionNumber,mergeReportDraft,recoverCompletedReport,selectProjectDraft,claimReportGeneration,releaseReportGeneration,persistedGenerationProgress,reconcileGenerationProgress,latestCompleteReportVersion,setCandidate,acceptCandidate,acceptAllCandidates,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
+  const api={keepOriginalLogic,clone,persistentSectionFailure,rememberGeneratedContract,generatedContract,generatedInputPlanId,generatedFinancialSource,candidateOrigin,hash,paramGroup,sectionAffected,impactedSections,markImpacted,clearSectionStale,summaryDiff,logicSnapshotCore,logicSnapshotDiff,markLogicImpacted,
+    createCalcSnapshot,createReportVersion,reportBodyText,hasReportBody,reportGenerationStatus,logicImpactedTasks,logicRevisionInProgress,historicalProgressDuringLogicRevision,nextReportVersionNumber,mergeReportDraft,recoverCompletedReport,selectProjectDraft,claimReportGeneration,releaseReportGeneration,resetCandidateBatchForGeneration,persistedGenerationProgress,reconcileGenerationProgress,latestCompleteReportVersion,currentCandidateBatchAcceptance,setCandidate,replaceCandidate,candidateToken,refreshCandidateQuality,refreshSectionQuality,acceptCandidate,acceptAllCandidates,rejectCandidate,undoSection,simpleDiffHtml,replaceSelectedText,ensureState,touchModule,bulkConfirm,
     aiReportStage,aiReportStageRank,previousAiReportStage,locationTokens,rankLocationCandidates,normalizeAnalysisSites,siteWritingPlan,aiReportProjectSeed,aiReportShouldSeedProject,resumeAppMode,aiReportDirectAction,buildProjectDiagnostic,
     impactedAnalysisSections,markAnalysisImpacted,METRIC_LABELS,ANALYSIS_DOMAIN_WORDS};
   root.ProjectWorkflow=api;

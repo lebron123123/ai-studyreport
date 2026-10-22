@@ -1,0 +1,92 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+test('monthly debt Excel roundtrip uses engine amounts, no legacy annual interest formula',()=>{
+ const s={console};s.window=s;vm.createContext(s);
+ for(const file of ['xlsx.full.min.js','nrcalc.js','calc.js','export.js'])vm.runInContext(fs.readFileSync(file,'utf8'),s);
+ s.params=require('./fixtures/nrcalc-reference.json').cases[0].params;
+ vm.runInContext("calcType='gaibao';scParams={...params,buildStartMonth:'2026-01',buildEndMonth:'2026-12',operateStartMonth:'2027-01',operateEndMonth:'2039-12',firstDecoLoanPct:60,occupancyMode:'monthly-phases',rampStartMonth:'2027-01',rampEndMonth:'2028-06',stableStartMonth:'2028-07'};scResult=NRCalc.calc(NRCalc.fromParams(scParams));",s);
+ vm.runInContext("scParams.rampIntervalMonths=6;scParams.rampRates=[.5,.7,.9];scResult=NRCalc.calc(NRCalc.fromParams(scParams));",s);
+ const expected=vm.runInContext('JSON.stringify(scResult)',s);
+ vm.runInContext("delete scResult.taxModelVersion;scResult.profit[scResult.allYears[0]].makeup=999;",s);
+ vm.runInContext('calcRefreshLegacyCashflow()',s);
+ assert.equal(vm.runInContext('JSON.stringify(scResult)',s),expected,'old annual-loss cache is recalculated using the new monthly tax version');
+ vm.runInContext("for(const y of scResult.allYears){delete scResult.cf[y].engineering;delete scResult.cf[y].cashCost;scResult.cf[y].outflow=scResult.cost[y].total+scResult.tax[y].total+scResult.profit[y].incomeTax}",s);
+ const wb=vm.runInContext('buildCalcWorkbook()',s);
+ assert.equal(vm.runInContext('JSON.stringify(scResult)',s),expected,'export repairs legacy cached result, not just one visible row');
+ const parsed=s.XLSX.read(s.XLSX.write(wb,{type:'array',bookType:'xlsx'}),{type:'array',cellFormula:true});
+ const sheet=parsed.Sheets['还本付息'];
+ assert.equal(sheet.A2.v,'工程流出');assert.equal(sheet.A3.v,'归还本金');
+ assert.equal(sheet.A4.v,'利息支出（逐月汇总）');assert.equal(sheet.C4.f,undefined);
+ const r=vm.runInContext('scResult',s);
+ const profitSheet=parsed.Sheets['利润'];
+ const profitRows=s.XLSX.utils.sheet_to_json(profitSheet,{header:1});
+ const preIndex=profitRows.findIndex(row=>row[0]==='项目税前利润');
+ assert.equal(profitRows[preIndex+1][0],'利润总额');
+ r.allYears.forEach((year,i)=>{
+   assert.equal(profitRows[preIndex][i+2],r.profit[year].pretax);
+   assert.ok(Math.abs(r.profit[year].pretax-(r.profit[year].incomeAT-r.profit[year].costAT))<0.00011);
+   assert.ok(Math.abs(r.profit[year].totalProfit-(r.profit[year].pretax-r.tax[year].surcharge-r.tax[year].stamp))<0.00011);
+   assert.equal(r.cf[year].engineering,r.loan[year].engineering);
+   assert.ok(Math.abs(r.cf[year].cashCost-(r.cost[year].collect+r.loan[year].engineering+r.cost[year].op+r.cost[year].fin+r.cost[year].share))<0.00011);
+   assert.ok(Math.abs(r.cf[year].outflow-(r.cf[year].cashCost+r.tax[year].total+r.profit[year].incomeTax))<0.00011);
+   const formula=profitSheet[s.XLSX.utils.encode_col(i+2)+(preIndex+2)].f;
+   const taxRows=s.XLSX.utils.sheet_to_json(parsed.Sheets['税金'],{header:1});
+   const col=s.XLSX.utils.encode_col(i+2);
+   for(const label of ['增值税附加','印花税'])assert.ok(formula.includes(col+(taxRows.findIndex(row=>row[0]===label)+1)));
+ });
+ assert.ok(profitRows.some(row=>row[0]==='收楼成本（不含税）'));
+ assert.ok(!(profitSheet['!rows']||[]).some(row=>row?.hidden));
+ const specs=vm.runInContext("calcSpecs('gaibao',scResult)",s);
+ const costSpec=specs.find(table=>table.sheet==='成本');
+ assert.equal(costSpec.rows.filter(row=>row.detailOf==='c_col'&&row.detailNonAdditive).length,2);
+ assert.equal(costSpec.rows.filter(row=>row.detailOf==='c_op').length,0);
+ const costHtml=vm.runInContext("dtable('成本',scResult,calcSpecs('gaibao',scResult).find(table=>table.sheet==='成本').rows,false)",s);
+ assert.match(costHtml,/data-detail-id="c_col"/);
+ assert.match(costHtml,/hidden data-detail-of="c_col"/);
+ assert.doesNotMatch(costHtml,/data-detail-id="c_op"|data-detail-of="c_op"/);
+ const cashRows=s.XLSX.utils.sheet_to_json(parsed.Sheets['现金流'],{header:1});
+ const xrow=cashRows.findIndex(row=>row[0]==='IRR(按月度现金流量XIRR公式)')+1;
+ assert.match(parsed.Sheets['现金流']['B'+xrow].f,/^XIRR\(/);
+ assert.match(parsed.Sheets['现金流']['B'+(xrow+1)].f,/^IRR\(/);
+ assert.equal(parsed.Sheets['月度现金流'].N2.v,r.monthlyCashflow[0].net);
+ const monthlySheet=parsed.Sheets['月度现金流'];
+ assert.equal(monthlySheet.P1.v,'前期补亏');assert.equal(monthlySheet.Q1.v,'计税基础');
+ assert.equal(monthlySheet.P2.f,'0');
+ r.monthlyCashflow.forEach((month,i)=>{
+   const row=i+2;
+   assert.equal(monthlySheet['P'+row].v,month.makeup);
+   assert.equal(monthlySheet['Q'+row].v,month.taxable);
+   assert.equal(monthlySheet['K'+row].v,month.incomeTax);
+   assert.equal(month.incomeTax,Math.round(Math.max(0,month.taxable)*.25*1e4)/1e4,'export tax formula recalculates to cached engine value');
+   assert.equal(monthlySheet['R'+row].v,month.netProfit);
+   if(i>0)assert.match(monthlySheet['P'+row].f,/SUM\(\$O\$2:O/);
+   assert.match(monthlySheet['K'+row].f,new RegExp('IF\\(Q'+row+'>0'));
+ });
+ for(const [id,col] of [['p_mk','P'],['p_tx','Q'],['p_it','K']]){
+   const spec=specs.find(table=>table.sheet==='利润').rows.find(row=>row.id===id);
+   const row=profitRows.findIndex(row=>row[0]===spec.l)+1;
+   r.allYears.forEach((year,i)=>{
+     const cell=profitSheet[s.XLSX.utils.encode_col(i+2)+row];
+     assert.match(cell.f,new RegExp("SUMIFS\\('月度现金流'!\\$"+col));
+     assert.equal(cell.v,spec.g(r,year));
+   });
+ }
+ const engineeringRow=cashRows.find(row=>row[0]==='工程流出（实际付款）');
+ r.allYears.forEach((year,i)=>assert.equal(engineeringRow[i+2],r.loan[year].engineering));
+ assert.ok(!(parsed.Sheets['现金流']['!rows']||[]).some(row=>row?.hidden));
+ for(const table of specs)for(const parent of table.rows){
+   const children=parent.id?table.rows.filter(row=>row.detailOf===parent.id):[];
+   if(children.length&&!children.some(row=>row.detailNonAdditive))for(const year of r.allYears)assert.ok(Math.abs(children.reduce((sum,row)=>sum+row.g(r,year),0)-parent.g(r,year))<0.00051,`${parent.id} ${year}`);
+ }
+ const incomeRows=s.XLSX.utils.sheet_to_json(parsed.Sheets['收入'],{header:1});
+ const occupancy=incomeRows.find(row=>row[0]==='出租率');
+ r.allYears.forEach((year,i)=>{if(r.resiOccupancy[year]!=null)assert.equal(occupancy[i+2],r.resiOccupancy[year]);});
+ r.allYears.forEach((year,i)=>{const col=s.XLSX.utils.encode_col(i+2);assert.equal(sheet[col+'2'].v,r.loan[year].engineering);assert.equal(sheet[col+'3'].v,r.loan[year].repay);assert.equal(sheet[col+'4'].v,r.loan[year].interest);});
+ assert.ok(!s.XLSX.utils.sheet_to_json(sheet,{header:1}).flat().some(x=>/期初借款余额|期末借款余额/.test(String(x))));
+ vm.runInContext("scParams={...scParams,mode:'share',collectReductionPct:30,projectSharePct:60,shareStartMonth:'2027-07'};scResult=NRCalc.calc(NRCalc.fromParams(scParams));",s);
+ const shareBook=vm.runInContext('buildCalcWorkbook()',s),shareSheet=shareBook.Sheets['成本'];
+ const shareRows=s.XLSX.utils.sheet_to_json(shareSheet,{header:1});
+ const collectRow=shareRows.findIndex(row=>row[0]==='收楼成本')+1,shareRow=shareRows.findIndex(row=>row[0]==='合作分成支出')+1;
+ assert.match(shareSheet['D'+collectRow].f,/SUMIFS\('月度现金流'!\$D/);
+ assert.match(shareSheet['D'+shareRow].f,/SUMIFS\('月度现金流'!\$G/);
+ assert.equal(shareSheet['D'+shareRow].v,vm.runInContext('scResult.cost[2027].share',s));
+});

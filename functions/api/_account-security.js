@@ -5,8 +5,9 @@ export async function ensureAccountSecurity(env){
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS security_events (id TEXT PRIMARY KEY,actor_id INTEGER NOT NULL,target_id INTEGER NOT NULL,action TEXT NOT NULL,note TEXT NOT NULL,created_at BIGINT NOT NULL)").run();
   ready.add(env.DB);
 }
-export async function accountSecurity(env,userId){
-  await ensureAccountSecurity(env);
+export async function accountSecurity(env,userId,options){
+  // Read-only consumers still check revocation/disable state; missing schema must fail closed.
+  if(!options?.readOnly)await ensureAccountSecurity(env);
   return env.DB?await env.DB.prepare('SELECT disabled,revoked_before FROM account_security WHERE user_id=?').bind(userId).first():null;
 }
 export async function changeAccountSecurity(env,actorId,targetId,action,note){

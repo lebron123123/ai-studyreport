@@ -104,6 +104,14 @@ test("完成版预览优先绑定进度记录对应版本，旧数据则回退�
   assert.equal(WF.latestCompleteReportVersion({reportVersions:[{id:"v2",chapters:partial}]},null),null);
 });
 
+test("部分候选接受的新旧混合版本不冒充整篇完成，旧版兼容不受影响",()=>{
+  const complete=chapters(),state={reportVersions:[{id:'v9',chapters:complete},{id:'v12',chapters:complete,candidateBatchAcceptance:{status:'partial',accepted:34,blocked:9}}]};
+  assert.equal(WF.latestCompleteReportVersion(state,'v12').id,'v9');
+  assert.equal(WF.latestCompleteReportVersion({reportVersions:[state.reportVersions[1]]},'v12'),null);
+  state.reportVersions[1].candidateBatchAcceptance.status='complete';
+  assert.equal(WF.latestCompleteReportVersion(state,'v12').id,'v12');
+});
+
 test("章节大纲插入和换序时按章节名与小节标题恢复，不再用下标错配正文",()=>{
   const saved=[{cn:"一",name:"总论",checked:true,sections:[{t:"项目背景",content:"背景正文"},{t:"建设必要性",content:"必要性正文"}]}];
   const template=[{cn:"一",name:"总论",checked:true,sections:[{t:"新增概览",content:""},{t:"建设必要性",content:""},{t:"项目背景",content:""}]}];
@@ -111,10 +119,32 @@ test("章节大纲插入和换序时按章节名与小节标题恢复，不再�
   assert.equal(merged[0].sections[0].content,"");assert.equal(merged[0].sections[1].content,"必要性正文");assert.equal(merged[0].sections[2].content,"背景正文");
 });
 
+test("刷新和同章换序保留原小节生成任务且不共享可变对象",()=>{
+  const task={taskId:"task-background",runId:"run-1",status:"completed",context:{hash:"context-1"}};
+  const saved=[{cn:"一",name:"总论",sections:[{t:"项目背景",content:"背景正文",executionTask:task},{t:"建设必要性",content:"必要性正文"}]}];
+  const template=[{cn:"一",name:"总论",sections:[{t:"建设必要性",content:""},{t:"项目背景",content:""}]}];
+  const merged=WF.mergeReportDraft(template,saved);
+  assert.deepEqual(merged[0].sections[1].executionTask,task);
+  merged[0].sections[1].executionTask.context.hash="changed";
+  assert.equal(task.context.hash,"context-1");
+  assert.equal(merged[0].sections[0].executionTask,undefined);
+});
+
+test("改名迁移只恢复旧正文，不把旧任务冒充新小节的生成任务",()=>{
+  const saved=[{cn:"一",name:"总论",sections:[{t:"旧背景",content:"原正文",executionTask:{taskId:"old-task",status:"running"}}]}];
+  const template=[{cn:"一",name:"总论",sections:[{t:"项目背景",content:"",executionTask:{taskId:"template-task"}}]}];
+  const merged=WF.mergeReportDraft(template,saved,{sectionAliases:{"总论|项目背景":["旧背景"]}});
+  assert.equal(merged[0].sections[0].content,"原正文");
+  assert.equal(merged[0].sections[0].executionTask,undefined);
+  assert.equal(merged[0].sections[0].syncStatus,"stale");
+  assert.equal(saved[0].sections[0].executionTask.taskId,"old-task");
+});
+
 test("批量接受候选稿只更新未锁定小节并保留一次撤销能力",()=>{
-  const open={content:"原稿A",syncStatus:"stale",staleKind:"logic"},locked={content:"原稿B",locked:true};
+  const open={content:"原稿A",syncStatus:"stale",staleKind:"logic"},locked={content:"原稿B"};
   WF.setCandidate(open,"候选A","同步正式逻辑",{logicRevision:{rules:[{id:"r1"}]},allowLogicAdoption:false});
   WF.setCandidate(locked,"候选B","人工修改");
+  locked.locked=true;
   assert.equal(open.pendingRevision.allowLogicAdoption,false);
   const result=WF.acceptAllCandidates([{checked:true,sections:[open,locked]}]);
   assert.deepEqual({total:result.total,accepted:result.accepted,locked:result.locked},{total:2,accepted:1,locked:1});

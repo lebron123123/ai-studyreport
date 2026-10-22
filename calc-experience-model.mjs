@@ -1,6 +1,15 @@
 // Experience-only normalization; existing finance engines remain the single calculation source.
 export const resultLabels={totalInvestment:'总投资',totalIncome:'全周期总收入',totalRevenue:'全周期总收入',totalCost:'总成本',totalTax:'税费合计',totalNetProfit:'净利润合计',totalProfit:'利润合计',totalNpv:'累计净现值',npv:'净现值',irr:'全投资IRR'};
 export const finite=value=>value===null||value===undefined||value===''||typeof value==='boolean'?null:(Number.isFinite(Number(value))?Number(value):null);
+export const monthFields={buildStartMonth:'建设开始年月',buildEndMonth:'建设结束年月',operateStartMonth:'运营开始年月',operateEndMonth:'运营结束年月'};
+export function validateMonths(params){
+  const keys=Object.keys(monthFields),filled=keys.filter(key=>params[key]);
+  if(!filled.length)return params;
+  for(const key of keys)if(!/^(19\d{2}|20\d{2}|21\d{2}|2200)-(0[1-9]|1[0-2])$/.test(params[key]||''))throw new Error('请完整填写有效的'+monthFields[key]);
+  if(params.buildEndMonth<params.buildStartMonth||params.operateEndMonth<params.operateStartMonth)throw new Error('结束年月不得早于开始年月');
+  if(params.operateStartMonth<params.buildStartMonth)throw new Error('运营开始年月不得早于建设开始年月');
+  return params;
+}
 export function isResult(metric){return Object.hasOwn(resultLabels,metric.metricKey)||metric.note==='测算结果'||metric.resultVersion==='excel'||metric.resultVersion==='system';}
 export function normalizeMetric(metric){
   const out={...metric},value=finite(metric.metricValue??metric.value);

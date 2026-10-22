@@ -62,10 +62,12 @@ export async function onRequestGet(context){
     return json({ok:true, project:{id:row.id, name:row.name, updated_at:row.updated_at, data:JSON.parse(row.data),role:access.role,permissions:{...access.permissions,delete:access.ownerUserId===Number(user.userId),duplicate:access.ownerUserId===Number(user.userId)}}});
   }
   await ensureProjectMemberships(env);
+  const offset=Number(url.searchParams.get('offset')||0);
+  if(!Number.isSafeInteger(offset)||offset<0)return json({ok:false,error:'项目分页位置无效'},400);
   const rows = await env.DB.prepare(
-    "SELECT p.id,p.user_id,p.name,p.data,p.updated_at,CASE WHEN p.user_id=? THEN 'OWNER' ELSE m.role END AS role FROM projects p LEFT JOIN project_memberships m ON m.project_id=p.id AND m.user_id=? AND m.status='active' WHERE p.user_id=? OR m.role IN ('OWNER','EDITOR','VIEWER') ORDER BY p.updated_at DESC LIMIT 100")
-    .bind(user.userId,user.userId,user.userId).all();
-  await ensureLifecycleIntegrity(env);const list=[];for(const row of rows.results||[]){const stage=await readWorkStage(env,row),data=parseData(row.data);data.workflow=data.workflow||{};data.workflow.management={...data.workflow.management,investmentStage:stage.key};list.push({...summarizeProjectRow({...row,data}),status:stage.key,stage:stage.label,workStageVersion:stage.version,role:row.role,permissions:{...projectRolePermissions(row.role),delete:Number(row.user_id)===Number(user.userId),duplicate:Number(row.user_id)===Number(user.userId)}});}return json({ok:true,list});
+    "SELECT p.id,p.user_id,p.name,p.data,p.updated_at,CASE WHEN p.user_id=? THEN 'OWNER' ELSE m.role END AS role FROM projects p LEFT JOIN project_memberships m ON m.project_id=p.id AND m.user_id=? AND m.status='active' WHERE p.user_id=? OR m.role IN ('OWNER','EDITOR','VIEWER') ORDER BY p.updated_at DESC,p.id DESC LIMIT 100 OFFSET ?")
+    .bind(user.userId,user.userId,user.userId,offset).all();
+  await ensureLifecycleIntegrity(env);const list=[];for(const row of rows.results||[]){const stage=await readWorkStage(env,row),data=parseData(row.data);data.workflow=data.workflow||{};data.workflow.management={...data.workflow.management,investmentStage:stage.key};list.push({...summarizeProjectRow({...row,data}),status:stage.key,stage:stage.label,workStageVersion:stage.version,role:row.role,permissions:{...projectRolePermissions(row.role),delete:Number(row.user_id)===Number(user.userId),duplicate:Number(row.user_id)===Number(user.userId)}});}return json({ok:true,list,nextOffset:list.length===100?offset+100:null});
 }
 
 export async function onRequestPost(context){

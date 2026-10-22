@@ -41,8 +41,97 @@ function buildSaleWordWorkbook(X,R,p){
   ]),[34,16].concat(ys.map(()=>13)));
   return wb;
 }
+function exportAppendGaibaoReviewSheets(X,wb,R,ys,specs,reg){
+  const annualById=Object.fromEntries(specs.flatMap(table=>table.rows.filter(row=>row.id).map(row=>[row.id,row])));
+  const overviewRows=[
+    ['收入',['i_rent','i_rat']],
+    ['成本费用',['c_col','c_eng','c_op','c_fin','c_shr','c_tot']],
+    ['还本付息',['l_eng','l_rep','l_int','l_pay']],
+    ['税金与利润',['t_vat','t_tot','p_tot','p_mk','p_tx','p_it','p_net']],
+    ['现金流',['f_in','f_out','f_net','f_cum','f_cnpv']]
+  ];
+  const monthlyAvailable=Array.isArray(R.monthlyCashflow)&&Array.isArray(R.monthlyDebt);
+  const review=X.utils.aoa_to_sheet([['非居改保年度测算总览（万元）'],[monthlyAvailable?'点击年份可查看该年逐月核对。':'当前结果无逐月债务明细，无法生成逐月核对。'],[],['指标','全周期合计',...ys.map(String)]]);
+  const yearAnchors={};
+  if(monthlyAvailable){
+    const cash=new Map(R.monthlyCashflow.map(row=>[row.date.slice(0,7),row]));
+    const debt=new Map(R.monthlyDebt.map(row=>[row.date,row]));
+    const monthly=X.utils.aoa_to_sheet([['逐月测算核对（万元）'],['12个月合计与年度表数值的差额应为0；期末借款余额取12月末，不累加。'],[]]);
+    let nextRow=4;
+    const sourceMap={
+      '收入:inflow':'i_rent','收入:incomeAT':'i_rat',
+      '成本:collect':'c_col','成本:amortization':'c_eng','成本:operations':'c_op','成本:interest':'c_fin','成本:share':'c_shr',
+      '还本付息:engineering':'l_eng','还本付息:repay':'l_rep','还本付息:interest':'l_int','还本付息:payTotal':'l_pay',
+      '税金:vat':'t_vat','税金:surcharge':'t_sur','税金:stamp':'t_stp','税金:incomeTax':'p_it',
+      '利润:incomeAT':'p_iat','利润:profit':'p_tot','利润:makeup':'p_mk','利润:taxable':'p_tx','利润:incomeTax':'p_it','利润:netProfit':'p_net',
+      '现金流:inflow':'f_in','现金流:outflow':'f_out','现金流:net':'f_net'
+    };
+    ys.forEach((year,yi)=>{
+      yearAnchors[year]=nextRow;
+      monthly['A'+nextRow]={t:'s',v:year+'年逐月明细'};
+      monthly['B'+nextRow]={t:'s',v:'返回年度总览',l:{Target:"#'年度总览'!"+X.utils.encode_col(yi+2)+'4',Tooltip:'返回'+year+'年年度数据'}};
+      nextRow++;
+      const header=['指标','来源',...Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0')+'月'),'逐月合计/期末','年度表数值','差额'];
+      header.forEach((value,i)=>{monthly[X.utils.encode_col(i)+nextRow]={t:'s',v:value};});
+      nextRow++;
+      calcMonthlyDetailGroups(R,year).forEach(group=>{
+        monthly['A'+nextRow]={t:'s',v:group.title};nextRow++;
+        group.rows.forEach(item=>{
+          const row=nextRow++,id=sourceMap[group.sheet+':'+item.key],annual=Number(item.annual);
+          const values=Array.from({length:12},(_,i)=>{
+            const date=year+'-'+String(i+1).padStart(2,'0');
+            const entry=(item.source==='debt'?debt:cash).get(date);
+            return entry&&Number.isFinite(Number(entry[item.key]))?Number(entry[item.key]):null;
+          });
+          const available=values.filter(v=>v!==null);
+          const total=available.length?(item.kind==='last'?available.at(-1):Math.round(available.reduce((a,b)=>a+b,0)*10000)/10000):null;
+          monthly['A'+row]={t:'s',v:item.label};monthly['B'+row]={t:'s',v:group.sheet};
+          values.forEach((value,i)=>{if(value!==null)monthly[X.utils.encode_col(i+2)+row]={t:'n',v:value,z:'#,##0.0000;[Red](#,##0.0000);–'};});
+          if(total!==null)monthly['O'+row]={t:'n',v:total,f:item.kind==='last'?'LOOKUP(2,1/(ISNUMBER(C'+row+':N'+row+')),C'+row+':N'+row+')':'ROUND(SUM(C'+row+':N'+row+'),4)',z:'#,##0.0000;[Red](#,##0.0000);–'};
+          if(Number.isFinite(annual)){
+            monthly['P'+row]={t:'n',v:annual,z:'#,##0.0000;[Red](#,##0.0000);–'};
+            if(id&&reg[id])monthly['P'+row].f="'"+reg[id].sheet+"'!"+X.utils.encode_col(yi+2)+reg[id].row;
+          }
+          if(total!==null&&Number.isFinite(annual))monthly['Q'+row]={t:'n',v:Math.round((total-annual)*10000)/10000,f:'ROUND(O'+row+'-P'+row+',4)',z:'#,##0.0000;[Red](#,##0.0000);–'};
+        });
+      });
+      nextRow+=2;
+    });
+    monthly['!ref']='A1:Q'+(nextRow-2);
+    monthly['!cols']=[{wch:30},{wch:15},...Array(12).fill({wch:13}),{wch:19},{wch:17},{wch:14}];
+    monthly['!freeze']={xSplit:2,ySplit:5};
+    X.utils.book_append_sheet(wb,monthly,'月度核对');
+  }
+  let reviewRow=5;
+  overviewRows.forEach(([section,ids])=>{
+    review['A'+reviewRow++]={t:'s',v:section};
+    ids.forEach(id=>{
+      const item=annualById[id],pos=reg[id];if(!item||!pos)return;
+      const row=reviewRow++,src=wb.Sheets[pos.sheet];
+      review['A'+row]={t:'s',v:item.l};
+      const base=src['B'+pos.row];
+      if(base)review['B'+row]={t:base.t,v:base.v,f:"'"+pos.sheet+"'!B"+pos.row,z:base.z||'#,##0.0000;[Red](#,##0.0000);–'};
+      ys.forEach((_,i)=>{
+        const cell=X.utils.encode_col(i+2),value=src[cell+pos.row];
+        if(value)review[cell+row]={t:value.t,v:value.v,f:"'"+pos.sheet+"'!"+cell+pos.row,z:value.z||'#,##0.0000;[Red](#,##0.0000);–'};
+      });
+    });
+  });
+  ys.forEach((year,i)=>{if(yearAnchors[year])review[X.utils.encode_col(i+2)+'4'].l={Target:"#'月度核对'!A"+yearAnchors[year],Tooltip:'查看'+year+'年12个月明细'};});
+  review['!ref']='A1:'+X.utils.encode_col(ys.length+1)+(reviewRow-1);
+  review['!cols']=[{wch:30},{wch:17},...ys.map(()=>({wch:15}))];
+  review['!freeze']={xSplit:2,ySplit:4};
+  X.utils.book_append_sheet(wb,review,'年度总览');
+  wb.SheetNames.splice(wb.SheetNames.indexOf('年度总览'),1);
+  wb.SheetNames.unshift('年度总览');
+  if(monthlyAvailable){
+    wb.SheetNames.splice(wb.SheetNames.indexOf('月度核对'),1);
+    wb.SheetNames.splice(wb.SheetNames.indexOf('月度现金流'),0,'月度核对');
+  }
+}
 function buildCalcWorkbook(){
-  const X = window.XLSX, R = scResult, ys = R.allYears, specs = calcSpecs(), K = calcEffK();
+  calcRefreshLegacyCashflow();
+  const X = window.XLSX, R = scResult, ys = R.allYears, specs = calcSpecs().map(t=>calcType==='gaibao'&&t.sheet==='税金'?{...t,rows:t.rows.filter(r=>r.detailOf!=='t_out'&&r.detailOf!=='t_in')}:t), K = calcEffK();
   if(calcType==="sale"&&R.saleEstimate)return buildSaleWordWorkbook(X,R,scParams||{});
   const wb = X.utils.book_new();
   const col = i => X.utils.encode_col(2+i);   // C 起为年份列
@@ -53,7 +142,7 @@ function buildCalcWorkbook(){
   const pushP = (label,key,val,note)=>{ pRows.push([label,key,val,note||""]); paramCell[key] = "'参数'!$C$"+pRows.length; };
   Object.entries(scParams||{}).forEach(([k,v])=>{ if(typeof v==="number") pushP("输入参数",k,v); else if(v!=null) pRows.push(["输入参数",k,typeof v==='object'?JSON.stringify(v):String(v),""]); });
   if(calcType==='gaibao'){
-    pushP('有效分成比例','effectiveShareRatio',scParams.mode==='share'?(scParams.sharePct??0)/100:0,'整租模式为0');
+    pushP('有效业主分成比例','effectiveShareRatio',scParams.mode==='share'?1-(scParams.projectSharePct??100-(scParams.sharePct??30))/100:0,'分成起始月以前为0；逐年分成见计算快照');
     pRows.push(['实际运营月数','monthDict',JSON.stringify(R.monthDict),'起止月份均计入']);
     (R.warnings||[]).forEach(t=>pRows.push(['口径提示','','',t]));
   }
@@ -102,10 +191,22 @@ function buildCalcWorkbook(){
             else if(r.xf.expr) c.f = r.xf.expr(ctx, i);
           }catch(e){}
         }
+        const monthlySource=R.monthlyCashflow||R.monthlyProfit;
+        const monthlyTaxCols={p_mk:'P',p_tx:'Q',p_it:'K'};
+        if(calcType==='gaibao'&&monthlySource&&(monthlyTaxCols[r.id]||R.monthlyCashflow&&(r.id==='c_col'||r.id==='c_shr'))){
+          const last=monthlySource.length+1,amountCol=monthlyTaxCols[r.id]||(r.id==='c_col'?'D':'G');
+          c.f="ROUND(SUMIFS('月度现金流'!$"+amountCol+"$2:$"+amountCol+"$"+last+",'月度现金流'!$A$2:$A$"+last+",\">=\"&DATE("+y+",1,1),'月度现金流'!$A$2:$A$"+last+",\"<\"&DATE("+(y+1)+",1,1)),4)";
+        }
         ws[cellRef]=c;
       });
       // 合计列
-      if(r.t==="none") ws["B"+row]={t:"s",v:"—"};
+      if(r.result){
+        const rate=r.result(R);
+        ws['B'+row]=rate==null?{t:'s',v:'—'}:{t:'n',v:rate/100,z:'0.00%'};
+        if(rate!=null&&r.id==='f_xirr')ws['B'+row].f="XIRR('月度现金流'!N2:N"+(R.monthlyCashflow.length+1)+",'月度现金流'!A2:A"+(R.monthlyCashflow.length+1)+")";
+        if(rate!=null&&r.id==='f_annual_irr')ws['B'+row].f="IRR(C"+reg.f_net.row+":"+col(ys.length-1)+reg.f_net.row+")";
+      }
+      else if(r.t==="none") ws["B"+row]={t:"s",v:"—"};
       else if(r.t==="last") ws["B"+row]={t:"n", v: vals.filter(v=>v!=null).slice(-1)[0]||0, f: col(ys.length-1)+row};
       else{
         const tot = vals.reduce((s,v)=>s+((typeof v==="number"&&isFinite(v))?v:0),0);
@@ -116,6 +217,25 @@ function buildCalcWorkbook(){
     ws["!cols"]=[{wch:30},{wch:14}].concat(ys.map(()=>({wch:12})));
     X.utils.book_append_sheet(wb, ws, t.sheet);
   });
+  if(calcType==='gaibao'&&(R.monthlyCashflow||R.monthlyProfit)){
+    const monthlySource=R.monthlyCashflow||R.monthlyProfit;
+    const data=[['日期（每月1日）','收入','工程流出','收楼','运营','利息','分成','增值税','附加','印花税','所得税（逐月补亏后）','舍入调平','现金流出','净现金流量','利润总额','前期补亏','计税基础','净利润']];
+    monthlySource.forEach(m=>data.push([(Date.parse(m.date+'T00:00:00Z')-Date.UTC(1899,11,30))/86400000,m.inflow,m.engineering,m.collect,m.operations,m.interest,m.share,m.vat,m.surcharge,m.stamp,m.incomeTax,m.reconciliation||0,m.outflow,m.net,m.profit,m.makeup,m.taxable,m.netProfit]));
+    const sheet=X.utils.aoa_to_sheet(data);
+    monthlySource.forEach((m,i)=>{
+      const row=i+2,current='O'+row,cumulative='SUM($O$2:'+current+')',previous='SUM($O$2:O'+(row-1)+')';
+      sheet['A'+row].z='yyyy-mm-dd';
+      sheet['P'+row].f=i===0?'0':'ROUND(IF(AND('+cumulative+'>0,'+current+'>0,'+previous+'<0),ABS('+previous+'),IF(AND('+cumulative+'<0,'+current+'>0),'+current+',0)),4)';
+      sheet['Q'+row].f='ROUND('+current+'-P'+row+',4)';
+      sheet['K'+row].f='ROUND(IF(Q'+row+'>0,Q'+row+'*'+ctx.param('incomeTax')+',0),4)';
+      sheet['R'+row].f='ROUND('+current+'-K'+row+',4)';
+      sheet['M'+row]={t:'n',v:m.outflow??Math.round((m.engineering+m.collect+m.operations+m.interest+m.share+m.vat+m.surcharge+m.stamp+m.incomeTax)*10000)/10000,f:'ROUND(SUM(C'+row+':L'+row+'),4)'};
+      sheet['N'+row]={t:'n',v:m.net??Math.round((m.inflow-sheet['M'+row].v)*10000)/10000,f:'ROUND(B'+row+'-M'+row+',4)'};
+    });
+    sheet['!cols']=[{wch:15},...Array(17).fill({wch:18})];
+    X.utils.book_append_sheet(wb,sheet,'月度现金流');
+  }
+  if(calcType==='gaibao')exportAppendGaibaoReviewSheets(X,wb,R,ys,specs,reg);
   const sch=scParams&&scParams.investSchedule;
   if(sch&&Array.isArray(sch.periods)&&sch.periods.length){
     const taskRows=[["序号","工作阶段"].concat(sch.periods.map(p=>p.label))];
@@ -162,11 +282,11 @@ function loadScript(src){
   });
 }
 async function ensureDocxLib(){
-  if(window.docx && window.buildDocxDocument) return;
+  if(window.docx && window.buildDocxDocument && window.ReportCoverMetadata) return;
   if(!docxLibLoading){
-    docxLibLoading = Promise.all([loadScript("docx.umd.js"), loadScript("report-output-policy.js?v=20260909.1"), loadScript("docxgen.js?v=20260909.2")]);
+    docxLibLoading = Promise.all([loadScript("docx.umd.js"), loadScript("report-output-policy.js?v=20260930.depth1"), loadScript("report-cover-metadata.js?v=20261013.cover1"), loadScript("docxgen.js?v=20261013.cover1")]);
   }
-  await docxLibLoading;
+  try{await docxLibLoading;}catch(error){docxLibLoading=null;throw error;}
 }
 
 // HTML → 结构块（段落/表格/标题/列表），供docx构建
@@ -183,34 +303,40 @@ function htmlToBlocks(htmlStr){
     if(tag==="FIGURE" && node.classList.contains("rpt-template-card")){
       const id=node.getAttribute("data-template-id");
       const type=typeof reportTableProjectType==="function"?reportTableProjectType():null;
-      const template=id&&type&&window.ReportTableTemplates?window.ReportTableTemplates.exportTemplate(id,type):null;
-      if(template){
-        node.querySelectorAll(".rpt-template-segment[data-segment]").forEach(segEl=>{
-          const si=Number(segEl.getAttribute("data-segment"));
-          const segment=template.segments&&template.segments[si];
+      const library=window.ReportTableTemplates;
+      if(!library?.fromFigure)throw new Error('表格导出组件尚未就绪，请刷新后重试；原表未修改。');
+      const source=id&&type?library.exportTemplate(id,type):null;
+      const template=library.fromFigure(node,source);
+      let segmentIndex=0;
+      const figureBlocks=el=>{
+        if(el.nodeType===3){if(el.textContent.trim())blocks.push({type:'p',text:el.textContent.trim()});return;}
+        if(el.nodeType!==1)return;
+        if(el.tagName==='FIGURE'){blocks.push(...htmlToBlocks(el.outerHTML));return;}
+        // Catalogue badges and editor expand/collapse labels are not report text.
+        // Titles are emitted by the native table; all real notes stay in order.
+        if(el.tagName==='FIGCAPTION'||el.tagName==='SUMMARY'||el.classList.contains('rpt-template-segment-title'))return;
+        if(el.tagName==='TABLE'){
+          const index=segmentIndex++,segment=template.segments[index];
           if(!segment)return;
-          segEl.querySelectorAll("[data-row][data-col]").forEach(cellEl=>{
-            if(segment.rows.length>1){
-              while(segment.rows.length<=Number(cellEl.getAttribute('data-row')))segment.rows.push({cells:segment.rows[0].cells.map(c=>Object.assign({},c,{text:'',role:'value'}))});
-            }
-            const row=segment.rows[Number(cellEl.getAttribute("data-row"))];
-            const cell=row&&row.cells.find(c=>Number(c.col)===Number(cellEl.getAttribute("data-col")));
-            if(cell)cell.text=cellEl.querySelector(".rpt-template-empty")?"":cellEl.textContent.trim();
-          });
-        });
-        blocks.push({type:"templateTable",template});
-      }
+          const title=el.closest('.rpt-template-segment')?.querySelector('.rpt-template-segment-title')?.textContent.trim()||template.title;
+          blocks.push({type:'templateTable',template:{...template,title,segments:[segment]}});return;
+        }
+        if(el.querySelector('table'))Array.from(el.childNodes).forEach(figureBlocks);
+        else blocks.push(...htmlToBlocks(el.outerHTML));
+      };
+      Array.from(node.childNodes).forEach(figureBlocks);
     }else if(node.classList.contains("rpt-table-caption")){
       blocks.push({type:"tableCaption",text:node.textContent.trim()});
     }else if(tag==="TABLE"){
       const rows = [...node.querySelectorAll("tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
       if(rows.length) blocks.push({type:"table", rows});
     }else if(tag==="UL" || tag==="OL"){
-      const ordered = tag==="OL";
-      [...node.querySelectorAll("li")].forEach((li,idx)=>{
-        const t = li.textContent.trim();
-        if(t) blocks.push({type:"p", text:(ordered ? (idx+1)+". " : "· ") + t});
-      });
+      const items=Array.from(node.children).filter(li=>li.tagName==='LI').map(li=>({blocks:htmlToBlocks(li.innerHTML)}));
+      const start=Number(node.getAttribute('start'));
+      if(items.length)blocks.push({type:'list',ordered:tag==='OL',start:Number.isInteger(start)&&start>0?start:1,items});
+    }else if(node.querySelector('table,ol,ul')){
+      // Editor/pasted wrappers are structural containers, not plain paragraphs.
+      blocks.push(...htmlToBlocks(node.innerHTML));
     }else if(/^H[1-6]$/.test(tag)){
       const t = node.textContent.trim();
       if(t) blocks.push({type:"h", level:Number(tag.slice(1)), text:t});
@@ -219,7 +345,7 @@ function htmlToBlocks(htmlStr){
     }else if(tag==="DIV" && /font-weight:\s*600/.test(node.getAttribute("style")||"")){
       // md.js 产出的标题是带 font-weight:600 的 div
       const t = node.textContent.trim();
-      if(t) blocks.push({type:"h", text:t});
+      if(t) blocks.push({type:"h", level:Number(node.dataset.reportHeadingLevel)||3, text:t});
     }else if(tag==="BLOCKQUOTE"){
       const t = node.textContent.trim();
       if(t) blocks.push({type:"p", text:t});
@@ -269,27 +395,31 @@ async function exportFrozenDeliveryWord(projectId,deliveryId){
   payload.chapters.forEach((c,i)=>{c.cn=c.cn||i+1;});
   payload.provenance={note:'以下是冻结时保存的来源记录，不代表原文已经人工核实。',rows:[['章节','记录类别','版本','冻结来源记录'],...snapshot.chapters.flatMap(c=>c.sections.filter(s=>s.prov).map(s=>[c.name+' / '+s.title,'来源快照',record.contentHash.slice(0,12),JSON.stringify(s.prov)]))]};
   const blob=await window.docx.Packer.toBlob(window.buildDocxDocument(window.docx,payload));
-  await verifyReportPageLimit(blob);
-  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=(snapshot.project.name||'可行性研究报告')+(approved?'_正式版_':'_冻结待复核_')+record.contentHash.slice(0,12)+'.docx';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  const prepared=await verifyReportPageLimit(blob,{prepareDownload:true});
+  const url=URL.createObjectURL(prepared.downloadBlob),a=document.createElement('a');a.href=url;a.download=(snapshot.project.name||'可行性研究报告')+(approved?'_正式版_':'_冻结待复核_')+record.contentHash.slice(0,12)+'.docx';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
 function buildExportPayload(){
-  const active = chapters.filter(c=>c.checked);
-  const secEls = document.querySelectorAll("#sheet .section-block");
+  const historical=arguments[0]?.version||null,sourceChapters=historical?historical.chapters:chapters;
+  const active = sourceChapters.filter(c=>c.checked!==false);
+  // Historical export reads the selected immutable snapshot, never current DOM.
+  const secEls = historical||arguments[0]?.stateOnly===true?[]:document.querySelectorAll("#sheet .section-block");
   const elMap = {};
   secEls.forEach(el=>{ const b = el.querySelector(".body"); if(el.dataset.cn!==undefined) elMap[el.dataset.cn+'_'+el.dataset.si] = b; });
-  const reportEntries=active.flatMap(c=>c.sections.map((s,si)=>({section:s,html:elMap[c.cn+'_'+si]?.innerHTML||s.editedHtml||renderContent(s.content||''),context:{type:typeof reportTableProjectType==='function'?reportTableProjectType():null,chapter:c.name,section:s.t,number:(chapters.indexOf(c)+1)+'.'+(si+1)}}))).filter(e=>e.html.trim());
-  const composed=window.ReportSectionLayout?.composeDocument?window.ReportSectionLayout.composeDocument(reportEntries,window.ReportTableTemplates):null;
+  const reportEntries=active.flatMap(c=>c.sections.map((s,si)=>({section:s,html:elMap[c.cn+'_'+si]?.innerHTML||s.editedHtml||renderContent(s.content||''),context:{type:historical?null:typeof reportTableProjectType==='function'?reportTableProjectType():null,chapter:c.name,section:s.t,number:(sourceChapters.indexOf(c)+1)+'.'+(si+1)}}))).filter(e=>e.html.trim());
+  // Historical copies normalize presentation headings only. Do not reconcile,
+  // deduplicate or inject tables using today's catalogue into an older report.
+  const composed=historical&&window.ReportSectionLayout?.normalizeHeadings?reportEntries.map(e=>{const box=document.createElement('div');box.innerHTML=e.html;window.ReportSectionLayout.normalizeHeadings(box,e.context);return box.innerHTML;}):window.ReportSectionLayout?.composeDocument?window.ReportSectionLayout.composeDocument(reportEntries,window.ReportTableTemplates):null;
 
-  const chs = active.map(c=>({ cn:c.cn, name:c.name, num: chapters.indexOf(c)+1,
+  const chs = active.map(c=>({ cn:c.cn, name:c.name, num: sourceChapters.indexOf(c)+1,
     sections: c.sections.map((s,si)=>{
       if(!String(s.content||"").trim()&&!String(s.editedHtml||"").trim())return null;
       const el = elMap[c.cn+'_'+si];
       const originalHtml = el? el.innerHTML : (s.editedHtml || renderContent(s.content||""));
-      const htmlStr=composed?composed[reportEntries.findIndex(e=>e.section===s)]:window.ReportSectionLayout?window.ReportSectionLayout.compose(originalHtml,{type:typeof reportTableProjectType==='function'?reportTableProjectType():null,chapter:c.name,section:s.t,number:(chapters.indexOf(c)+1)+'.'+(si+1)},window.ReportTableTemplates):originalHtml;
+      const htmlStr=composed?composed[reportEntries.findIndex(e=>e.section===s)]:window.ReportSectionLayout?window.ReportSectionLayout.compose(originalHtml,{type:historical?null:typeof reportTableProjectType==='function'?reportTableProjectType():null,chapter:c.name,section:s.t,number:(sourceChapters.indexOf(c)+1)+'.'+(si+1)},historical?null:window.ReportTableTemplates):originalHtml;
       const blocks=htmlToBlocks(htmlStr);
       // 绿色“本节生成逻辑”只用于网页解释和交互，不属于正式报告正文，禁止进入Word。
       // 导出只读取 .body 或正式正文状态，不读取相邻的逻辑卡、材料框架卡和操作按钮。
-      const type=typeof reportTableProjectType==="function"?reportTableProjectType():null;
+      const type=historical?null:typeof reportTableProjectType==="function"?reportTableProjectType():null;
       if(!window.ReportSectionLayout&&type&&window.ReportTableTemplates){
         const used=new Set(blocks.filter(b=>b.type==="templateTable").map(b=>b.template&&b.template.id));
         window.ReportTableTemplates.forSection(type,c.name,s.t).forEach(t=>{
@@ -303,7 +433,7 @@ function buildExportPayload(){
   const provenance=exportProvenance(active);
 
   let appendix = null;
-  if(calcResult){
+  if(!historical&&calcResult){
     const r = calcResult, s = r.summary;
     const fmt = x=> x==null||x===""||!Number.isFinite(Number(x))? "—" : Number(x).toLocaleString("zh-CN",{maximumFractionDigits:2});
     const mainRows = [["年份","租金收入","总成本","税金","净利润","净现金流","累计净现金流"]];
@@ -319,15 +449,25 @@ function buildExportPayload(){
       mainRows, sensRows,
     };
   }
-  const type=typeof reportTableProjectType==="function"?reportTableProjectType():null;
+  const type=historical?null:typeof reportTableProjectType==="function"?reportTableProjectType():null;
   const bodyTemplateIds=new Set(chs.flatMap(c=>c.sections.flatMap(s=>s.blocks.filter(b=>b.type==='templateTable').map(b=>b.template.id))));
   const tableAppendix=type&&window.ReportTableTemplates
     ?window.ReportTableTemplates.appendix(type).filter(t=>!bodyTemplateIds.has(t.id)).map(t=>window.ReportTableTemplates.exportTemplate(t.id,type))
     :[];
   const workflow=typeof projectWorkflow!=="undefined"?projectWorkflow:null;
-  const current=workflow?.reportVersions?.find(v=>v.id===workflow.currentReportVersionId);
-  const versionNote=[current?"关联报告版本 V"+current.version:null,typeof reportDocumentRevision!=="undefined"?"工作稿修订 "+reportDocumentRevision:null].filter(Boolean).join(" · ");
-  return { project: project, signed: false, docNo: getDocNo(), chapters: chs, appendix, tableAppendix, provenance, versionNote:versionNote+' · 未签发工作稿' };
+  const current=historical||workflow?.reportVersions?.find(v=>v.id===workflow.currentReportVersionId);
+  const versionNote=historical?'历史正文快照 V'+historical.version+' · 不读取当前正文或测算附表 · 封面项目信息为当前项目': [current?"关联报告版本 V"+current.version:null,typeof reportDocumentRevision!=="undefined"?"工作稿修订 "+reportDocumentRevision:null].filter(Boolean).join(" · ");
+  const completionPlan=historical&&window.ReportCompletionContract?ReportCompletionContract.createPlan(sourceChapters):arguments[0]?.savedCompletionReview?arguments[0].savedCompletionReview.takePlan():typeof reportCompletionPlan==='function'?reportCompletionPlan():null;
+  const completionReview=completionPlan&&window.ReportCompletionContract?window.ReportCompletionContract.reviewDocument(reportEntries.map((e,i)=>({key:e.context.chapter+' / '+e.context.section,number:e.context.number,text:composed?composed[i]:e.html})),completionPlan):null;
+  if(historical&&completionReview){if(completionReview.status==='passed')completionReview.status='unverified';completionReview.issues.push({code:'historical-version',severity:'warning',message:'历史正文快照只读导出，未按当前事实台账重新签认；不会替换旧正文或套入当前财务结果'});}
+  // A historical snapshot without its own confirmed length plan must never
+  // borrow today's project target. Capture the current draft's target before
+  // asynchronous packing/pagination, just like its body and filename.
+  const paginationTarget=exportReportPaginationTarget(historical?null:window.ReportLengthUI?.savedPlan?.());
+  const coverContext=window.ReportCoverMetadata?.captureContext(project,{historical:!!historical,workflow,
+    calcType:(typeof rptCtype!=='undefined'&&rptCtype)||(typeof calcType!=='undefined'?calcType:null),
+    calcParams:typeof calcParams!=='undefined'?calcParams:null})||null;
+  return { project: project, coverContext, signed: false, docNo: getDocNo(), chapters: chs, appendix, tableAppendix, provenance, completionReview, paginationTarget, versionNote:versionNote+' · 未签发工作稿' };
 }
 
 /* ===== 图表转PNG(嵌入Word用) ===== */
@@ -389,28 +529,37 @@ async function collectReportImages(){
 }
 
 async function exportWord(){
-  const btn = document.getElementById("exportWordBtn")||document.getElementById("exportWordDraftBtn");
+  const options=arguments[0]||{},btn = options.button||document.getElementById("exportWordBtn")||document.getElementById("exportWordDraftBtn"),buttonText=btn?.textContent;
+  if(btn?.disabled)return;
   if(btn){ btn.disabled = true; btn.textContent = "正在生成 .docx…"; }
   try{
     const researchToken=window.ResearchUI?.active()?window.ResearchUI.capture('export'):null;
     const legacyProjectId=typeof currentProjectId!=='undefined'?currentProjectId:null;
-    const guardExport=async()=>{if(researchToken)await window.ResearchUI.guard(researchToken);else if(legacyProjectId!==(typeof currentProjectId!=='undefined'?currentProjectId:null))throw new Error('项目已切换，请在目标项目重新下载');};
+    const savedVersion=options.versionId?projectWorkflow?.reportVersions?.find(v=>v.id===options.versionId):null;
+    if(options.versionId&&!savedVersion)throw new Error('未找到所选报告版本，原稿未改变');
+    const versionSource=savedVersion?JSON.stringify(savedVersion):null,versionSnapshot=versionSource?JSON.parse(versionSource):null;
+    const guardExport=async()=>{if(researchToken)await window.ResearchUI.guard(researchToken);else if(window.ResearchUI?.active()||legacyProjectId!==(typeof currentProjectId!=='undefined'?currentProjectId:null))throw new Error('项目已切换，请在目标项目重新下载');if(versionSource&&JSON.stringify(projectWorkflow?.reportVersions?.find(v=>v.id===options.versionId))!==versionSource)throw new Error('所选历史版本已变化，未下载混合内容，请重新打开本版');};
     await guardExport();
     await ensureDocxLib();
     if(typeof ensureReportTableTemplates==="function")await ensureReportTableTemplates();
     await guardExport();
-    const payload = JSON.parse(JSON.stringify(buildExportPayload()));
-    const versions=projectWorkflow&&Array.isArray(projectWorkflow.reportVersions)?projectWorkflow.reportVersions:[],current=versions.find(v=>v.id===projectWorkflow.currentReportVersionId)||versions[versions.length-1];
+    if(!versionSnapshot&&window.ReportGapUI&&typeof reportPrepareGapVerification==='function')await reportPrepareGapVerification();
+    await guardExport();
+    const savedCompletionReview=!versionSnapshot&&typeof reportSavedCompletionReviewPlan==='function'?await reportSavedCompletionReviewPlan():null;
+    await guardExport();
+    const payload = JSON.parse(JSON.stringify(buildExportPayload({version:versionSnapshot,savedCompletionReview})));
+    const versions=projectWorkflow&&Array.isArray(projectWorkflow.reportVersions)?projectWorkflow.reportVersions:[],current=versionSnapshot||versions.find(v=>v.id===projectWorkflow.currentReportVersionId)||versions[versions.length-1];
     const filename=(payload.project.name||"可行性研究报告")+"_未签发工作稿"+(current?"V"+current.version:"")+(researchToken?'_研究轮次_'+researchToken.runId.slice(0,8):'')+".docx";
     if(researchToken){payload.signed=false;payload.versionNote+=' · 研究 '+researchToken.researchId+' · 轮次 '+researchToken.runId;}
     if(!payload.chapters.length)throw new Error("当前还没有已生成的小节可供导出");
+    exportReportCompletionGate(payload);
     payload.images = [];
     const doc = window.buildDocxDocument(window.docx, payload);
     const blob = await window.docx.Packer.toBlob(doc);
     if(btn)btn.textContent='正在核验实际页数…';
-    await verifyReportPageLimit(blob);
+    const prepared=await verifyReportPageLimit(blob,{prepareDownload:true,paginationTarget:payload.paginationTarget});
     await guardExport();
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(prepared.downloadBlob);
     const a = document.createElement("a");
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -418,20 +567,203 @@ async function exportWord(){
   }catch(e){
     alert("导出失败："+e.message);
   }
-  if(btn){ btn.disabled = false; btn.textContent = btn.id==="exportWordDraftBtn"?"下载当前阶段 Word":"导出 Word"; }
+  if(btn){ btn.disabled = false; btn.textContent = buttonText||(btn.id==="exportWordDraftBtn"?"下载当前阶段 Word":"导出 Word"); }
 }
 
-async function verifyReportPageLimit(blob){
-  let response;
-  try{response=await fetch('/api/report-pagination',{method:'POST',headers:{...authHeaders(),'Content-Type':'application/vnd.openxmlformats-officedocument.wordprocessingml.document'},body:blob,signal:AbortSignal.timeout(75000)});}
-  catch(e){throw Error('页数核验服务暂不可用，请稍后重试；原报告未修改。');}
-  const data=await response.json().catch(()=>({}));
-  if(response.status===422&&data.ok===false&&Number.isInteger(data.pages)&&data.pages>120&&data.maxPages===120){
-    if(!confirm('报告共'+data.pages+'页，超过120页目标。\n\n是否仍然下载完整报告？\n点击“确定”仍然下载，点击“取消”返回。正文不会删减。'))throw Error('已取消下载，原报告未修改。');
-    return {...data,overLimitAccepted:true};
+function exportReportCompletionGate(payload){
+  const review=payload.completionReview;
+  if(!review||!['passed','unverified','blocked'].includes(review.status)||!review.planId)throw new Error('未取得当前报告的完整成稿检查，请刷新后重试；不会跳过检查直接导出');
+  const issues=[...(review.issues||[]),...(review.reviews||[]).flatMap(r=>(r.issues||[]).map(i=>({...i,section:r.key})))];
+  const broken=issues.filter(i=>['table-placeholder','table-shape','table-markers'].includes(i.code));
+  if(broken.length)throw new Error('存在未还原或结构不完整的表格，请先返修：'+broken.slice(0,5).map(i=>(i.section?i.section+'：':'')+i.message).join('；'));
+  if(review.status!=='passed'){
+    const detail=issues.slice(0,6).map(i=>(i.section?i.section+'：':'')+i.message).join('\n');
+    if(!confirm('成稿检查'+(review.status==='blocked'?'未达标':'尚待核实')+'（'+issues.length+'项）。\n'+detail+'\n\n原文不会截断，也不视为正式达标。是否仍下载完整待审工作稿？'))throw new Error('已取消待审稿下载，原报告保留');
   }
-  if(!response.ok||!data.ok||!Number.isInteger(data.pages)||data.pages>120)throw Error(data.error||'未能确认报告在120页以内，暂不下载，请检查排版服务。');
+  payload.signed=false;
+  payload.versionNote+=' · 成稿计划 '+review.planId+' · '+(review.status==='blocked'?'篇幅/结构未达标':review.status==='unverified'?'证据待核实':'机械检查通过，待事实审签');
+}
+
+function exportReportPaginationPanel(){
+  document.getElementById('reportPaginationReceiptPanel')?.remove();
+  const panel=document.createElement('section');panel.id='reportPaginationReceiptPanel';
+  panel.setAttribute('aria-label','Word实际分页核验');
+  panel.style.cssText='position:fixed;right:20px;bottom:20px;z-index:10050;width:min(620px,calc(100vw - 40px));max-height:70vh;overflow:auto;box-sizing:border-box;padding:16px;background:#fff;border:1px solid #a9bfd7;border-radius:10px;box-shadow:0 6px 28px #163b6026;color:#173958;font:14px/1.6 sans-serif;';
+  const close=document.createElement('button');close.type='button';close.textContent='关闭';close.style.cssText='float:right;margin-left:12px;';close.onclick=()=>panel.remove();
+  const status=document.createElement('div');status.dataset.paginationStatus='loading';status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.textContent='正在核验实际分页与文件回执…';
+  const detail=document.createElement('div');detail.dataset.paginationDetail='true';
+  panel.append(close,status,detail);document.body.appendChild(panel);
+  return {panel,status,detail};
+}
+function exportReportPaginationTarget(plan){
+  const fallback={min:110,max:130,targetPages:120,source:'default',planId:null};
+  if(!plan||typeof plan.confirmedAt!=='string'||!Number.isFinite(Date.parse(plan.confirmedAt))||plan.budgetResolution?.policy!=='confirmed-length-plan')return fallback;
+  try{if(window.ReportLengthPlan?.validatePlan?.(plan)?.valid!==true)return fallback;}catch{return fallback;}
+  const range=plan.targetPageRange;
+  if(!range||!Number.isInteger(range.min)||!Number.isInteger(range.max)||range.min<1||range.max<range.min)return fallback;
+  return {min:range.min,max:range.max,targetPages:plan.targetPages,source:'confirmed-length-plan',planId:plan.planId};
+}
+function exportReportPaginationRange(target){
+  // Target metadata only classifies the user's requested length. It never
+  // changes the fixed server/receipt security checks or the 130-page guard.
+  return target?.source==='confirmed-length-plan'&&typeof target.planId==='string'&&target.planId&&Number.isInteger(target.min)&&Number.isInteger(target.max)&&target.min>=1&&target.max>=target.min&&target.max<=1100
+    ?{min:target.min,max:target.max,targetPages:target.targetPages,source:target.source,planId:target.planId}:exportReportPaginationTarget();
+}
+function exportReportPaginationReceiptView(view,data){
+  const receipt=data.receipt,diagnostics=data.diagnostics||{};
+  const add=(parent,tag,text)=>{const node=document.createElement(tag);node.textContent=text;parent.appendChild(node);return node;};
+  const target=exportReportPaginationRange(data.paginationTarget),targetRange=target.min+'–'+target.max,over=data.pages>target.max,below=data.pages<target.min,overGuard=data.pages>130;
+  view.status.dataset.paginationStatus=over||overGuard?'over-limit':'verified';
+  view.status.dataset.depthStatus=over?'over-target':below?'below-target':'within-target';
+  view.status.textContent='实际 '+data.pages+' 页 · '+(over?'超过'+targetRange+'页目标（未达标）':below?'低于'+targetRange+'页详实目标，需核查分析深度':'位于'+targetRange+'页目标区间（内容仍须审签）')+(overGuard?' · 超过固定130页下载保护线（需确认）':'')+' · 文件 SHA-256 已核对';
+  view.detail.replaceChildren();
+  add(view.detail,'p','此回执仅证明本文件的实际分页，不证明正文事实、测算或内容质量已通过复核。不同终端字体和 Word/WPS 版本仍可能重排。');
+  if(below)add(view.detail,'p','页数偏少不自动触发返修。请查看重点章节的事实、比较、因果、财务驱动与风险论证；选择需要补充的小节填写修订要求。资料不足仍保留待补，不为凑页数重复背景。');
+  const detail=add(view.detail,'details','');
+  add(detail,'summary','展开真实章节 / 表格页区间与回执');
+  add(detail,'p','排版引擎：'+receipt.renderer+' '+receipt.rendererVersion+'；核验时间：'+new Date(receipt.checkedAt).toLocaleString('zh-CN'));
+  add(detail,'p','规则：'+receipt.rulesVersion+'；模板：'+receipt.templateVersion+'（文件内版本一致）');
+  add(detail,'p','篇幅目标：'+targetRange+' 页（'+(target.source==='confirmed-length-plan'?'本次已确认计划 '+target.planId:'默认范围；未套用其他工作稿的计划')+'）；下载保护线：130 页。'+(receipt.maxPages===120?'旧版服务回执仍按其120页协议校验，未将旧上限当作当前目标。':''));
+  add(detail,'p','SHA-256：'+receipt.documentSha256).style.overflowWrap='anywhere';
+  if(receipt.tocUpdated){
+    add(view.detail,'p','下载文件已更新目录页码及章节链接；在 Word/WPS 中按 Ctrl+单击可跳转，右键目录可更新域。编辑正文后需再次更新目录。');
+    add(detail,'p','已更新下载文件 SHA-256：'+receipt.preparedDocumentSha256).style.overflowWrap='anywhere';
+  }
+  const validRange=row=>row&&Number.isInteger(row.startPage)&&Number.isInteger(row.endPage)&&row.startPage>=1&&row.endPage>=row.startPage&&row.endPage<=data.pages;
+  const actual=diagnostics.measurement==='actual-renderer-pages'&&['available','partial'].includes(diagnostics.status);
+  const sections=actual&&Array.isArray(diagnostics.sections)?diagnostics.sections.filter(row=>validRange(row)&&/^_tc\d+_\d+$/.test(row.bookmark)):[];
+  const tables=actual&&Array.isArray(diagnostics.tables)?diagnostics.tables.filter(row=>validRange(row)&&Number.isInteger(row.index)&&row.index>=1):[];
+  const incomplete=!actual||diagnostics.status!=='available'||sections.length!==(diagnostics.sections||[]).length||tables.length!==(diagnostics.tables||[]).length;
+  add(detail,'p',incomplete?'明细不完整 / 不可用：'+(typeof diagnostics.reason==='string'?diagnostics.reason:'未取得可靠的全部章节和表格页区间；不使用估算代替。'):'章节与表格页区间来自排版引擎实测。');
+  const range=row=>row.startPage===row.endPage?'第 '+row.startPage+' 页':'第 '+row.startPage+'–'+row.endPage+' 页';
+  if(sections.length){
+    add(detail,'strong','章节（'+sections.length+'）');const list=add(detail,'ul','');
+    sections.forEach(row=>add(list,'li',String(row.title||row.bookmark).slice(0,300)+'：'+range(row)));
+  }else add(detail,'p','章节实际页区间不可用。');
+  if(tables.length){
+    add(detail,'strong','表格（'+tables.length+'）');const list=add(detail,'ul','');
+    tables.forEach(row=>{const owner=sections.find(s=>s.bookmark===row.sectionBookmark);add(list,'li','表 '+row.index+'：'+range(row)+(owner?' · '+String(owner.title||owner.bookmark).slice(0,300):' · 所属章节未定位'));});
+  }else add(detail,'p',actual&&diagnostics.status==='available'?'未检出表格。':'表格实际页区间不可用。');
+  add(detail,'p','小节可共享同一页，区间页数不能相加作为全篇页数。');
+}
+function exportReportPaginationValidate(data,response,documentSha256){
+  const receipt=data?.receipt,protocolLimit=receipt?.schemaVersion==='report-pagination-receipt-v1'?120:receipt?.schemaVersion==='report-pagination-receipt-v2'?130:null;
+  if(!data||!Number.isInteger(data.pages)||data.pages<1||protocolLimit===null||data.maxPages!==protocolLimit)throw Error(data?.error||'未取得有效实际页数或分页协议，暂不下载，请检查排版服务。');
+  const over=data.pages>protocolLimit;
+  if(over?response.status!==422||data.ok!==false:!response.ok||data.ok!==true)throw Error(data.error||'分页结果与服务状态不一致，暂不下载。');
+  if(receipt.scope!=='pagination-only'||receipt.contentQualityCertified!==false)throw Error('缺少有效分页回执或回执范围错误，暂不下载；请更新排版服务后重试。');
+  if(!/^[a-f0-9]{64}$/.test(receipt.documentSha256)||receipt.documentSha256!==documentSha256)throw Error('分页回执与待下载 Word 文件不一致，暂不下载；请重新生成并核验。');
+  const rules=window.ReportOutputPolicy?.contentVersion,template=window.buildDocxDocument?.templateVersion;
+  if(!rules||!template||receipt.versionsMatch!==true||receipt.rulesVersion!==rules||receipt.documentRulesVersion!==rules||receipt.templateVersion!==template||receipt.documentTemplateVersion!==template)throw Error('分页规则或模板版本不一致，暂不下载；请刷新页面并确认排版服务已更新。');
+  if(receipt.pages!==data.pages||receipt.maxPages!==protocolLimit||receipt.validationStatus!==(over?'over-page-limit':'within-page-limit')||receipt.renderer!==data.renderer||typeof receipt.renderer!=='string'||!receipt.renderer.trim()||typeof receipt.rendererVersion!=='string'||!receipt.rendererVersion.trim()||receipt.rendererVersion==='unknown'||!Number.isFinite(Date.parse(receipt.checkedAt)))throw Error('分页回执的页数、状态或排版器版本无效，暂不下载。');
   return data;
+}
+async function verifyReportPageLimit(blob,{prepareDownload=false,paginationTarget,measurementOnly=false}={}){
+  const view=measurementOnly?null:exportReportPaginationPanel();
+  const target=exportReportPaginationRange(paginationTarget);
+  try{
+    if(!window.crypto?.subtle||!blob?.arrayBuffer)throw Error('当前浏览器无法核对文件 SHA-256，暂不下载；请使用 HTTPS 或 localhost 打开后重试。');
+    const bytes=await blob.arrayBuffer();
+    const documentSha256=Array.from(new Uint8Array(await window.crypto.subtle.digest('SHA-256',bytes)),value=>value.toString(16).padStart(2,'0')).join('');
+    let response;
+    try{response=await fetch('/api/report-pagination',{method:'POST',headers:{...authHeaders(),'Content-Type':'application/vnd.openxmlformats-officedocument.wordprocessingml.document',...(prepareDownload?{Accept:'multipart/form-data'}:{})},body:blob,signal:AbortSignal.timeout(75000)});}
+    catch(e){throw Error('页数核验服务暂不可用，请稍后重试；原报告未修改。');}
+    let raw,downloadBlob;
+    if(prepareDownload&&response.headers?.get('Content-Type')?.includes('multipart/form-data')){
+      const parts=await response.formData();
+      try{raw=JSON.parse(parts.get('receipt'));}catch{throw Error('目录更新回执无法读取，暂不下载。');}
+      downloadBlob=parts.get('document');
+    }else raw=await response.json().catch(()=>({}));
+    const data=exportReportPaginationValidate(raw,response,documentSha256);
+    if(prepareDownload){
+      if(data.receipt.tocUpdated!==true||!downloadBlob?.size||!downloadBlob?.arrayBuffer)throw Error('排版服务未返回已更新目录的 Word，暂不下载；请更新服务后重试。');
+      const preparedHash=Array.from(new Uint8Array(await window.crypto.subtle.digest('SHA-256',await downloadBlob.arrayBuffer())),value=>value.toString(16).padStart(2,'0')).join('');
+      if(data.receipt.preparedDocumentSha256!==preparedHash)throw Error('已更新 Word 与下载回执不一致，暂不下载；请重新核验。');
+      data.downloadBlob=downloadBlob;
+    }
+    data.paginationTarget=target;
+    if(view)exportReportPaginationReceiptView(view,data);
+    // Initial drafting measures the same file and validates the same receipt,
+    // but must not ask the download override question or treat it as delivery.
+    if(measurementOnly)return data;
+    const overTarget=data.pages>target.max,overGuard=data.pages>130;
+    if(overTarget||overGuard){
+      const reason=(overTarget?'超过'+target.min+'–'+target.max+'页目标（未达标）':'位于'+target.min+'–'+target.max+'页自选目标范围')+(overGuard?'；超过固定130页下载保护线':'');
+      if(!confirm('报告实际共'+data.pages+'页，'+reason+'。文件及版本回执已核对。\n\n是否仍然下载完整报告？\n点击“确定”仍然下载，点击“取消”返回。正文不会删减；分页回执不代表内容质量通过。')){
+        view.status.dataset.paginationStatus='cancelled';view.status.textContent='实际 '+data.pages+' 页 · '+reason+' · 已取消下载';
+        throw Error('已取消下载，原报告未修改。');
+      }
+      view.status.textContent='实际 '+data.pages+' 页 · '+reason+' · 已明确同意完整下载';
+      return {...data,overLimitAccepted:true};
+    }
+    return data;
+  }catch(error){
+    if(view&&view.status.dataset.paginationStatus!=='cancelled'){
+      view.status.dataset.paginationStatus='failed';view.status.textContent='暂不下载：'+error.message;view.detail.replaceChildren();
+    }
+    throw error;
+  }
+}
+
+async function reportInitialDeliveryBodyHash(){
+  if(!window.crypto?.subtle)throw new Error('无法核对本轮正文，请使用 localhost 或 HTTPS；原稿保留');
+  const source=JSON.stringify(chapters.filter(c=>c.checked!==false).map(c=>({cn:c.cn,name:c.name,sections:(c.sections||[]).map(s=>({title:s.t,content:s.content||'',editedHtml:s.editedHtml||null}))})));
+  const bytes=new TextEncoder().encode(source);
+  return Array.from(new Uint8Array(await window.crypto.subtle.digest('SHA-256',bytes)),value=>value.toString(16).padStart(2,'0')).join('');
+}
+
+function reportAssertInitialDeliveryDetails(){
+  if(typeof window.ReportArgument?.contract!=='function'||typeof reportSectionContract!=='function'||typeof window.ReportCompletionContract?.inspect!=='function')throw new Error('明细复核模块未就绪，未测量页数');
+  let details=0,summaries=0;
+  for(const c of chapters.filter(chapter=>chapter.checked!==false))for(const s of c.sections||[]){
+    const source=String(s.editedHtml||s.content||''),visible=source.replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/gi,' ').trim();
+    if(s.pendingRevision)throw new Error('仍有未处理候选稿，不能把候选当作已完成明细');
+    if(window.ReportArgument.contract(c.name,s.t)?.summary){
+      summaries++;
+      if(visible)throw new Error('汇总小节已经有正文，请使用完整报告实排');
+    }else{
+      details++;
+      if(!visible||window.ReportCompletionContract.inspect(source,reportSectionContract(c,s)).status==='blocked')throw new Error('明细仍缺正文或存在阻断问题，未测量页数');
+    }
+  }
+  if(!details||!summaries)throw new Error('明细阶段不匹配当前目录，未测量页数');
+  return {details,summaries};
+}
+
+async function reportMeasureInitialDelivery(options={}){
+  return reportMeasureInitialDeliveryDocument(options,false);
+}
+
+// This is a planning measurement only. Its receipt is never a complete report.
+async function reportMeasureInitialDeliveryDetails(options={}){
+  return reportMeasureInitialDeliveryDocument(options,true);
+}
+
+async function reportMeasureInitialDeliveryDocument({assertCurrent,expectedPlanId}={},detailsOnly=false){
+  const guard=typeof assertCurrent==='function'?assertCurrent:async()=>{};
+  await guard();
+  if(detailsOnly)reportAssertInitialDeliveryDetails();
+  const plan=window.ReportLengthUI?.savedPlan?.();
+  if(!plan||expectedPlanId&&plan.planId!==expectedPlanId)throw new Error('本轮篇幅计划已变化，未核定完成');
+  const bodyHash=await reportInitialDeliveryBodyHash(),planSnapshot=JSON.stringify(plan);
+  const unchanged=async()=>{
+    await guard();
+    if(JSON.stringify(window.ReportLengthUI?.savedPlan?.())!==planSnapshot||await reportInitialDeliveryBodyHash()!==bodyHash)throw new Error('排版期间正文或计划发生变化，旧页数不计为本轮完成');
+    if(detailsOnly)reportAssertInitialDeliveryDetails();
+  };
+  await ensureDocxLib();
+  if(typeof ensureReportTableTemplates==='function')await ensureReportTableTemplates();
+  await unchanged();
+  const savedCompletionReview=typeof reportSavedCompletionReviewPlan==='function'?await reportSavedCompletionReviewPlan():null;
+  await unchanged();
+  const payload=JSON.parse(JSON.stringify(buildExportPayload({stateOnly:true,savedCompletionReview})));
+  if(!payload.chapters.length)throw new Error('尚无正文，不能核定整篇完成');
+  payload.images=[];
+  const blob=await window.docx.Packer.toBlob(window.buildDocxDocument(window.docx,payload));
+  await unchanged();
+  const measured=await verifyReportPageLimit(blob,{measurementOnly:true,paginationTarget:payload.paginationTarget});
+  await unchanged();
+  return {pages:measured.pages,documentSha256:measured.receipt.documentSha256,receipt:measured.receipt,diagnostics:measured.diagnostics||null,planId:plan.planId,bodyHash,qualityReview:payload.completionReview,paginationTarget:payload.paginationTarget,measurementScope:detailsOnly?'details-only':'complete-document'};
 }
 
 /* ================= 测算说明书 Word 导出 =================
@@ -443,11 +775,11 @@ const CALC_FORMULA_TEXT = {
   gaibao: {
     i_rent : "住宅租金收入 = 收楼后按当年出租率对外出租取得的月租金收入之和",
     i_rat  : "租金收入（不含税）= 住宅租金收入 ÷ (1+销项税率)",
-    c_col  : "收楼成本 = 收楼单价 × 面积 × 出租率 × 计租月数 ÷ 10000",
+    c_col  : "固定方式：收楼单价 × 面积 × 运营月数 ÷ 10000；比例方式：当月实际租金 × 收楼比例；减租分成方式：固定方式成本 × (1－减免比例)",
     c_eng  : "工程费用（装修摊销）= 首次装修与历次重装造价之和，按运营期总月数摊销到当年",
-    c_op   : "运营费用 = 单套月运营成本 × 总套数 × 计租月数 ÷ 10000（首年另加开办费）",
+    c_op   : "运营费用：单套方式按单套月成本 × 套数 × 计租月数；租金比例方式按当月实际租金收入 × 运营成本比例。首年另加开办费",
     c_fin  : "财务费用 = 还本付息表当年本期利息",
-    c_shr  : "合作分成支出 = 住宅租金收入 × 业主分成比例（仅「减租金合作分成」模式适用，整租模式为0）",
+    c_shr  : "合作分成支出 = 分成起始月及以后实际住宅租金收入 × (1－项目保留收益比例)，仅减租分成方式适用",
     c_tot  : "总成本费用 = 收楼成本 + 工程费用 + 运营费用 + 财务费用 + 合作分成支出",
     c_totAT: "总成本费用（不含税）= (收楼成本+工程费用)÷(1+销项税率) + 运营费用÷(1+运营税率) + 财务费用÷(1+运营税率，financeCost>0时)",
     l_beg  : "期初借款余额 = 上年期末借款余额",
@@ -457,7 +789,7 @@ const CALC_FORMULA_TEXT = {
     l_pay  : "还本付息合计 = 本期还本 + 本期利息",
     l_end  : "期末借款余额 = MAX(期初借款+本期借款−本期还本,0)",
     t_out  : "销项税额 = 住宅租金收入÷(1+销项税率)×销项税率",
-    t_in   : "进项税额 = 工程费用×销项税率÷(1+销项税率) + (运营费用+财务费用)×运营税率÷(1+运营税率)",
+    t_in   : "进项税额 = (收楼成本+工程费用)×销项税率÷(1+销项税率) + (运营费用+财务费用)×运营税率÷(1+运营税率)；收楼成本为0时不产生该部分进项",
     t_vat  : "增值税 = MAX(销项税额−进项税额,0)",
     t_sur  : "增值税附加 = 增值税 × 附加税率",
     t_stp  : "印花税",
@@ -465,9 +797,9 @@ const CALC_FORMULA_TEXT = {
     p_iat  : "营业收入（不含税）= 租金收入（不含税）",
     p_cat  : "营业成本（不含税）= 总成本费用（不含税）",
     p_tot  : "利润总额 = 营业收入（不含税）− 营业成本（不含税）− 税金及附加",
-    p_mk   : "弥补亏损：首次盈利年弥补此前5年亏损，其后按剩余亏损顺延，最长5年",
-    p_tx   : "应纳税所得额 = 利润总额 + 弥补亏损",
-    p_it   : "所得税 = 应纳税所得额 × 25%（应纳税所得额为负则取0）",
+    p_mk   : "前期补亏：按Excel逐月累计利润判断，本月盈利且累计仍亏时补本月利润；转正时补截至上月累计亏损。累计恰好为0时补亏为0；跨年不重置",
+    p_tx   : "月度计税基础 = 本月利润总额 − 本月前期补亏；年度为逐月汇总",
+    p_it   : "月度所得税 = MAX(月度计税基础,0) × 所得税率；年度逐月汇总，不按年度净计税基础重算、不作后月亏损冲回",
     p_net  : "净利润 = 利润总额 − 所得税",
     f_in   : "现金流入 = 住宅租金收入",
     f_out  : "现金流出 = 总成本费用 + 税金及附加 + 所得税",
@@ -632,7 +964,7 @@ async function exportCalcWord(){
     buildStartMonth:"建设开始年月",buildEndMonth:"建设结束年月",operateStartMonth:"运营开始年月",operateEndMonth:"运营结束年月",
     costSpan:"运营成本递增跨度（年）",costRate:"运营成本递增率（%）",stableStart:"稳定期开始年",stableEnd:"稳定期结束年",
     occupancyRamp:"分年出租率",loanPlan:"分年借款计划（万元）",repayPlan:"分年还款计划（万元）",
-    collect:"收楼单价（元/㎡/月）",deco:"首次装修单方造价（元/㎡）",decoInt:"装修间隔（年）",decoRatio:"二次装修系数",units:"总套数",unitCost:"单套月运营成本（元）",startup:"开办费（万元）",loan:"总借款额（万元）",interestBase:"计息本金（万元）",rateDiscount:"利率折扣系数",discount:"折现率（%）",repay:"默认年均还款（万元）",collectPct:"收楼支付比例（%）",sharePct:"业主分成比例（%）",
+    collect:"固定收楼单价（元/㎡/月）",collectRentPct:"实收租金收楼比例（%）",collectReductionPct:"固定收楼租金减免（%）",projectSharePct:"项目保留租金收益（%）",shareStartMonth:"分成起始月",mode:"收楼流出方式",deco:"首次装修单方造价（元/㎡）",decoInt:"装修间隔（年）",decoRatio:"二次装修系数",units:"总套数",unitCost:"单套月运营成本（元/套/月）",operateCostMode:"运营成本方式",operateRentPct:"实收租金运营成本比例（%）",startup:"开办费（万元）",loan:"总借款额（万元）",interestBase:"计息本金（万元）",rateDiscount:"利率折扣系数",discount:"折现率（%）",repay:"默认年均还款（万元）",principalRepayMode:"归还本金方式",principalRepayIntervalMonths:"还本间隔（月）",principalRepayPct:"每期归还本金比例（%）",principalRepayFinalMonth:"末期还本月（建设起算）",collectPct:"旧版收楼支付比例（%）",sharePct:"旧版业主分成比例（%）",
     firstMonths:"运营首年计租月数", area:"住宅面积（㎡）", rent:"起始租金（元/㎡/月）",
     rentDiscount:"租金折扣系数", subsidyArea:"政府补贴对应面积（㎡）", subsidyPrice:"补贴单价（元/㎡/月）",
     subsidyDiscount:"补贴折扣系数", subsidyStableOcc:"补贴部分出租率",
