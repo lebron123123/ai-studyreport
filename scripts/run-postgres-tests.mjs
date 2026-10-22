@@ -4,6 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import pg from '../local-server/node_modules/pg/lib/index.js';
+import {runTestSuite,selectTestFiles} from './run-tests.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const source=process.env.TEST_DATABASE_URL||process.env.DATABASE_URL;
@@ -15,6 +16,8 @@ const admin=new pg.Client({connectionString:url.toString()});
 const name='studyreport_restore_'+Date.now()+String(process.pid).padStart(6,'0');
 if(!/^studyreport_restore_\d+$/.test(name))throw new Error('隔离库名称校验失败');
 let created=false,connection;
+const args=process.argv.slice(2);
+selectTestFiles(args); // Validate suites before creating any database.
 try{
   await admin.connect();
   await admin.query('CREATE DATABASE "'+name+'"');created=true;
@@ -26,11 +29,11 @@ try{
   await connection.end();connection=null;
   console.log('已创建全新隔离测试库：'+name+'（无用户数据）');
   const env={...process.env,AGENT_TEST_DATABASE_URL:url.toString(),TEST_DATABASE_URL:url.toString(),REQUIRE_DATABASE_TESTS:'1'};
-  const args=process.argv.slice(2);
-  for(const command of [['local-server/check-migrations.js','--require-db'],['--require',path.join(root,'scripts/windows-browser-lockout-guard.cjs'),'--test',...args]]){
+  for(const command of [['local-server/check-migrations.js','--require-db']]){
     const code=await new Promise((resolve,reject)=>{const child=spawn(process.execPath,command,{cwd:root,env,stdio:'inherit',windowsHide:true});child.once('error',reject);child.once('exit',(code)=>resolve(code??1));});
     if(code){process.exitCode=code;break;}
   }
+  if(!process.exitCode)process.exitCode=await runTestSuite(args,{root,env});
 }finally{
   if(connection)await connection.end();
   // Only the exact database successfully created by this process is eligible for cleanup.

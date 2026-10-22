@@ -1,18 +1,16 @@
+import '../scripts/windows-browser-lockout-guard.cjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import vm from 'node:vm';
 import {createRequire} from 'node:module';
 import {spawnSync} from 'node:child_process';
 import {applyTax94Analyses} from '../scripts/report-tax94-recovery.mjs';
 import {TAX94_RECOVERY as policy} from '../scripts/report-tax94-recovery.mjs';
-import {parseTax94Args,validateTax94Proposal,claimTax94Request,browserSaveTax94Candidate,canonicalTax94,runTax94Action,correctTax94ScenarioWording,prepareTax94RetainedIdentity} from '../scripts/report-tax94-execute.mjs';
-import {loadTax94PaidEvidence,recoverTax94PaidProtocol,loadTax94IdentityRebindBaseline} from '../scripts/report-tax94-paid-protocol-recovery.mjs';
+import {parseTax94Args,claimTax94Request,browserSaveTax94Candidate,canonicalTax94,runTax94Action} from '../scripts/report-tax94-execute.mjs';
 const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
 const clone=value=>JSON.parse(JSON.stringify(value));
 const require=createRequire(import.meta.url),RealWorkflow=require('../project-workflow.js');
-const proposalFile=new URL('../outputs/report-standardization/1010-full-generation-2026-10-10T02-04-51-303Z-3378c9e5/generation-runner/tax/recovery/tax-9.4-reconciliation-proposal-20261012T022649Z.json',import.meta.url);
 function request(){
   const prompt={section:'9.4',financialSourceSignatureSha256:policy.financialSourceSha256,targets:{paragraphs:[{id:'a'},{id:'b'},{id:'c'}],headings:[],tables:[]}};
   const body=JSON.stringify({projectId:policy.projectId,kind:'batch',stream:false,messages:[{role:'user',content:JSON.stringify(prompt)}]});
@@ -38,24 +36,12 @@ test('explicit flags only; no-mode and proposal-only are inert, including nonexi
   for(const args of [['--save-retained','--execute','--proposal','x'],['--save-retained','--proposal','x'],['--save-retained','--save-retained']])assert.throws(()=>parseTax94Args(args));
 });
 
-test('retained semantic correction changes only two exact scenario sentences and preserves every other byte',async()=>{
-  const recovered=await recoverTax94PaidProtocol(await loadTax94PaidEvidence()),edited=correctTax94ScenarioWording(recovered.after);
-  assert.equal(edited.beforeSha256,recovered.afterSha256);assert.equal(edited.afterSha256,sha(edited.after));assert.equal(edited.edits.length,2);
-  let reversed=edited.after;for(const edit of edited.edits){assert.equal(reversed.split(edit.after).length,2);reversed=reversed.replace(edit.after,edit.before);}
-  assert.equal(reversed,recovered.after);assert.match(edited.after,/不代表标准化敏感系数排序/);assert.match(edited.after,/不据此排列各因素的标准化敏感程度/);
-  const tables=html=>html.match(/<table\b[\s\S]*?<\/table>/g),heads=html=>html.match(/<h[1-6]\b[\s\S]*?<\/h[1-6]>/g);
-  assert.deepEqual(tables(edited.after),tables(recovered.after));assert.deepEqual(heads(edited.after),heads(recovered.after));assert.ok(edited.after.includes(policy.gapStatement));
-  assert.throws(()=>correctTax94ScenarioWording(edited.after),/missing or repeated/);assert.throws(()=>correctTax94ScenarioWording(recovered.after+edited.edits[0].before),/missing or repeated/);
-});
 test('fresh import cannot activate legacy inspector main branches and restores caller argv',()=>{
   const url=new URL('../scripts/report-tax94-execute.mjs',import.meta.url).href;
   const result=spawnSync(process.execPath,['--input-type=module','-e','process.argv=[process.execPath,"import-only","--run"]; await import('+JSON.stringify(url)+'); if(process.argv[2]!=="--run") throw Error("argv changed"); console.log("inert import");'],{encoding:'utf8',timeout:10000});
   assert.equal(result.status,0,result.stderr);assert.equal(result.stdout.trim(),'inert import');
 });
-test('proposal is restricted to exact test copy, old terminal response and canonical frozen source',async()=>{
-  const proposal=JSON.parse(await fs.readFile(proposalFile));assert.equal(validateTax94Proposal(proposal),true);
-  for(const mutate of [p=>p.target.projectId='formal',p=>p.oldTask.getStatus='running',p=>p.oldTask.rawTextSha256='changed',p=>p.currentSection.requiredHeadings.reverse(),p=>p.legacyBoundedAttempt.planCounts.paragraphs=1,p=>p.legacyBoundedAttempt.resumePaidIntentExists=true,p=>p.adoptedCalculation.financialSourceSignatureSha256='changed',p=>p.minimalReconciliation.unresolvedGap.statement='verified']){const bad=clone(proposal);mutate(bad);assert.throws(()=>validateTax94Proposal(bad));}
-});
+
 test('single exact scoped POST consumes its in-memory arm; unknown outcome cannot re-arm/retry',()=>{
   const req=request(),state={armed:true,submitted:false};assert.equal(claimTax94Request(state,req,req.expected),true);assert.deepEqual(state,{armed:false,submitted:true});
   assert.throws(()=>claimTax94Request(state,req,req.expected),/never retry/);state.armed=true;assert.throws(()=>claimTax94Request(state,req,req.expected),/never retry/);
@@ -89,21 +75,4 @@ test('invalid slot count/numeric AI output is rejected before the candidate-save
 });
 test('full-state comparison only normalizes object-key order, never bodies, array order or absent fields',()=>{
   assert.deepEqual(canonicalTax94({b:2,a:{d:4,c:3}}),canonicalTax94({a:{c:3,d:4},b:2}));assert.notDeepEqual(canonicalTax94({a:['one','two']}),canonicalTax94({a:['two','one']}));assert.notDeepEqual(canonicalTax94({content:' x '}),canonicalTax94({content:'x'}));assert.notDeepEqual(canonicalTax94({a:null}),canonicalTax94({}));
-});
-
-test('retained controller awaits published rules before preparation/capture, rejects changed complete inputs and never saves',async()=>{
-  const recovered=await recoverTax94PaidProtocol(await loadTax94PaidEvidence()),baseline=await loadTax94IdentityRebindBaseline(recovered);
-  for(const changed of [false,true]){
-    const calls=[],fresh={...clone(recovered.prepared),sourceIdentity:baseline.expected.sourceIdentity},capture=clone(baseline.expected);
-    if(changed)capture.fields.project+='changed';
-    const page={evaluate:async(fn,args)=>{
-      if(fn.name==='browserPrepareTax94Analysis'){assert.deepEqual(calls,['rules-loaded']);calls.push('prepared');assert.equal(args.projectId,policy.projectId);return fresh;}
-      if(fn.name==='browserCaptureTax94IdentityInputs'){assert.deepEqual(calls,['rules-loaded','prepared']);calls.push('captured');return capture;}
-      const context={currentProjectId:policy.projectId,window:{__qaDispatchPaused:true},projectCanEdit:()=>true,rlProjectType:()=> 'gaibao',ReportLogicCore:{load:async(type,force)=>{assert.equal(type,'gaibao');assert.equal(force,true);await Promise.resolve();calls.push('rules-loaded');}}};
-      return vm.runInNewContext('('+fn.toString()+')()',context);
-    }};
-    if(changed)await assert.rejects(prepareTax94RetainedIdentity({page},recovered),/identity|input/i);
-    else {const result=await prepareTax94RetainedIdentity({page},recovered);assert.equal(result.fresh,fresh);assert.equal(result.identityRebind.proposal.newSourceIdentity,baseline.expected.sourceIdentity);assert.equal(result.identityRebind.proposal.newPaidAiCalls,0);assert.equal(result.identityRebind.proposal.projectWrites,0);}
-    assert.deepEqual(calls,['rules-loaded','prepared','captured']);
-  }
 });

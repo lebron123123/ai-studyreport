@@ -2,7 +2,8 @@ const test=require('node:test'),assert=require('node:assert/strict'),path=requir
 require('../scripts/windows-browser-lockout-guard.cjs');
 const api=require('../report-financial-tables.js');
 const htmlTable=rows=>'<table>'+rows.map((row,i)=>'<tr>'+row.map(value=>'<'+(i?'td':'th')+'>'+String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</'+(i?'td':'th')+'>').join('')+'</tr>').join('')+'</table>';
-const historical=require('./fixtures/report-legacy-financial-tables.json');
+const synthetic=require('./fixtures/financial-public-synthetic.cjs');
+const historical={tables:synthetic.legacyTables,summary:synthetic.currentSummary};
 const oldTables=historical.tables.map(htmlTable);
 function source(){
   const params={area:5620,rent:45,discount:4.6,collectMode:'rent_share',collectPct:20},years=[2027,2028,2029,2030,2031];
@@ -32,7 +33,7 @@ test('first generation can bind an adopted source without old tables, with the s
   const race=structuredClone(current);race.result.cf[2027].net++;
   assert.throws(()=>api.assertCurrent(binding,race),{code:'REPORT_FINANCIAL_SOURCE_INVALID'});
 });
-test('explicit refresh synchronizes real legacy and canonical financial tables without changing any originals',{timeout:90000},async t=>{
+test('explicit refresh synchronizes synthetic legacy and canonical financial tables without changing any originals',{timeout:90000},async t=>{
   const {chromium}=require('playwright'),browser=await chromium.launch({headless:true});
   try{
     const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -40,7 +41,7 @@ test('explicit refresh synchronizes real legacy and canonical financial tables w
     await page.goto('http://localhost:8080/[system-test]-financial-tables');
     for(const file of ['report-length-plan.js','report-completion-contract.js','report-financial-tables.js','report-table-templates.js','report-section-layout.js','nrcalc.js','rentcalc.js','saleestimate.js','salecalc.js'])await page.addScriptTag({path:path.resolve(file)});
     await page.evaluate(({context,oldTables})=>{window.context=context;window.oldTables=oldTables;}, {context:source(),oldTables});
-    await t.test('saved four-table audit fixture is replaced from one current source and repeated refresh is identical',async()=>{
+    await t.test('fictional four-table fixture is replaced from one current source and repeated refresh is identical',async()=>{
       const r=await page.evaluate(()=>{
         const entries=[{key:'9.2',html:'<p>人工分析保持不变。</p>'+oldTables.join(''),context:{type:'gaibao-housing',chapter:'财务评价',section:'盈利能力分析',number:'9.2'}},{key:'9.3',text:'<p>重复的原财务表。</p>'+oldTables[0],context:{type:'gaibao-housing',chapter:'财务评价',section:'不确定性分析',number:'9.3'}}];
         const before=JSON.stringify(entries),originalContext=JSON.stringify(context),out=ReportFinancialTables.prepare(entries,context),again=ReportFinancialTables.prepare(out.entries,context);
@@ -51,11 +52,11 @@ test('explicit refresh synchronizes real legacy and canonical financial tables w
       assert.deepEqual(r.out,r.again);assert.ok(r.out.entries[0].html.startsWith('<p>人工分析保持不变。</p>'));
       for(const table of r.rows){assert.equal(table.snapshot,'[系统测试]calc-current');assert.equal(table.version,'5');assert.equal(table.project,'[系统测试]tax-project');}
       const html=r.out.entries.map(e=>e.html||e.text).join('');
-      for(const stale of ['21,750.94','18,444.00','1,250.24','880.47','25.79','2039'])assert.ok(!html.includes(stale),stale+' remains');
+      for(const stale of ['31,111.11','22,222.22','888.88','444.44','66.66','2039'])assert.ok(!html.includes(stale),stale+' remains');
       assert.deepEqual(r.rows.map(x=>x.kind),['income','cost','summary','sensitivity','income']);
       assert.deepEqual(r.rows[0].rows[1],['2027','84.7388','55.83%','45']);
       assert.deepEqual(r.rows[1].rows[1],['2027','16.9478','53.3335','13.303','6.3095','89.8938']);
-      assert.ok(r.rows[2].rows.some(row=>row[0]==='净利润'&&row[2]==='149.61'));
+      assert.ok(r.rows[2].rows.some(row=>row[0]==='净利润'&&row[2]==='202.75'));
       assert.deepEqual(r.rows[3].rows.at(-1),['租金','−10%','—','-12.3456']);
     });
     await t.test('nonfinancial content is unchanged and directly marked manual/independent tables stay protected without a chosen snapshot',async()=>{
@@ -102,7 +103,7 @@ test('explicit refresh synchronizes real legacy and canonical financial tables w
           const entries=[{key:'owner',html:html+oldTables[2],context:ctx}],original=JSON.stringify(entries),prepared=ReportFinancialTables.prepare(entries,c),composed=ReportSectionLayout.composeDocument(prepared.entries,ReportTableTemplates),bound=await ReportCompletionContract.bindFrozenTables(contract,composed[0],c.snapshot.id),frozen=JSON.parse(JSON.stringify(bound)),restored=[{key:'owner',html:frozen.frozenTables.tables.map(table=>table.html).join(''),context:ctx}],restoredBefore=JSON.stringify(restored),second=ReportFinancialTables.prepare(restored,c);
           const inspect=html=>{
             const tables=read(html),manualTables=tables.filter(table=>table.textContent.includes('77777.55'));
-            return {manualTables:manualTables.length,manualText:manualTables[0]?.textContent,marker:manualTables[0]?.getAttribute(marker),independent:manualTables[0]?.hasAttribute('data-report-independent'),automaticManualValue:tables.filter(table=>!table.closest('[data-report-independent]')).some(table=>table.textContent.includes('77777.55')),current:tables.some(table=>!table.closest('[data-report-independent]')&&table.textContent.includes('149.61'))};
+            return {manualTables:manualTables.length,manualText:manualTables[0]?.textContent,marker:manualTables[0]?.getAttribute(marker),independent:manualTables[0]?.hasAttribute('data-report-independent'),automaticManualValue:tables.filter(table=>!table.closest('[data-report-independent]')).some(table=>table.textContent.includes('77777.55')),current:tables.some(table=>!table.closest('[data-report-independent]')&&table.textContent.includes('202.75'))};
           };
           const manualOnly=read(second.entries[0].html).filter(table=>table.hasAttribute('data-report-independent')).map(table=>table.outerHTML).join(''),withoutSource=ReportFinancialTables.prepare([{html:manualOnly}],{});
           results.push({marker,placement,originalUnchanged:original===JSON.stringify(entries),restoredUnchanged:restoredBefore===JSON.stringify(restored),firstUpdated:prepared.updatedCount,secondUpdated:second.updatedCount,composed:inspect(composed[0]),second:inspect(second.entries[0].html),withoutSource:{updated:withoutSource.updatedCount,binding:withoutSource.binding,html:withoutSource.entries[0].html===manualOnly}});
@@ -205,7 +206,7 @@ test('explicit refresh synchronizes real legacy and canonical financial tables w
         const c=structuredClone(context);delete c.result.sens;
         const out=ReportFinancialTables.prepare([{html:oldTables[3]}],c);return {error,html:out.entries[0].html};
       });
-      assert.match(r.error,/无法同步的程序财务表/);assert.match(r.html,/待补：当前测算敏感性分析结果/);assert.ok(!r.html.includes('25.79'));
+      assert.match(r.error,/无法同步的程序财务表/);assert.match(r.html,/待补：当前测算敏感性分析结果/);assert.ok(!r.html.includes('66.66'));
     });
     await t.test('all raw tables synchronize before canonical merge, so obsolete years and values cannot be unioned back',async()=>{
       const r=await page.evaluate(()=>{
@@ -216,7 +217,7 @@ test('explicit refresh synchronizes real legacy and canonical financial tables w
         const out=ReportFinancialTables.prepare(entries,context),composed=ReportSectionLayout.composeDocument(out.entries,library);
         return {composed};
       });
-      const html=JSON.stringify(r.composed);assert.match(html,/149.61/);assert.match(html,/1116.78/);assert.ok(!html.includes('21,750.94'));assert.ok(!html.includes('2039'));assert.ok(!html.includes('880.47'));
+      const html=JSON.stringify(r.composed);assert.match(html,/202.75/);assert.match(html,/1200/);assert.ok(!html.includes('31,111.11'));assert.ok(!html.includes('2039'));assert.ok(!html.includes('444.44'));
     });
     await t.test('empty financial duties seed adopted tables only on explicit generation, without changing source or neighboring sections',async()=>{
       const r=await page.evaluate(()=>{
@@ -233,7 +234,7 @@ test('explicit refresh synchronizes real legacy and canonical financial tables w
       assert.equal(r.unchanged,true);assert.equal(r.sourceUnchanged,true);assert.deepEqual(r.plain.entries,r.entries);assert.equal(r.plain.updatedCount,0);assert.equal(r.plain.binding,null);assert.deepEqual(r.summary,r.again);
       assert.deepEqual(r.batch.entries,r.summary.entries);assert.deepEqual(r.batch.binding,r.summary.binding);assert.equal(r.duplicate,'REPORT_FINANCIAL_SOURCE_INVALID');
       assert.deepEqual(r.rows[1],['2027','384','307.2','76.8']);assert.deepEqual(r.rows.at(-1),['全周期合计','480','384','96']);assert.match(r.rows[0][3],/非审批资本金/);
-      assert.match(r.summary.entries[0].html,/工程费用合计/);assert.match(r.summary.entries[0].html,/其他投资费用及批准总投资/);assert.match(r.summary.entries[2].html,/149.61/);assert.match(r.race,/正文生成期间测算版本或结果已改变/);
+      assert.match(r.summary.entries[0].html,/工程费用合计/);assert.match(r.summary.entries[0].html,/其他投资费用及批准总投资/);assert.match(r.summary.entries[2].html,/202.75/);assert.match(r.race,/正文生成期间测算版本或结果已改变/);
     });
     await t.test('first summary seed and frozen tables share the real canonical table and protected-note budget',async()=>{
       const template=JSON.parse(fs.readFileSync(path.resolve('data/report-table-templates-gaibao-housing-v1.json'),'utf8')).templates.find(t=>t.id==='gaibao-housing-table-11');
@@ -257,7 +258,7 @@ test('explicit refresh synchronizes real legacy and canonical financial tables w
       assert.equal(r.unchanged,true);assert.equal(r.metrics.tableCount,2);assert.deepEqual(r.metrics,r.frozenMetrics);assert.deepEqual(r.metrics,r.againMetrics);
       assert.equal(r.allocated.status,'ready');assert.deepEqual(r.allocated.sections[0].actual,{...r.metrics,maxCellCharacters:r.allocated.sections[0].actual.maxCellCharacters});
       assert.equal(r.requirements.tableMax,2);assert.ok(r.requirements.tableRowsMax>=r.metrics.tableRows);assert.ok(r.requirements.tableCharsMax>=r.metrics.tableCharacters);
-      assert.deepEqual(r.issues.filter(i=>i.severity==='error'),[]);assert.match(r.notes,/折现率4.6%/);assert.match(r.notes,/当前测算主指标/);assert.match(r.notes,/测算期第4年/);assert.match(r.html,/149.61/);
+      assert.deepEqual(r.issues.filter(i=>i.severity==='error'),[]);assert.match(r.notes,/折现率4.6%/);assert.match(r.notes,/当前测算主指标/);assert.match(r.notes,/测算期第4年/);assert.match(r.html,/202.75/);
       assert.equal(r.allocated.caps.tableRows,600);assert.equal(r.allocated.caps.tableCharacters,30000);
     });
     await t.test('legacy program-summary wrapper is exposed narrowly; manual/canonical figures and rent/sale scope remain intact',async()=>{
@@ -277,9 +278,9 @@ test('explicit refresh synchronizes real legacy and canonical financial tables w
         return {upgraded:upgraded.entries[0].html,stable:again.entries[0].html===upgraded.entries[0].html,protectedCases,canonical,scopes};
       });
       assert.doesNotMatch(r.upgraded,/<figure/);assert.match(r.upgraded,/rpt-table-caption/);assert.match(r.upgraded,/data-report-program-table="summary"/);assert.equal(r.stable,true);
-      for(const p of r.protectedCases){assert.equal(p.kept,true);assert.equal(p.updated,0);assert.match(p.value,/149.61/);}
+      for(const p of r.protectedCases){assert.equal(p.kept,true);assert.equal(p.updated,0);assert.match(p.value,/202.75/);}
       assert.match(r.canonical,/<figure[^>]+data-template-id="gaibao-housing-table-11"/);
-      for(const scope of r.scopes){assert.equal(scope.again,true);assert.match(scope.html,/149.61/);assert.doesNotMatch(scope.html,/gaibao-housing|data-template-id|data-report-field-differences/);}
+      for(const scope of r.scopes){assert.equal(scope.again,true);assert.match(scope.html,/202.75/);assert.doesNotMatch(scope.html,/gaibao-housing|data-template-id|data-report-field-differences/);}
     });
     await t.test('missing actual engineering payments or loans stop funding seeds; amortized engineering is never used as cash payments',async()=>{
       const r=await page.evaluate(()=>{

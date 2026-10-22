@@ -1,7 +1,7 @@
+require('../scripts/windows-browser-lockout-guard.cjs');
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-const {createRequire}=require('node:module'),{chromium}=require('playwright');
-const bundled=createRequire('C:/Users/HP/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/package.json');
-const docx=bundled('docx'),JSZip=bundled('jszip'),builder=require('../docxgen.js');
+const {chromium}=require('playwright');
+const docx=require('docx'),JSZip=require('jszip'),builder=require('../docxgen.js');
 test('真实页面：四类项目保留层级、历史版独立下载，生产Word含六级标题且不混入当前稿',{timeout:90000},async()=>{
   const browser=await chromium.launch({headless:true}),context=await browser.newContext({serviceWorkers:'block'}),page=await context.newPage(),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
@@ -48,9 +48,10 @@ test('真实页面：四类项目保留层级、历史版独立下载，生产Wo
       for(const level of [1,2,3,4,5,6])assert.match(xml,new RegExp('w:pStyle w:val="Heading'+level+'"'));
       assert.match(xml,/1\.1\.1\.1\.1\.1 责任落实/);assert.doesNotMatch(xml,/当前工作稿不可混入/);
       if(type==='gaibao'){
-        fs.mkdirSync('outputs/report-standardization',{recursive:true});
-        fs.writeFileSync('outputs/report-standardization/0930-structure-qa.docx',await docx.Packer.toBuffer(builder(docx,payload)));
-        await page.screenshot({path:'outputs/report-standardization/0930-structure-preview.png',fullPage:true});
+        fs.mkdirSync('.tmp',{recursive:true});
+        const artifacts=fs.mkdtempSync(path.join('.tmp','report-structure-preview-'));
+        fs.writeFileSync(path.join(artifacts,'structure-qa.docx'),await docx.Packer.toBuffer(builder(docx,payload)));
+        await page.screenshot({path:path.join(artifacts,'structure-preview.png'),fullPage:true});
       }
       assert.equal(await page.evaluate(()=>JSON.stringify({chapters,versions:projectWorkflow.reportVersions})===__baseline),true);
       for(let i=0;i<3;i++){await page.evaluate(()=>airOpenReportVersionById('[系统测试]v11'));assert.match(await page.locator('#airDocPane .air-doc-download').innerText(),/V11/);await page.evaluate(()=>airOpenReportVersionById('[系统测试]v9'));}

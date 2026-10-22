@@ -1,9 +1,9 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const scope={};scope.window=scope;vm.createContext(scope);vm.runInContext(fs.readFileSync('nrcalc.js','utf8'),scope);
-const N=scope.NRCalc,fixture=require('./fixtures/nrcalc-excel-monthly-loss.json');
+const N=scope.NRCalc,fixture={rows:require('./fixtures/financial-public-synthetic.cjs').monthlyRows};
 const close=(actual,expected,label)=>assert.ok(Math.abs(actual-expected)<=.00005001,`${label}: ${actual} != ${expected}`);
 
-test('税务局原Excel的144个月：补亏、计税基础、所得税逐月一致',()=>{
+test('公开虚构144个月：独立预期的补亏、计税基础、所得税逐月一致',()=>{
   const rows=fixture.rows.map(([period,profit])=>({period,profit}));
   N.applyMonthlyLossOffset(rows,.25);
   fixture.rows.forEach(([period,profit,makeup,taxable,incomeTax],i)=>{
@@ -12,7 +12,8 @@ test('税务局原Excel的144个月：补亏、计税基础、所得税逐月一
     close(rows[i].incomeTax,incomeTax,period+' 所得税');
     close(rows[i].netProfit,profit-rows[i].incomeTax,period+' 净利润');
   });
-  close(rows.slice(0,12).reduce((sum,m)=>sum+m.makeup,0),11.8851,'首年逐月补亏汇总');
+  assert.equal(rows.length,144);
+  close(rows.slice(0,12).reduce((sum,m)=>sum+m.makeup,0),125.3086,'首年逐月补亏汇总');
   for(const [start,end] of [[0,12],[12,24],[0,24]]){
     const expected=fixture.rows.slice(start,end).reduce((sum,row)=>sum+Math.round(row[2]*1e4)/1e4,0);
     close(rows.slice(start,end).reduce((sum,m)=>sum+m.makeup,0),expected,'逐月四位小数汇总');

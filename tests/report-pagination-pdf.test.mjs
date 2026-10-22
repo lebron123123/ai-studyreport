@@ -6,16 +6,11 @@ import os from 'node:os';
 import vm from 'node:vm';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {execFile} from 'node:child_process';
-import {promisify} from 'node:util';
 import {buildPaginationResult} from '../local-server/report-pagination.js';
 import {parseArgs,parsePaginationResponse} from '../scripts/report-actual-word-acceptance.mjs';
 
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const source=await fs.readFile(new URL('../local-server/report-pagination.js',import.meta.url),'utf8');
-const script=fileURLToPath(new URL('../local-server/report-pagination.ps1',import.meta.url));
-const fixture=fileURLToPath(new URL('./fixtures/report-pagination-fake-wps.ps1',import.meta.url));
-const execute=promisify(execFile);
 const docx=Buffer.from('exact prepared docx bytes'),pdf=Buffer.from('%PDF-1.7\nfixture\n%%EOF');
 function proofFor(document=docx,rendered=pdf){return {sha256:hash(rendered),bytes:rendered.length,preparedDocumentSha256:hash(document),preparedDocumentSha256After:hash(document),pagesBeforeExport:120,pagesAfterExport:120,scope:'same-prepared-document-render-only'};}
 
@@ -110,47 +105,4 @@ test('acceptance blocks missing/forged PDF, mismatched DOCX binding or changed e
   for(const change of [data=>data.receipt.pdf.sha256=hash('other'),data=>data.receipt.pdf.preparedDocumentSha256=hash('other'),data=>data.receipt.pdf.preparedDocumentSha256After=hash('other'),data=>data.receipt.pdf.pagesAfterExport=121,data=>data.receipt.pdf.bytes++,data=>data.receipt.pdf.scope='approved']){
     await assert.rejects(parsePaginationResponse(multipart({withPdf:true,change}),{requirePdf:true}),/PDF does not match/);
   }
-});
-
-async function fakeWps(mode='success',withPdf=true,withoutPrepared=false){
-  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'report-fake-wps-'));
-  try{
-    // Match the production child-process flag; this does not change the machine
-    // or user execution policy. The fixture intercepts all COM construction.
-    const args=['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',fixture,'-Script',script,'-Directory',directory,'-Mode',mode];
-    if(withPdf)args.push('-WithPdf');if(withoutPrepared)args.push('-WithoutPrepared');
-    const {stdout}=await execute('powershell.exe',args,{windowsHide:true,encoding:'utf8',timeout:15000});
-    return JSON.parse(stdout.trim().replace(/^\uFEFF/,''));
-  }finally{await fs.rm(directory,{recursive:true,force:true});}
-}
-function assertUserUntouched(result,opened=true){
-  assert.equal(result.inputText,'caller source remains unchanged');
-  assert.equal(result.calls.filter(value=>value.startsWith('close-own:')).length,opened?1:0,JSON.stringify(result));
-  assert.equal(result.calls.some(value=>/QUIT-USER|CHANGE-USER/.test(value)),false,JSON.stringify(result));
-}
-test('real PowerShell script exports once from its own saved document without quitting or hiding shared WPS',{timeout:20000},async()=>{
-  const result=await fakeWps();assert.equal(result.ok,true,JSON.stringify(result));assertUserUntouched(result);
-  assert.equal(result.calls.filter(value=>value.startsWith('open-own:')).length,1);assert.equal(result.calls.filter(value=>value==='pdf:17').length,1);
-  assert.ok(result.calls.indexOf('save:12')<result.calls.indexOf('pdf:17'));assert.equal(result.layout.pdf.preparedDocumentSha256,result.layout.pdf.preparedDocumentSha256After);assert.equal(result.layout.pdf.pagesBeforeExport,result.layout.pdf.pagesAfterExport);
-  const legacy=await fakeWps('success',false);assert.equal(legacy.ok,true);assertUserUntouched(legacy);assert.equal(legacy.layout.pdf,undefined);assert.equal(legacy.calls.some(value=>value.startsWith('pdf:')),false);
-});
-test('real PowerShell export/hash/page failures close only the opened report and return no success receipt',{timeout:60000},async()=>{
-  for(const mode of ['pdf-error','hash-change','page-change','empty-pdf']){
-    const result=await fakeWps(mode);assert.equal(result.ok,false,JSON.stringify(result));assert.match(result.error,/Report PDF/);assertUserUntouched(result);assert.equal(result.layout,undefined);
-  }
-  const invalid=await fakeWps('success',true,true);assert.equal(invalid.ok,false);assertUserUntouched(invalid,false);assert.equal(invalid.calls.includes('fake-com'),false);
-  const openError=await fakeWps('open-error');assert.equal(openError.ok,false);assertUserUntouched(openError,false);
-});
-
-test('real Windows writer lock permits read-only hashing, while a writer change still rejects the PDF receipt',{timeout:30000},async()=>{
-  const stable=await fakeWps('writer-locked');
-  assert.equal(stable.legacyReadBlocked,true,'The old OpenRead call must fail against the actual Windows handle');
-  assert.equal(stable.ok,true,JSON.stringify(stable));assertUserUntouched(stable);
-  assert.equal(stable.layout.pdf.preparedDocumentSha256,hash('prepared exact DOCX fixture'));
-  assert.equal(stable.layout.pdf.preparedDocumentSha256After,stable.layout.pdf.preparedDocumentSha256);
-  assert.equal(stable.layout.pdf.pagesBeforeExport,stable.layout.pdf.pagesAfterExport);
-  const changed=await fakeWps('writer-locked-hash-change');
-  assert.equal(changed.legacyReadBlocked,true);assert.equal(changed.ok,false,JSON.stringify(changed));
-  assert.match(changed.error,/Report PDF export changed the prepared Word document/);
-  assert.equal(changed.layout,undefined);assertUserUntouched(changed);
 });

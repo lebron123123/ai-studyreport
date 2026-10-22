@@ -5,9 +5,11 @@
   "description": "可研报告生成工具 —— 财务测算引擎回归测试",
   "scripts": {
     "postinstall": "npm --prefix local-server ci --ignore-scripts",
-    "test": "node --require ./scripts/windows-browser-lockout-guard.cjs --test",
+    "test": "node scripts/run-tests.mjs",
     "browser:safe": "node --require ./scripts/windows-browser-lockout-guard.cjs",
-    "test:integration": "node --env-file=local-server/.env scripts/run-postgres-tests.mjs",
+    "test:integration": "node --env-file=local-server/.env scripts/run-postgres-tests.mjs --include-private",
+    "test:private": "node scripts/run-tests.mjs --private-only",
+    "test:windows": "node scripts/run-tests.mjs --windows-only",
     "check:syntax": "node scripts/check-javascript-syntax.mjs",
     "check:release": "node scripts/check-release-consistency.mjs",
     "check:migrations": "node local-server/check-migrations.js",
@@ -17,6 +19,8 @@
     "sensitivity": "node scripts/sensitivity.js"
   },
   "devDependencies": {
+    "docx": "9.6.1",
+    "jszip": "3.10.1",
     "playwright": "^1.62.1"
   }
 }

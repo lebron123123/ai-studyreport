@@ -11,7 +11,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-compatibility:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: 安装锁定依赖
+        run: npm ci
+      - name: Windows 排版与文件锁行为验证（禁止跳过）
+        run: node scripts/run-tests.mjs --windows-only
   quality-gate:
+    needs: windows-compatibility
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -49,5 +62,5 @@ jobs:
         run: npm run check:migrations -- --require-db
       - name: Golden Project 定向回归
         run: npm run test:golden
-      - name: 全仓自动化测试（独立数据库，禁止跳过行为验证）
+      - name: 可移植全量行为测试（独立数据库，禁止跳过）
         run: node scripts/run-postgres-tests.mjs
